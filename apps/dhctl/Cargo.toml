@@ -1,0 +1,18 @@
+[package]
+name = "dhpanel-dhctl"
+description = "DHPanel admin CLI for bootstrap, migrations and recovery."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "dhctl"
+path = "src/main.rs"
+
+[dependencies]
+dhpanel-common.workspace = true
+
+[lints]
+workspace = true

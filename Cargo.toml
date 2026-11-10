@@ -1,0 +1,50 @@
+[workspace]
+resolver = "3"
+members = [
+    "apps/control-api",
+    "apps/worker",
+    "apps/node-agent",
+    "apps/priv-helper",
+    "apps/dhctl",
+    "crates/kernel",
+    "crates/common",
+    "crates/domain",
+    "crates/database",
+    "crates/http-kit",
+    "crates/observability",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "LicenseRef-DHPanel-Proprietary"
+publish = false
+repository = "https://example.invalid/dhpanel"
+
+[workspace.dependencies]
+# Internal crates. External dependencies are added here (with a reason in the PR) by later tasks.
+dhpanel-kernel = { path = "crates/kernel" }
+dhpanel-common = { path = "crates/common" }
+dhpanel-domain = { path = "crates/domain" }
+dhpanel-database = { path = "crates/database" }
+dhpanel-http-kit = { path = "crates/http-kit" }
+dhpanel-observability = { path = "crates/observability" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+dbg_macro = "deny"
+todo = "warn"
+unwrap_used = "warn"
+expect_used = "warn"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
