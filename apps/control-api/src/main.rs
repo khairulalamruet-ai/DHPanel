@@ -1,12 +1,12 @@
 //! DHPanel control plane HTTP API (Axum).
 //!
-//! T00.03 scope: telemetry initialisation and the Prometheus `/metrics` endpoint.
-//! Configuration (T00.04), error format (T00.05) and health/readiness (T00.06)
-//! build on this entry point.
+//! Startup: load and validate configuration (`dhpanel-config`), initialise
+//! telemetry, serve HTTP, shut down gracefully on SIGINT/SIGTERM.
 
-use std::{net::SocketAddr, process::ExitCode, sync::Arc};
+use std::{process::ExitCode, sync::Arc};
 
 use axum::{Router, extract::State, http::header, response::IntoResponse, routing::get};
+use dhpanel_config::ControlConfig;
 use dhpanel_observability::{LogFormat, TelemetryConfig};
 
 /// Renders the current metrics in Prometheus text format. A closure keeps the
@@ -14,8 +14,6 @@ use dhpanel_observability::{LogFormat, TelemetryConfig};
 type MetricsHandle = Arc<dyn Fn() -> String + Send + Sync>;
 
 const SERVICE: &str = "control-api";
-/// Temporary until T00.04 introduces the config loader.
-const DEFAULT_LISTEN: &str = "127.0.0.1:8080";
 
 /// Builds the HTTP router. Kept separate from `main` so tests can drive it.
 fn router(metrics: MetricsHandle) -> Router {
@@ -37,36 +35,43 @@ async fn render_metrics(State(metrics): State<MetricsHandle>) -> impl IntoRespon
     )
 }
 
+/// `EX_CONFIG` from sysexits.h: systemd and operators can tell config errors apart.
+const EXIT_CONFIG: u8 = 78;
+
+fn telemetry_config(config: &ControlConfig) -> TelemetryConfig {
+    let mut t = TelemetryConfig::new(SERVICE);
+    t.log_format = match config.log.format {
+        dhpanel_config::LogFormat::Json => LogFormat::Json,
+        dhpanel_config::LogFormat::Pretty => LogFormat::Pretty,
+    };
+    t.log_filter.clone_from(&config.log.filter);
+    t.otlp_endpoint.clone_from(&config.log.otlp_endpoint);
+    t
+}
+
 #[tokio::main]
 async fn main() -> ExitCode {
-    let mut telemetry_config = TelemetryConfig::new(SERVICE);
-    if std::env::var("DHPANEL_LOG_FORMAT").as_deref() == Ok("pretty") {
-        telemetry_config.log_format = LogFormat::Pretty;
-    }
-    if let Ok(filter) = std::env::var("RUST_LOG") {
-        telemetry_config.log_filter = filter;
-    }
-    telemetry_config.otlp_endpoint = std::env::var("DHPANEL_OTLP_ENDPOINT").ok();
+    // Config comes first; telemetry is not up yet, so errors go to stderr.
+    let config = match ControlConfig::load() {
+        Ok(c) => c,
+        Err(err) => {
+            eprintln!("{SERVICE}: {err}");
+            return ExitCode::from(EXIT_CONFIG);
+        }
+    };
 
-    let telemetry = match dhpanel_observability::init(&telemetry_config) {
+    let telemetry = match dhpanel_observability::init(&telemetry_config(&config)) {
         Ok(t) => t,
         Err(err) => {
             eprintln!("{SERVICE}: failed to initialise telemetry: {err}");
-            return ExitCode::FAILURE;
+            return ExitCode::from(EXIT_CONFIG);
         }
     };
 
     let handle = telemetry.prometheus_handle();
     let app = router(Arc::new(move || handle.render()));
 
-    let listen = std::env::var("DHPANEL_LISTEN").unwrap_or_else(|_| DEFAULT_LISTEN.to_owned());
-    let addr: SocketAddr = match listen.parse() {
-        Ok(a) => a,
-        Err(err) => {
-            tracing::error!(%listen, error = %err, "invalid listen address");
-            return ExitCode::FAILURE;
-        }
-    };
+    let addr = config.listen;
     let listener = match tokio::net::TcpListener::bind(addr).await {
         Ok(l) => l,
         Err(err) => {

@@ -8,6 +8,7 @@ members = [
     "apps/dhctl",
     "crates/kernel",
     "crates/common",
+    "crates/config",
     "crates/domain",
     "crates/database",
     "crates/http-kit",
@@ -26,6 +27,7 @@ repository = "https://example.invalid/dhpanel"
 # Internal crates. External dependencies are added here (with a reason in the PR) by later tasks.
 dhpanel-kernel = { path = "crates/kernel" }
 dhpanel-common = { path = "crates/common" }
+dhpanel-config = { path = "crates/config" }
 dhpanel-domain = { path = "crates/domain" }
 dhpanel-database = { path = "crates/database" }
 dhpanel-http-kit = { path = "crates/http-kit" }

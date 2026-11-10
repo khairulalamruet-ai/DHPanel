@@ -1,0 +1,22 @@
+# DHPanel control plane configuration (example).
+# Install as /etc/dhpanel/control.toml (mode 0640, owner root:dhpanel),
+# or point DHPANEL_CONFIG at another path.
+#
+# Every key can be overridden by environment variables:
+#   DHPANEL_<SECTION>__<KEY>, e.g. DHPANEL_DATABASE__MAX_CONNECTIONS=20
+# Unknown keys are rejected at startup.
+
+listen = "127.0.0.1:8080"
+
+[log]
+format = "json"          # json | pretty
+filter = "info"          # EnvFilter directives, e.g. "info,dhpanel=debug"
+# otlp_endpoint = "http://127.0.0.1:4318/v1/traces"   # needs a build with --features otel
+
+[database]
+# Put the URL in a file readable only by the service user (chmod 0600).
+url_file = "/etc/dhpanel/secrets/database_url"
+max_connections = 10
+
+[redis]
+url_file = "/etc/dhpanel/secrets/redis_url"

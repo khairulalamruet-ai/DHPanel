@@ -1,0 +1,23 @@
+[package]
+name = "dhpanel-config"
+description = "Typed service configuration: defaults, TOML file, DHPANEL_* environment, secret files and validation."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# Layered config (defaults -> TOML file -> env), named in T00.04.
+figment = { version = "0.10", features = ["toml", "env"] }
+serde = { version = "1", features = ["derive"] }
+# Keeps secrets out of Debug/log output.
+secrecy = { version = "0.10", features = ["serde"] }
+thiserror = "2.0.21"
+
+[dev-dependencies]
+# figment::Jail isolates env vars and files per test.
+figment = { version = "0.10", features = ["toml", "env", "test"] }
