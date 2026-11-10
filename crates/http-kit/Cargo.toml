@@ -19,7 +19,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2.0.21"
 # task_local! carries the correlation ID through the request.
-tokio = { version = "1", features = ["rt"] }
+tokio = { version = "1", features = ["rt", "time"] }
 tracing = "0.1.44"
 # UUIDv7 request IDs (time-ordered; also the planned DB primary key format).
 uuid = { version = "1", features = ["v7"] }

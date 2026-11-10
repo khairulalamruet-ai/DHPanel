@@ -3,45 +3,15 @@
 //! Startup: load and validate configuration (`dhpanel-config`), initialise
 //! telemetry, serve HTTP, shut down gracefully on SIGINT/SIGTERM.
 
+mod app;
+
 use std::{process::ExitCode, sync::Arc};
 
-use axum::{Router, extract::State, http::header, response::IntoResponse, routing::get};
 use dhpanel_config::ControlConfig;
-use dhpanel_http_kit::AppError;
+use dhpanel_http_kit::health::Readiness;
 use dhpanel_observability::{LogFormat, TelemetryConfig};
 
-/// Renders the current metrics in Prometheus text format. A closure keeps the
-/// router independent of the exporter type and easy to fake in tests.
-type MetricsHandle = Arc<dyn Fn() -> String + Send + Sync>;
-
 const SERVICE: &str = "control-api";
-
-/// Builds the HTTP router. Kept separate from `main` so tests can drive it.
-///
-/// Layer order (outermost first): correlation ID -> metrics -> routes.
-/// Unknown routes answer with a Problem Details 404.
-fn router(metrics: MetricsHandle) -> Router {
-    Router::new()
-        .route("/metrics", get(render_metrics))
-        .fallback(|| async { AppError::not_found("route") })
-        .layer(axum::middleware::from_fn(
-            dhpanel_http_kit::metrics::track_http_metrics,
-        ))
-        .layer(axum::middleware::from_fn(
-            dhpanel_http_kit::request_id::correlation_id_layer,
-        ))
-        .with_state(metrics)
-}
-
-async fn render_metrics(State(metrics): State<MetricsHandle>) -> impl IntoResponse {
-    (
-        [(
-            header::CONTENT_TYPE,
-            "text/plain; version=0.0.4; charset=utf-8",
-        )],
-        metrics(),
-    )
-}
 
 /// `EX_CONFIG` from sysexits.h: systemd and operators can tell config errors apart.
 const EXIT_CONFIG: u8 = 78;
@@ -77,7 +47,11 @@ async fn main() -> ExitCode {
     };
 
     let handle = telemetry.prometheus_handle();
-    let app = router(Arc::new(move || handle.render()));
+    // Database and Redis probes are registered by T00.07 / T00.08.
+    let app = app::router(app::AppState {
+        metrics: Arc::new(move || handle.render()),
+        readiness: Readiness::default(),
+    });
 
     let addr = config.listen;
     let listener = match tokio::net::TcpListener::bind(addr).await {
@@ -124,68 +98,4 @@ async fn shutdown_signal() {
         () = terminate => {},
     }
     tracing::info!("shutdown signal received");
-}
-
-#[cfg(test)]
-mod tests {
-    use axum::{body::Body, http::Request};
-    use tower::ServiceExt;
-
-    use super::*;
-
-    #[tokio::test]
-    async fn metrics_endpoint_returns_prometheus_text() {
-        let app = router(Arc::new(|| "http_requests_total 1\n".to_owned()));
-        let res = app
-            .oneshot(
-                Request::builder()
-                    .uri("/metrics")
-                    .body(Body::empty())
-                    .unwrap_or_default(),
-            )
-            .await
-            .unwrap_or_default();
-        assert_eq!(res.status(), 200);
-        let ct = res
-            .headers()
-            .get(header::CONTENT_TYPE)
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or_default();
-        assert!(ct.starts_with("text/plain"), "{ct}");
-        assert!(res.headers().contains_key("x-request-id"));
-    }
-
-    #[tokio::test]
-    async fn unknown_route_is_problem_json_with_correlation_id() {
-        let app = router(Arc::new(String::new));
-        let res = app
-            .oneshot(
-                Request::builder()
-                    .uri("/no/such/route")
-                    .header("x-request-id", "corr-abc")
-                    .body(Body::empty())
-                    .unwrap_or_default(),
-            )
-            .await
-            .unwrap_or_default();
-        assert_eq!(res.status(), 404);
-        assert_eq!(
-            res.headers()
-                .get(header::CONTENT_TYPE)
-                .and_then(|v| v.to_str().ok()),
-            Some(dhpanel_http_kit::error::PROBLEM_JSON)
-        );
-        assert_eq!(
-            res.headers()
-                .get("x-request-id")
-                .and_then(|v| v.to_str().ok()),
-            Some("corr-abc")
-        );
-        let bytes = axum::body::to_bytes(res.into_body(), 64 * 1024)
-            .await
-            .unwrap_or_default();
-        let text = String::from_utf8_lossy(&bytes);
-        assert!(text.contains(r#""code":"not_found""#), "{text}");
-        assert!(text.contains(r#""correlation_id":"corr-abc""#), "{text}");
-    }
 }
