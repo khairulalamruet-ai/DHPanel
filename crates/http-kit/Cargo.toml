@@ -1,6 +1,6 @@
 [package]
 name = "dhpanel-http-kit"
-description = "Axum extractors, problem-details errors and OpenAPI helpers."
+description = "Axum extractors, middleware, problem-details errors and OpenAPI helpers."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,3 +9,15 @@ publish.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+# HTTP framework used by control-api (fixed stack).
+axum = "0.8"
+dhpanel-observability.workspace = true
+
+[dev-dependencies]
+# Drive routers in tests without opening sockets.
+tokio = { version = "1", features = ["macros", "rt"] }
+tower = { version = "0.5", features = ["util"] }
+metrics-exporter-prometheus = { version = "0.18.3", default-features = false }
+metrics = "0.24.6"
