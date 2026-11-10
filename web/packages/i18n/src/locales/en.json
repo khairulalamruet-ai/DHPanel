@@ -1,0 +1,27 @@
+{
+  "common": {
+    "appName": "DHPanel",
+    "dashboard": "Dashboard",
+    "domains": "Domains",
+    "users": "Users",
+    "settings": "Settings",
+    "logout": "Logout",
+    "light": "Light",
+    "dark": "Dark",
+    "system": "System",
+    "language": "Language",
+    "english": "English",
+    "bangla": "বাংলা",
+    "adminTitle": "DHPanel Admin",
+    "clientTitle": "DHPanel Client Portal",
+    "welcome": "Welcome back",
+    "healthStatus": "System Health",
+    "status": "Status",
+    "version": "Version",
+    "ok": "OK",
+    "loading": "Loading...",
+    "error": "An error occurred",
+    "noPermission": "You do not have permission to access this resource",
+    "featureDisabled": "This feature is not enabled for your plan"
+  }
+}

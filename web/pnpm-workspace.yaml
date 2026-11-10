@@ -1,0 +1,8 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+  - 'packages/modules/*'
+  - 'e2e'
+allowBuilds:
+  esbuild: true
+  msw: true
