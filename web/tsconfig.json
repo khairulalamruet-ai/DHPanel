@@ -1,0 +1,38 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["DOM", "DOM.Iterable", "ES2022"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "skipLibCheck": true,
+    "allowSyntheticDefaultImports": true,
+    "forceConsistentCasingInFileNames": true,
+    "types": ["vite/client", "@testing-library/jest-dom/vitest"],
+    "baseUrl": ".",
+    "paths": {
+      "@dhpanel/ui": ["./packages/ui/src"],
+      "@dhpanel/ui/*": ["./packages/ui/src/*"],
+      "@dhpanel/api": ["./packages/api/src"],
+      "@dhpanel/api/*": ["./packages/api/src/*"],
+      "@dhpanel/auth": ["./packages/auth/src"],
+      "@dhpanel/auth/*": ["./packages/auth/src/*"],
+      "@dhpanel/i18n": ["./packages/i18n/src"],
+      "@dhpanel/i18n/*": ["./packages/i18n/src/*"],
+      "@dhpanel/shell": ["./packages/shell/src"],
+      "@dhpanel/shell/*": ["./packages/shell/src/*"],
+      "@dhpanel/modules": ["./packages/modules/src"],
+      "@dhpanel/modules/*": ["./packages/modules/src/*"]
+    }
+  },
+  "include": [
+    "apps/**/*.ts",
+    "apps/**/*.tsx",
+    "packages/**/*.ts",
+    "packages/**/*.tsx",
+    "e2e/**/*.ts"
+  ]
+}
