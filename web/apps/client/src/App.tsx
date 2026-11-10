@@ -1,5 +1,5 @@
 import React from "react";
-import { ThemeProvider } from "@dhpanel/ui";
+import { ThemeProvider, ToastProvider } from "@dhpanel/ui";
 import { SessionProvider } from "@dhpanel/auth";
 import { AppShell } from "@dhpanel/shell";
 import { DashboardPage } from "@dhpanel/modules";
@@ -10,11 +10,13 @@ export function App() {
 
   return (
     <ThemeProvider defaultTheme="system" storageKey="dhpanel-client-theme">
-      <SessionProvider bootstrapPath="/api/v1/client/bootstrap">
-        <AppShell title={t("common.clientTitle")}>
-          <DashboardPage />
-        </AppShell>
-      </SessionProvider>
+      <ToastProvider>
+        <SessionProvider bootstrapPath="/api/v1/client/bootstrap">
+          <AppShell title={t("common.clientTitle")}>
+            <DashboardPage />
+          </AppShell>
+        </SessionProvider>
+      </ToastProvider>
     </ThemeProvider>
   );
 }

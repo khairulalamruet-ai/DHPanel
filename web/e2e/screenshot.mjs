@@ -35,7 +35,7 @@ function createStaticServer(distDir, port = 8089) {
 
   return new Promise((resolve) => {
     server.listen(port, "127.0.0.1", () => {
-      console.log(`Server listening on http://127.0.0.1:${port}`);
+      console.log(`Static server running on http://127.0.0.1:${port}`);
       resolve(server);
     });
   });
@@ -48,56 +48,71 @@ async function wait(ms) {
 async function main() {
   const server = await createStaticServer(DIST_DIR, 8089);
 
-  console.log("Launching Chrome...");
+  console.log("Launching headless Chrome...");
   const browser = await chromium.launch({
     channel: "chrome",
     args: ["--headless=new", "--no-sandbox", "--disable-gpu"],
   });
 
   const context = await browser.newContext({
-    viewport: { width: 1280, height: 800 },
+    viewport: { width: 1280, height: 950 },
   });
 
   const page = await context.newPage();
 
-  console.log("Navigating to http://127.0.0.1:8089/ ...");
+  console.log("Navigating to admin portal...");
   await page.goto("http://127.0.0.1:8089/", { waitUntil: "domcontentloaded" });
-  await wait(3000);
+  await wait(2000);
 
-  // 1. Bengali Light Mode (default)
-  const sc1 = path.join(ARTIFACT_DIR, "admin-light-bn.png");
+  // Switch to UI Components Demo tab
+  const demoTab = page.locator("button:has-text('UI Components Demo (T00.12)')");
+  if (await demoTab.count() > 0) {
+    await demoTab.click();
+    await wait(1000);
+  }
+
+  // Trigger a success toast so toast is visible in screenshot
+  const successToastBtn = page.locator("button:has-text('Success Toast')");
+  if (await successToastBtn.count() > 0) {
+    await successToastBtn.click();
+    await wait(600);
+  }
+
+  // 1. Light Mode Demo Page
+  const sc1 = path.join(ARTIFACT_DIR, "ui-demo-light.png");
   await page.screenshot({ path: sc1 });
-  console.log("Saved screenshot 1:", sc1);
+  console.log("Saved screenshot:", sc1);
 
-  // 2. Toggle to English via desktop header
-  const langBtn = page.locator("header button:has-text('বাং')");
-  if (await langBtn.count() > 0) {
-    await langBtn.click();
-    await wait(1000);
-    const sc2 = path.join(ARTIFACT_DIR, "admin-light-en.png");
+  // 2. Open ConfirmDialog to show high-stakes typed confirmation modal
+  const deleteBtn = page.locator("button:has-text('Delete Tenant (Typed Confirm)')");
+  if (await deleteBtn.count() > 0) {
+    await deleteBtn.click();
+    await wait(600);
+    const sc2 = path.join(ARTIFACT_DIR, "ui-demo-confirm-dialog.png");
     await page.screenshot({ path: sc2 });
-    console.log("Saved screenshot 2:", sc2);
+    console.log("Saved screenshot:", sc2);
 
-    // 3. Toggle to Dark Mode
-    const themeBtn = page.locator("header button[aria-label='Toggle theme']");
-    await themeBtn.click();
+    // Cancel modal
+    const cancelBtn = page.locator("button:has-text('Cancel')");
+    if (await cancelBtn.count() > 0) {
+      await cancelBtn.click();
+      await wait(600);
+    }
+  }
+
+  // 3. Toggle to Dark Theme
+  const themeToggle = page.locator("header button[aria-label='Toggle theme']");
+  if (await themeToggle.count() > 0) {
+    await themeToggle.click();
     await wait(1000);
-    const sc3 = path.join(ARTIFACT_DIR, "admin-dark-en.png");
+    const sc3 = path.join(ARTIFACT_DIR, "ui-demo-dark.png");
     await page.screenshot({ path: sc3 });
-    console.log("Saved screenshot 3:", sc3);
-
-    // 4. Toggle back to Bengali in Dark Mode
-    const langBtnEn = page.locator("header button:has-text('EN')");
-    await langBtnEn.click();
-    await wait(1000);
-    const sc4 = path.join(ARTIFACT_DIR, "admin-dark-bn.png");
-    await page.screenshot({ path: sc4 });
-    console.log("Saved screenshot 4:", sc4);
+    console.log("Saved screenshot:", sc3);
   }
 
   await browser.close();
   server.close();
-  console.log("All 4 screenshots taken successfully!");
+  console.log("UI Demo screenshots captured successfully!");
 }
 
 main().catch(err => {
