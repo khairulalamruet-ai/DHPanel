@@ -861,6 +861,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "dhpanel-rbac"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "dhpanel-cache",
+ "dhpanel-database",
+ "dhpanel-http-kit",
+ "dhpanel-session",
+ "secrecy",
+ "sqlx",
+ "tokio",
+ "tower",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "dhpanel-session"
 version = "0.1.0"
 dependencies = [

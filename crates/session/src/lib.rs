@@ -524,9 +524,7 @@ impl SessionStore {
     /// Redis or PostgreSQL failures.
     pub async fn list_active(&self, account_id: Uuid) -> Result<Vec<SessionInfo>, SessionError> {
         let rows = sqlx::query!(
-            r#"SELECT id, token_sha256, host(ip) AS ip, user_agent,
-                      extract(epoch FROM created_at)::bigint AS "created_at!",
-                      extract(epoch FROM expires_at)::bigint AS "expires_at!"
+            r#"SELECT id, token_sha256, host(ip) AS ip, user_agent
                FROM sessions
                WHERE account_id = $1 AND revoked_at IS NULL AND expires_at > now()
                ORDER BY created_at DESC, id DESC
@@ -555,13 +553,15 @@ impl SessionStore {
         for (row, payload) in rows.into_iter().zip(payloads) {
             let data = payload.and_then(|p| serde_json::from_str::<SessionData>(&p).ok());
             match data {
+                // All three times come from the session itself, so they share
+                // one clock and are consistent with each other.
                 Some(data) => live.push(SessionInfo {
                     id: row.id,
                     ip: row.ip,
                     user_agent: row.user_agent,
-                    created_at: row.created_at,
+                    created_at: data.created_at,
                     last_seen_at: data.last_seen_at,
-                    expires_at: row.expires_at,
+                    expires_at: data.absolute_expires_at,
                 }),
                 None => gone.push(row.id),
             }

@@ -11,6 +11,7 @@
 
 pub mod accounts;
 pub mod mfa;
+pub mod rbac;
 
 use std::{future::Future, pin::Pin, time::Duration};
 

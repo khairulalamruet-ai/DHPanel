@@ -197,6 +197,12 @@ pub struct Me {
     pub csrf_token: String,
     /// Whether two-factor authentication (TOTP) is enabled.
     pub mfa_enabled: bool,
+    /// Role names, e.g. `["super_admin"]`.
+    pub roles: Vec<String>,
+    /// Permission grants from all roles: exact keys (`admin.roles.read`),
+    /// subtrees (`admin.*`) or `*` for everything. Use them to show or hide
+    /// UI; the server enforces them on every request.
+    pub permissions: Vec<String>,
 }
 
 impl std::fmt::Debug for Me {
@@ -209,7 +215,26 @@ impl std::fmt::Debug for Me {
 }
 
 impl Me {
-    fn new(p: AccountProfile, csrf: &CsrfToken, mfa_enabled: bool) -> Self {
+    /// Builds the response from the account's profile, session and access.
+    async fn load(db: &PgPool, p: AccountProfile, csrf: &CsrfToken) -> Result<Self, AppError> {
+        let mfa_enabled = dhpanel_database::mfa::totp_enabled(db, p.id)
+            .await
+            .map_err(AppError::internal)?;
+        let access = dhpanel_database::rbac::load_access(db, p.id)
+            .await
+            .map_err(AppError::internal)?;
+        let (roles, permissions) =
+            access.map_or_else(Default::default, |a| (a.roles, a.permissions));
+        Ok(Self::new(p, csrf, mfa_enabled, roles, permissions))
+    }
+
+    fn new(
+        p: AccountProfile,
+        csrf: &CsrfToken,
+        mfa_enabled: bool,
+        roles: Vec<String>,
+        permissions: Vec<String>,
+    ) -> Self {
         Self {
             id: p.id,
             kind: p.kind,
@@ -218,6 +243,8 @@ impl Me {
             locale: p.locale,
             csrf_token: csrf.expose().to_owned(),
             mfa_enabled,
+            roles,
+            permissions,
         }
     }
 }
@@ -480,12 +507,10 @@ pub(crate) async fn finish_login(
         .ok_or_else(|| {
             AppError::internal(std::io::Error::other("account vanished during login"))
         })?;
-    let mfa_enabled = dhpanel_database::mfa::totp_enabled(&state.db, account_id)
-        .await
-        .map_err(AppError::internal)?;
+    let me = Me::load(&state.db, profile, &session.csrf_token).await?;
 
     let cookie = HeaderValue::from_str(&set_cookie(&token)).map_err(AppError::internal)?;
-    let mut response = no_store_json(Me::new(profile, &session.csrf_token, mfa_enabled));
+    let mut response = no_store_json(me);
     response.headers_mut().insert(header::SET_COOKIE, cookie);
     Ok(response)
 }
@@ -543,12 +568,9 @@ pub async fn me(
         .await
         .map_err(AppError::internal)?;
     match profile {
-        Some(p) if p.status == DbAccountStatus::Active => {
-            let mfa_enabled = dhpanel_database::mfa::totp_enabled(&state.db, session.account_id)
-                .await
-                .map_err(AppError::internal)?;
-            Ok(no_store_json(Me::new(p, &session.csrf_token, mfa_enabled)))
-        }
+        Some(p) if p.status == DbAccountStatus::Active => Ok(no_store_json(
+            Me::load(&state.db, p, &session.csrf_token).await?,
+        )),
         _ => {
             // Account deleted or blocked after login: end the session.
             if let Some(value) = cookie_value(&headers) {

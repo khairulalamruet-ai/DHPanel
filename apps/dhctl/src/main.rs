@@ -71,6 +71,10 @@ enum AdminAction {
         /// (for automation). Passwords are never accepted as arguments.
         #[arg(long)]
         password_stdin: bool,
+        /// Role to grant. The default gives full access; use `admin` or
+        /// `support` for restricted administrators.
+        #[arg(long, default_value = "super_admin")]
+        role: String,
     },
 }
 
@@ -95,8 +99,9 @@ async fn main() -> ExitCode {
                     username,
                     email,
                     password_stdin,
+                    role,
                 },
-        } => admin_create(&username, &email, password_stdin).await,
+        } => admin_create(&username, &email, password_stdin, &role).await,
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -168,7 +173,12 @@ fn read_password(from_stdin: bool) -> Result<SecretString, Failure> {
     Ok(SecretString::from(first))
 }
 
-async fn admin_create(username: &str, email: &str, password_stdin: bool) -> Result<(), Failure> {
+async fn admin_create(
+    username: &str,
+    email: &str,
+    password_stdin: bool,
+    role: &str,
+) -> Result<(), Failure> {
     // Validate identifiers before asking for the password.
     let username =
         Username::parse(username).map_err(|e| Failure(EXIT_USAGE, format!("--username: {e}")))?;
@@ -198,6 +208,20 @@ async fn admin_create(username: &str, email: &str, password_stdin: bool) -> Resu
         .map_err(|e| Failure(EXIT_SOFTWARE, e.to_string()))?;
 
     let pool = connect(&config).await?;
+    let db_err = |e: dhpanel_database::sqlx::Error| {
+        Failure(EXIT_UNAVAILABLE, format!("database error: {e}"))
+    };
+    // Checked before the account is created so a typo cannot leave an
+    // administrator without any role.
+    if !dhpanel_database::rbac::role_exists(&pool, role)
+        .await
+        .map_err(db_err)?
+    {
+        return Err(Failure(
+            EXIT_USAGE,
+            format!("--role: no role named '{role}'"),
+        ));
+    }
     let existing_admins = dhpanel_database::accounts::count_accounts(&pool, AccountKind::Admin)
         .await
         .map_err(|e| Failure(EXIT_UNAVAILABLE, format!("database error: {e}")))?;
@@ -226,7 +250,22 @@ async fn admin_create(username: &str, email: &str, password_stdin: bool) -> Resu
     } else {
         ""
     };
-    println!("created admin '{username}' <{email}> id={id}{first}");
+    match dhpanel_database::rbac::assign_role(&pool, id, role, None)
+        .await
+        .map_err(db_err)?
+    {
+        dhpanel_database::rbac::AssignRole::UnknownRole => {
+            return Err(Failure(
+                EXIT_SOFTWARE,
+                format!(
+                    "account {id} was created but role '{role}' vanished; grant a role before use"
+                ),
+            ));
+        }
+        dhpanel_database::rbac::AssignRole::Assigned
+        | dhpanel_database::rbac::AssignRole::AlreadyAssigned => {}
+    }
+    println!("created admin '{username}' <{email}> id={id} role={role}{first}");
     Ok(())
 }
 
@@ -257,7 +296,7 @@ mod tests {
 
     #[tokio::test]
     async fn invalid_username_is_rejected_before_any_io() {
-        let Err(f) = admin_create("No Spaces", "a@b.co", true).await else {
+        let Err(f) = admin_create("No Spaces", "a@b.co", true, "super_admin").await else {
             unreachable!("must fail");
         };
         assert_eq!(f.0, EXIT_USAGE);

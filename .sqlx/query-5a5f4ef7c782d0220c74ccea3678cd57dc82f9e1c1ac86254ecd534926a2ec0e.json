@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, token_sha256, host(ip) AS ip, user_agent,\n                      extract(epoch FROM created_at)::bigint AS \"created_at!\",\n                      extract(epoch FROM expires_at)::bigint AS \"expires_at!\"\n               FROM sessions\n               WHERE account_id = $1 AND revoked_at IS NULL AND expires_at > now()\n               ORDER BY created_at DESC, id DESC\n               LIMIT $2",
+  "query": "SELECT id, token_sha256, host(ip) AS ip, user_agent\n               FROM sessions\n               WHERE account_id = $1 AND revoked_at IS NULL AND expires_at > now()\n               ORDER BY created_at DESC, id DESC\n               LIMIT $2",
   "describe": {
     "columns": [
       {
@@ -41,18 +41,6 @@
             "name": "user_agent"
           }
         }
-      },
-      {
-        "ordinal": 4,
-        "name": "created_at!",
-        "type_info": "Int8",
-        "origin": "Expression"
-      },
-      {
-        "ordinal": 5,
-        "name": "expires_at!",
-        "type_info": "Int8",
-        "origin": "Expression"
       }
     ],
     "parameters": {
@@ -65,10 +53,8 @@
       false,
       false,
       null,
-      true,
-      null,
-      null
+      true
     ]
   },
-  "hash": "c961186edf0a2c4c65cd7556def5707cd25afc09a067f1921bc5e05897b98026"
+  "hash": "5a5f4ef7c782d0220c74ccea3678cd57dc82f9e1c1ac86254ecd534926a2ec0e"
 }

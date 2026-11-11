@@ -208,6 +208,9 @@ async fn login_me_logout_flow(pool: PgPool) {
     assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
     assert_eq!(r.body["username"], "alice");
     assert_eq!(r.body["kind"], "admin");
+    // No roles were granted to this test account.
+    assert_eq!(r.body["roles"], json!([]));
+    assert_eq!(r.body["permissions"], json!([]));
     assert!(r.body.get("password_hash").is_none());
     let set = r.set_cookie.expect("cookie");
     for attr in [
@@ -1285,4 +1288,30 @@ async fn revoke_others_keeps_only_the_caller_and_needs_csrf(pool: PgPool) {
     assert_eq!(r.status, StatusCode::NO_CONTENT);
     assert!(r.set_cookie.unwrap().contains("Max-Age=0"));
     assert_eq!(b.me_status(&app).await, StatusCode::UNAUTHORIZED);
+}
+
+// ------------------------------------------------------------ RBAC (T01.11)
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn me_lists_roles_and_permissions(pool: PgPool) {
+    let hasher = PasswordHasher::new(fast_params(2)).unwrap();
+    let id = create_account(&pool, &hasher, "yuri", "active").await;
+    for role in ["admin", "support"] {
+        dhpanel_database::rbac::assign_role(&pool, id, role, None)
+            .await
+            .unwrap();
+    }
+    let app = app(state(&pool, hasher));
+    let b = sign_in(&app, "yuri").await;
+    let r = send(&app, "GET", "/api/v1/auth/me", Some(&b.cookie), None).await;
+    assert_eq!(r.body["roles"], json!(["admin", "support"]));
+    assert_eq!(
+        r.body["permissions"],
+        json!([
+            "admin.administrators.read",
+            "admin.audit.read",
+            "admin.roles.read"
+        ])
+    );
 }

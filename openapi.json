@@ -904,7 +904,9 @@
           "email",
           "locale",
           "csrf_token",
-          "mfa_enabled"
+          "mfa_enabled",
+          "roles",
+          "permissions"
         ],
         "properties": {
           "csrf_token": {
@@ -932,6 +934,20 @@
           "mfa_enabled": {
             "type": "boolean",
             "description": "Whether two-factor authentication (TOTP) is enabled."
+          },
+          "permissions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Permission grants from all roles: exact keys (`admin.roles.read`),\nsubtrees (`admin.*`) or `*` for everything. Use them to show or hide\nUI; the server enforces them on every request."
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Role names, e.g. `[\"super_admin\"]`."
           },
           "username": {
             "type": "string",
