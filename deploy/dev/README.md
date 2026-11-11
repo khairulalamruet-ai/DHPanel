@@ -66,3 +66,17 @@ Each worktree is synced to its own `~/work/<worktree name>` directory, so
 agents working in parallel do not interfere. The box needs rustup, cargo-deny,
 PostgreSQL 18, Redis, Node and pnpm, plus `~/.dhpanel-dev/secrets/database_url`
 (a superuser, for per-test databases) and `redis_test_url`, both mode 0600.
+
+On a small box, keep the shared target directory from filling the disk by
+putting this in the build user's `~/.cargo/config.toml`:
+
+```
+[build]
+incremental = false
+target-dir = "/home/<user>/target-rust"
+
+[profile.dev]
+debug = "line-tables-only"
+```
+
+If the disk still fills up, delete `~/target-rust`; the next run rebuilds it.

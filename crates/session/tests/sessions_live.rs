@@ -391,3 +391,84 @@ async fn sensitive_routes_need_recent_authentication(pool: PgPool) {
     assert!(!s.mark_reauthenticated(token.expose()).await.expect("mark"));
     assert!(s.load(token.expose()).await.expect("load").is_none());
 }
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs PostgreSQL + Redis: see module docs"]
+async fn listing_shows_only_live_sessions_of_the_account(pool: PgPool) {
+    let alice = account(&pool).await;
+    let bob = account(&pool).await;
+    // Idle timeout 1s so one session can lapse in Redis while its history row stays open.
+    let short = store(&pool, 1, 3600, 60);
+    let long = store(&pool, 600, 3600, 60);
+
+    let (_, lapsing) = short.create(new_session(alice)).await.expect("create");
+    let (t1, s1) = long.create(new_session(alice)).await.expect("create");
+    let (_, s2) = long.create(new_session(alice)).await.expect("create");
+    let (_, other) = long.create(new_session(bob)).await.expect("create");
+    tokio::time::sleep(Duration::from_millis(2300)).await;
+
+    let listed = long.list_active(alice).await.expect("list");
+    let ids: Vec<Uuid> = listed.iter().map(|s| s.id).collect();
+    assert_eq!(
+        ids,
+        vec![s2.id, s1.id],
+        "newest first, lapsed and foreign sessions left out"
+    );
+    assert!(!ids.contains(&other.id));
+    let first = &listed[0];
+    assert_eq!(first.ip.as_deref(), Some("203.0.113.5"));
+    assert_eq!(first.user_agent.as_deref(), Some("Mozilla/5.0 test"));
+    assert!(first.expires_at > first.created_at && first.last_seen_at >= first.created_at);
+
+    // The lapsed session is now closed in the history as expired.
+    let reason: Option<String> =
+        sqlx::query_scalar("SELECT revoke_reason FROM sessions WHERE id = $1")
+            .bind(lapsing.id)
+            .fetch_one(&pool)
+            .await
+            .expect("row");
+    assert_eq!(reason.as_deref(), Some("expired"));
+
+    // Revoking by id: only the owner can, and it kills the session immediately.
+    assert!(
+        !long
+            .revoke_by_id(bob, s1.id, RevokeReason::Admin)
+            .await
+            .expect("foreign")
+    );
+    assert!(long.load(t1.expose()).await.expect("load").is_some());
+    assert!(
+        long.revoke_by_id(alice, s1.id, RevokeReason::Logout)
+            .await
+            .expect("own")
+    );
+    assert!(long.load(t1.expose()).await.expect("load").is_none());
+    assert!(
+        !long
+            .revoke_by_id(alice, s1.id, RevokeReason::Logout)
+            .await
+            .expect("twice")
+    );
+
+    // Revoke all but one, then all.
+    let (_, s3) = long.create(new_session(alice)).await.expect("create");
+    assert_eq!(
+        long.revoke_all(alice, Some(s3.id), RevokeReason::LogoutAll)
+            .await
+            .expect("others"),
+        1
+    );
+    assert_eq!(long.list_active(alice).await.expect("list").len(), 1);
+    assert_eq!(
+        long.revoke_all(alice, None, RevokeReason::LogoutAll)
+            .await
+            .expect("all"),
+        1
+    );
+    assert!(long.list_active(alice).await.expect("list").is_empty());
+    assert_eq!(
+        long.list_active(bob).await.expect("list").len(),
+        1,
+        "bob is untouched"
+    );
+}

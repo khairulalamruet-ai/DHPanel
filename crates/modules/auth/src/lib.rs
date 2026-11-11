@@ -6,6 +6,9 @@
 //! | POST | `/api/v1/auth/logout` | session |
 //! | GET  | `/api/v1/auth/me` | session |
 //!
+//! Two-factor authentication and sudo mode are in [`mfa`]; session listing
+//! and revocation in [`sessions`].
+//!
 //! Security properties:
 //! * Unknown accounts and wrong passwords give the same 401 `invalid_credentials`
 //!   and take the same time (dummy argon2 verification).
@@ -29,6 +32,7 @@
 //! form cannot send without a CORS preflight) and rotates any prior session.
 
 pub mod mfa;
+pub mod sessions;
 
 use std::{
     net::{IpAddr, SocketAddr},
@@ -152,6 +156,7 @@ pub fn router() -> Router<AuthState> {
         .route("/api/v1/auth/logout", post(logout))
         .route("/api/v1/auth/me", get(me))
         .merge(mfa::router())
+        .merge(sessions::router())
 }
 
 /// Login request body.
@@ -575,11 +580,13 @@ impl Modify for SessionCookieScheme {
     paths(
         login, logout, me,
         mfa::login_mfa, mfa::sudo, mfa::status, mfa::enroll_totp, mfa::confirm_totp,
-        mfa::disable_totp
+        mfa::disable_totp, sessions::list, sessions::revoke, sessions::revoke_others,
+        sessions::logout_all
     ),
     components(schemas(
         LoginRequest, Me, mfa::MfaChallenge, mfa::MfaLoginRequest, mfa::MfaStatus,
-        mfa::SudoRequest, mfa::SudoStatus, mfa::TotpEnrollment, mfa::CodeRequest, mfa::BackupCodes
+        mfa::SudoRequest, mfa::SudoStatus, mfa::TotpEnrollment, mfa::CodeRequest, mfa::BackupCodes, sessions::SessionView, sessions::SessionList,
+        sessions::RevokedCount
     )),
     modifiers(&SessionCookieScheme),
     tags((name = "auth", description = "Login, logout, the current account and two-factor authentication"))

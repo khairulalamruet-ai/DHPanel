@@ -10,6 +10,10 @@
 //! * **History**: PostgreSQL `sessions` row on create (token hash, IP, UA,
 //!   absolute expiry) and `revoked_at`/`revoke_reason` on revoke.
 //! * **Extractor**: [`Authenticated`] yields the session or a 401 Problem.
+//! * **Management**: [`SessionStore::list_active`], [`SessionStore::revoke_by_id`]
+//!   and [`SessionStore::revoke_all`] let an account see and end its sessions.
+//!   Revocation deletes the Redis entry, so it takes effect on the very next
+//!   request.
 //! * **CSRF**: every session carries a random [`CsrfToken`]. The client gets it
 //!   in a response body (login, `/me`) and keeps it in memory only. For any
 //!   method other than GET/HEAD/OPTIONS/TRACE, [`Authenticated`] requires the
@@ -215,6 +219,43 @@ pub enum SessionError {
     /// Corrupt session payload in Redis.
     #[error("session payload is corrupt")]
     Corrupt,
+}
+
+/// One live session, as shown to its owner.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionInfo {
+    /// Session id.
+    pub id: Uuid,
+    /// IP address at login.
+    pub ip: Option<String>,
+    /// User agent at login.
+    pub user_agent: Option<String>,
+    /// Unix seconds of login.
+    pub created_at: i64,
+    /// Unix seconds of the last recorded activity (at most
+    /// [`SessionConfig::touch_interval`] behind).
+    pub last_seen_at: i64,
+    /// Unix seconds of the absolute expiry.
+    pub expires_at: i64,
+}
+
+/// Most sessions returned by [`SessionStore::list_active`].
+pub const MAX_LISTED_SESSIONS: i64 = 100;
+
+/// Formats Unix seconds as an RFC 3339 UTC timestamp (`2026-11-11T09:30:00Z`).
+#[must_use]
+pub fn rfc3339(unix_seconds: i64) -> String {
+    time::OffsetDateTime::from_unix_timestamp(unix_seconds)
+        .ok()
+        .and_then(|t| {
+            t.format(&time::format_description::well_known::Rfc3339)
+                .ok()
+        })
+        .unwrap_or_default()
+}
+
+fn key_from_hash_bytes(hash: &[u8]) -> Option<String> {
+    <[u8; 32]>::try_from(hash).ok().map(|h| redis_key(&h))
 }
 
 /// The cookie value handed to the browser. Never logged.
@@ -475,6 +516,135 @@ impl SessionStore {
         Ok(removed > 0)
     }
 
+    /// The account's live sessions, newest first (at most
+    /// [`MAX_LISTED_SESSIONS`]). Sessions whose Redis entry has gone (idle
+    /// timeout) are marked `expired` in the history and left out.
+    ///
+    /// # Errors
+    /// Redis or PostgreSQL failures.
+    pub async fn list_active(&self, account_id: Uuid) -> Result<Vec<SessionInfo>, SessionError> {
+        let rows = sqlx::query!(
+            r#"SELECT id, token_sha256, host(ip) AS ip, user_agent,
+                      extract(epoch FROM created_at)::bigint AS "created_at!",
+                      extract(epoch FROM expires_at)::bigint AS "expires_at!"
+               FROM sessions
+               WHERE account_id = $1 AND revoked_at IS NULL AND expires_at > now()
+               ORDER BY created_at DESC, id DESC
+               LIMIT $2"#,
+            account_id,
+            MAX_LISTED_SESSIONS,
+        )
+        .fetch_all(&self.db)
+        .await?;
+        if rows.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let keys: Vec<String> = rows
+            .iter()
+            .map(|r| key_from_hash_bytes(&r.token_sha256).unwrap_or_default())
+            .collect();
+        let mut conn = self.redis.connection().await?;
+        let payloads: Vec<Option<String>> = dhpanel_cache::redis::cmd("MGET")
+            .arg(&keys)
+            .query_async(&mut conn)
+            .await?;
+
+        let mut live = Vec::with_capacity(rows.len());
+        let mut gone = Vec::new();
+        for (row, payload) in rows.into_iter().zip(payloads) {
+            let data = payload.and_then(|p| serde_json::from_str::<SessionData>(&p).ok());
+            match data {
+                Some(data) => live.push(SessionInfo {
+                    id: row.id,
+                    ip: row.ip,
+                    user_agent: row.user_agent,
+                    created_at: row.created_at,
+                    last_seen_at: data.last_seen_at,
+                    expires_at: row.expires_at,
+                }),
+                None => gone.push(row.id),
+            }
+        }
+        if !gone.is_empty() {
+            sqlx::query!(
+                r#"UPDATE sessions SET revoked_at = now(), revoke_reason = 'expired'
+                   WHERE id = ANY($1) AND revoked_at IS NULL"#,
+                &gone,
+            )
+            .execute(&self.db)
+            .await?;
+        }
+        Ok(live)
+    }
+
+    /// Ends one session of `account_id` by id. Returns `false` when the
+    /// account has no such live session (also for other accounts' ids).
+    ///
+    /// # Errors
+    /// Redis or PostgreSQL failures.
+    pub async fn revoke_by_id(
+        &self,
+        account_id: Uuid,
+        session_id: Uuid,
+        reason: RevokeReason,
+    ) -> Result<bool, SessionError> {
+        let hash = sqlx::query_scalar!(
+            r#"UPDATE sessions SET revoked_at = now(), revoke_reason = $3
+               WHERE id = $2 AND account_id = $1 AND revoked_at IS NULL
+               RETURNING token_sha256"#,
+            account_id,
+            session_id,
+            reason.as_str(),
+        )
+        .fetch_optional(&self.db)
+        .await?;
+        let Some(hash) = hash else {
+            return Ok(false);
+        };
+        if let Some(key) = key_from_hash_bytes(&hash) {
+            let mut conn = self.redis.connection().await?;
+            let _: u64 = conn.del(key).await?;
+        }
+        Ok(true)
+    }
+
+    /// Ends every live session of the account, optionally keeping one
+    /// (typically the caller's). Returns how many were ended.
+    ///
+    /// # Errors
+    /// Redis or PostgreSQL failures.
+    pub async fn revoke_all(
+        &self,
+        account_id: Uuid,
+        keep: Option<Uuid>,
+        reason: RevokeReason,
+    ) -> Result<u64, SessionError> {
+        let hashes = sqlx::query_scalar!(
+            r#"UPDATE sessions SET revoked_at = now(), revoke_reason = $3
+               WHERE account_id = $1 AND revoked_at IS NULL
+                 AND ($2::uuid IS NULL OR id <> $2)
+               RETURNING token_sha256"#,
+            account_id,
+            keep,
+            reason.as_str(),
+        )
+        .fetch_all(&self.db)
+        .await?;
+        let keys: Vec<String> = hashes
+            .iter()
+            .filter_map(|h| key_from_hash_bytes(h))
+            .collect();
+        if !keys.is_empty() {
+            let mut conn = self.redis.connection().await?;
+            let _: u64 = dhpanel_cache::redis::cmd("DEL")
+                .arg(&keys)
+                .query_async(&mut conn)
+                .await?;
+        }
+        Ok(u64::try_from(hashes.len()).unwrap_or(u64::MAX))
+    }
+
     /// Seconds until the earlier of idle and absolute expiry (at least 1).
     fn ttl_from(&self, now: i64, absolute_expires_at: i64) -> u64 {
         let idle = secs(self.config.idle_timeout);
@@ -632,6 +802,13 @@ mod tests {
         assert_eq!(data.sudo_remaining(2_000_000, window), None);
         // Clock went backwards: do not grant.
         assert_eq!(data.sudo_remaining(999_999, window), None);
+    }
+
+    #[test]
+    fn timestamps_format_as_rfc3339_utc() {
+        assert_eq!(rfc3339(0), "1970-01-01T00:00:00Z");
+        assert_eq!(rfc3339(1_794_400_000), "2026-11-11T12:26:40Z");
+        assert_eq!(rfc3339(i64::MAX), "");
     }
 
     #[test]

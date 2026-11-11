@@ -65,6 +65,46 @@
         ]
       }
     },
+    "/api/v1/auth/logout-all": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "End every session of the signed-in account, including the current one.",
+        "operationId": "logoutAll",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "All sessions ended; cookie cleared"
+          },
+          "403": {
+            "description": "`csrf_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/auth/me": {
       "get": {
         "tags": [
@@ -285,6 +325,149 @@
           },
           "409": {
             "description": "`mfa_already_enabled`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/sessions": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "List the signed-in account's live sessions.",
+        "operationId": "listSessions",
+        "responses": {
+          "200": {
+            "description": "Live sessions, newest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not logged in",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/sessions/revoke-others": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "End every other session of the signed-in account (\"log out everywhere else\").",
+        "operationId": "revokeOtherSessions",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Other sessions ended; the current one stays",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevokedCount"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`csrf_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/sessions/{id}": {
+      "delete": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "End one of the signed-in account's sessions. Ending the current session\nis a logout and clears the cookie.",
+        "operationId": "revokeSession",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session id from the list",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Session ended"
+          },
+          "403": {
+            "description": "`csrf_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such live session for this account",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -886,6 +1069,89 @@
             "type": "string",
             "description": "`ready` or `not_ready`.",
             "example": "ready"
+          }
+        }
+      },
+      "RevokedCount": {
+        "type": "object",
+        "description": "Result of a bulk revocation.",
+        "required": [
+          "revoked"
+        ],
+        "properties": {
+          "revoked": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Number of sessions ended.",
+            "minimum": 0
+          }
+        }
+      },
+      "SessionList": {
+        "type": "object",
+        "description": "Live sessions.",
+        "required": [
+          "sessions"
+        ],
+        "properties": {
+          "sessions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SessionView"
+            },
+            "description": "Newest first; at most 100."
+          }
+        }
+      },
+      "SessionView": {
+        "type": "object",
+        "description": "A live session of the signed-in account.",
+        "required": [
+          "id",
+          "current",
+          "created_at",
+          "last_seen_at",
+          "expires_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the session was created (RFC 3339, UTC).",
+            "example": "2026-11-11T09:30:00Z"
+          },
+          "current": {
+            "type": "boolean",
+            "description": "Whether this is the session making the request."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the session ends regardless of activity (RFC 3339, UTC)."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Session id."
+          },
+          "ip": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "IP address at login."
+          },
+          "last_seen_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Last recorded activity (RFC 3339, UTC; up to a minute behind)."
+          },
+          "user_agent": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Browser user agent at login."
           }
         }
       },

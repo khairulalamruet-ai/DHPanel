@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE sessions SET revoked_at = now(), revoke_reason = 'expired'\n                   WHERE id = ANY($1) AND revoked_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "564c8bdeffebdbf045a1ed13039de286252a95205c8fdbb3e590ee4c1809b80b"
+}

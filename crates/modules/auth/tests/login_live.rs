@@ -1126,3 +1126,163 @@ async fn with_2fa_on_sudo_needs_a_second_factor_so_a_password_cannot_disable_2fa
     let r = send(&app, "GET", "/api/v1/auth/mfa", Some(&b.cookie), None).await;
     assert_eq!(r.body["totp_enabled"], false);
 }
+
+// ------------------------------------------------- session management (T01.10)
+
+const SESSIONS: &str = "/api/v1/auth/sessions";
+
+impl Browser {
+    async fn delete(&self, app: &Router, uri: &str) -> Resp {
+        send_with(
+            app,
+            "DELETE",
+            uri,
+            Some(&self.cookie),
+            None,
+            &[("x-csrf-token", &self.csrf)],
+        )
+        .await
+    }
+
+    async fn me_status(&self, app: &Router) -> StatusCode {
+        send(app, "GET", "/api/v1/auth/me", Some(&self.cookie), None)
+            .await
+            .status
+    }
+
+    async fn sessions(&self, app: &Router) -> Vec<Value> {
+        let r = send(app, "GET", SESSIONS, Some(&self.cookie), None).await;
+        assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+        r.body["sessions"].as_array().unwrap().clone()
+    }
+}
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn a_revoked_session_cannot_make_any_further_request(pool: PgPool) {
+    let hasher = PasswordHasher::new(fast_params(2)).unwrap();
+    create_account(&pool, &hasher, "uma", "active").await;
+    let app = app(state(&pool, hasher));
+    let laptop = sign_in(&app, "uma").await;
+    let phone = sign_in(&app, "uma").await;
+
+    let list = laptop.sessions(&app).await;
+    assert_eq!(list.len(), 2);
+    // Newest first; exactly the caller's session is marked current.
+    assert_eq!(list[0]["current"], false);
+    assert_eq!(list[1]["current"], true);
+    assert_eq!(list[0]["ip"], "198.51.100.23");
+    assert_eq!(list[0]["user_agent"], "test-agent/1.0");
+    for key in ["created_at", "last_seen_at", "expires_at"] {
+        let t = list[0][key].as_str().unwrap();
+        assert!(
+            t.len() == 20 && t.ends_with('Z') && t.contains('T'),
+            "{key}={t}"
+        );
+    }
+    // Nothing secret is listed.
+    let text = Value::Array(list.clone()).to_string();
+    assert!(!text.contains("csrf") && !text.contains("token"), "{text}");
+
+    // The laptop ends the phone's session; the phone's cookie stops working at once.
+    let phone_id = list[0]["id"].as_str().unwrap();
+    let r = laptop.delete(&app, &format!("{SESSIONS}/{phone_id}")).await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT);
+    assert!(r.set_cookie.is_none(), "the caller's own cookie is kept");
+    assert_eq!(phone.me_status(&app).await, StatusCode::UNAUTHORIZED);
+    let r = send(&app, "GET", SESSIONS, Some(&phone.cookie), None).await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+    let r = phone.post_empty(&app, "/api/v1/auth/logout").await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(laptop.me_status(&app).await, StatusCode::OK);
+    assert_eq!(laptop.sessions(&app).await.len(), 1);
+
+    // Ending it again, a malformed id, or a random id: 404.
+    for id in [
+        phone_id,
+        "not-a-uuid",
+        "0190b6a2-0000-7000-8000-000000000000",
+    ] {
+        let r = laptop.delete(&app, &format!("{SESSIONS}/{id}")).await;
+        assert_eq!(r.status, StatusCode::NOT_FOUND, "{id}");
+        assert_eq!(r.body["code"], "not_found");
+    }
+    let reason: String =
+        sqlx::query_scalar("SELECT revoke_reason FROM sessions WHERE id = $1::uuid")
+            .bind(phone_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(reason, "logout");
+}
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn sessions_of_other_accounts_are_invisible_and_untouchable(pool: PgPool) {
+    let hasher = PasswordHasher::new(fast_params(2)).unwrap();
+    create_account(&pool, &hasher, "victor", "active").await;
+    create_account(&pool, &hasher, "wendy", "active").await;
+    let app = app(state(&pool, hasher));
+    let victor = sign_in(&app, "victor").await;
+    let wendy = sign_in(&app, "wendy").await;
+
+    let wendy_id = wendy.sessions(&app).await[0]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let mine = victor.sessions(&app).await;
+    assert_eq!(mine.len(), 1);
+    assert_ne!(mine[0]["id"], wendy_id.as_str());
+
+    // Victor cannot end Wendy's session, by id or in bulk.
+    let r = victor.delete(&app, &format!("{SESSIONS}/{wendy_id}")).await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+    let r = victor.post_empty(&app, "/api/v1/auth/logout-all").await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT);
+    assert_eq!(victor.me_status(&app).await, StatusCode::UNAUTHORIZED);
+    assert_eq!(wendy.me_status(&app).await, StatusCode::OK);
+}
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn revoke_others_keeps_only_the_caller_and_needs_csrf(pool: PgPool) {
+    let hasher = PasswordHasher::new(fast_params(2)).unwrap();
+    create_account(&pool, &hasher, "xena", "active").await;
+    let app = app(state(&pool, hasher));
+    let a = sign_in(&app, "xena").await;
+    let b = sign_in(&app, "xena").await;
+    let c = sign_in(&app, "xena").await;
+    let others = format!("{SESSIONS}/revoke-others");
+
+    // Without the CSRF header nothing happens.
+    let r = send(&app, "POST", &others, Some(&b.cookie), None).await;
+    assert_eq!(r.body["code"], "csrf_failed");
+    let r = send(
+        &app,
+        "DELETE",
+        &format!("{SESSIONS}/x"),
+        Some(&b.cookie),
+        None,
+    )
+    .await;
+    assert_eq!(r.body["code"], "csrf_failed");
+    assert_eq!(a.sessions(&app).await.len(), 3);
+
+    let r = b.post_empty(&app, &others).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert_eq!(r.body["revoked"], 2);
+    assert_eq!(a.me_status(&app).await, StatusCode::UNAUTHORIZED);
+    assert_eq!(c.me_status(&app).await, StatusCode::UNAUTHORIZED);
+    assert_eq!(b.me_status(&app).await, StatusCode::OK);
+    let left = b.sessions(&app).await;
+    assert_eq!(left.len(), 1);
+    assert_eq!(left[0]["current"], true);
+    assert_eq!(b.post_empty(&app, &others).await.body["revoked"], 0);
+
+    // Ending the current session by id is a logout: cookie cleared.
+    let own = left[0]["id"].as_str().unwrap();
+    let r = b.delete(&app, &format!("{SESSIONS}/{own}")).await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT);
+    assert!(r.set_cookie.unwrap().contains("Max-Age=0"));
+    assert_eq!(b.me_status(&app).await, StatusCode::UNAUTHORIZED);
+}
