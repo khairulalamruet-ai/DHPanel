@@ -30,6 +30,7 @@ Never open or edit another agent's worktree. Start every task from the latest `m
 4. Frontend never waits for the backend: missing endpoints are mocked (MSW) and tagged `TODO(api:T<id>)`.
 5. Dependency additions go in their own small PR with a reason.
 6. Commit or push only when the human asks.
+7. Always use the latest stable versions: the newest stable Rust toolchain in `rust-toolchain.toml` and the newest stable release of every Rust crate and npm package (check crates.io / npm before adding or bumping; never pick an older major/minor to match what is already in the lockfile). Use current idioms and APIs, not deprecated ones. An older version is allowed only when the latest is incompatible, broken or has an open advisory; say why in the PR and add a `TODO` to upgrade.
 
 ## Hard limits
 
