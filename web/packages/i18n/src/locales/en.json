@@ -229,5 +229,85 @@
       "cancelBtn": "Cancel"
     },
     "empty": "No modules found matching the selected criteria."
+  },
+  "nodes": {
+    "title": "Cluster Nodes",
+    "desc": "Manage host servers running the node-agent daemon, monitor capacity, and enroll new worker nodes.",
+    "nav": "Nodes",
+    "addNode": "Add Node",
+    "status": {
+      "online": "Online",
+      "offline": "Offline",
+      "draining": "Draining",
+      "revoked": "Revoked"
+    },
+    "table": {
+      "node": "Node / Hostname",
+      "status": "Status",
+      "cpu": "CPU",
+      "ram": "RAM",
+      "disk": "Disk",
+      "version": "Agent / Docker",
+      "lastSeen": "Last Seen",
+      "actions": "Actions",
+      "viewDetails": "View Specs",
+      "revoke": "Revoke"
+    },
+    "wizard": {
+      "title": "Enroll New Node",
+      "desc": "Generate a single-use enrollment token and run the installation script on your server.",
+      "nameLabel": "Node Name",
+      "namePlaceholder": "e.g. node-sgp-01",
+      "generateToken": "Generate Enrollment Token",
+      "generating": "Generating...",
+      "tokenLabel": "One-time Enrollment Token",
+      "expiresIn": "Valid for 15 minutes",
+      "commandLabel": "Run this command on your server:",
+      "copyCommand": "Copy Command",
+      "copyToken": "Copy Token",
+      "copied": "Copied!",
+      "securityNotice": "The installer connects to the control plane using outbound mTLS. No inbound ports are required.",
+      "sudoPrompt": "Administrative sudo verification required to generate enrollment tokens. Please enter your password:",
+      "passwordLabel": "Password",
+      "verifySudo": "Verify Password",
+      "done": "Done & Refresh"
+    },
+    "details": {
+      "title": "Node Specifications & Status",
+      "hostname": "Hostname",
+      "ip": "IP Address",
+      "nodeId": "Node ID",
+      "fingerprint": "Certificate Fingerprint",
+      "cpuModel": "CPU Model",
+      "kernel": "Kernel",
+      "docker": "Docker Engine",
+      "securityFeatures": "Security Sandboxing",
+      "enrolledAt": "Enrolled On",
+      "close": "Close"
+    },
+    "revoke": {
+      "title": "Revoke Node Certificate",
+      "desc": "Are you sure you want to revoke this node? The agent will immediately lose access to the control plane and will be disconnected from the cluster.",
+      "confirmPrompt": "Type the node name to confirm revocation:",
+      "success": "Node revoked successfully",
+      "cancel": "Cancel",
+      "confirm": "Revoke Node"
+    },
+    "empty": "No cluster nodes enrolled yet.",
+    "enrollments": {
+      "title": "Enrollment Tokens",
+      "desc": "Single-use enrollment tokens created for server onboarding.",
+      "name": "Node Name",
+      "status": "Token Status",
+      "created": "Created",
+      "expires": "Expires",
+      "cancel": "Cancel",
+      "cancelSuccess": "Enrollment token cancelled successfully.",
+      "empty": "No active enrollment tokens.",
+      "statusPending": "Pending",
+      "statusExpired": "Expired",
+      "statusConsumed": "Consumed",
+      "statusRevoked": "Revoked"
+    }
   }
 }

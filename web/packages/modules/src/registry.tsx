@@ -1,5 +1,5 @@
 import React from "react";
-import { LayoutDashboard, ShieldCheck, Sparkles, Puzzle, Globe, Users, Settings, FileText, Boxes } from "lucide-react";
+import { LayoutDashboard, ShieldCheck, Sparkles, Puzzle, Globe, Users, Settings, FileText, Boxes, Server } from "lucide-react";
 
 export interface ModuleManifest {
   name: string;
@@ -80,6 +80,25 @@ export const registeredFrontendModules: FrontendModule[] = [
         icon: <ShieldCheck className="h-4 w-4" />,
         href: "/security",
         order: 20,
+      },
+    ],
+  },
+  {
+    manifest: {
+      name: "nodes",
+      title: { en: "Cluster Nodes", bn: "ক্লাস্টার নোডস" },
+      category: "core",
+      core: true,
+      permissions: ["admin.nodes.read"],
+    },
+    adminNav: [
+      {
+        id: "nodes",
+        labelKey: "nodes.nav",
+        icon: <Server className="h-4 w-4" />,
+        href: "/nodes",
+        order: 22,
+        permission: "admin.nodes.read",
       },
     ],
   },

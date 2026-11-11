@@ -15,6 +15,7 @@ import {
   AuditViewerPage,
   DummyModulePage,
   ModuleManagerPage,
+  NodesPage,
   filterNavItems,
   registeredFrontendModules,
 } from "@dhpanel/modules";
@@ -114,7 +115,14 @@ const modulesRoute = createRoute({
   component: ModuleManagerPage,
 });
 
-// 8. Login route
+// 8. Nodes route (Cluster Nodes T02.16)
+const nodesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/nodes",
+  component: NodesPage,
+});
+
+// 9. Login route
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/login",
@@ -129,7 +137,7 @@ const loginRoute = createRoute({
   },
 });
 
-// 9. Route Tree
+// 10. Route Tree
 const routeTree = rootRoute.addChildren([
   indexRoute,
   demoRoute,
@@ -137,6 +145,7 @@ const routeTree = rootRoute.addChildren([
   auditRoute,
   dummyRoute,
   modulesRoute,
+  nodesRoute,
   loginRoute,
 ]);
 

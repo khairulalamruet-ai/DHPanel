@@ -551,6 +551,163 @@ export const handlers = [
     ];
   })(),
 
+  // Node Management (GET /api/v1/admin/nodes) TODO(api:T02.08)
+  ...(() => {
+    const mockNodes = [
+      {
+        id: "00000000-0000-0000-0000-0000000000aa",
+        name: "node-master-01",
+        hostname: "cp1.dhpanel.net",
+        ip_address: "167.104.101.81",
+        status: "online",
+        version: "0.1.0",
+        fingerprint: "SHA256:7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b",
+        last_seen_at: new Date().toISOString(),
+        enrolled_at: new Date(Date.now() - 7 * 86400 * 1000).toISOString(),
+        capabilities: {
+          cpu_cores: 8,
+          cpu_model: "AMD EPYC 7763 64-Core Processor",
+          cpu_usage_pct: 18,
+          ram_total_bytes: 16 * 1024 * 1024 * 1024,
+          ram_used_bytes: 5.4 * 1024 * 1024 * 1024,
+          disk_total_bytes: 250 * 1024 * 1024 * 1024,
+          disk_used_bytes: 52 * 1024 * 1024 * 1024,
+          kernel: "Linux 6.8.0-45-generic",
+          docker_version: "27.3.1",
+          security_features: ["seccomp", "apparmor", "userns"],
+        },
+      },
+      {
+        id: "00000000-0000-0000-0000-0000000000bb",
+        name: "node-worker-02",
+        hostname: "worker2.dhpanel.net",
+        ip_address: "167.104.101.82",
+        status: "draining",
+        version: "0.1.0",
+        fingerprint: "SHA256:9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1f0e",
+        last_seen_at: new Date(Date.now() - 30 * 1000).toISOString(),
+        enrolled_at: new Date(Date.now() - 3 * 86400 * 1000).toISOString(),
+        capabilities: {
+          cpu_cores: 16,
+          cpu_model: "AMD EPYC 7763 64-Core Processor",
+          cpu_usage_pct: 42,
+          ram_total_bytes: 32 * 1024 * 1024 * 1024,
+          ram_used_bytes: 18.2 * 1024 * 1024 * 1024,
+          disk_total_bytes: 500 * 1024 * 1024 * 1024,
+          disk_used_bytes: 140 * 1024 * 1024 * 1024,
+          kernel: "Linux 6.8.0-45-generic",
+          docker_version: "27.3.1",
+          security_features: ["seccomp", "apparmor"],
+        },
+      },
+      {
+        id: "00000000-0000-0000-0000-0000000000cc",
+        name: "node-worker-03-backup",
+        hostname: "worker3.dhpanel.net",
+        ip_address: "167.104.101.83",
+        status: "offline",
+        version: "0.1.0",
+        fingerprint: "SHA256:1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
+        last_seen_at: new Date(Date.now() - 3600 * 1000 * 5).toISOString(),
+        enrolled_at: new Date(Date.now() - 14 * 86400 * 1000).toISOString(),
+        capabilities: {
+          cpu_cores: 4,
+          cpu_model: "Intel Xeon E-2288G CPU @ 3.70GHz",
+          cpu_usage_pct: 0,
+          ram_total_bytes: 8 * 1024 * 1024 * 1024,
+          ram_used_bytes: 1.1 * 1024 * 1024 * 1024,
+          disk_total_bytes: 120 * 1024 * 1024 * 1024,
+          disk_used_bytes: 22 * 1024 * 1024 * 1024,
+          kernel: "Linux 6.5.0-28-generic",
+          docker_version: "26.1.4",
+          security_features: ["seccomp"],
+        },
+      },
+    ];
+
+    const mockEnrollments: any[] = [
+      {
+        id: "00000000-0000-0000-0000-000000000001",
+        name: "node-worker-pending",
+        created_at: new Date(Date.now() - 300 * 1000).toISOString(),
+        created_by: "00000000-0000-0000-0000-000000000001",
+        expires_at: new Date(Date.now() + 600 * 1000).toISOString(),
+        status: "pending",
+      },
+    ];
+
+    return [
+      // List Nodes (GET /api/v1/admin/nodes) TODO(api:T02.08)
+      http.get(/\/api\/v1\/admin\/nodes$/, () => {
+        return HttpResponse.json({
+          items: mockNodes,
+          total: mockNodes.length,
+        });
+      }),
+
+      // Create Enrollment Token (POST /api/v1/admin/nodes)
+      http.post(/\/api\/v1\/admin\/nodes$/, async ({ request }) => {
+        const body = (await request.json().catch(() => ({}))) as any;
+        const name = body?.name || "node-worker-" + Math.floor(Math.random() * 100);
+        const id = "00000000-0000-0000-0000-" + Math.random().toString(16).substring(2, 14).padEnd(12, "0");
+        const token = "dhn_" + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+        const expiresIn = 900;
+        const expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
+        const enrollCommand = `curl -sSL https://get.dhpanel.com/agent.sh | sudo bash -s -- --token ${token}`;
+
+        const newEnrollment = {
+          id,
+          name,
+          token,
+          expires_at: expiresAt,
+          expires_in: expiresIn,
+          enroll_command: enrollCommand,
+        };
+
+        mockEnrollments.unshift({
+          id,
+          name,
+          created_at: new Date().toISOString(),
+          created_by: "00000000-0000-0000-0000-000000000001",
+          expires_at: expiresAt,
+          status: "pending",
+        });
+
+        return HttpResponse.json(newEnrollment, { status: 201 });
+      }),
+
+      // List Node Enrollments (GET /api/v1/admin/nodes/enrollments)
+      http.get(/\/api\/v1\/admin\/nodes\/enrollments$/, () => {
+        return HttpResponse.json({
+          items: mockEnrollments,
+        });
+      }),
+
+      // Cancel/Revoke Node Enrollment (DELETE /api/v1/admin/nodes/enrollments/:id)
+      http.delete(/\/api\/v1\/admin\/nodes\/enrollments\/([^/]+)$/, ({ params }) => {
+        const { 0: id } = params as any;
+        const idx = mockEnrollments.findIndex((e) => e.id === id);
+        if (idx !== -1) {
+          mockEnrollments[idx].status = "revoked";
+        }
+        return new HttpResponse(null, { status: 204 });
+      }),
+
+      // Revoke Node (POST /api/v1/admin/nodes/:id/revoke)
+      http.post(/\/api\/v1\/admin\/nodes\/([^/]+)\/revoke$/, ({ params }) => {
+        const { 0: nodeId } = params as any;
+        const target = mockNodes.find((n) => n.id === nodeId || n.name === nodeId);
+        if (target) {
+          target.status = "revoked";
+        }
+        return HttpResponse.json({
+          success: true,
+          message: "Node revoked successfully",
+        });
+      }),
+    ];
+  })(),
+
   // Modules: List all modules (GET /api/v1/admin/modules)
   // TODO(api:T03.03): Replace with real backend endpoint
   http.get(/\/api\/v1\/admin\/modules$/, () => {
