@@ -6,15 +6,15 @@ import {
   Outlet,
 } from "@tanstack/react-router";
 import { ThemeProvider, ToastProvider } from "@dhpanel/ui";
-import { SessionProvider } from "@dhpanel/auth";
+import { SessionProvider, useSession, LoginPage, AccountSecurityPage } from "@dhpanel/auth";
 import { queryClient, QueryClientProvider } from "@dhpanel/api";
 import { AppShell, NotFoundPage, RouteErrorFallback } from "@dhpanel/shell";
 import { DashboardPage, UiDemoPage } from "@dhpanel/modules";
 import { useTranslation } from "@dhpanel/i18n";
-import { LayoutDashboard, Sparkles } from "lucide-react";
+import { LayoutDashboard, Sparkles, ShieldCheck } from "lucide-react";
 
-// Root Component
-function RootLayout() {
+function AuthenticatedContent() {
+  const { data: session, isLoading } = useSession();
   const { t } = useTranslation();
 
   const navItems = [
@@ -25,6 +25,12 @@ function RootLayout() {
       href: "/",
     },
     {
+      id: "security",
+      labelKey: "security.nav",
+      icon: <ShieldCheck className="h-4 w-4" />,
+      href: "/security",
+    },
+    {
       id: "demo",
       labelKey: "UI Foundation (T00.12)",
       icon: <Sparkles className="h-4 w-4 text-primary" />,
@@ -32,14 +38,38 @@ function RootLayout() {
     },
   ];
 
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <p className="text-sm text-muted-foreground">{t("common.loading")}</p>
+      </div>
+    );
+  }
+
+  if (!session?.user) {
+    return (
+      <LoginPage
+        title={t("common.adminTitle")}
+        onSuccess={() => router.navigate({ to: "/" })}
+      />
+    );
+  }
+
+  return (
+    <AppShell title={t("common.adminTitle")} navItems={navItems}>
+      <Outlet />
+    </AppShell>
+  );
+}
+
+// Root Component
+function RootLayout() {
   return (
     <ThemeProvider defaultTheme="system" storageKey="dhpanel-admin-theme">
       <QueryClientProvider client={queryClient}>
         <ToastProvider>
-          <SessionProvider bootstrapPath="/api/v1/admin/bootstrap">
-            <AppShell title={t("common.adminTitle")} navItems={navItems}>
-              <Outlet />
-            </AppShell>
+          <SessionProvider bootstrapPath="/api/v1/auth/me">
+            <AuthenticatedContent />
           </SessionProvider>
         </ToastProvider>
       </QueryClientProvider>
@@ -68,10 +98,32 @@ const demoRoute = createRoute({
   component: UiDemoPage,
 });
 
-// 4. Route Tree
-const routeTree = rootRoute.addChildren([indexRoute, demoRoute]);
+// 4. Security route
+const securityRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/security",
+  component: AccountSecurityPage,
+});
 
-// 5. Create Router
+// 5. Login route
+const loginRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/login",
+  component: () => {
+    const { t } = useTranslation();
+    return (
+      <LoginPage
+        title={t("common.adminTitle")}
+        onSuccess={() => router.navigate({ to: "/" })}
+      />
+    );
+  },
+});
+
+// 6. Route Tree
+const routeTree = rootRoute.addChildren([indexRoute, demoRoute, securityRoute, loginRoute]);
+
+// 6. Create Router
 export const router = createRouter({
   routeTree,
   defaultPreload: "intent",

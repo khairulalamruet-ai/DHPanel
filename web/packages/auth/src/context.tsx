@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
-import { setCsrfToken, apiFetch } from "@dhpanel/api";
+import { setCsrfToken, getCsrfToken, apiFetch, api } from "@dhpanel/api";
 import { BootstrapData } from "./types";
 
 interface SessionContextType {
@@ -10,16 +10,18 @@ interface SessionContextType {
   hasFeature: (feature: string) => boolean;
   hasRole: (role: string) => boolean;
   refetch: () => Promise<void>;
+  logout: () => Promise<void>;
+  setSessionData: (data: BootstrapData | null) => void;
 }
 
 const SessionContext = createContext<SessionContextType | undefined>(undefined);
 
 export interface SessionProviderProps {
   children: React.ReactNode;
-  bootstrapPath: "/api/v1/admin/bootstrap" | "/api/v1/client/bootstrap";
+  bootstrapPath?: string;
 }
 
-export function SessionProvider({ children, bootstrapPath }: SessionProviderProps) {
+export function SessionProvider({ children, bootstrapPath = "/api/v1/auth/me" }: SessionProviderProps) {
   const [data, setData] = useState<BootstrapData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
@@ -28,10 +30,30 @@ export function SessionProvider({ children, bootstrapPath }: SessionProviderProp
     try {
       setIsLoading(true);
       setError(null);
-      const res = await apiFetch<BootstrapData>(bootstrapPath);
-      setData(res);
-      if (res.csrfToken) {
-        setCsrfToken(res.csrfToken);
+      const res = await apiFetch<any>(bootstrapPath);
+      const normalized: BootstrapData = res.user
+        ? res
+        : {
+            user: {
+              id: res.id,
+              username: res.username,
+              email: res.email,
+              name: res.username,
+              kind: res.kind,
+            },
+            roles: res.roles || [],
+            permissions: res.permissions || [],
+            modules: ["dashboard", "domains", "security"],
+            features: ["all"],
+            limits: {},
+            branding: { companyName: "DHPanel" },
+            locale: res.locale || "bn",
+            csrfToken: res.csrf_token,
+            mfa_enabled: res.mfa_enabled,
+          };
+      setData(normalized);
+      if (normalized.csrfToken || res.csrf_token) {
+        setCsrfToken(normalized.csrfToken || res.csrf_token);
       }
     } catch (err: any) {
       setError(err instanceof Error ? err : new Error(String(err)));
@@ -46,19 +68,32 @@ export function SessionProvider({ children, bootstrapPath }: SessionProviderProp
 
   const hasPermission = (perm: string): boolean => {
     if (!data) return false;
-    if (data.roles.includes("super_admin")) return true;
+    if (data.roles.includes("super_admin") || data.permissions.includes("*")) return true;
     return data.permissions.includes(perm);
   };
 
   const hasFeature = (feature: string): boolean => {
     if (!data) return false;
-    if (data.features.includes("all")) return true;
-    return data.features.includes(feature);
+    if (data.features?.includes("all")) return true;
+    return data.features?.includes(feature) ?? false;
   };
 
   const hasRole = (role: string): boolean => {
     if (!data) return false;
     return data.roles.includes(role);
+  };
+
+  const logout = async () => {
+    try {
+      await api.POST("/api/v1/auth/logout", {
+        params: { header: { "X-CSRF-Token": getCsrfToken() || "" } },
+      });
+    } catch {
+      // Ignore network errors on logout
+    } finally {
+      setData(null);
+      setCsrfToken(null);
+    }
   };
 
   return (
@@ -71,6 +106,8 @@ export function SessionProvider({ children, bootstrapPath }: SessionProviderProp
         hasFeature,
         hasRole,
         refetch: fetchSession,
+        logout,
+        setSessionData: setData,
       }}
     >
       {children}

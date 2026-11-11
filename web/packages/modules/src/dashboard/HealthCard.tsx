@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from "react";
-import { apiFetch } from "@dhpanel/api";
+import { api } from "@dhpanel/api";
 import { Card, CardHeader, CardTitle, CardContent, Badge } from "@dhpanel/ui";
 import { useTranslation } from "@dhpanel/i18n";
 import { Activity, CheckCircle2, AlertCircle } from "lucide-react";
 
-interface HealthResponse {
+interface HealthState {
   status: string;
   version: string;
   timestamp?: string;
@@ -12,15 +12,19 @@ interface HealthResponse {
 
 export function HealthCard() {
   const { t } = useTranslation();
-  const [health, setHealth] = useState<HealthResponse | null>(null);
+  const [health, setHealth] = useState<HealthState | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Calls GET /api/v1/public/health (MSW mock tagged TODO(api:T00.06) until backend is merged)
-    apiFetch<HealthResponse>("/api/v1/public/health")
-      .then((res) => {
-        setHealth(res);
+    // Typed API call via openapi-fetch
+    api.GET("/api/v1/public/health")
+      .then(({ data, error: apiErr }) => {
+        if (data) {
+          setHealth(data);
+        } else if (apiErr) {
+          setError((apiErr as any).message || "Degraded service");
+        }
         setLoading(false);
       })
       .catch((err) => {

@@ -23,10 +23,14 @@ import {
   TableCell,
   useToast,
 } from "@dhpanel/ui";
-import { ShieldAlert, Trash2, PlusCircle, CheckCircle2, Globe } from "lucide-react";
+import { ShieldAlert, Trash2, PlusCircle, CheckCircle2, Globe, Calendar, HardDrive, DollarSign, Hash } from "lucide-react";
+import { useFormatters } from "@dhpanel/i18n";
 
 export function UiDemoPage() {
   const { toast } = useToast();
+  const formatters = useFormatters();
+  const sampleDate = new Date("2026-05-15T10:30:00Z");
+  const samplePastDate = new Date(Date.now() - 1000 * 60 * 45); // 45 mins ago
 
   const [standardDialogOpen, setStandardDialogOpen] = useState(false);
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
@@ -264,6 +268,62 @@ export function UiDemoPage() {
               ))}
             </TableBody>
           </Table>
+        </CardContent>
+      </Card>
+
+      {/* 7. Localized Formats (i18n - T00.15) */}
+      <Card>
+        <CardHeader>
+          <CardTitle>7. Localized Formats (i18n - T00.15)</CardTitle>
+          <CardDescription>
+            Bilingual number formatting, currency, storage bytes, dates, and relative time ({formatters.locale}).
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="p-4 rounded-lg border bg-muted/20 space-y-1">
+              <span className="text-xs text-muted-foreground flex items-center gap-1.5 font-medium">
+                <Hash className="h-3.5 w-3.5 text-primary" />
+                Number (সংখ্যা)
+              </span>
+              <p className="text-xl font-bold font-mono">
+                {formatters.formatNumber(1250450.75)}
+              </p>
+            </div>
+
+            <div className="p-4 rounded-lg border bg-muted/20 space-y-1">
+              <span className="text-xs text-muted-foreground flex items-center gap-1.5 font-medium">
+                <DollarSign className="h-3.5 w-3.5 text-emerald-600" />
+                Currency (মুদ্রা)
+              </span>
+              <p className="text-xl font-bold font-mono">
+                {formatters.formatCurrency(2500, "BDT")}
+              </p>
+            </div>
+
+            <div className="p-4 rounded-lg border bg-muted/20 space-y-1">
+              <span className="text-xs text-muted-foreground flex items-center gap-1.5 font-medium">
+                <HardDrive className="h-3.5 w-3.5 text-blue-600" />
+                Disk / Bandwidth (তথ্য ধারণক্ষমতা)
+              </span>
+              <p className="text-xl font-bold font-mono">
+                {formatters.formatBytes(1024 * 1024 * 1024 * 42.5)}
+              </p>
+            </div>
+
+            <div className="p-4 rounded-lg border bg-muted/20 space-y-1">
+              <span className="text-xs text-muted-foreground flex items-center gap-1.5 font-medium">
+                <Calendar className="h-3.5 w-3.5 text-purple-600" />
+                Date & Time (তারিখ ও সময়)
+              </span>
+              <p className="text-sm font-semibold">
+                {formatters.formatDate(sampleDate)}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {formatters.formatRelativeTime(samplePastDate)}
+              </p>
+            </div>
+          </div>
         </CardContent>
       </Card>
     </div>

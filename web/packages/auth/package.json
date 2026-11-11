@@ -11,6 +11,9 @@
   },
   "dependencies": {
     "@dhpanel/api": "workspace:*",
+    "@dhpanel/ui": "workspace:*",
+    "@dhpanel/i18n": "workspace:*",
+    "lucide-react": "^0.475.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },

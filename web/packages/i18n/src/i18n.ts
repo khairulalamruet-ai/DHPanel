@@ -3,7 +3,10 @@ import { initReactI18next } from "react-i18next";
 import en from "./locales/en.json";
 import bn from "./locales/bn.json";
 
-const savedLng = typeof window !== "undefined" ? localStorage.getItem("dhpanel-locale") || "bn" : "bn";
+const savedLng =
+  typeof window !== "undefined" && typeof window.localStorage !== "undefined"
+    ? window.localStorage?.getItem?.("dhpanel-locale") || "bn"
+    : "bn";
 
 i18n.use(initReactI18next).init({
   resources: {
