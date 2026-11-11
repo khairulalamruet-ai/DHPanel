@@ -17,12 +17,15 @@ dhpanel-common.workspace = true
 dhpanel-config.workspace = true
 dhpanel-database.workspace = true
 dhpanel-domain.workspace = true
+dhpanel-pki.workspace = true
 # Subcommand parsing; dhctl grows many commands (migrate, admin, ca, ...).
 clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 # Reads passwords from the terminal without echo.
 rpassword = "7.5.5"
 secrecy = "0.10"
+# Certificate validity periods.
+time = "0.3"
 
 [lints]
 workspace = true

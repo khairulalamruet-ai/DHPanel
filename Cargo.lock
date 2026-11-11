@@ -864,8 +864,10 @@ dependencies = [
  "dhpanel-config",
  "dhpanel-database",
  "dhpanel-domain",
+ "dhpanel-pki",
  "rpassword",
  "secrecy",
+ "time",
  "tokio",
 ]
 
@@ -984,7 +986,14 @@ dependencies = [
 name = "dhpanel-pki"
 version = "0.1.0"
 dependencies = [
+ "getrandom 0.4.3",
  "rcgen",
+ "secrecy",
+ "sha2 0.11.1",
+ "thiserror",
+ "time",
+ "uuid",
+ "x509-parser",
 ]
 
 [[package]]

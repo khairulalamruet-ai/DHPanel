@@ -3,7 +3,7 @@
 //! Reads the same configuration as the control plane (`DHPANEL_CONFIG`,
 //! `DHPANEL_*` env, secret files).
 
-use std::{io::BufRead as _, process::ExitCode};
+use std::{io::BufRead as _, path::PathBuf, process::ExitCode};
 
 use clap::{Parser, Subcommand};
 use dhpanel_auth_core::{
@@ -27,8 +27,12 @@ const EXIT_DATAERR: u8 = 65;
 const EXIT_UNAVAILABLE: u8 = 69;
 /// `EX_SOFTWARE` from sysexits.h (internal error).
 const EXIT_SOFTWARE: u8 = 70;
+/// `EX_IOERR` from sysexits.h (files could not be read or written).
+const EXIT_IOERR: u8 = 74;
 /// `EX_CONFIG` from sysexits.h.
 const EXIT_CONFIG: u8 = 78;
+/// Where the control plane keeps its secrets, including the node CA.
+const DEFAULT_CA_DIR: &str = "/etc/dhpanel/secrets";
 
 #[derive(Debug, Parser)]
 #[command(name = "dhctl", version, about = "DHPanel admin CLI")]
@@ -48,6 +52,51 @@ enum Command {
     Admin {
         #[command(subcommand)]
         action: AdminAction,
+    },
+    /// Manage the internal certificate authority for node mTLS.
+    Ca {
+        #[command(subcommand)]
+        action: CaAction,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum CaAction {
+    /// Create the CA (key `node_ca.key` mode 0600, certificate `node_ca.crt`).
+    /// Refuses to overwrite an existing CA: replacing it would orphan every
+    /// enrolled node.
+    Init {
+        /// Directory for the CA files (created with mode 0700 if missing).
+        #[arg(long, default_value = DEFAULT_CA_DIR)]
+        dir: PathBuf,
+        /// Common name of the CA certificate.
+        #[arg(long, default_value = "DHPanel Node CA")]
+        name: String,
+        /// Validity of the CA certificate in years (1..=20).
+        #[arg(long, default_value_t = 10)]
+        years: u32,
+    },
+    /// Show the CA's name, fingerprint and expiry.
+    Show {
+        /// Directory holding the CA files.
+        #[arg(long, default_value = DEFAULT_CA_DIR)]
+        dir: PathBuf,
+    },
+    /// Issue a server certificate for the control plane's agent port.
+    IssueServer {
+        /// Directory holding the CA files.
+        #[arg(long, default_value = DEFAULT_CA_DIR)]
+        dir: PathBuf,
+        /// DNS name or IP address of the server; repeat for several. The
+        /// first becomes the common name.
+        #[arg(long = "dns", required = true)]
+        names: Vec<String>,
+        /// Directory to write `server.crt` and `server.key` to.
+        #[arg(long)]
+        out_dir: PathBuf,
+        /// Validity in days (1..=400).
+        #[arg(long, default_value_t = 365)]
+        days: u32,
     },
 }
 
@@ -83,6 +132,7 @@ enum AdminAction {
 }
 
 /// A failure with its exit code. Messages never contain secrets.
+#[derive(Debug)]
 struct Failure(u8, String);
 
 impl Failure {
@@ -107,10 +157,101 @@ async fn main() -> ExitCode {
                     require_mfa,
                 },
         } => admin_create(&username, &email, password_stdin, &role, require_mfa).await,
+        Command::Ca { action } => ca(action),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(f) => f.exit(),
+    }
+}
+
+fn pki_failure(err: dhpanel_pki::PkiError) -> Failure {
+    use dhpanel_pki::PkiError as E;
+    let code = match &err {
+        E::AlreadyInitialised(_) => EXIT_DATAERR,
+        E::InvalidInput(_) => EXIT_USAGE,
+        E::InvalidCa(_) | E::InsecureKeyPermissions { .. } => EXIT_CONFIG,
+        E::Io { .. } => EXIT_IOERR,
+        _ => EXIT_SOFTWARE,
+    };
+    Failure(code, err.to_string())
+}
+
+fn print_ca(ca: &dhpanel_pki::CertificateAuthority) {
+    println!("name:        {}", ca.common_name());
+    println!("fingerprint: sha256:{}", ca.fingerprint_sha256());
+    println!(
+        "valid:       {} to {}",
+        dhpanel_pki::format_rfc3339(ca.not_before()),
+        dhpanel_pki::format_rfc3339(ca.not_after())
+    );
+}
+
+/// `dhctl ca ...`: no database needed, only the CA files.
+fn ca(action: CaAction) -> Result<(), Failure> {
+    let now = time::OffsetDateTime::now_utc();
+    match action {
+        CaAction::Init { dir, name, years } => {
+            if !(1..=20).contains(&years) {
+                return Err(Failure(EXIT_USAGE, "--years must be 1..=20".to_owned()));
+            }
+            let ca = dhpanel_pki::init_ca_dir(
+                &dir,
+                &name,
+                now,
+                time::Duration::days(i64::from(years) * 365),
+            )
+            .map_err(pki_failure)?;
+            println!("created the node CA in {}", dir.display());
+            println!(
+                "certificate: {}",
+                dir.join(dhpanel_pki::CA_CERT_FILE).display()
+            );
+            println!(
+                "private key: {} (mode 0600)",
+                dir.join(dhpanel_pki::CA_KEY_FILE).display()
+            );
+            print_ca(&ca);
+            println!(
+                "Back the private key up somewhere safe and separate: it cannot be recovered, and losing it means re-enrolling every node."
+            );
+            Ok(())
+        }
+        CaAction::Show { dir } => {
+            print_ca(&dhpanel_pki::load_ca_dir(&dir, now).map_err(pki_failure)?);
+            Ok(())
+        }
+        CaAction::IssueServer {
+            dir,
+            names,
+            out_dir,
+            days,
+        } => {
+            if !(1..=400).contains(&days) {
+                return Err(Failure(EXIT_USAGE, "--days must be 1..=400".to_owned()));
+            }
+            let ca = dhpanel_pki::load_ca_dir(&dir, now).map_err(pki_failure)?;
+            let (issued, key) = ca
+                .issue_server_certificate(&names, now, time::Duration::days(i64::from(days)))
+                .map_err(pki_failure)?;
+            if !out_dir.exists() {
+                std::fs::create_dir_all(&out_dir)
+                    .map_err(|e| Failure(EXIT_IOERR, format!("{}: {e}", out_dir.display())))?;
+            }
+            let (cert_path, key_path) = (out_dir.join("server.crt"), out_dir.join("server.key"));
+            dhpanel_pki::write_private_file(&key_path, secrecy::ExposeSecret::expose_secret(&key))
+                .map_err(pki_failure)?;
+            dhpanel_pki::write_public_file(&cert_path, &issued.cert_pem).map_err(pki_failure)?;
+            println!("certificate: {}", cert_path.display());
+            println!("private key: {} (mode 0600)", key_path.display());
+            println!("subject:     {}", issued.subject_cn);
+            println!("fingerprint: sha256:{}", issued.fingerprint_sha256);
+            println!(
+                "expires:     {}",
+                dhpanel_pki::format_rfc3339(issued.not_after)
+            );
+            Ok(())
+        }
     }
 }
 
@@ -292,6 +433,77 @@ mod tests {
     #[test]
     fn cli_definition_is_valid() {
         Cli::command().debug_assert();
+    }
+
+    fn temp_dir(tag: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("dhctl-{tag}-{}-{nanos}", std::process::id()))
+    }
+
+    #[test]
+    fn ca_init_issue_and_show_work_end_to_end_and_never_overwrite() {
+        let base = temp_dir("ca");
+        let (dir, out) = (base.join("secrets"), base.join("tls"));
+        let init = |years| {
+            ca(CaAction::Init {
+                dir: dir.clone(),
+                name: "Test CA".into(),
+                years,
+            })
+        };
+        // Bad input is a usage error and creates nothing.
+        for years in [0, 21] {
+            assert_eq!(init(years).unwrap_err().0, EXIT_USAGE, "{years}");
+        }
+        assert!(!dir.exists());
+        init(10).unwrap();
+        assert!(dir.join(dhpanel_pki::CA_KEY_FILE).exists());
+        // A second init is a data conflict and leaves the key alone.
+        let key_before = std::fs::read(dir.join(dhpanel_pki::CA_KEY_FILE)).unwrap();
+        assert_eq!(init(10).unwrap_err().0, EXIT_DATAERR);
+        assert_eq!(
+            std::fs::read(dir.join(dhpanel_pki::CA_KEY_FILE)).unwrap(),
+            key_before
+        );
+
+        ca(CaAction::Show { dir: dir.clone() }).unwrap();
+        let issue = |days, names: Vec<String>| {
+            ca(CaAction::IssueServer {
+                dir: dir.clone(),
+                names,
+                out_dir: out.clone(),
+                days,
+            })
+        };
+        assert_eq!(
+            issue(0, vec!["a.example.com".into()]).unwrap_err().0,
+            EXIT_USAGE
+        );
+        assert_eq!(
+            issue(30, vec!["*.example.com".into()]).unwrap_err().0,
+            EXIT_USAGE
+        );
+        assert!(
+            !out.join("server.key").exists(),
+            "nothing written on bad input"
+        );
+        issue(30, vec!["control.example.com".into(), "10.0.0.5".into()]).unwrap();
+        assert!(out.join("server.crt").exists() && out.join("server.key").exists());
+        // Never replaces existing server files either.
+        assert_eq!(
+            issue(30, vec!["control.example.com".into()]).unwrap_err().0,
+            EXIT_IOERR
+        );
+        // No CA, no certificates.
+        let missing = ca(CaAction::Show {
+            dir: base.join("nowhere"),
+        })
+        .unwrap_err();
+        assert_eq!(missing.0, EXIT_IOERR);
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
