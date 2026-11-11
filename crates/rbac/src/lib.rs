@@ -68,6 +68,14 @@ pub mod permissions {
         /// Read the audit log.
         pub AuditRead = "admin.audit.read"
     );
+    crate::permission!(
+        /// See nodes and their enrollment tokens.
+        pub NodesRead = "admin.nodes.read"
+    );
+    crate::permission!(
+        /// Add, change and remove nodes (create and revoke enrollment tokens).
+        pub NodesManage = "admin.nodes.manage"
+    );
 }
 
 /// Name of the built-in role that grants everything.
@@ -467,5 +475,7 @@ mod tests {
         assert!(is_valid_key(permissions::AdministratorsManage::KEY));
         assert!(is_valid_key(permissions::AdministratorsRead::KEY));
         assert!(is_valid_key(permissions::RolesRead::KEY));
+        assert_eq!(permissions::NodesRead::KEY, "admin.nodes.read");
+        assert_eq!(permissions::NodesManage::KEY, "admin.nodes.manage");
     }
 }

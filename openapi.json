@@ -813,6 +813,189 @@
         ]
       }
     },
+    "/api/v1/admin/nodes": {
+      "post": {
+        "tags": [
+          "nodes"
+        ],
+        "summary": "Add a node: creates a one-time enrollment token.",
+        "operationId": "createNodeEnrollment",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateEnrollment"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Token created; shown only now",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedEnrollment"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied` (needs admin.nodes.manage), `reauth_required`, `mfa_setup_required` or `csrf_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`node_name_taken`: a node or a valid token already uses the name",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid name",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/nodes/enrollments": {
+      "get": {
+        "tags": [
+          "nodes"
+        ],
+        "summary": "List recent enrollment tokens (never the tokens themselves).",
+        "operationId": "listNodeEnrollments",
+        "responses": {
+          "200": {
+            "description": "Recent tokens, newest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnrollmentList"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied` (needs admin.nodes.read) or `mfa_setup_required`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/nodes/enrollments/{id}": {
+      "delete": {
+        "tags": [
+          "nodes"
+        ],
+        "summary": "Cancel a token that has not been used yet.",
+        "operationId": "revokeNodeEnrollment",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Token id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Cancelled"
+          },
+          "403": {
+            "description": "`permission_denied`, `reauth_required` or `csrf_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`enrollment_not_pending`: already used, cancelled or expired",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/auth/logout": {
       "post": {
         "tags": [
@@ -1870,6 +2053,66 @@
         },
         "additionalProperties": false
       },
+      "CreateEnrollment": {
+        "type": "object",
+        "description": "Request to add a node.",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Name for the new node: 2-63 characters, a-z, 0-9 and `-`, starting with a letter.",
+            "example": "eu-west-1"
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreatedEnrollment": {
+        "type": "object",
+        "description": "A newly created enrollment token. **The token is shown only in this response.**",
+        "required": [
+          "id",
+          "name",
+          "token",
+          "expires_at",
+          "expires_in"
+        ],
+        "properties": {
+          "enroll_command": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Command to run on the new server. Absent when `agent.public_url` is not configured."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the token stops working (RFC 3339, UTC)."
+          },
+          "expires_in": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds until then.",
+            "minimum": 0
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Token id (use it to cancel the token)."
+          },
+          "name": {
+            "type": "string",
+            "description": "The node name this token is for."
+          },
+          "token": {
+            "type": "string",
+            "description": "The one-time token. It cannot be shown again.",
+            "example": "dhn_…"
+          }
+        }
+      },
       "EndedSessions": {
         "type": "object",
         "description": "Result of ending sessions.",
@@ -1882,6 +2125,67 @@
             "format": "int64",
             "description": "Number of sessions ended.",
             "minimum": 0
+          }
+        }
+      },
+      "EnrollmentList": {
+        "type": "object",
+        "description": "The most recent enrollment tokens.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EnrollmentView"
+            },
+            "description": "Newest first (at most 100)."
+          }
+        }
+      },
+      "EnrollmentView": {
+        "type": "object",
+        "description": "An enrollment token as listed (without the token itself).",
+        "required": [
+          "id",
+          "name",
+          "status",
+          "created_at",
+          "expires_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Creation time (RFC 3339, UTC)."
+          },
+          "created_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Account that created it, if it still exists."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Expiry (RFC 3339, UTC)."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Token id."
+          },
+          "name": {
+            "type": "string",
+            "description": "The node name it is for."
+          },
+          "status": {
+            "type": "string",
+            "description": "`pending`, `expired`, `consumed` or `revoked`.",
+            "example": "pending"
           }
         }
       },
@@ -2358,6 +2662,10 @@
     {
       "name": "administrators",
       "description": "Manage administrator accounts (super administrators)"
+    },
+    {
+      "name": "nodes",
+      "description": "Add and manage servers (nodes)"
     }
   ]
 }

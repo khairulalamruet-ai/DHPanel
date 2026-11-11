@@ -65,3 +65,11 @@ totp_issuer = "DHPanel"
 # If it is lost, users must re-enrol 2FA; if it leaks together with a database
 # dump, stored TOTP secrets are exposed.
 master_key_file = "/etc/dhpanel/secrets/master_key"
+
+[agent]
+# Where node agents reach this control plane (its agent port). Shown to
+# administrators in the command that enrols a new node. https is required;
+# http only for localhost.
+# public_url = "https://panel.example.com:8443"
+# How long a new node's enrollment token stays valid, in minutes (1..=60).
+enrollment_token_minutes = 15

@@ -62,6 +62,7 @@ pub fn router(
     state: AppState,
     auth: Option<dhpanel_mod_auth::AuthState>,
     admin: Option<dhpanel_mod_admin::AdminState>,
+    nodes: Option<dhpanel_mod_nodes::NodesState>,
 ) -> Router {
     let public = Router::new()
         .route("/health", get(health::liveness))
@@ -77,6 +78,11 @@ pub fn router(
     let router = {
         use utoipa_scalar::{Scalar, Servable as _};
         router.merge(Scalar::with_url("/api/docs", crate::openapi::document()))
+    };
+
+    let router = match nodes {
+        Some(nodes) => router.merge(dhpanel_mod_nodes::router().with_state(nodes)),
+        None => router,
     };
 
     let router = match admin {
@@ -167,7 +173,8 @@ mod tests {
             .await
             .unwrap();
         let status = res.status();
-        let bytes = axum::body::to_bytes(res.into_body(), 64 * 1024)
+        // The OpenAPI document alone is well over 64 KiB.
+        let bytes = axum::body::to_bytes(res.into_body(), 4 * 1024 * 1024)
             .await
             .unwrap();
         (status, serde_json::from_slice(&bytes).unwrap())
@@ -176,7 +183,7 @@ mod tests {
     #[tokio::test]
     async fn health_is_ok_with_version() {
         let (status, body) = get_json(
-            router(state(Readiness::default()), None, None),
+            router(state(Readiness::default()), None, None, None),
             "/api/v1/public/health",
         )
         .await;
@@ -189,8 +196,11 @@ mod tests {
     async fn ready_is_200_when_all_probes_pass() {
         let readiness =
             Readiness::default().with_probe("database", Arc::new(|| Box::pin(async { Ok(()) })));
-        let (status, body) =
-            get_json(router(state(readiness), None, None), "/api/v1/public/ready").await;
+        let (status, body) = get_json(
+            router(state(readiness), None, None, None),
+            "/api/v1/public/ready",
+        )
+        .await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["status"], "ready");
         assert_eq!(body["checks"][0]["name"], "database");
@@ -203,8 +213,11 @@ mod tests {
             "database",
             Arc::new(|| Box::pin(async { Err("down".to_owned()) })),
         );
-        let (status, body) =
-            get_json(router(state(readiness), None, None), "/api/v1/public/ready").await;
+        let (status, body) = get_json(
+            router(state(readiness), None, None, None),
+            "/api/v1/public/ready",
+        )
+        .await;
         assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(body["status"], "not_ready");
         assert_eq!(body["checks"][0]["status"], "failed");
@@ -213,7 +226,7 @@ mod tests {
     #[tokio::test]
     async fn openapi_endpoint_serves_the_document() {
         let (status, body) = get_json(
-            router(state(Readiness::default()), None, None),
+            router(state(Readiness::default()), None, None, None),
             "/api/v1/openapi.json",
         )
         .await;
@@ -224,7 +237,7 @@ mod tests {
 
     #[tokio::test]
     async fn metrics_endpoint_returns_prometheus_text() {
-        let res = router(state(Readiness::default()), None, None)
+        let res = router(state(Readiness::default()), None, None, None)
             .oneshot(
                 Request::builder()
                     .uri("/metrics")
@@ -241,7 +254,7 @@ mod tests {
 
     #[tokio::test]
     async fn unknown_route_is_problem_json_with_correlation_id() {
-        let res = router(state(Readiness::default()), None, None)
+        let res = router(state(Readiness::default()), None, None, None)
             .oneshot(
                 Request::builder()
                     .uri("/no/such/route")

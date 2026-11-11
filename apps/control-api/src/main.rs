@@ -151,6 +151,14 @@ async fn main() -> ExitCode {
         window: minutes(config.auth.lockout_window_minutes),
         lockout: minutes(config.auth.lockout_minutes),
     };
+    let nodes = dhpanel_mod_nodes::NodesState {
+        db: db.clone(),
+        sessions: sessions.clone(),
+        public_url: config.agent.public_url.as_deref().map(Into::into),
+        token_ttl: std::time::Duration::from_secs(
+            u64::from(config.agent.enrollment_token_minutes) * 60,
+        ),
+    };
     let admin = dhpanel_mod_admin::AdminState {
         db: db.clone(),
         sessions: sessions.clone(),
@@ -181,6 +189,7 @@ async fn main() -> ExitCode {
         },
         Some(auth),
         Some(admin),
+        Some(nodes),
     );
 
     let addr = config.listen;

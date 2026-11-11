@@ -212,7 +212,7 @@ async fn built_in_roles_grant_what_they_should(pool: PgPool) {
     );
     assert_eq!(
         call(&app, "GET", "/who", Some(&h), false).await.1,
-        "admin.audit.read"
+        "admin.audit.read,admin.nodes.read"
     );
 }
 
@@ -265,7 +265,7 @@ async fn role_changes_apply_to_the_next_request(pool: PgPool) {
     );
     assert_eq!(
         call(&app, "GET", "/who", Some(&auth), false).await.1,
-        "admin.audit.read,dns.zones.*"
+        "admin.audit.read,admin.nodes.read,dns.zones.*"
     );
 }
 

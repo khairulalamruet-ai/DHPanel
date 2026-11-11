@@ -47,6 +47,43 @@ pub struct ControlConfig {
     pub auth: AuthConfig,
     /// Keys for secrets stored encrypted in the database.
     pub secrets: SecretsConfig,
+    /// Node agents: how they reach the control plane.
+    pub agent: AgentConfig,
+}
+
+/// Node agent settings.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AgentConfig {
+    /// Address agents use to reach the control plane's agent port, e.g.
+    /// `https://panel.example.com:8443`. Put into the enrol command shown when a
+    /// node is added; without it the command is left out and only the token is
+    /// shown. Plain `http` is accepted for localhost only.
+    pub public_url: Option<String>,
+    /// Minutes an enrollment token stays valid (1..=60).
+    pub enrollment_token_minutes: u32,
+}
+
+/// Whether `url` is safe to paste into a shell command and points where agents
+/// may be told to connect: `https://host[:port][/path]`, or `http://` for
+/// loopback only (so a token never crosses a network in the clear). Only
+/// letters, digits and `.-_~/:` are allowed, which rules out quotes, spaces,
+/// `$`, `;`, `?` and user-info.
+fn valid_agent_url(url: &str) -> bool {
+    let allowed =
+        |c: char| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '~' | '/' | ':');
+    if url.len() > 200 || url.ends_with('/') || !url.chars().all(allowed) {
+        return false;
+    }
+    if let Some(host) = url.strip_prefix("https://") {
+        return !host.is_empty() && !host.starts_with(['/', ':']);
+    }
+    ["http://localhost", "http://127.0.0.1"]
+        .iter()
+        .any(|prefix| {
+            url.strip_prefix(prefix)
+                .is_some_and(|rest| rest.is_empty() || rest.starts_with([':', '/']))
+        })
 }
 
 /// Keys for secrets at rest.
@@ -175,6 +212,10 @@ impl Default for ControlConfig {
             secrets: SecretsConfig {
                 master_key: None,
                 master_key_file: None,
+            },
+            agent: AgentConfig {
+                public_url: None,
+                enrollment_token_minutes: 15,
             },
         }
     }
@@ -315,8 +356,13 @@ impl ControlConfig {
                 reason: "must not exceed session_absolute_hours".to_owned(),
             });
         }
-        let range_checks: [(&'static str, u32, std::ops::RangeInclusive<u32>); 5] = [
+        let range_checks: [(&'static str, u32, std::ops::RangeInclusive<u32>); 6] = [
             ("auth.sudo_minutes", self.auth.sudo_minutes, 1..=60),
+            (
+                "agent.enrollment_token_minutes",
+                self.agent.enrollment_token_minutes,
+                1..=60,
+            ),
             (
                 "auth.lockout_threshold",
                 self.auth.lockout_threshold,
@@ -341,6 +387,14 @@ impl ControlConfig {
                     reason: format!("must be {}..={}, got {value}", range.start(), range.end()),
                 });
             }
+        }
+        if let Some(url) = &self.agent.public_url
+            && !valid_agent_url(url)
+        {
+            return Err(ConfigError::Invalid {
+                key: "agent.public_url",
+                reason: "must be https://host[:port] (http only for localhost) without a trailing slash, query or special characters".to_owned(),
+            });
         }
         let issuer = self.auth.totp_issuer.trim();
         if issuer.is_empty() || issuer.chars().count() > 64 || issuer.contains(':') {
@@ -661,6 +715,52 @@ mod tests {
             jail.set_env("DHPANEL_SECRETS__MASTER_KEY_FILE", "/nonexistent");
             let msg = load(jail).expect_err("both").to_string();
             assert!(msg.contains("secrets.master_key"), "{msg}");
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn agent_settings_default_and_are_validated() {
+        Jail::expect_with(|jail| {
+            jail.clear_env();
+            let cfg = load(jail).expect("defaults");
+            assert_eq!(cfg.agent.public_url, None);
+            assert_eq!(cfg.agent.enrollment_token_minutes, 15);
+            for ok in [
+                "https://panel.example.com",
+                "https://panel.example.com:8443",
+                "https://10.0.0.5:8443/agent",
+                "http://localhost:8443",
+                "http://127.0.0.1",
+            ] {
+                jail.set_env("DHPANEL_AGENT__PUBLIC_URL", ok);
+                assert!(load(jail).is_ok(), "{ok}");
+            }
+            for bad in [
+                "http://panel.example.com",
+                "http://localhost.evil.com",
+                "ftp://x.example.com",
+                "https://",
+                "https://:8443",
+                "https://a.example.com/",
+                "https://a.example.com/x y",
+                "https://a.example.com;reboot",
+                "https://a.example.com/$(id)",
+                "https://a.example.com?x=1",
+                "https://user@a.example.com",
+                "panel.example.com",
+                &format!("https://{}", "a".repeat(200)),
+            ] {
+                jail.set_env("DHPANEL_AGENT__PUBLIC_URL", bad);
+                let msg = load(jail).expect_err(bad).to_string();
+                assert!(msg.contains("agent.public_url"), "{bad}: {msg}");
+            }
+            jail.set_env("DHPANEL_AGENT__PUBLIC_URL", "https://panel.example.com");
+            for bad in ["0", "61"] {
+                jail.set_env("DHPANEL_AGENT__ENROLLMENT_TOKEN_MINUTES", bad);
+                let msg = load(jail).expect_err(bad).to_string();
+                assert!(msg.contains("agent.enrollment_token_minutes"), "{msg}");
+            }
             Ok(())
         });
     }

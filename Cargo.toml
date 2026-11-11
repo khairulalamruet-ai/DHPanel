@@ -22,6 +22,7 @@ members = [
     "crates/pki",
     "crates/modules/auth",
     "crates/modules/admin",
+    "crates/modules/nodes",
 ]
 
 [workspace.package]
@@ -50,6 +51,7 @@ dhpanel-node-protocol = { path = "crates/node-protocol" }
 dhpanel-pki = { path = "crates/pki" }
 dhpanel-mod-auth = { path = "crates/modules/auth" }
 dhpanel-mod-admin = { path = "crates/modules/admin" }
+dhpanel-mod-nodes = { path = "crates/modules/nodes" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

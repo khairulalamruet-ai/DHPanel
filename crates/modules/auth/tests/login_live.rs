@@ -1328,6 +1328,7 @@ async fn me_lists_roles_and_permissions(pool: PgPool) {
         json!([
             "admin.administrators.read",
             "admin.audit.read",
+            "admin.nodes.read",
             "admin.roles.read"
         ])
     );
