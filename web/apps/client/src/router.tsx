@@ -6,15 +6,31 @@ import {
   Outlet,
 } from "@tanstack/react-router";
 import { ThemeProvider, ToastProvider } from "@dhpanel/ui";
-import { SessionProvider, useSession, LoginPage } from "@dhpanel/auth";
+import { SessionProvider, useSession, LoginPage, AccountSecurityPage } from "@dhpanel/auth";
 import { queryClient, QueryClientProvider } from "@dhpanel/api";
 import { AppShell, NotFoundPage, RouteErrorFallback } from "@dhpanel/shell";
 import { DashboardPage } from "@dhpanel/modules";
 import { useTranslation } from "@dhpanel/i18n";
+import { LayoutDashboard, ShieldCheck } from "lucide-react";
 
 function AuthenticatedContent() {
   const { data: session, isLoading } = useSession();
   const { t } = useTranslation();
+
+  const navItems = [
+    {
+      id: "dashboard",
+      labelKey: "common.dashboard",
+      icon: <LayoutDashboard className="h-4 w-4" />,
+      href: "/",
+    },
+    {
+      id: "security",
+      labelKey: "security.nav",
+      icon: <ShieldCheck className="h-4 w-4" />,
+      href: "/security",
+    },
+  ];
 
   if (isLoading) {
     return (
@@ -34,7 +50,7 @@ function AuthenticatedContent() {
   }
 
   return (
-    <AppShell title={t("common.clientTitle")}>
+    <AppShell title={t("common.clientTitle")} navItems={navItems}>
       <Outlet />
     </AppShell>
   );
@@ -66,6 +82,12 @@ const indexRoute = createRoute({
   component: DashboardPage,
 });
 
+const securityRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/security",
+  component: AccountSecurityPage,
+});
+
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/login",
@@ -80,7 +102,7 @@ const loginRoute = createRoute({
   },
 });
 
-const routeTree = rootRoute.addChildren([indexRoute, loginRoute]);
+const routeTree = rootRoute.addChildren([indexRoute, securityRoute, loginRoute]);
 
 export const router = createRouter({
   routeTree,

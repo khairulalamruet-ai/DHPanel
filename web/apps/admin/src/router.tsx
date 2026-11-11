@@ -6,12 +6,12 @@ import {
   Outlet,
 } from "@tanstack/react-router";
 import { ThemeProvider, ToastProvider } from "@dhpanel/ui";
-import { SessionProvider, useSession, LoginPage } from "@dhpanel/auth";
+import { SessionProvider, useSession, LoginPage, AccountSecurityPage } from "@dhpanel/auth";
 import { queryClient, QueryClientProvider } from "@dhpanel/api";
 import { AppShell, NotFoundPage, RouteErrorFallback } from "@dhpanel/shell";
 import { DashboardPage, UiDemoPage } from "@dhpanel/modules";
 import { useTranslation } from "@dhpanel/i18n";
-import { LayoutDashboard, Sparkles } from "lucide-react";
+import { LayoutDashboard, Sparkles, ShieldCheck } from "lucide-react";
 
 function AuthenticatedContent() {
   const { data: session, isLoading } = useSession();
@@ -23,6 +23,12 @@ function AuthenticatedContent() {
       labelKey: "common.dashboard",
       icon: <LayoutDashboard className="h-4 w-4" />,
       href: "/",
+    },
+    {
+      id: "security",
+      labelKey: "security.nav",
+      icon: <ShieldCheck className="h-4 w-4" />,
+      href: "/security",
     },
     {
       id: "demo",
@@ -92,7 +98,14 @@ const demoRoute = createRoute({
   component: UiDemoPage,
 });
 
-// 4. Login route
+// 4. Security route
+const securityRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/security",
+  component: AccountSecurityPage,
+});
+
+// 5. Login route
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/login",
@@ -107,8 +120,8 @@ const loginRoute = createRoute({
   },
 });
 
-// 5. Route Tree
-const routeTree = rootRoute.addChildren([indexRoute, demoRoute, loginRoute]);
+// 6. Route Tree
+const routeTree = rootRoute.addChildren([indexRoute, demoRoute, securityRoute, loginRoute]);
 
 // 6. Create Router
 export const router = createRouter({

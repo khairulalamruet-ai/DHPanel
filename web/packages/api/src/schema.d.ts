@@ -105,6 +105,225 @@ export interface paths {
     };
   };
 
+  "/api/v1/account/password": {
+    /** Change account password */
+    post: {
+      requestBody: {
+        content: {
+          "application/json": {
+            current_password: string;
+            new_password: string;
+          };
+        };
+      };
+      responses: {
+        200: {
+          content: {
+            "application/json": {
+              success: boolean;
+              message?: string;
+            };
+          };
+        };
+        400: {
+          content: {
+            "application/json": {
+              error: string;
+              message: string;
+            };
+          };
+        };
+      };
+    };
+  };
+
+  "/api/v1/account/2fa/status": {
+    /** Get current 2FA status and backup codes info */
+    get: {
+      responses: {
+        200: {
+          content: {
+            "application/json": {
+              enabled: boolean;
+              backup_codes_remaining?: number;
+            };
+          };
+        };
+      };
+    };
+  };
+
+  "/api/v1/account/2fa/enroll": {
+    /** Start 2FA enrollment: returns secret and TOTP URI */
+    post: {
+      responses: {
+        200: {
+          content: {
+            "application/json": {
+              secret: string;
+              qr_code_uri: string;
+            };
+          };
+        };
+      };
+    };
+  };
+
+  "/api/v1/account/2fa/confirm": {
+    /** Verify TOTP code and finalize enrollment, returning initial backup codes */
+    post: {
+      requestBody: {
+        content: {
+          "application/json": {
+            totp_code: string;
+          };
+        };
+      };
+      responses: {
+        200: {
+          content: {
+            "application/json": {
+              success: boolean;
+              backup_codes: string[];
+            };
+          };
+        };
+        400: {
+          content: {
+            "application/json": {
+              error: string;
+              message: string;
+            };
+          };
+        };
+      };
+    };
+  };
+
+  "/api/v1/account/2fa/disable": {
+    /** Disable 2FA by verifying current password */
+    post: {
+      requestBody: {
+        content: {
+          "application/json": {
+            password: string;
+          };
+        };
+      };
+      responses: {
+        200: {
+          content: {
+            "application/json": {
+              success: boolean;
+            };
+          };
+        };
+        400: {
+          content: {
+            "application/json": {
+              error: string;
+              message: string;
+            };
+          };
+        };
+      };
+    };
+  };
+
+  "/api/v1/account/2fa/backup-codes": {
+    /** Regenerate 10 new one-time backup codes */
+    post: {
+      responses: {
+        200: {
+          content: {
+            "application/json": {
+              backup_codes: string[];
+            };
+          };
+        };
+      };
+    };
+  };
+
+  "/api/v1/account/sessions": {
+    /** List active sessions */
+    get: {
+      responses: {
+        200: {
+          content: {
+            "application/json": {
+              sessions: Array<{
+                id: string;
+                ip_address: string;
+                user_agent: string;
+                created_at: string;
+                last_active_at: string;
+                current: boolean;
+              }>;
+            };
+          };
+        };
+      };
+    };
+  };
+
+  "/api/v1/account/sessions/{id}": {
+    /** Revoke a specific session */
+    delete: {
+      parameters: {
+        path: {
+          id: string;
+        };
+      };
+      responses: {
+        200: {
+          content: {
+            "application/json": {
+              success: boolean;
+            };
+          };
+        };
+      };
+    };
+  };
+
+  "/api/v1/account/sessions/revoke-others": {
+    /** Revoke all other active sessions except current */
+    post: {
+      responses: {
+        200: {
+          content: {
+            "application/json": {
+              success: boolean;
+              revoked_count: number;
+            };
+          };
+        };
+      };
+    };
+  };
+
+  "/api/v1/account/login-history": {
+    /** Get recent login events history */
+    get: {
+      responses: {
+        200: {
+          content: {
+            "application/json": {
+              events: Array<{
+                id: string;
+                ip_address: string;
+                user_agent: string;
+                status: "success" | "failed" | "2fa_prompt";
+                created_at: string;
+              }>;
+            };
+          };
+        };
+      };
+    };
+  };
+
   "/api/v1/admin/bootstrap": {
     /** Admin session and capability bootstrap */
     get: {
