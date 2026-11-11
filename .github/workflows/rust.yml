@@ -1,0 +1,129 @@
+# Rust CI: formatting, lints, tests (with PostgreSQL + Redis), OpenAPI and
+# SQLx cache freshness, and supply-chain checks.
+name: rust
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - "apps/**"
+      - "crates/**"
+      - "migrations/**"
+      - ".sqlx/**"
+      - "openapi.json"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "deny.toml"
+      - ".github/workflows/rust.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  RUST_BACKTRACE: "1"
+  # Builds use the committed .sqlx cache unless a job opts out.
+  SQLX_OFFLINE: "true"
+
+jobs:
+  lint:
+    name: fmt + clippy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain from rust-toolchain.toml
+        run: rustup toolchain install && rustup show active-toolchain
+      - uses: Swatinem/rust-cache@v2
+      - name: rustfmt
+        run: cargo fmt --all --check
+      - name: clippy (default features)
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: clippy (otel feature)
+        run: cargo clippy --workspace --all-targets --locked --features dhpanel-control-api/otel -- -D warnings
+
+  test:
+    name: tests (PostgreSQL 18 + Redis 8)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-postgres-password
+          POSTGRES_DB: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      # Throwaway CI-only credentials for the service containers above.
+      DATABASE_URL: postgres://postgres:ci-postgres-password@127.0.0.1:5432/postgres
+      REDIS_URL: redis://:ci-redis-password@127.0.0.1:6379/15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain from rust-toolchain.toml
+        run: rustup toolchain install && rustup show active-toolchain
+      - uses: Swatinem/rust-cache@v2
+
+      # Started as a step (not a service) so it can require a password, which
+      # the wrong-password integration test depends on.
+      - name: Start Redis 8 with a password
+        run: |
+          docker run -d --name redis -p 127.0.0.1:6379:6379 redis:8 \
+            redis-server --requirepass ci-redis-password
+          for i in $(seq 1 30); do
+            docker exec redis redis-cli -a ci-redis-password --no-auth-warning ping | grep -q PONG && exit 0
+            sleep 1
+          done
+          echo "redis did not start" >&2; exit 1
+
+      - name: Create application role and database, apply migrations
+        env:
+          PGPASSWORD: ci-postgres-password
+          DHPANEL_DATABASE__URL: postgres://dhpanel:ci-dhpanel-password@127.0.0.1:5432/dhpanel_dev
+          DHPANEL_REDIS__URL: redis://:ci-redis-password@127.0.0.1:6379/0
+          DHPANEL_CONFIG: deploy/dev/control.dev.toml
+        run: |
+          psql -h 127.0.0.1 -U postgres -v ON_ERROR_STOP=1 \
+            -c "CREATE ROLE dhpanel LOGIN PASSWORD 'ci-dhpanel-password'" \
+            -c "CREATE DATABASE dhpanel_dev OWNER dhpanel"
+          cargo run --locked -q -p dhpanel-dhctl -- migrate
+
+      - name: Verify .sqlx cache matches the migrated schema (online compile)
+        env:
+          SQLX_OFFLINE: "false"
+          DATABASE_URL: postgres://dhpanel:ci-dhpanel-password@127.0.0.1:5432/dhpanel_dev
+        run: cargo check --workspace --all-targets --locked
+
+      - name: Tests (unit + integration)
+        run: cargo test --workspace --locked --no-fail-fast -- --include-ignored
+
+      - name: openapi.json is up to date
+        run: cargo test --locked -p dhpanel-control-api openapi_json_is_up_to_date
+
+  supply-chain:
+    name: cargo-deny + cargo-audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      checks: write # rustsec/audit-check reports findings as a check run
+    steps:
+      - uses: actions/checkout@v4
+      - name: cargo-deny (advisories, licenses, bans, sources)
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check all
+      - name: cargo-audit
+        uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
