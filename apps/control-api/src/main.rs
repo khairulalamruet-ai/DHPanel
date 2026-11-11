@@ -68,16 +68,39 @@ async fn main() -> ExitCode {
         }
     };
 
-    let readiness = Readiness::default().with_probe("database", {
-        let db = db.clone();
-        Arc::new(move || {
+    // Redis: URL parsed now, connection opened on first use; /ready reports outages.
+    let redis = match config
+        .redis_url()
+        .map_err(|e| e.to_string())
+        .and_then(|url| dhpanel_cache::RedisHandle::new(&url).map_err(|e| e.to_string()))
+    {
+        Ok(handle) => handle,
+        Err(err) => {
+            tracing::error!(error = %err, "redis configuration invalid");
+            telemetry.shutdown();
+            return ExitCode::from(EXIT_CONFIG);
+        }
+    };
+
+    let readiness = Readiness::default()
+        .with_probe("database", {
             let db = db.clone();
-            Box::pin(async move { dhpanel_database::ping(&db).await.map_err(|e| e.to_string()) })
+            Arc::new(move || {
+                let db = db.clone();
+                Box::pin(
+                    async move { dhpanel_database::ping(&db).await.map_err(|e| e.to_string()) },
+                )
+            })
         })
-    });
+        .with_probe("redis", {
+            let redis = redis.clone();
+            Arc::new(move || {
+                let redis = redis.clone();
+                Box::pin(async move { redis.ping().await.map_err(|e| e.to_string()) })
+            })
+        });
 
     let handle = telemetry.prometheus_handle();
-    // The Redis probe is registered by T00.08.
     let app = app::router(app::AppState {
         metrics: Arc::new(move || handle.render()),
         readiness,

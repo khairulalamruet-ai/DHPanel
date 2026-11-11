@@ -17,6 +17,7 @@ default = []
 otel = ["dhpanel-observability/otel"]
 
 [dependencies]
+dhpanel-cache.workspace = true
 dhpanel-common.workspace = true
 dhpanel-config.workspace = true
 dhpanel-database.workspace = true

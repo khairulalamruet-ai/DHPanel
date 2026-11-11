@@ -7,6 +7,7 @@ members = [
     "apps/priv-helper",
     "apps/dhctl",
     "crates/kernel",
+    "crates/cache",
     "crates/common",
     "crates/config",
     "crates/domain",
@@ -18,7 +19,7 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.99"
 license = "LicenseRef-DHPanel-Proprietary"
 publish = false
 repository = "https://example.invalid/dhpanel"
@@ -26,6 +27,7 @@ repository = "https://example.invalid/dhpanel"
 [workspace.dependencies]
 # Internal crates. External dependencies are added here (with a reason in the PR) by later tasks.
 dhpanel-kernel = { path = "crates/kernel" }
+dhpanel-cache = { path = "crates/cache" }
 dhpanel-common = { path = "crates/common" }
 dhpanel-config = { path = "crates/config" }
 dhpanel-domain = { path = "crates/domain" }
