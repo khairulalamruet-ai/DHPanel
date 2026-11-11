@@ -12,6 +12,11 @@ workspace = true
 
 [dependencies]
 argon2 = "0.6.0"
+# XChaCha20-Poly1305 for secrets at rest (TOTP secrets; docs/01-architecture/07-security-model.md).
+chacha20poly1305 = { version = "0.11", features = ["zeroize"] }
+# RFC 6238 TOTP for 2FA (named in docs/01-architecture/02-tech-stack.md);
+# `otpauth` builds the otpauth:// URI that the frontend renders as a QR code.
+totp-rs = { version = "6", features = ["otpauth"] }
 secrecy = "0.10"
 thiserror = "2.0.21"
 tokio = { version = "1", features = ["rt"] }
