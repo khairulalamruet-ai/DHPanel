@@ -40,3 +40,29 @@ Then create `0600` files containing `postgres://dhpanel:<PG_PASSWORD>@127.0.0.1:
 
 - API shape changed → `make -C deploy/dev openapi` and commit `openapi.json`.
 - SQL in `sqlx::query!` changed → `make -C deploy/dev sqlx-prepare` and commit `.sqlx/`.
+
+## Building and testing on a remote box
+
+When the workstation is slow or busy, run the checks on a Linux build box
+instead. `deploy/dev/remote.sh` syncs the current worktree there and runs:
+
+```
+deploy/dev/remote.sh rust          # fmt, clippy (default + otel), tests, cargo-deny
+deploy/dev/remote.sh rust test     # only one of: lint | test | deny
+deploy/dev/remote.sh web           # pnpm install, lint, typecheck, test, build
+deploy/dev/remote.sh web e2e       # Playwright
+deploy/dev/remote.sh status        # versions, memory and disk of the box
+```
+
+The box address and SSH key live outside the repository in
+`~/.config/dhpanel/remote.env`:
+
+```
+DHPANEL_REMOTE_HOST=dev@<host>
+DHPANEL_REMOTE_KEY=/path/to/private/key
+```
+
+Each worktree is synced to its own `~/work/<worktree name>` directory, so
+agents working in parallel do not interfere. The box needs rustup, cargo-deny,
+PostgreSQL 18, Redis, Node and pnpm, plus `~/.dhpanel-dev/secrets/database_url`
+(a superuser, for per-test databases) and `redis_test_url`, both mode 0600.
