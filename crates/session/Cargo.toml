@@ -14,20 +14,20 @@ workspace = true
 dhpanel-cache.workspace = true
 dhpanel-http-kit.workspace = true
 # OS CSPRNG for session tokens; SHA-256 so only token hashes are stored;
-# base64url for the cookie value. Versions match those already used by sqlx.
+# base64url for the cookie value.
 axum = "0.8"
-base64 = "0.22"
-getrandom = "0.3"
+base64 = "0.23"
+getrandom = "0.4"
 secrecy = "0.10"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
-sha2 = "0.10"
+sha2 = "0.11"
 thiserror = "2.0.21"
 # Same version/features as dhpanel-database; the query! macros need the crate in scope.
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres", "macros", "uuid"] }
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "postgres", "macros", "uuid"] }
 uuid = { version = "1", features = ["serde"] }
 
 [dev-dependencies]
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres", "macros", "uuid", "migrate"] }
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "postgres", "macros", "uuid", "migrate"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 tower = { version = "0.5", features = ["util"] }
