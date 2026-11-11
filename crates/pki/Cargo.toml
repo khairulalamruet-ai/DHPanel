@@ -1,0 +1,17 @@
+[package]
+name = "dhpanel-pki"
+description = "Internal certificate authority for node mTLS: create the CA, issue and inspect certificates."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# Certificate and CSR generation/signing. `ring` is the single crypto backend
+# for the workspace (rustls will use it too): smaller and quicker to build than
+# aws-lc-rs. `x509-parser` lets rcgen read the CSRs that agents send.
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "ring", "x509-parser"] }
