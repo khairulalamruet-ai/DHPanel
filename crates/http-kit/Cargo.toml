@@ -21,6 +21,7 @@ thiserror = "2.0.21"
 # task_local! carries the correlation ID through the request.
 tokio = { version = "1", features = ["rt", "time"] }
 tracing = "0.1.44"
+utoipa = "6"
 # UUIDv7 request IDs (time-ordered; also the planned DB primary key format).
 uuid = { version = "1", features = ["v7"] }
 

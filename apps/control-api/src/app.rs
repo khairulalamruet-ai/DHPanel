@@ -59,9 +59,23 @@ pub fn router(state: AppState) -> Router {
         .route("/health", get(health::liveness))
         .route("/ready", get(health::readiness));
 
-    Router::new()
+    let router = Router::new()
         .nest("/api/v1/public", public)
-        .route("/metrics", get(render_metrics))
+        .route("/api/v1/openapi.json", get(openapi_json))
+        .route("/metrics", get(render_metrics));
+
+    // Interactive API viewer for local development only; never in release builds.
+    #[cfg(debug_assertions)]
+    let router = {
+        use utoipa::OpenApi as _;
+        use utoipa_scalar::{Scalar, Servable as _};
+        router.merge(Scalar::with_url(
+            "/api/docs",
+            crate::openapi::ApiDoc::openapi(),
+        ))
+    };
+
+    router
         .fallback(|| async { AppError::not_found("route") })
         .layer(CompressionLayer::new())
         .layer(RequestBodyLimitLayer::new(BODY_LIMIT_BYTES))
@@ -77,6 +91,13 @@ pub fn router(state: AppState) -> Router {
             dhpanel_http_kit::request_id::correlation_id_layer,
         ))
         .with_state(state)
+}
+
+async fn openapi_json() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "application/json")],
+        crate::openapi::json(),
+    )
 }
 
 async fn render_metrics(State(metrics): State<MetricsHandle>) -> impl IntoResponse {
@@ -160,6 +181,15 @@ mod tests {
         assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(body["status"], "not_ready");
         assert_eq!(body["checks"][0]["status"], "failed");
+    }
+
+    #[tokio::test]
+    async fn openapi_endpoint_serves_the_document() {
+        let (status, body) =
+            get_json(router(state(Readiness::default())), "/api/v1/openapi.json").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["info"]["title"], "DHPanel API");
+        assert!(body["paths"]["/api/v1/public/health"].is_object());
     }
 
     #[tokio::test]

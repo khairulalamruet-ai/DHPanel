@@ -1,0 +1,228 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "DHPanel API",
+    "description": "Control plane API for the DHPanel hosting panel. Errors use RFC 9457 Problem Details (`application/problem+json`).",
+    "license": {
+      "name": "Proprietary"
+    },
+    "version": "0.1.0"
+  },
+  "servers": [
+    {
+      "url": "/",
+      "description": "Same origin as the panel"
+    }
+  ],
+  "paths": {
+    "/api/v1/public/health": {
+      "get": {
+        "tags": [
+          "public"
+        ],
+        "summary": "Liveness: the process answers HTTP",
+        "operationId": "getHealth",
+        "responses": {
+          "200": {
+            "description": "Process is alive",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Liveness"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/public/ready": {
+      "get": {
+        "tags": [
+          "public"
+        ],
+        "summary": "Readiness: all dependencies (database, redis, ...) are reachable",
+        "operationId": "getReadiness",
+        "responses": {
+          "200": {
+            "description": "All checks passed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadinessReport"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "At least one check failed or timed out",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadinessReport"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "CheckResult": {
+        "type": "object",
+        "description": "Public result for one probe.",
+        "required": [
+          "name",
+          "status",
+          "duration_ms"
+        ],
+        "properties": {
+          "duration_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Time taken, in milliseconds.",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string",
+            "description": "Probe name, e.g. `database`."
+          },
+          "status": {
+            "$ref": "#/components/schemas/CheckStatus",
+            "description": "Outcome."
+          }
+        }
+      },
+      "CheckStatus": {
+        "type": "string",
+        "description": "Outcome of one probe.",
+        "enum": [
+          "ok",
+          "failed",
+          "timeout"
+        ]
+      },
+      "FieldError": {
+        "type": "object",
+        "description": "One invalid input field (used with 422).",
+        "required": [
+          "field",
+          "code",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Stable machine code, e.g. `required`, `too_long`, `invalid_format`."
+          },
+          "field": {
+            "type": "string",
+            "description": "JSON pointer-ish field path, e.g. `email` or `limits.max_domains`."
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable message (English; the UI translates by `code`)."
+          }
+        }
+      },
+      "Liveness": {
+        "type": "object",
+        "description": "Body of `/health`.",
+        "required": [
+          "status",
+          "version"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "Always `ok`.",
+            "example": "ok"
+          },
+          "version": {
+            "type": "string",
+            "description": "Build version."
+          }
+        }
+      },
+      "ProblemDetails": {
+        "type": "object",
+        "description": "Wire format (RFC 9457 + DHPanel extensions `code`, `correlation_id`, `errors`).",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "code"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Stable machine-readable code."
+          },
+          "correlation_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Request correlation ID, when known."
+          },
+          "detail": {
+            "type": "string",
+            "description": "Human-readable explanation."
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FieldError"
+            },
+            "description": "Field errors (422 only)."
+          },
+          "status": {
+            "type": "integer",
+            "format": "int32",
+            "description": "HTTP status code.",
+            "minimum": 0
+          },
+          "title": {
+            "type": "string",
+            "description": "Short summary of the status."
+          },
+          "type": {
+            "type": "string",
+            "description": "Problem type URI."
+          }
+        }
+      },
+      "ReadinessReport": {
+        "type": "object",
+        "description": "Body of `/ready`.",
+        "required": [
+          "status",
+          "checks"
+        ],
+        "properties": {
+          "checks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CheckResult"
+            },
+            "description": "One entry per registered probe, sorted by name."
+          },
+          "status": {
+            "type": "string",
+            "description": "`ready` or `not_ready`.",
+            "example": "ready"
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "public",
+      "description": "Unauthenticated health endpoints"
+    }
+  ]
+}

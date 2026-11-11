@@ -1,0 +1,80 @@
+//! OpenAPI document for the control plane.
+//!
+//! * Served at `GET /api/v1/openapi.json`.
+//! * Committed as `openapi.json` at the repository root; the frontend generates
+//!   its types from that file. The `openapi_json_is_up_to_date` test fails when
+//!   the committed file drifts; regenerate with
+//!   `DHPANEL_UPDATE_OPENAPI=1 cargo test -p dhpanel-control-api openapi_json`.
+//! * Debug builds also serve an interactive viewer at `/api/docs`.
+
+use dhpanel_http_kit::{FieldError, ProblemDetails, health::PublicHealthApi};
+use utoipa::OpenApi;
+
+/// Root OpenAPI document. Each module nests its own fragment here.
+#[derive(OpenApi)]
+#[openapi(
+    info(
+        title = "DHPanel API",
+        description = "Control plane API for the DHPanel hosting panel. \
+                       Errors use RFC 9457 Problem Details (`application/problem+json`).",
+        license(name = "Proprietary")
+    ),
+    servers((url = "/", description = "Same origin as the panel")),
+    nest((path = "/api/v1/public", api = PublicHealthApi)),
+    components(schemas(ProblemDetails, FieldError))
+)]
+pub struct ApiDoc;
+
+/// The document as pretty JSON with a trailing newline (stable for diffs).
+#[must_use]
+pub fn json() -> String {
+    let mut out = ApiDoc::openapi()
+        .to_pretty_json()
+        .unwrap_or_else(|e| format!("{{\"error\":\"openapi serialization failed: {e}\"}}"));
+    out.push('\n');
+    out
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::unwrap_used)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+
+    fn committed_path() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../openapi.json")
+    }
+
+    #[test]
+    fn openapi_json_is_up_to_date() {
+        let generated = json();
+        let path = committed_path();
+        if std::env::var_os("DHPANEL_UPDATE_OPENAPI").is_some() {
+            std::fs::write(&path, &generated).expect("write openapi.json");
+            return;
+        }
+        let committed = std::fs::read_to_string(&path).unwrap_or_default();
+        assert!(
+            committed == generated,
+            "openapi.json is stale; run: DHPANEL_UPDATE_OPENAPI=1 cargo test -p dhpanel-control-api openapi_json"
+        );
+    }
+
+    #[test]
+    fn document_lists_public_health_paths_and_problem_schema() {
+        let doc: serde_json::Value = serde_json::from_str(&json()).expect("valid json");
+        assert!(
+            doc["openapi"]
+                .as_str()
+                .unwrap_or_default()
+                .starts_with("3.")
+        );
+        assert!(doc["paths"]["/api/v1/public/health"]["get"].is_object());
+        assert!(doc["paths"]["/api/v1/public/ready"]["get"]["responses"]["503"].is_object());
+        assert!(doc["components"]["schemas"]["ProblemDetails"].is_object());
+        assert!(doc["components"]["schemas"]["ReadinessReport"].is_object());
+        // `/metrics` is operational, not part of the public API contract.
+        assert!(doc["paths"]["/metrics"].is_null());
+    }
+}

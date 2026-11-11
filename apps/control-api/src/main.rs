@@ -4,6 +4,7 @@
 //! telemetry, serve HTTP, shut down gracefully on SIGINT/SIGTERM.
 
 mod app;
+mod openapi;
 
 use std::{process::ExitCode, sync::Arc};
 

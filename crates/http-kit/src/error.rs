@@ -19,7 +19,7 @@ pub const PROBLEM_JSON: &str = "application/problem+json";
 pub const PROBLEM_TYPE_BASE: &str = "https://docs.dhpanel.dev/problems/";
 
 /// One invalid input field (used with 422).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, utoipa::ToSchema)]
 pub struct FieldError {
     /// JSON pointer-ish field path, e.g. `email` or `limits.max_domains`.
     pub field: String,
@@ -175,7 +175,7 @@ impl AppError {
 }
 
 /// Wire format (RFC 9457 + DHPanel extensions `code`, `correlation_id`, `errors`).
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct ProblemDetails {
     /// Problem type URI.
     #[serde(rename = "type")]

@@ -48,7 +48,7 @@ impl std::fmt::Debug for Readiness {
 }
 
 /// Outcome of one probe.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CheckStatus {
     /// Probe succeeded.
@@ -60,7 +60,7 @@ pub enum CheckStatus {
 }
 
 /// Public result for one probe.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct CheckResult {
     /// Probe name, e.g. `database`.
     pub name: &'static str,
@@ -71,9 +71,10 @@ pub struct CheckResult {
 }
 
 /// Body of `/ready`.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct ReadinessReport {
     /// `ready` or `not_ready`.
+    #[schema(example = "ready")]
     pub status: &'static str,
     /// One entry per registered probe, sorted by name.
     pub checks: Vec<CheckResult>,
@@ -162,15 +163,24 @@ impl Readiness {
 }
 
 /// Body of `/health`.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct Liveness {
     /// Always `ok`.
+    #[schema(example = "ok")]
     pub status: &'static str,
     /// Build version.
     pub version: &'static str,
 }
 
 /// `GET /health` handler.
+#[utoipa::path(
+    get,
+    path = "/health",
+    tag = "public",
+    operation_id = "getHealth",
+    summary = "Liveness: the process answers HTTP",
+    responses((status = 200, description = "Process is alive", body = Liveness))
+)]
 pub async fn liveness() -> Json<Liveness> {
     Json(Liveness {
         status: "ok",
@@ -179,6 +189,17 @@ pub async fn liveness() -> Json<Liveness> {
 }
 
 /// `GET /ready` handler. Needs `Readiness` reachable via `State` (use `FromRef`).
+#[utoipa::path(
+    get,
+    path = "/ready",
+    tag = "public",
+    operation_id = "getReadiness",
+    summary = "Readiness: all dependencies (database, redis, ...) are reachable",
+    responses(
+        (status = 200, description = "All checks passed", body = ReadinessReport),
+        (status = 503, description = "At least one check failed or timed out", body = ReadinessReport)
+    )
+)]
 pub async fn readiness(State(readiness): State<Readiness>) -> (StatusCode, Json<ReadinessReport>) {
     let report = readiness.check().await;
     let code = if report.is_ready() {
@@ -192,6 +213,16 @@ pub async fn readiness(State(readiness): State<Readiness>) -> (StatusCode, Json<
 fn dhpanel_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
+
+/// OpenAPI fragment for the unauthenticated health endpoints. Nest it under
+/// the prefix the router mounts them at (e.g. `/api/v1/public`).
+#[derive(utoipa::OpenApi)]
+#[openapi(
+    paths(liveness, readiness),
+    components(schemas(Liveness, ReadinessReport, CheckResult, CheckStatus)),
+    tags((name = "public", description = "Unauthenticated health endpoints"))
+)]
+pub struct PublicHealthApi;
 
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::unwrap_used)]
