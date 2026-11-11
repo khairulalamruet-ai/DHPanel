@@ -4,6 +4,23 @@
  */
 
 export interface paths {
+    "/api/v1/admin/audit-logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List audit entries, newest first. */
+        get: operations["listAuditLogs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/logout": {
         parameters: {
             query?: never;
@@ -275,6 +292,62 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description One audit entry. */
+        AuditItem: {
+            /**
+             * @description What happened, e.g. `auth.login_failed`.
+             * @example auth.login
+             */
+            action: string;
+            /**
+             * Format: uuid
+             * @description Account that acted, if known.
+             */
+            actor_id?: string | null;
+            /** @description IP address the request came from. */
+            actor_ip?: string | null;
+            /**
+             * Format: date-time
+             * @description When it happened (RFC 3339, UTC, microseconds).
+             * @example 2026-11-11T09:30:00.123456Z
+             */
+            at: string;
+            /** @description Request correlation id; matches the `x-request-id` header and the logs. */
+            correlation_id?: string | null;
+            /**
+             * Format: uuid
+             * @description Entry id (time-ordered).
+             */
+            id: string;
+            /** @description Extra details (never secrets). */
+            metadata: Record<string, never>;
+            /**
+             * Format: uuid
+             * @description Node the action ran on.
+             */
+            node_id?: string | null;
+            /**
+             * @description `success`, `failure` or `denied`.
+             * @example success
+             */
+            outcome: string;
+            /** @description Object acted on. */
+            target_id?: string | null;
+            /** @description Kind of object acted on. */
+            target_type?: string | null;
+            /**
+             * Format: uuid
+             * @description Tenant the action belongs to.
+             */
+            tenant_id?: string | null;
+        };
+        /** @description A page of audit entries. */
+        AuditPage: {
+            /** @description Newest first. */
+            items: components["schemas"]["AuditItem"][];
+            /** @description Pass as `cursor` to get the next (older) page; absent on the last page. */
+            next_cursor?: string | null;
+        };
         /** @description Backup codes, shown exactly once. */
         BackupCodes: {
             /** @description Ten single-use codes; store them somewhere safe. */
@@ -508,6 +581,72 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    listAuditLogs: {
+        parameters: {
+            query?: {
+                /** @description Only actions starting with this text, e.g. `auth.` or `auth.login_failed`. */
+                action?: string;
+                /** @description Only entries by this account. */
+                actor_id?: string;
+                /** @description `success`, `failure` or `denied`. */
+                outcome?: string;
+                /** @description Only entries about this kind of object, e.g. `session`. */
+                target_type?: string;
+                /** @description Only entries about this object (use with `target_type`). */
+                target_id?: string;
+                /** @description Earliest time, inclusive (RFC 3339). */
+                from?: string;
+                /** @description Latest time, exclusive (RFC 3339). */
+                to?: string;
+                /** @description Entries per page, 1..=100 (default 50). */
+                limit?: string;
+                /** @description `next_cursor` of the previous page. */
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of entries */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditPage"];
+                };
+            };
+            /** @description Not logged in */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `permission_denied`: needs admin.audit.read */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Invalid filter */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
     logout: {
         parameters: {
             query?: never;

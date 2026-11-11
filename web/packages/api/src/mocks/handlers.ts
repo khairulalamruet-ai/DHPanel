@@ -324,4 +324,97 @@ export const handlers = [
   http.get(/\/api\/v1\/account\/login-history$/, () => {
     return HttpResponse.json({ events: loginEvents });
   }),
+
+  // Audit Logs (GET /api/v1/admin/audit-logs) (T01.12 / T01.16)
+  ...(() => {
+    const mockAuditLogs = Array.from({ length: 30 }, (_, i) => {
+      const actions = [
+        "auth.login",
+        "auth.login_failed",
+        "auth.mfa_enrolled",
+        "auth.session_revoked",
+        "auth.password_changed",
+        "auth.sudo_granted",
+        "vhost.create",
+        "domain.create",
+        "user.role_assigned",
+      ];
+      const outcomes = ["success", "failure", "denied"] as const;
+      const targetTypes = ["session", "account", "domain", "role"];
+      const action = actions[i % actions.length];
+      const outcome = action.includes("failed") ? "failure" : outcomes[i % outcomes.length];
+      const targetType = targetTypes[i % targetTypes.length];
+      const at = new Date(Date.now() - (i + 1) * 3600 * 1000 * 2).toISOString();
+
+      return {
+        id: `00000000-0000-0000-0000-${String(i + 1).padStart(12, "0")}`,
+        at,
+        action,
+        outcome,
+        actor_id: i % 3 === 0 ? "00000000-0000-0000-0000-000000000001" : `00000000-0000-0000-0000-${String(i + 10).padStart(12, "0")}`,
+        actor_ip: i % 2 === 0 ? "192.168.1.105" : "203.0.113.42",
+        correlation_id: `req-${1000 + i}-trace`,
+        node_id: "00000000-0000-0000-0000-0000000000aa",
+        target_type: targetType,
+        target_id: `obj-${100 + i}`,
+        tenant_id: i % 4 === 0 ? "00000000-0000-0000-0000-000000000001" : null,
+        metadata: {
+          client: i % 2 === 0 ? "Chrome 130 (macOS)" : "Firefox 131 (Linux)",
+          details: `Executed ${action} with status ${outcome}`,
+          ip: i % 2 === 0 ? "192.168.1.105" : "203.0.113.42",
+          duration_ms: (i + 1) * 12,
+        },
+      };
+    });
+
+    return [
+      http.get(/\/api\/v1\/admin\/audit-logs/, ({ request }) => {
+        const url = new URL(request.url);
+        const action = url.searchParams.get("action");
+        const actorId = url.searchParams.get("actor_id");
+        const outcome = url.searchParams.get("outcome");
+        const targetType = url.searchParams.get("target_type");
+        const targetId = url.searchParams.get("target_id");
+        const limit = parseInt(url.searchParams.get("limit") || "10", 10);
+        const cursor = url.searchParams.get("cursor");
+
+        let filtered = [...mockAuditLogs];
+
+        if (action) {
+          filtered = filtered.filter((item) =>
+            item.action.toLowerCase().startsWith(action.toLowerCase())
+          );
+        }
+        if (actorId) {
+          filtered = filtered.filter((item) => item.actor_id === actorId);
+        }
+        if (outcome && outcome !== "all") {
+          filtered = filtered.filter((item) => item.outcome === outcome);
+        }
+        if (targetType) {
+          filtered = filtered.filter((item) => item.target_type === targetType);
+        }
+        if (targetId) {
+          filtered = filtered.filter((item) => item.target_id === targetId);
+        }
+
+        let startIndex = 0;
+        if (cursor) {
+          const found = filtered.findIndex((item) => item.id === cursor);
+          if (found !== -1) {
+            startIndex = found + 1;
+          }
+        }
+
+        const pageItems = filtered.slice(startIndex, startIndex + limit);
+        const nextItem = filtered[startIndex + limit];
+        const nextCursor = nextItem ? nextItem.id : null;
+
+        return HttpResponse.json({
+          items: pageItems,
+          next_cursor: nextCursor,
+        });
+      }),
+    ];
+  })(),
 ];
