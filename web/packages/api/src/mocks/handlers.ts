@@ -80,6 +80,139 @@ const loginEvents = [
   },
 ];
 
+export interface MockModuleItem {
+  name: string;
+  title: { en: string; bn: string };
+  description: { en: string; bn: string };
+  version: string;
+  category: "core" | "web" | "db" | "files" | "mail" | "security" | "system";
+  core: boolean;
+  enabled: boolean;
+  depends_on: string[];
+  status: "active" | "disabled" | "error";
+}
+
+export const getInitialModules = (): MockModuleItem[] => [
+  {
+    name: "auth",
+    title: { en: "Authentication", bn: "প্রমাণীকরণ" },
+    description: {
+      en: "User authentication, sessions, and multi-factor security",
+      bn: "ব্যবহারকারী প্রমাণীকরণ, সেশন এবং টু-ফ্যাক্টর নিরাপত্তা",
+    },
+    version: "1.0.0",
+    category: "core",
+    core: true,
+    enabled: true,
+    depends_on: [],
+    status: "active",
+  },
+  {
+    name: "users",
+    title: { en: "Users & RBAC", bn: "ব্যবহারকারী ও আরব্যাক" },
+    description: {
+      en: "User management and role-based access control",
+      bn: "ব্যবহারকারী ব্যবস্থাপনা এবং ভূমিকা-ভিত্তিক অ্যাক্সেস নিয়ন্ত্রণ",
+    },
+    version: "1.0.0",
+    category: "core",
+    core: true,
+    enabled: true,
+    depends_on: ["auth"],
+    status: "active",
+  },
+  {
+    name: "settings",
+    title: { en: "Settings", bn: "সেটিংস" },
+    description: {
+      en: "Global panel configuration and environment preferences",
+      bn: "গ্লোবাল প্যানেল কনফিগারেশন এবং পরিবেশ সেটিংস",
+    },
+    version: "1.0.0",
+    category: "core",
+    core: true,
+    enabled: true,
+    depends_on: [],
+    status: "active",
+  },
+  {
+    name: "webserver",
+    title: { en: "Web Server", bn: "ওয়েব সার্ভার" },
+    description: {
+      en: "Nginx / Traefik reverse proxy and vhost management",
+      bn: "Nginx / Traefik রিভার্স প্রক্সি এবং ভার্চুয়াল হোস্ট পরিচালনা",
+    },
+    version: "1.0.0",
+    category: "web",
+    core: false,
+    enabled: true,
+    depends_on: [],
+    status: "active",
+  },
+  {
+    name: "dns",
+    title: { en: "DNS Manager", bn: "ডিএনএস ম্যানেজার" },
+    description: {
+      en: "PowerDNS / CoreDNS zone files and record management",
+      bn: "PowerDNS / CoreDNS জোন ফাইল এবং রেকর্ড ব্যবস্থাপনা",
+    },
+    version: "1.0.0",
+    category: "web",
+    core: false,
+    enabled: true,
+    depends_on: [],
+    status: "active",
+  },
+  {
+    name: "domains",
+    title: { en: "Domains", bn: "ডোমেইন" },
+    description: {
+      en: "Domain routing, virtual hosts, and docroots",
+      bn: "ডোমেইন রাউটিং, ভার্চুয়াল হোস্ট এবং ডকরুট",
+    },
+    version: "1.0.0",
+    category: "web",
+    core: false,
+    enabled: true,
+    depends_on: ["webserver", "dns"],
+    status: "active",
+  },
+  {
+    name: "db-mysql",
+    title: { en: "MySQL / MariaDB", bn: "মাইএসকিউএল / মারিয়াডিবি" },
+    description: {
+      en: "Database container provisioning and user grants",
+      bn: "ডাটাবেস কন্টেইনার প্রভিশনিং এবং ব্যবহারকারী গ্রান্ট",
+    },
+    version: "1.0.0",
+    category: "db",
+    core: false,
+    enabled: true,
+    depends_on: [],
+    status: "active",
+  },
+  {
+    name: "files",
+    title: { en: "File Manager", bn: "ফাইল ম্যানেজার" },
+    description: {
+      en: "Web-based file explorer and permissions editor",
+      bn: "ওয়েব-ভিত্তিক ফাইল ব্রাউজার এবং পারমিশন এডিটর",
+    },
+    version: "1.0.0",
+    category: "files",
+    core: false,
+    enabled: false,
+    depends_on: [],
+    status: "disabled",
+  },
+];
+
+let modules = getInitialModules();
+
+export const resetMockModules = () => {
+  modules = getInitialModules();
+};
+
 const mockMe = {
   id: "00000000-0000-0000-0000-000000000001",
   username: "admin",
@@ -417,4 +550,74 @@ export const handlers = [
       }),
     ];
   })(),
+
+  // Modules: List all modules (GET /api/v1/admin/modules)
+  // TODO(api:T03.03): Replace with real backend endpoint
+  http.get(/\/api\/v1\/admin\/modules$/, () => {
+    return HttpResponse.json({
+      items: modules,
+      total: modules.length,
+    });
+  }),
+
+  // Modules: Toggle module state (POST /api/v1/admin/modules/:name/toggle)
+  // TODO(api:T03.03): Replace with real backend endpoint
+  // TODO(api:T03.12): Cascading dependency toggle warnings
+  http.post(/\/api\/v1\/admin\/modules\/([^/]+)\/toggle$/, async ({ params, request }) => {
+    const name = params[0] as string;
+    const body = (await request.json().catch(() => ({}))) as any;
+    const { cascade = false } = body || {};
+
+    const modIndex = modules.findIndex((m) => m.name === name);
+    if (modIndex === -1) {
+      return HttpResponse.json({ error: "not_found", message: "Module not found" }, { status: 404 });
+    }
+
+    const mod = modules[modIndex];
+    if (mod.core) {
+      return HttpResponse.json(
+        { error: "core_module_locked", message: "Core modules cannot be disabled" },
+        { status: 400 }
+      );
+    }
+
+    const targetEnabled = !mod.enabled;
+    const disabledDependents: string[] = [];
+
+    if (!targetEnabled) {
+      // Disabling module: find all enabled dependents
+      const activeDependents = modules.filter(
+        (m) => m.enabled && m.depends_on.includes(name)
+      );
+
+      if (activeDependents.length > 0) {
+        if (!cascade) {
+          return HttpResponse.json(
+            {
+              error: "dependencies_active",
+              message: "Cannot disable module because dependent modules are active",
+              dependents: activeDependents.map((d) => d.name),
+            },
+            { status: 409 }
+          );
+        }
+
+        // Cascade disable dependents
+        for (const dep of activeDependents) {
+          dep.enabled = false;
+          dep.status = "disabled";
+          disabledDependents.push(dep.name);
+        }
+      }
+    }
+
+    mod.enabled = targetEnabled;
+    mod.status = targetEnabled ? "active" : "disabled";
+
+    return HttpResponse.json({
+      success: true,
+      module: mod,
+      disabled_dependents: disabledDependents,
+    });
+  }),
 ];

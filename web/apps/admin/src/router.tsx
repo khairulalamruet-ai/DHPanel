@@ -14,6 +14,7 @@ import {
   UiDemoPage,
   AuditViewerPage,
   DummyModulePage,
+  ModuleManagerPage,
   filterNavItems,
   registeredFrontendModules,
 } from "@dhpanel/modules";
@@ -106,7 +107,14 @@ const dummyRoute = createRoute({
   component: DummyModulePage,
 });
 
-// 7. Login route
+// 7. Modules route (T03.12)
+const modulesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/modules",
+  component: ModuleManagerPage,
+});
+
+// 8. Login route
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/login",
@@ -121,17 +129,18 @@ const loginRoute = createRoute({
   },
 });
 
-// 8. Route Tree
+// 9. Route Tree
 const routeTree = rootRoute.addChildren([
   indexRoute,
   demoRoute,
   securityRoute,
   auditRoute,
   dummyRoute,
+  modulesRoute,
   loginRoute,
 ]);
 
-// 6. Create Router
+// Create Router
 export const router = createRouter({
   routeTree,
   defaultPreload: "intent",

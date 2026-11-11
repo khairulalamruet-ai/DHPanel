@@ -184,5 +184,50 @@
     "badge": "Modular Plugin",
     "status": "Module is currently active and rendered via Frontend Registry.",
     "activeNotice": "This page is rendered only when 'dummy' is present in active modules and 'dummy_feature' is enabled."
+  },
+  "modules": {
+    "nav": "Modules",
+    "title": "Module Manager",
+    "desc": "Manage core system components and toggleable platform features",
+    "searchPlaceholder": "Search modules by name or description...",
+    "categories": {
+      "all": "All",
+      "core": "Core",
+      "web": "Web",
+      "db": "Database",
+      "files": "Files",
+      "mail": "Mail",
+      "security": "Security",
+      "system": "System"
+    },
+    "table": {
+      "name": "Module",
+      "category": "Category",
+      "version": "Version",
+      "dependencies": "Dependencies",
+      "status": "Status",
+      "actions": "Action",
+      "noDependencies": "None",
+      "coreBadge": "Core",
+      "active": "Active",
+      "disabled": "Disabled"
+    },
+    "coreTooltip": "Core modules are essential for panel operation and cannot be disabled.",
+    "toggle": {
+      "enable": "Enable",
+      "disable": "Disable",
+      "enabling": "Enabling...",
+      "disabling": "Disabling...",
+      "enabledSuccess": "Module '{{name}}' enabled successfully.",
+      "disabledSuccess": "Module '{{name}}' disabled successfully."
+    },
+    "warning": {
+      "title": "Disable Module & Dependent Services?",
+      "desc": "Disabling '{{name}}' will also affect or disable the following active modules that depend on it:",
+      "dependentsList": "Dependent modules:",
+      "confirmBtn": "Confirm & Disable",
+      "cancelBtn": "Cancel"
+    },
+    "empty": "No modules found matching the selected criteria."
   }
 }

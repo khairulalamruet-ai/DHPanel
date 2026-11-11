@@ -1,5 +1,5 @@
 import React from "react";
-import { LayoutDashboard, ShieldCheck, Sparkles, Puzzle, Globe, Users, Settings, FileText } from "lucide-react";
+import { LayoutDashboard, ShieldCheck, Sparkles, Puzzle, Globe, Users, Settings, FileText, Boxes } from "lucide-react";
 
 export interface ModuleManifest {
   name: string;
@@ -208,6 +208,25 @@ export const registeredFrontendModules: FrontendModule[] = [
         href: "/settings",
         order: 80,
         permission: "settings.read",
+      },
+    ],
+  },
+  {
+    manifest: {
+      name: "modules",
+      title: { en: "Modules", bn: "মডিউলসমূহ" },
+      category: "core",
+      core: true,
+      permissions: ["admin.modules.read"],
+    },
+    adminNav: [
+      {
+        id: "modules",
+        labelKey: "modules.nav",
+        icon: <Boxes className="h-4 w-4" />,
+        href: "/modules",
+        order: 70,
+        permission: "admin.modules.read",
       },
     ],
   },
