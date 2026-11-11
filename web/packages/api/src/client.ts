@@ -1,3 +1,6 @@
+import createClient, { type Middleware } from "openapi-fetch";
+import type { paths } from "./schema";
+
 let csrfToken: string | null = null;
 
 export function setCsrfToken(token: string | null) {
@@ -7,6 +10,35 @@ export function setCsrfToken(token: string | null) {
 export function getCsrfToken(): string | null {
   return csrfToken;
 }
+
+/**
+ * CSRF Header & Cookie Middleware for openapi-fetch
+ */
+const csrfMiddleware: Middleware = {
+  async onRequest({ request }) {
+    const isMutating = ["POST", "PUT", "PATCH", "DELETE"].includes(request.method.toUpperCase());
+    if (isMutating && csrfToken) {
+      request.headers.set("X-CSRF-Token", csrfToken);
+    }
+    return request;
+  },
+};
+
+const defaultBaseUrl =
+  typeof window !== "undefined" && window.location && window.location.origin && window.location.origin !== "null"
+    ? window.location.origin
+    : "http://localhost";
+
+/**
+ * Typed OpenAPI Fetch Client
+ */
+export const api = createClient<paths>({
+  baseUrl: defaultBaseUrl,
+  credentials: "include",
+  fetch: (req: Request) => fetch(req),
+});
+
+api.use(csrfMiddleware);
 
 export interface ApiFetchOptions extends RequestInit {
   params?: Record<string, string | number | boolean | undefined>;
@@ -30,7 +62,7 @@ export async function apiFetch<T>(path: string, options: ApiFetchOptions = {}): 
   }
 
   const reqHeaders: Record<string, string> = {
-    "Accept": "application/json",
+    Accept: "application/json",
     ...(headers as Record<string, string>),
   };
 
@@ -46,7 +78,7 @@ export async function apiFetch<T>(path: string, options: ApiFetchOptions = {}): 
   const response = await fetch(url, {
     ...rest,
     headers: reqHeaders,
-    credentials: "include", // Session HttpOnly cookie
+    credentials: "include",
   });
 
   if (!response.ok) {

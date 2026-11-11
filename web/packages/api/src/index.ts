@@ -1,5 +1,6 @@
 import { QueryClient } from "@tanstack/react-query";
 
+export type * from "./schema";
 export * from "./client";
 export * from "./mocks/handlers";
 export * from "./mocks/browser";

@@ -6,7 +6,7 @@ import { http, HttpResponse } from "msw";
  */
 export const handlers = [
   // TODO(api:T00.06): Backend Axum health check endpoint
-  http.get("/api/v1/public/health", () => {
+  http.get(/\/api\/v1\/public\/health$/, () => {
     return HttpResponse.json({
       status: "ok",
       version: "0.1.0",
@@ -15,7 +15,7 @@ export const handlers = [
   }),
 
   // TODO(api:T01.01): Backend Admin bootstrap endpoint
-  http.get("/api/v1/admin/bootstrap", () => {
+  http.get(/\/api\/v1\/admin\/bootstrap$/, () => {
     return HttpResponse.json({
       user: {
         id: "usr_admin_01",
@@ -45,7 +45,7 @@ export const handlers = [
   }),
 
   // TODO(api:T01.01): Backend Client bootstrap endpoint
-  http.get("/api/v1/client/bootstrap", () => {
+  http.get(/\/api\/v1\/client\/bootstrap$/, () => {
     return HttpResponse.json({
       user: {
         id: "usr_client_01",
