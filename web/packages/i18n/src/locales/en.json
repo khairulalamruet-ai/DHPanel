@@ -360,5 +360,30 @@
     },
     "retrySuccess": "Operation re-queued for execution successfully",
     "empty": "No operations found matching the filter criteria."
+  },
+  "settings": {
+    "nav": "Settings",
+    "title": "Platform Settings",
+    "desc": "Configure core platform modules, security parameters, and operational preferences",
+    "tabs": {
+      "general": "General",
+      "security": "Security",
+      "backup": "Backups",
+      "notifications": "Notifications",
+      "docker": "Docker Engine"
+    },
+    "form": {
+      "save": "Save Changes",
+      "saving": "Saving...",
+      "reset": "Reset",
+      "requiredField": "This field is required",
+      "invalidEmail": "Please enter a valid email address",
+      "invalidInteger": "Please enter a valid integer",
+      "minValue": "Value must be at least {{min}}",
+      "maxValue": "Value must be at most {{max}}",
+      "saveSuccess": "Settings for '{{module}}' updated successfully",
+      "saveError": "Failed to update settings"
+    },
+    "empty": "No settings available for this module."
   }
 }

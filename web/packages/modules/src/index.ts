@@ -9,3 +9,4 @@ export * from "./nodes/types";
 export * from "./operations/OperationsPage";
 export * from "./operations/useOperation";
 export * from "./operations/types";
+export * from "./settings";

@@ -213,6 +213,204 @@ export const resetMockModules = () => {
   modules = getInitialModules();
 };
 
+export const getInitialSettingsStore = () => ({
+  general: {
+    title: { en: "General", bn: "সাধারণ" },
+    description: {
+      en: "Global panel identity, default language, and session preferences",
+      bn: "গ্লোবাল প্যানেল পরিচিতি, ডিফল্ট ভাষা এবং সেশন পছন্দসমূহ",
+    },
+    schema: {
+      type: "object" as const,
+      title: "General Settings",
+      required: ["panel_name", "support_email"],
+      properties: {
+        panel_name: {
+          type: "string",
+          title: "Panel Name",
+          description: "Name displayed across headers, emails, and login pages",
+          default: "DHPanel",
+        },
+        support_email: {
+          type: "string",
+          format: "email",
+          title: "Support Contact Email",
+          description: "Inquiries and customer issue reports will be directed here",
+          default: "support@dhpanel.local",
+        },
+        session_timeout: {
+          type: "integer",
+          title: "Session Timeout (Minutes)",
+          description: "Duration of idle user session before automatic logout",
+          default: 60,
+          minimum: 5,
+          maximum: 1440,
+        },
+        maintenance_mode: {
+          type: "boolean",
+          title: "Maintenance Mode",
+          description: "Temporarily pause user access for platform maintenance",
+          default: false,
+        },
+        default_locale: {
+          type: "string",
+          title: "Default Language",
+          enum: ["bn", "en"],
+          enumNames: ["বাংলা", "English"],
+          default: "bn",
+        },
+      },
+    },
+    values: {
+      panel_name: "DHPanel",
+      support_email: "support@dhpanel.local",
+      session_timeout: 60,
+      maintenance_mode: false,
+      default_locale: "bn",
+    },
+  },
+  security: {
+    title: { en: "Security", bn: "নিরাপত্তা" },
+    description: {
+      en: "Authentication policies, password rules, and brute-force protection",
+      bn: "প্রমাণীকরণ নীতি, পাসওয়ার্ড নিয়ম এবং ব্রুট-ফোর্স সুরক্ষা",
+    },
+    schema: {
+      type: "object" as const,
+      title: "Security Settings",
+      required: ["password_min_length", "max_login_attempts"],
+      properties: {
+        password_min_length: {
+          type: "integer",
+          title: "Minimum Password Length",
+          description: "Minimum character count for new passwords",
+          default: 8,
+          minimum: 8,
+          maximum: 64,
+        },
+        max_login_attempts: {
+          type: "integer",
+          title: "Max Failed Login Attempts",
+          description: "Consecutive failed logins before temporary IP lockout",
+          default: 5,
+          minimum: 3,
+          maximum: 20,
+        },
+        require_2fa_for_admins: {
+          type: "boolean",
+          title: "Enforce 2FA for Administrators",
+          description: "Mandates TOTP setup for all admin accounts",
+          default: true,
+        },
+        session_ip_binding: {
+          type: "boolean",
+          title: "Bind Sessions to IP Address",
+          description: "Terminates session if request IP address changes",
+          default: false,
+        },
+      },
+    },
+    values: {
+      password_min_length: 8,
+      max_login_attempts: 5,
+      require_2fa_for_admins: true,
+      session_ip_binding: false,
+    },
+  },
+  backup: {
+    title: { en: "Backups", bn: "ব্যাকআপ" },
+    description: {
+      en: "Automated snapshot frequency, compression, and retention policies",
+      bn: "স্বয়ংক্রিয় স্ন্যাপশট ফ্রিকোয়েন্সি, কম্প্রেশন এবং রিটেনশন নীতি",
+    },
+    schema: {
+      type: "object" as const,
+      title: "Backup Settings",
+      required: ["backup_retention_days", "compression_algorithm"],
+      properties: {
+        backup_retention_days: {
+          type: "integer",
+          title: "Retention Period (Days)",
+          description: "Number of days before automated snapshots are pruned",
+          default: 30,
+          minimum: 1,
+          maximum: 365,
+        },
+        compression_algorithm: {
+          type: "string",
+          title: "Compression Algorithm",
+          enum: ["zstd", "gzip", "none"],
+          enumNames: ["Zstandard (Fast & High Ratio)", "Gzip (Standard)", "None (Uncompressed)"],
+          default: "zstd",
+        },
+        auto_backup_enabled: {
+          type: "boolean",
+          title: "Automatic Daily Backups",
+          description: "Run automated backups every midnight",
+          default: true,
+        },
+        remote_storage_provider: {
+          type: "string",
+          title: "Storage Destination",
+          enum: ["local", "s3", "b2"],
+          enumNames: ["Local Disk", "Amazon S3", "Backblaze B2"],
+          default: "local",
+        },
+      },
+    },
+    values: {
+      backup_retention_days: 30,
+      compression_algorithm: "zstd",
+      auto_backup_enabled: true,
+      remote_storage_provider: "local",
+    },
+  },
+  notifications: {
+    title: { en: "Notifications", bn: "বিজ্ঞপ্তি" },
+    description: {
+      en: "Alert channels, email dispatches, and incoming webhooks",
+      bn: "সতর্কবার্তা চ্যানেল, ইমেইল প্রেরণ এবং ইনকামিং ওয়েবহুক",
+    },
+    schema: {
+      type: "object" as const,
+      title: "Notification Settings",
+      required: ["alert_email"],
+      properties: {
+        alert_email: {
+          type: "string",
+          format: "email",
+          title: "Alert Recipient Email",
+          description: "Destination address for critical node alarms",
+          default: "alerts@dhpanel.local",
+        },
+        notify_on_node_offline: {
+          type: "boolean",
+          title: "Notify when a Node goes offline",
+          description: "Dispatches immediate alert upon missed node heartbeat",
+          default: true,
+        },
+        slack_webhook_url: {
+          type: "string",
+          title: "Slack Webhook URL",
+          description: "Optional URL for posting critical system alerts to Slack channel",
+          default: "",
+        },
+      },
+    },
+    values: {
+      alert_email: "alerts@dhpanel.local",
+      notify_on_node_offline: true,
+      slack_webhook_url: "",
+    },
+  },
+});
+
+let mockSettingsStore: Record<string, any> = getInitialSettingsStore();
+
+export const resetMockSettings = () => {
+  mockSettingsStore = getInitialSettingsStore();
+};
+
 const mockMe = {
   id: "00000000-0000-0000-0000-000000000001",
   username: "admin",
@@ -922,6 +1120,88 @@ export const handlers = [
       success: true,
       module: mod,
       disabled_dependents: disabledDependents,
+    });
+  }),
+
+  // Settings: Get all modules and their schemas/values (GET /api/v1/admin/settings)
+  // TODO(api:T03.09): Replace with real backend settings endpoint
+  http.get(/\/api\/v1\/admin\/settings$/, () => {
+    return HttpResponse.json({
+      modules: Object.keys(mockSettingsStore).map((key) => ({
+        id: key,
+        title: mockSettingsStore[key].title,
+        description: mockSettingsStore[key].description,
+        schema: mockSettingsStore[key].schema,
+        values: mockSettingsStore[key].values,
+      })),
+    });
+  }),
+
+  // Settings: Get schema & values for a specific module (GET /api/v1/admin/settings/:module)
+  // TODO(api:T03.09): Replace with real backend settings endpoint
+  http.get(/\/api\/v1\/admin\/settings\/([^/]+)$/, ({ params }) => {
+    const mod = params[0] as string;
+    const entry = mockSettingsStore[mod];
+    if (!entry) {
+      return HttpResponse.json(
+        { error: "not_found", message: `Settings module '${mod}' not found` },
+        { status: 404 }
+      );
+    }
+    return HttpResponse.json({
+      module: mod,
+      title: entry.title,
+      description: entry.description,
+      schema: entry.schema,
+      values: entry.values,
+    });
+  }),
+
+  // Settings: Update values for a module (PUT /api/v1/admin/settings/:module)
+  // TODO(api:T03.09): Replace with real backend settings endpoint
+  // TODO(api:T03.08): JSON Schema validation
+  http.put(/\/api\/v1\/admin\/settings\/([^/]+)$/, async ({ params, request }) => {
+    const mod = params[0] as string;
+    const entry = mockSettingsStore[mod];
+    if (!entry) {
+      return HttpResponse.json(
+        { error: "not_found", message: `Settings module '${mod}' not found` },
+        { status: 404 }
+      );
+    }
+
+    const body = (await request.json().catch(() => ({}))) as any;
+    const incomingValues = body?.values || body;
+
+    // Validate required fields
+    const required = entry.schema.required || [];
+    for (const reqKey of required) {
+      if (
+        incomingValues[reqKey] === undefined ||
+        incomingValues[reqKey] === null ||
+        incomingValues[reqKey] === ""
+      ) {
+        return HttpResponse.json(
+          {
+            error: "validation_failed",
+            message: `Missing required field: ${reqKey}`,
+            field: reqKey,
+          },
+          { status: 422 }
+        );
+      }
+    }
+
+    // Update store
+    mockSettingsStore[mod].values = {
+      ...mockSettingsStore[mod].values,
+      ...incomingValues,
+    };
+
+    return HttpResponse.json({
+      success: true,
+      module: mod,
+      values: mockSettingsStore[mod].values,
     });
   }),
 ];

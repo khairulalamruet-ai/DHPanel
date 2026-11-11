@@ -236,7 +236,7 @@ export const registeredFrontendModules: FrontendModule[] = [
       title: { en: "Settings", bn: "সেটিংস" },
       category: "core",
       core: true,
-      permissions: ["settings.read", "settings.update"],
+      permissions: ["admin.settings.read", "admin.settings.manage", "settings.read", "settings.update"],
     },
     adminNav: [
       {
@@ -245,7 +245,7 @@ export const registeredFrontendModules: FrontendModule[] = [
         icon: <Settings className="h-4 w-4" />,
         href: "/settings",
         order: 80,
-        permission: "settings.read",
+        permission: "admin.settings.read",
       },
     ],
   },

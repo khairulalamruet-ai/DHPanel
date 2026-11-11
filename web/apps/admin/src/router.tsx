@@ -17,6 +17,7 @@ import {
   ModuleManagerPage,
   NodesPage,
   OperationsPage,
+  SettingsPage,
   filterNavItems,
   registeredFrontendModules,
 } from "@dhpanel/modules";
@@ -124,7 +125,14 @@ const operationsRoute = createRoute({
   component: OperationsPage,
 });
 
-// 10. Login route
+// 10. Settings route (T03.13)
+const settingsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/settings",
+  component: SettingsPage,
+});
+
+// 11. Login route
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/login",
@@ -139,7 +147,7 @@ const loginRoute = createRoute({
   },
 });
 
-// 11. Route Tree
+// 12. Route Tree
 const routeTree = rootRoute.addChildren([
   indexRoute,
   demoRoute,
@@ -149,6 +157,7 @@ const routeTree = rootRoute.addChildren([
   modulesRoute,
   nodesRoute,
   operationsRoute,
+  settingsRoute,
   loginRoute,
 ]);
 
