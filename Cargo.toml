@@ -18,6 +18,7 @@ members = [
     "crates/session",
     "crates/rbac",
     "crates/audit",
+    "crates/node-protocol",
     "crates/modules/auth",
     "crates/modules/admin",
 ]
@@ -44,6 +45,7 @@ dhpanel-observability = { path = "crates/observability" }
 dhpanel-session = { path = "crates/session" }
 dhpanel-rbac = { path = "crates/rbac" }
 dhpanel-audit = { path = "crates/audit" }
+dhpanel-node-protocol = { path = "crates/node-protocol" }
 dhpanel-mod-auth = { path = "crates/modules/auth" }
 dhpanel-mod-admin = { path = "crates/modules/admin" }
 

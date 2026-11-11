@@ -888,6 +888,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "dhpanel-node-protocol"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
 name = "dhpanel-observability"
 version = "0.1.0"
 dependencies = [
