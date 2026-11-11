@@ -23,6 +23,7 @@ import {
 } from "@dhpanel/ui";
 import { useTranslation, useFormatters } from "@dhpanel/i18n";
 import { api } from "@dhpanel/api";
+import { useSession } from "@dhpanel/auth";
 import {
   FileText,
   Filter,
@@ -55,6 +56,7 @@ interface AuditItem {
 export function AuditViewerPage() {
   const { t } = useTranslation();
   const { formatDate } = useFormatters();
+  const { hasPermission, isLoading: isSessionLoading } = useSession();
 
   // Filters State
   const [actionFilter, setActionFilter] = useState("");
@@ -96,6 +98,10 @@ export function AuditViewerPage() {
       });
 
       if (res.error) {
+        if ((res.response as any)?.status === 403) {
+          setError(t("common.noPermission"));
+          return;
+        }
         setError(t("common.error"));
         return;
       }
@@ -185,6 +191,22 @@ export function AuditViewerPage() {
         );
     }
   };
+
+  if (isSessionLoading) {
+    return (
+      <div className="py-12 text-center text-sm text-muted-foreground">
+        {t("common.loading")}
+      </div>
+    );
+  }
+
+  if (!hasPermission("admin.audit.read")) {
+    return (
+      <div className="p-8 text-center border rounded-lg bg-card">
+        <p className="text-sm text-muted-foreground">{t("common.noPermission")}</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

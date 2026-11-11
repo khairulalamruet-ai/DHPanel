@@ -4,6 +4,21 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { AuditViewerPage } from "./AuditViewerPage";
 import { api } from "@dhpanel/api";
 
+let mockHasPermission = true;
+
+vi.mock("@dhpanel/auth", () => ({
+  useSession: () => ({
+    data: {
+      user: { id: "00000000-0000-0000-0000-000000000001", username: "admin" },
+      roles: ["super_admin"],
+      permissions: ["*"],
+    },
+    isLoading: false,
+    hasPermission: (perm: string) => mockHasPermission,
+    hasRole: (role: string) => true,
+  }),
+}));
+
 vi.mock("@dhpanel/i18n", () => ({
   useTranslation: () => ({
     t: (key: string) => {
@@ -47,6 +62,7 @@ vi.mock("@dhpanel/i18n", () => ({
         "audit.empty": "No audit records found matching the criteria.",
         "common.loading": "Loading...",
         "common.error": "Failed to load audit logs",
+        "common.noPermission": "Permission denied",
       };
       return dict[key] || key;
     },
@@ -90,6 +106,13 @@ const mockAuditLogs = [
 describe("AuditViewerPage", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    mockHasPermission = true;
+  });
+
+  it("renders permission denied message when user lacks admin.audit.read", () => {
+    mockHasPermission = false;
+    render(<AuditViewerPage />);
+    expect(screen.getByText("Permission denied")).toBeInTheDocument();
   });
 
   it("renders audit logs table and filters", async () => {

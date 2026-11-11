@@ -14,7 +14,7 @@ import { useTranslation } from "@dhpanel/i18n";
 import { LayoutDashboard, Sparkles, ShieldCheck, FileText } from "lucide-react";
 
 function AuthenticatedContent() {
-  const { data: session, isLoading } = useSession();
+  const { data: session, isLoading, hasPermission } = useSession();
   const { t } = useTranslation();
 
   const navItems = [
@@ -30,12 +30,16 @@ function AuthenticatedContent() {
       icon: <ShieldCheck className="h-4 w-4" />,
       href: "/security",
     },
-    {
-      id: "audit",
-      labelKey: "audit.nav",
-      icon: <FileText className="h-4 w-4" />,
-      href: "/audit",
-    },
+    ...(hasPermission("admin.audit.read")
+      ? [
+          {
+            id: "audit",
+            labelKey: "audit.nav",
+            icon: <FileText className="h-4 w-4" />,
+            href: "/audit",
+          },
+        ]
+      : []),
     {
       id: "demo",
       labelKey: "UI Foundation (T00.12)",

@@ -4,6 +4,98 @@
  */
 
 export interface paths {
+    "/api/v1/admin/administrators": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List administrators. */
+        get: operations["listAdministrators"];
+        put?: never;
+        /** Create an administrator. */
+        post: operations["createAdministrator"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/administrators/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Show one administrator. */
+        get: operations["getAdministrator"];
+        put?: never;
+        post?: never;
+        /** Delete an administrator. Their sessions end; audit entries stay. */
+        delete: operations["deleteAdministrator"];
+        options?: never;
+        head?: never;
+        /** Change an administrator's email, status or two-factor requirement. */
+        patch: operations["updateAdministrator"];
+        trace?: never;
+    };
+    "/api/v1/admin/administrators/{id}/mfa/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Remove an administrator's second factor and backup codes (lost phone) and
+         *     end their sessions. If 2FA is mandatory for them, they must enrol again.
+         */
+        post: operations["resetAdministratorMfa"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/administrators/{id}/roles/{role}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Give an administrator a role (no change when they already have it). */
+        put: operations["assignAdministratorRole"];
+        post?: never;
+        /** Take a role away from an administrator (no change when they do not have it). */
+        delete: operations["revokeAdministratorRole"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/administrators/{id}/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Sign an administrator out everywhere. */
+        delete: operations["endAdministratorSessions"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/audit-logs": {
         parameters: {
             query?: never;
@@ -292,6 +384,50 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description A page of administrators. */
+        AdministratorList: {
+            /** @description Oldest account first. */
+            items: components["schemas"]["AdministratorView"][];
+            /**
+             * Format: uuid
+             * @description Pass as `after` to get the next page; absent on the last page.
+             */
+            next_after?: string | null;
+        };
+        /** @description An administrator account. */
+        AdministratorView: {
+            /**
+             * Format: date-time
+             * @description When the account was created (RFC 3339, UTC).
+             * @example 2026-11-11T09:30:00Z
+             */
+            created_at: string;
+            /** @description Email address. */
+            email: string;
+            /**
+             * Format: uuid
+             * @description Account id.
+             */
+            id: string;
+            /**
+             * Format: date-time
+             * @description Last successful login (RFC 3339, UTC), if any.
+             */
+            last_login_at?: string | null;
+            /** @description A second factor is set up. */
+            mfa_enabled: boolean;
+            /** @description Two-factor authentication is mandatory for this account. */
+            mfa_required: boolean;
+            /** @description Role names. */
+            roles: string[];
+            /**
+             * @description `active`, `suspended` or `disabled`.
+             * @example active
+             */
+            status: string;
+            /** @description Login name. */
+            username: string;
+        };
         /** @description One audit entry. */
         AuditItem: {
             /**
@@ -378,6 +514,36 @@ export interface components {
              */
             code: string;
         };
+        /** @description New administrator. */
+        CreateAdministrator: {
+            /** @description Contact email address. */
+            email: string;
+            /**
+             * Format: password
+             * @description Initial password; must satisfy the password policy.
+             */
+            password: string;
+            /** @description Require two-factor authentication (default `true`). */
+            require_mfa?: boolean | null;
+            /**
+             * @description Role to grant (default `admin`).
+             * @example admin
+             */
+            role?: string | null;
+            /**
+             * @description Login name: 3-32 characters, a-z, 0-9, `_` or `-`, starting with a letter.
+             * @example khairul
+             */
+            username: string;
+        };
+        /** @description Result of ending sessions. */
+        EndedSessions: {
+            /**
+             * Format: int64
+             * @description Number of sessions ended.
+             */
+            revoked: number;
+        };
         /** @description One invalid input field (used with 422). */
         FieldError: {
             /** @description Stable machine code, e.g. `required`, `too_long`, `invalid_format`. */
@@ -430,6 +596,14 @@ export interface components {
             locale: string;
             /** @description Whether two-factor authentication (TOTP) is enabled. */
             mfa_enabled: boolean;
+            /** @description An administrator made two-factor authentication mandatory for this account. */
+            mfa_required: boolean;
+            /**
+             * @description Two-factor authentication is mandatory but not set up yet: until it is,
+             *     permission-protected endpoints answer 403 `mfa_setup_required`. The UI
+             *     should send the user to the security page to enrol.
+             */
+            mfa_setup_required: boolean;
             /**
              * @description Permission grants from all roles: exact keys (`admin.roles.read`),
              *     subtrees (`admin.*`) or `*` for everything. Use them to show or hide
@@ -544,6 +718,11 @@ export interface components {
             /** @description Browser user agent at login. */
             user_agent?: string | null;
         };
+        /**
+         * @description Status an administrator can be set to.
+         * @enum {string}
+         */
+        StatusInput: "active" | "suspended" | "disabled";
         /** @description Re-authentication to enter sudo mode. */
         SudoRequest: {
             /**
@@ -572,6 +751,14 @@ export interface components {
             /** @description Base32 secret for manual entry. */
             secret: string;
         };
+        /** @description Changes to an administrator; omitted fields stay as they are. */
+        UpdateAdministrator: {
+            /** @description New email address. */
+            email?: string | null;
+            /** @description Make two-factor authentication mandatory (or not). */
+            require_mfa?: boolean | null;
+            status?: components["schemas"]["StatusInput"] | null;
+        };
     };
     responses: never;
     parameters: never;
@@ -581,6 +768,457 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    listAdministrators: {
+        parameters: {
+            query?: {
+                /** @description Entries per page, 1..=100 (default 50). */
+                limit?: string;
+                /** @description `next_after` of the previous page. */
+                after?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of administrators */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdministratorList"];
+                };
+            };
+            /** @description `permission_denied` (needs admin.administrators.read) or `mfa_setup_required` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Invalid paging */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    createAdministrator: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The session's csrf_token */
+                "X-CSRF-Token": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateAdministrator"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdministratorView"];
+                };
+            };
+            /** @description `permission_denied`, `super_admin_required`, `reauth_required` (call POST /api/v1/auth/sudo) or `csrf_failed` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `username_taken` or `email_taken` */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Invalid input; one error per field */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    getAdministrator: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Administrator id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The administrator */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdministratorView"];
+                };
+            };
+            /** @description `permission_denied` or `mfa_setup_required` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such administrator */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    deleteAdministrator: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The session's csrf_token */
+                "X-CSRF-Token": string;
+            };
+            path: {
+                /** @description Administrator id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `permission_denied`, `super_admin_required`, `reauth_required` or `csrf_failed` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such administrator */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `cannot_delete_self` or `last_super_admin` */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    updateAdministrator: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The session's csrf_token */
+                "X-CSRF-Token": string;
+            };
+            path: {
+                /** @description Administrator id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateAdministrator"];
+            };
+        };
+        responses: {
+            /** @description Updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdministratorView"];
+                };
+            };
+            /** @description `permission_denied`, `super_admin_required`, `reauth_required` or `csrf_failed` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such administrator */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `email_taken`, `cannot_lock_yourself` or `last_super_admin` */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Nothing to change, or invalid input */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    resetAdministratorMfa: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The session's csrf_token */
+                "X-CSRF-Token": string;
+            };
+            path: {
+                /** @description Administrator id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Second factor removed (also when there was none) */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `permission_denied`, `super_admin_required`, `reauth_required` or `csrf_failed` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such administrator */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    assignAdministratorRole: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The session's csrf_token */
+                "X-CSRF-Token": string;
+            };
+            path: {
+                /** @description Administrator id */
+                id: string;
+                /** @description Role name */
+                role: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The administrator with their roles */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdministratorView"];
+                };
+            };
+            /** @description `permission_denied`, `super_admin_required`, `reauth_required` or `csrf_failed` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such administrator or role */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `role_not_assignable` */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    revokeAdministratorRole: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The session's csrf_token */
+                "X-CSRF-Token": string;
+            };
+            path: {
+                /** @description Administrator id */
+                id: string;
+                /** @description Role name */
+                role: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The administrator with their roles */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdministratorView"];
+                };
+            };
+            /** @description `permission_denied`, `super_admin_required`, `reauth_required` or `csrf_failed` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such administrator */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `last_super_admin` */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    endAdministratorSessions: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The session's csrf_token */
+                "X-CSRF-Token": string;
+            };
+            path: {
+                /** @description Administrator id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Sessions ended */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EndedSessions"];
+                };
+            };
+            /** @description `permission_denied`, `super_admin_required`, `reauth_required` or `csrf_failed` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such administrator */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
     listAuditLogs: {
         parameters: {
             query?: {
