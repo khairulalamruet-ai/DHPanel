@@ -20,3 +20,13 @@ max_connections = 10
 
 [redis]
 url_file = "/etc/dhpanel/secrets/redis_url"
+
+[auth]
+# Argon2id password hashing cost. Raising these makes every login slower;
+# existing hashes are upgraded on the next successful login.
+# Default is the OWASP baseline (19 MiB, t=2). Benchmark the server first:
+#   DHPANEL_BENCH_ARGON2=65536,3,1 cargo test -p dhpanel-auth-core --release -- --ignored --nocapture benchmark
+# and aim for roughly 200 ms per hash.
+argon2_memory_kib = 19456   # KiB, minimum 19456
+argon2_iterations = 2       # minimum 2
+argon2_parallelism = 1

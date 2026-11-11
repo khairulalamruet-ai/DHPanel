@@ -1,0 +1,21 @@
+[package]
+name = "dhpanel-auth-core"
+description = "Password hashing (argon2id), password policy, sessions, TOTP and CSRF primitives."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+argon2 = "0.6.0"
+secrecy = "0.10"
+thiserror = "2.0.21"
+tokio = { version = "1", features = ["rt"] }
+zxcvbn = "3.1.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

@@ -39,6 +39,20 @@ pub struct ControlConfig {
     pub database: DatabaseConfig,
     /// Redis connection.
     pub redis: RedisConfig,
+    /// Authentication settings.
+    pub auth: AuthConfig,
+}
+
+/// Authentication settings.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AuthConfig {
+    /// Argon2id memory cost in KiB (minimum 19456 = 19 MiB).
+    pub argon2_memory_kib: u32,
+    /// Argon2id iterations (minimum 2).
+    pub argon2_iterations: u32,
+    /// Argon2id lanes (1..=8).
+    pub argon2_parallelism: u32,
 }
 
 /// Logging settings.
@@ -104,6 +118,12 @@ impl Default for ControlConfig {
             redis: RedisConfig {
                 url: None,
                 url_file: None,
+            },
+            // OWASP argon2id baseline; see dhpanel_auth_core::password::Argon2Params.
+            auth: AuthConfig {
+                argon2_memory_kib: 19 * 1024,
+                argon2_iterations: 2,
+                argon2_parallelism: 1,
             },
         }
     }
@@ -201,6 +221,27 @@ impl ControlConfig {
             return Err(ConfigError::Invalid {
                 key: "database.max_connections",
                 reason: format!("must be 1..=500, got {}", self.database.max_connections),
+            });
+        }
+        if self.auth.argon2_memory_kib < 19 * 1024 {
+            return Err(ConfigError::Invalid {
+                key: "auth.argon2_memory_kib",
+                reason: format!(
+                    "must be at least 19456 (OWASP minimum), got {}",
+                    self.auth.argon2_memory_kib
+                ),
+            });
+        }
+        if self.auth.argon2_iterations < 2 {
+            return Err(ConfigError::Invalid {
+                key: "auth.argon2_iterations",
+                reason: format!("must be at least 2, got {}", self.auth.argon2_iterations),
+            });
+        }
+        if !(1..=8).contains(&self.auth.argon2_parallelism) {
+            return Err(ConfigError::Invalid {
+                key: "auth.argon2_parallelism",
+                reason: format!("must be 1..=8, got {}", self.auth.argon2_parallelism),
             });
         }
         if self.database.url.is_some() && self.database.url_file.is_some() {
@@ -421,6 +462,17 @@ mod tests {
             jail.set_env("DHPANEL_DATABASE__MAX_CONNECTIONS", "0");
             let msg = load(jail).expect_err("must fail").to_string();
             assert!(msg.contains("database.max_connections"), "{msg}");
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn weak_argon2_settings_are_rejected() {
+        Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DHPANEL_AUTH__ARGON2_MEMORY_KIB", "4096");
+            let msg = load(jail).expect_err("too little memory").to_string();
+            assert!(msg.contains("auth.argon2_memory_kib"), "{msg}");
             Ok(())
         });
     }
