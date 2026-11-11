@@ -352,6 +352,8 @@ mod tests {
     #[test]
     fn defaults_load_without_file_or_env() {
         Jail::expect_with(|jail| {
+            // Isolate from the developer's shell (e.g. `devenv.sh env` exports).
+            jail.clear_env();
             let cfg = load(jail).expect("defaults are valid");
             assert_eq!(cfg.listen.to_string(), "127.0.0.1:8080");
             assert_eq!(cfg.log.format, LogFormat::Json);
@@ -363,6 +365,8 @@ mod tests {
     #[test]
     fn file_then_env_override_order() {
         Jail::expect_with(|jail| {
+            // Isolate from the developer's shell (e.g. `devenv.sh env` exports).
+            jail.clear_env();
             jail.create_file(
                 "control.toml",
                 r#"
@@ -385,6 +389,8 @@ mod tests {
     #[test]
     fn unknown_key_is_rejected_with_its_name() {
         Jail::expect_with(|jail| {
+            // Isolate from the developer's shell (e.g. `devenv.sh env` exports).
+            jail.clear_env();
             jail.create_file("control.toml", "lisen = \"0.0.0.0:1\"")?;
             let msg = load(jail).expect_err("typo must fail").to_string();
             assert!(msg.contains("`lisen`"), "{msg}");
@@ -397,6 +403,8 @@ mod tests {
     #[test]
     fn wrong_type_is_rejected() {
         Jail::expect_with(|jail| {
+            // Isolate from the developer's shell (e.g. `devenv.sh env` exports).
+            jail.clear_env();
             jail.set_env("DHPANEL_DATABASE__MAX_CONNECTIONS", "lots");
             let msg = load(jail).expect_err("must fail").to_string();
             assert!(msg.contains("`database.max_connections`"), "{msg}");
@@ -408,6 +416,8 @@ mod tests {
     #[test]
     fn out_of_range_value_names_the_key() {
         Jail::expect_with(|jail| {
+            // Isolate from the developer's shell (e.g. `devenv.sh env` exports).
+            jail.clear_env();
             jail.set_env("DHPANEL_DATABASE__MAX_CONNECTIONS", "0");
             let msg = load(jail).expect_err("must fail").to_string();
             assert!(msg.contains("database.max_connections"), "{msg}");
@@ -418,6 +428,8 @@ mod tests {
     #[test]
     fn missing_secret_is_reported() {
         Jail::expect_with(|jail| {
+            // Isolate from the developer's shell (e.g. `devenv.sh env` exports).
+            jail.clear_env();
             let cfg = load(jail).expect("valid");
             let msg = cfg.database_url().expect_err("missing").to_string();
             assert!(msg.contains("database.url_file"), "{msg}");
@@ -428,6 +440,8 @@ mod tests {
     #[test]
     fn secret_never_appears_in_debug_output() {
         Jail::expect_with(|jail| {
+            // Isolate from the developer's shell (e.g. `devenv.sh env` exports).
+            jail.clear_env();
             jail.set_env("DHPANEL_DATABASE__URL", "postgres://u:hunter2@db/x");
             let cfg = load(jail).expect("valid");
             assert!(!format!("{cfg:?}").contains("hunter2"));
@@ -442,6 +456,8 @@ mod tests {
     #[test]
     fn wrong_url_scheme_is_rejected() {
         Jail::expect_with(|jail| {
+            // Isolate from the developer's shell (e.g. `devenv.sh env` exports).
+            jail.clear_env();
             jail.set_env("DHPANEL_REDIS__URL", "http://cache");
             let cfg = load(jail).expect("valid");
             let msg = cfg.redis_url().expect_err("scheme").to_string();
@@ -453,6 +469,8 @@ mod tests {
     #[test]
     fn inline_and_file_together_is_rejected() {
         Jail::expect_with(|jail| {
+            // Isolate from the developer's shell (e.g. `devenv.sh env` exports).
+            jail.clear_env();
             jail.set_env("DHPANEL_REDIS__URL", "redis://a");
             jail.set_env("DHPANEL_REDIS__URL_FILE", "/tmp/x");
             assert!(load(jail).is_err());
@@ -465,6 +483,8 @@ mod tests {
     fn secret_file_permissions_are_enforced() {
         use std::os::unix::fs::PermissionsExt;
         Jail::expect_with(|jail| {
+            // Isolate from the developer's shell (e.g. `devenv.sh env` exports).
+            jail.clear_env();
             let path = jail.directory().join("db_url");
             std::fs::write(&path, "postgres://u:p@db/x\n").expect("write");
             jail.set_env("DHPANEL_DATABASE__URL_FILE", path.display());
