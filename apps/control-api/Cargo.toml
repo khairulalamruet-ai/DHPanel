@@ -19,6 +19,7 @@ otel = ["dhpanel-observability/otel"]
 [dependencies]
 dhpanel-common.workspace = true
 dhpanel-config.workspace = true
+dhpanel-database.workspace = true
 dhpanel-http-kit.workspace = true
 dhpanel-observability.workspace = true
 # HTTP framework and async runtime (fixed stack).

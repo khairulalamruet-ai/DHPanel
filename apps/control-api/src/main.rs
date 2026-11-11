@@ -46,11 +46,41 @@ async fn main() -> ExitCode {
         }
     };
 
+    // Lazy pool: the API starts even if PostgreSQL is down; /ready reports it.
+    let db = match config
+        .database_url()
+        .map_err(|e| e.to_string())
+        .and_then(|url| {
+            dhpanel_database::connect_lazy(
+                &url,
+                &dhpanel_database::PoolSettings {
+                    max_connections: config.database.max_connections,
+                    application_name: SERVICE.to_owned(),
+                },
+            )
+            .map_err(|e| e.to_string())
+        }) {
+        Ok(pool) => pool,
+        Err(err) => {
+            tracing::error!(error = %err, "database configuration invalid");
+            telemetry.shutdown();
+            return ExitCode::from(EXIT_CONFIG);
+        }
+    };
+
+    let readiness = Readiness::default().with_probe("database", {
+        let db = db.clone();
+        Arc::new(move || {
+            let db = db.clone();
+            Box::pin(async move { dhpanel_database::ping(&db).await.map_err(|e| e.to_string()) })
+        })
+    });
+
     let handle = telemetry.prometheus_handle();
-    // Database and Redis probes are registered by T00.07 / T00.08.
+    // The Redis probe is registered by T00.08.
     let app = app::router(app::AppState {
         metrics: Arc::new(move || handle.render()),
-        readiness: Readiness::default(),
+        readiness,
     });
 
     let addr = config.listen;
@@ -67,6 +97,7 @@ async fn main() -> ExitCode {
         .with_graceful_shutdown(shutdown_signal())
         .await;
 
+    db.close().await;
     telemetry.shutdown();
     match result {
         Ok(()) => ExitCode::SUCCESS,

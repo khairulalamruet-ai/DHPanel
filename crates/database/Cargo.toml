@@ -1,6 +1,6 @@
 [package]
 name = "dhpanel-database"
-description = "PostgreSQL pool, transaction helpers and tenant-scoped repository base."
+description = "PostgreSQL pool, transaction helpers, migrations and tenant-scoped repository base."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,3 +9,15 @@ publish.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+# Async PostgreSQL driver + migrations (fixed stack). No TLS yet: the database
+# listens on localhost / a private network; TLS is added with remote DB support.
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres", "migrate", "macros", "uuid", "time"] }
+# Database URL stays wrapped so it never reaches logs.
+secrecy = "0.10"
+thiserror = "2.0.21"
+tracing = "0.1.44"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
