@@ -9,44 +9,21 @@ import { ThemeProvider, ToastProvider } from "@dhpanel/ui";
 import { SessionProvider, useSession, LoginPage, AccountSecurityPage } from "@dhpanel/auth";
 import { queryClient, QueryClientProvider } from "@dhpanel/api";
 import { AppShell, NotFoundPage, RouteErrorFallback } from "@dhpanel/shell";
-import { DashboardPage, UiDemoPage, AuditViewerPage } from "@dhpanel/modules";
+import {
+  DashboardPage,
+  UiDemoPage,
+  AuditViewerPage,
+  DummyModulePage,
+  filterNavItems,
+  registeredFrontendModules,
+} from "@dhpanel/modules";
 import { useTranslation } from "@dhpanel/i18n";
-import { LayoutDashboard, Sparkles, ShieldCheck, FileText } from "lucide-react";
 
 function AuthenticatedContent() {
-  const { data: session, isLoading, hasPermission } = useSession();
+  const { data: session, isLoading } = useSession();
   const { t } = useTranslation();
 
-  const navItems = [
-    {
-      id: "dashboard",
-      labelKey: "common.dashboard",
-      icon: <LayoutDashboard className="h-4 w-4" />,
-      href: "/",
-    },
-    {
-      id: "security",
-      labelKey: "security.nav",
-      icon: <ShieldCheck className="h-4 w-4" />,
-      href: "/security",
-    },
-    ...(hasPermission("admin.audit.read")
-      ? [
-          {
-            id: "audit",
-            labelKey: "audit.nav",
-            icon: <FileText className="h-4 w-4" />,
-            href: "/audit",
-          },
-        ]
-      : []),
-    {
-      id: "demo",
-      labelKey: "UI Foundation (T00.12)",
-      icon: <Sparkles className="h-4 w-4 text-primary" />,
-      href: "/demo",
-    },
-  ];
+  const navItems = filterNavItems(registeredFrontendModules, session, "admin");
 
   if (isLoading) {
     return (
@@ -122,7 +99,14 @@ const auditRoute = createRoute({
   component: AuditViewerPage,
 });
 
-// 6. Login route
+// 6. Dummy module route (T03.11 DoD)
+const dummyRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/dummy",
+  component: DummyModulePage,
+});
+
+// 7. Login route
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/login",
@@ -137,8 +121,15 @@ const loginRoute = createRoute({
   },
 });
 
-// 7. Route Tree
-const routeTree = rootRoute.addChildren([indexRoute, demoRoute, securityRoute, auditRoute, loginRoute]);
+// 8. Route Tree
+const routeTree = rootRoute.addChildren([
+  indexRoute,
+  demoRoute,
+  securityRoute,
+  auditRoute,
+  dummyRoute,
+  loginRoute,
+]);
 
 // 6. Create Router
 export const router = createRouter({

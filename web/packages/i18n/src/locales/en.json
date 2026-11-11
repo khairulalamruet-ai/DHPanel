@@ -23,6 +23,8 @@
     "error": "An error occurred",
     "noPermission": "You do not have permission to access this resource",
     "featureDisabled": "This feature is not enabled for your plan",
+    "featureDisabledDesc": "Upgrade your hosting plan to gain access to this feature and unlock higher limits.",
+    "upgradePlan": "Upgrade Plan",
     "notFoundTitle": "404 - Page Not Found",
     "notFoundDesc": "The page you are looking for does not exist or has been moved.",
     "backHome": "Back to Dashboard",
@@ -174,5 +176,13 @@
       "page": "Page"
     },
     "empty": "No audit records found matching the current filters."
+  },
+  "dummy": {
+    "title": "Dummy Module (T03.11)",
+    "desc": "Demonstrates runtime modularity, bootstrap menu filtering, and plan feature-gates.",
+    "nav": "Dummy Module",
+    "badge": "Modular Plugin",
+    "status": "Module is currently active and rendered via Frontend Registry.",
+    "activeNotice": "This page is rendered only when 'dummy' is present in active modules and 'dummy_feature' is enabled."
   }
 }
