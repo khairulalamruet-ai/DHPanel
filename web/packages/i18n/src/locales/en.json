@@ -309,5 +309,56 @@
       "statusConsumed": "Consumed",
       "statusRevoked": "Revoked"
     }
+  },
+  "operations": {
+    "title": "Operation Ledger",
+    "desc": "Track real-time background jobs, node agent executions, and retry failed operations.",
+    "nav": "Operations",
+    "status": {
+      "all": "All Statuses",
+      "pending": "Pending",
+      "dispatched": "Dispatched",
+      "succeeded": "Succeeded",
+      "failed": "Failed",
+      "retryable": "Retryable"
+    },
+    "filters": {
+      "title": "Filter Operations",
+      "status": "Status",
+      "opType": "Operation Type",
+      "opTypePlaceholder": "e.g. Ping, PullImage, AttachDomain",
+      "node": "Node",
+      "nodePlaceholder": "Node ID or name",
+      "apply": "Apply Filters",
+      "reset": "Reset Filters"
+    },
+    "table": {
+      "id": "Operation ID",
+      "type": "Type",
+      "status": "Status",
+      "node": "Node",
+      "retries": "Retries",
+      "time": "Created",
+      "actions": "Actions",
+      "viewDetails": "View Payload & Logs",
+      "retry": "Retry",
+      "retrying": "Retrying..."
+    },
+    "modal": {
+      "title": "Operation Details",
+      "idempotencyKey": "Idempotency Key",
+      "nodeId": "Node ID",
+      "tenantId": "Tenant ID",
+      "attempts": "Attempts Count",
+      "payload": "Operation Payload",
+      "output": "Execution Output",
+      "error": "Error Diagnostic",
+      "copyJson": "Copy JSON",
+      "copied": "Copied!",
+      "close": "Close",
+      "retryOp": "Retry Operation"
+    },
+    "retrySuccess": "Operation re-queued for execution successfully",
+    "empty": "No operations found matching the filter criteria."
   }
 }

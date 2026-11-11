@@ -16,6 +16,7 @@ import {
   DummyModulePage,
   ModuleManagerPage,
   NodesPage,
+  OperationsPage,
   filterNavItems,
   registeredFrontendModules,
 } from "@dhpanel/modules";
@@ -29,40 +30,34 @@ function AuthenticatedContent() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
+      <div className="flex h-screen w-screen items-center justify-center">
         <p className="text-sm text-muted-foreground">{t("common.loading")}</p>
       </div>
     );
   }
 
-  if (!session?.user) {
-    return (
-      <LoginPage
-        title={t("common.adminTitle")}
-        onSuccess={() => router.navigate({ to: "/" })}
-      />
-    );
-  }
-
   return (
-    <AppShell title={t("common.adminTitle")} navItems={navItems}>
+    <AppShell
+      appName={t("common.appName")}
+      user={session ? { name: session.user.username } : undefined}
+      navItems={navItems}
+    >
       <Outlet />
     </AppShell>
   );
 }
 
-// Root Component
 function RootLayout() {
   return (
-    <ThemeProvider defaultTheme="system" storageKey="dhpanel-admin-theme">
-      <QueryClientProvider client={queryClient}>
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider defaultTheme="system">
         <ToastProvider>
-          <SessionProvider bootstrapPath="/api/v1/auth/me">
+          <SessionProvider>
             <AuthenticatedContent />
           </SessionProvider>
         </ToastProvider>
-      </QueryClientProvider>
-    </ThemeProvider>
+      </ThemeProvider>
+    </QueryClientProvider>
   );
 }
 
@@ -122,7 +117,14 @@ const nodesRoute = createRoute({
   component: NodesPage,
 });
 
-// 9. Login route
+// 9. Operations route (Operation Ledger T02.17)
+const operationsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/operations",
+  component: OperationsPage,
+});
+
+// 10. Login route
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/login",
@@ -137,7 +139,7 @@ const loginRoute = createRoute({
   },
 });
 
-// 10. Route Tree
+// 11. Route Tree
 const routeTree = rootRoute.addChildren([
   indexRoute,
   demoRoute,
@@ -146,6 +148,7 @@ const routeTree = rootRoute.addChildren([
   dummyRoute,
   modulesRoute,
   nodesRoute,
+  operationsRoute,
   loginRoute,
 ]);
 

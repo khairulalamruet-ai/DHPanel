@@ -707,6 +707,153 @@ export const handlers = [
       }),
     ];
   })(),
+  // Operations Ledger (T02.10, T02.11, T02.17) TODO(api:T02.17)
+  ...(() => {
+    const mockOperations: any[] = [
+      {
+        id: "00000000-0000-0000-0000-000000000101",
+        idempotency_key: "idemp_ping_001",
+        op_type: "Ping",
+        node_id: "00000000-0000-0000-0000-0000000000aa",
+        node_name: "node-master-01",
+        tenant_id: null,
+        status: "succeeded",
+        retries_count: 0,
+        payload: { echo: "dhpanel-heartbeat", timestamp: new Date(Date.now() - 60000).toISOString() },
+        output: { pong: true, latency_ms: 1.4 },
+        error: null,
+        created_at: new Date(Date.now() - 65000).toISOString(),
+        updated_at: new Date(Date.now() - 60000).toISOString(),
+      },
+      {
+        id: "00000000-0000-0000-0000-000000000102",
+        idempotency_key: "idemp_domain_002",
+        op_type: "AttachDomain",
+        node_id: "00000000-0000-0000-0000-0000000000aa",
+        node_name: "node-master-01",
+        tenant_id: "00000000-0000-0000-0000-000000000001",
+        status: "succeeded",
+        retries_count: 0,
+        payload: { domain: "example.com", docroot: "/var/www/example.com", php: "8.3" },
+        output: { vhost_created: true, caddy_reloaded: true },
+        error: null,
+        created_at: new Date(Date.now() - 120000).toISOString(),
+        updated_at: new Date(Date.now() - 110000).toISOString(),
+      },
+      {
+        id: "00000000-0000-0000-0000-000000000103",
+        idempotency_key: "idemp_pull_003",
+        op_type: "PullImage",
+        node_id: "00000000-0000-0000-0000-0000000000bb",
+        node_name: "node-worker-02",
+        tenant_id: null,
+        status: "failed",
+        retries_count: 2,
+        payload: { image: "redis:7.4-alpine", digest: "sha256:7f9202a061b" },
+        output: null,
+        error: {
+          code: "image_pull_timeout",
+          message: "Network timeout while pulling container image layer 3 from registry",
+          details: { registry: "docker.io", layer: "sha256:4a8bc9...", elapsed_seconds: 45 },
+        },
+        created_at: new Date(Date.now() - 300000).toISOString(),
+        updated_at: new Date(Date.now() - 250000).toISOString(),
+      },
+      {
+        id: "00000000-0000-0000-0000-000000000104",
+        idempotency_key: "idemp_db_004",
+        op_type: "CreateDatabase",
+        node_id: "00000000-0000-0000-0000-0000000000bb",
+        node_name: "node-worker-02",
+        tenant_id: "00000000-0000-0000-0000-000000000001",
+        status: "retryable",
+        retries_count: 1,
+        payload: { name: "demo_db", user: "db_user", charset: "utf8mb4" },
+        output: null,
+        error: {
+          code: "connection_refused",
+          message: "Database socket connection refused: daemon is initializing",
+          details: { socket: "/var/run/mysqld/mysqld.sock" },
+        },
+        created_at: new Date(Date.now() - 400000).toISOString(),
+        updated_at: new Date(Date.now() - 350000).toISOString(),
+      },
+      {
+        id: "00000000-0000-0000-0000-000000000105",
+        idempotency_key: "idemp_reload_005",
+        op_type: "ReloadWebServer",
+        node_id: "00000000-0000-0000-0000-0000000000aa",
+        node_name: "node-master-01",
+        tenant_id: null,
+        status: "dispatched",
+        retries_count: 0,
+        payload: { graceful: true },
+        output: null,
+        error: null,
+        created_at: new Date(Date.now() - 5000).toISOString(),
+        updated_at: new Date(Date.now() - 3000).toISOString(),
+      },
+    ];
+
+    return [
+      // List operations (GET /api/v1/admin/operations)
+      http.get(/\/api\/v1\/admin\/operations$/, ({ request }) => {
+        const url = new URL(request.url);
+        const status = url.searchParams.get("status");
+        const opType = url.searchParams.get("op_type");
+        const nodeId = url.searchParams.get("node_id");
+
+        let items = [...mockOperations];
+        if (status && status !== "all") {
+          items = items.filter((op) => op.status === status);
+        }
+        if (opType) {
+          items = items.filter((op) => op.op_type.toLowerCase().includes(opType.toLowerCase()));
+        }
+        if (nodeId) {
+          items = items.filter((op) => op.node_id === nodeId || op.node_name === nodeId);
+        }
+
+        return HttpResponse.json({
+          items,
+          total: items.length,
+        });
+      }),
+
+      // Get single operation (GET /api/v1/admin/operations/:id)
+      http.get(/\/api\/v1\/admin\/operations\/([^/]+)$/, ({ params }) => {
+        const { 0: id } = params as any;
+        const op = mockOperations.find((o) => o.id === id);
+        if (!op) {
+          return HttpResponse.json({ error: "not_found", message: "Operation not found" }, { status: 404 });
+        }
+        return HttpResponse.json(op);
+      }),
+
+      // Retry operation (POST /api/v1/admin/operations/:id/retry)
+      http.post(/\/api\/v1\/admin\/operations\/([^/]+)\/retry$/, ({ params }) => {
+        const { 0: id } = params as any;
+        const opIndex = mockOperations.findIndex((o) => o.id === id);
+        if (opIndex === -1) {
+          return HttpResponse.json({ error: "not_found", message: "Operation not found" }, { status: 404 });
+        }
+
+        const updated = {
+          ...mockOperations[opIndex],
+          status: "pending",
+          retries_count: mockOperations[opIndex].retries_count + 1,
+          error: null,
+          updated_at: new Date().toISOString(),
+        };
+        mockOperations[opIndex] = updated;
+
+        return HttpResponse.json({
+          success: true,
+          operation: updated,
+        });
+      }),
+    ];
+  })(),
 
   // Modules: List all modules (GET /api/v1/admin/modules)
   // TODO(api:T03.03): Replace with real backend endpoint
