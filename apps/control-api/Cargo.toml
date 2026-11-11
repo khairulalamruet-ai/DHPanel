@@ -17,12 +17,15 @@ default = []
 otel = ["dhpanel-observability/otel"]
 
 [dependencies]
+dhpanel-auth-core.workspace = true
 dhpanel-cache.workspace = true
 dhpanel-common.workspace = true
 dhpanel-config.workspace = true
 dhpanel-database.workspace = true
 dhpanel-http-kit.workspace = true
+dhpanel-mod-auth.workspace = true
 dhpanel-observability.workspace = true
+dhpanel-session.workspace = true
 # HTTP framework and async runtime (fixed stack).
 axum = "0.8"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal"] }

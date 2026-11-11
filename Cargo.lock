@@ -675,12 +675,15 @@ name = "dhpanel-control-api"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "dhpanel-auth-core",
  "dhpanel-cache",
  "dhpanel-common",
  "dhpanel-config",
  "dhpanel-database",
  "dhpanel-http-kit",
+ "dhpanel-mod-auth",
  "dhpanel-observability",
+ "dhpanel-session",
  "serde_json",
  "tokio",
  "tower",
@@ -696,6 +699,7 @@ version = "0.1.0"
 dependencies = [
  "dhpanel-domain",
  "secrecy",
+ "serde",
  "sqlx",
  "thiserror",
  "tokio",
@@ -745,6 +749,28 @@ dependencies = [
 [[package]]
 name = "dhpanel-kernel"
 version = "0.1.0"
+
+[[package]]
+name = "dhpanel-mod-auth"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "dhpanel-auth-core",
+ "dhpanel-cache",
+ "dhpanel-database",
+ "dhpanel-domain",
+ "dhpanel-http-kit",
+ "dhpanel-session",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tokio",
+ "tower",
+ "tracing",
+ "utoipa",
+ "uuid",
+]
 
 [[package]]
 name = "dhpanel-node-agent"
@@ -3239,6 +3265,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.10",
+ "uuid",
 ]
 
 [[package]]

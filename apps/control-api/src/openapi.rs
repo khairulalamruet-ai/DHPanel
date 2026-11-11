@@ -25,10 +25,18 @@ use utoipa::OpenApi;
 )]
 pub struct ApiDoc;
 
+/// The full document: root info plus every module's fragment.
+#[must_use]
+pub fn document() -> utoipa::openapi::OpenApi {
+    let mut doc = ApiDoc::openapi();
+    doc.merge(dhpanel_mod_auth::AuthApi::openapi());
+    doc
+}
+
 /// The document as pretty JSON with a trailing newline (stable for diffs).
 #[must_use]
 pub fn json() -> String {
-    let mut out = ApiDoc::openapi()
+    let mut out = document()
         .to_pretty_json()
         .unwrap_or_else(|e| format!("{{\"error\":\"openapi serialization failed: {e}\"}}"));
     out.push('\n');

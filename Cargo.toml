@@ -16,6 +16,7 @@ members = [
     "crates/http-kit",
     "crates/observability",
     "crates/session",
+    "crates/modules/auth",
 ]
 
 [workspace.package]
@@ -38,6 +39,7 @@ dhpanel-database = { path = "crates/database" }
 dhpanel-http-kit = { path = "crates/http-kit" }
 dhpanel-observability = { path = "crates/observability" }
 dhpanel-session = { path = "crates/session" }
+dhpanel-mod-auth = { path = "crates/modules/auth" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

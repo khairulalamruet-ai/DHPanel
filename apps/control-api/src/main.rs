@@ -101,11 +101,47 @@ async fn main() -> ExitCode {
             })
         });
 
+    let hasher = match dhpanel_auth_core::password::PasswordHasher::new(
+        dhpanel_auth_core::password::Argon2Params {
+            memory_kib: config.auth.argon2_memory_kib,
+            iterations: config.auth.argon2_iterations,
+            parallelism: config.auth.argon2_parallelism,
+        },
+    ) {
+        Ok(h) => h,
+        Err(err) => {
+            tracing::error!(error = %err, "password hashing configuration invalid");
+            telemetry.shutdown();
+            return ExitCode::from(EXIT_CONFIG);
+        }
+    };
+    let sessions = dhpanel_session::SessionStore::new(
+        redis.clone(),
+        db.clone(),
+        dhpanel_session::SessionConfig {
+            idle_timeout: std::time::Duration::from_secs(
+                u64::from(config.auth.session_idle_minutes) * 60,
+            ),
+            absolute_timeout: std::time::Duration::from_secs(
+                u64::from(config.auth.session_absolute_hours) * 3600,
+            ),
+            ..dhpanel_session::SessionConfig::default()
+        },
+    );
+    let auth = dhpanel_mod_auth::AuthState {
+        db: db.clone(),
+        sessions,
+        hasher,
+    };
+
     let handle = telemetry.prometheus_handle();
-    let app = app::router(app::AppState {
-        metrics: Arc::new(move || handle.render()),
-        readiness,
-    });
+    let app = app::router(
+        app::AppState {
+            metrics: Arc::new(move || handle.render()),
+            readiness,
+        },
+        Some(auth),
+    );
 
     let addr = config.listen;
     let listener = match tokio::net::TcpListener::bind(addr).await {
@@ -117,9 +153,13 @@ async fn main() -> ExitCode {
     };
 
     tracing::info!(%addr, version = dhpanel_common::VERSION, "{SERVICE} listening");
-    let result = axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await;
+    // Connect info gives handlers the peer address (login events, sessions).
+    let result = axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await;
 
     db.close().await;
     telemetry.shutdown();

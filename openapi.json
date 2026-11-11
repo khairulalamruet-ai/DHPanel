@@ -15,6 +15,140 @@
     }
   ],
   "paths": {
+    "/api/v1/auth/logout": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "End the current session.",
+        "operationId": "logout",
+        "responses": {
+          "204": {
+            "description": "Logged out; cookie cleared"
+          },
+          "401": {
+            "description": "Not logged in",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/me": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "The signed-in account.",
+        "operationId": "getMe",
+        "responses": {
+          "200": {
+            "description": "Current account",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Me"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not logged in",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/public/auth/login": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Log in with username or email and password.",
+        "operationId": "login",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Logged in; session cookie set",
+            "headers": {
+              "set-cookie": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "__Host-dh_session=…; Path=/; Secure; HttpOnly; SameSite=Strict"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Me"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid username or password",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Correct password but account suspended or disabled",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Malformed body",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/public/health": {
       "get": {
         "tags": [
@@ -146,6 +280,62 @@
           }
         }
       },
+      "LoginRequest": {
+        "type": "object",
+        "description": "Login request body.",
+        "required": [
+          "login",
+          "password"
+        ],
+        "properties": {
+          "login": {
+            "type": "string",
+            "description": "Username or email address.",
+            "example": "khairul"
+          },
+          "password": {
+            "type": "string",
+            "format": "password",
+            "description": "Password."
+          }
+        },
+        "additionalProperties": false
+      },
+      "Me": {
+        "type": "object",
+        "description": "The signed-in account.",
+        "required": [
+          "id",
+          "kind",
+          "username",
+          "email",
+          "locale"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "description": "Email."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Account id."
+          },
+          "kind": {
+            "type": "string",
+            "description": "`admin`, `reseller` or `client`.",
+            "example": "admin"
+          },
+          "locale": {
+            "type": "string",
+            "description": "UI locale (`en` or `bn`)."
+          },
+          "username": {
+            "type": "string",
+            "description": "Username."
+          }
+        }
+      },
       "ProblemDetails": {
         "type": "object",
         "description": "Wire format (RFC 9457 + DHPanel extensions `code`, `correlation_id`, `errors`).",
@@ -217,12 +407,24 @@
           }
         }
       }
+    },
+    "securitySchemes": {
+      "session": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "__Host-dh_session",
+        "description": "HttpOnly session cookie set by POST /api/v1/public/auth/login"
+      }
     }
   },
   "tags": [
     {
       "name": "public",
       "description": "Unauthenticated health endpoints"
+    },
+    {
+      "name": "auth",
+      "description": "Login, logout and the current account"
     }
   ]
 }

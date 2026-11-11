@@ -1,0 +1,31 @@
+[package]
+name = "dhpanel-mod-auth"
+description = "Auth module: login, logout and current-account endpoints."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+dhpanel-auth-core.workspace = true
+dhpanel-database.workspace = true
+dhpanel-domain.workspace = true
+dhpanel-http-kit.workspace = true
+dhpanel-session.workspace = true
+axum = "0.8"
+secrecy = "0.10"
+serde = { version = "1", features = ["derive"] }
+tracing = "0.1.44"
+utoipa = { version = "6", features = ["uuid"] }
+uuid = { version = "1", features = ["serde"] }
+
+[dev-dependencies]
+dhpanel-cache.workspace = true
+serde_json = "1"
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres", "macros", "uuid", "migrate"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tower = { version = "0.5", features = ["util"] }

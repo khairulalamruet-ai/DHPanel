@@ -58,6 +58,14 @@ pub enum AppError {
     /// 401 — not authenticated.
     #[error("unauthorized")]
     Unauthorized,
+    /// 401 — an authentication attempt failed (e.g. `invalid_credentials`).
+    #[error("authentication failed: {code}")]
+    AuthenticationFailed {
+        /// Stable code.
+        code: Cow<'static, str>,
+        /// Explanation safe to show to the client.
+        detail: String,
+    },
     /// 403 — authenticated but not allowed. `code` distinguishes e.g.
     /// `permission_denied` from `feature_disabled`.
     #[error("forbidden: {code}")]
@@ -100,6 +108,13 @@ impl AppError {
             detail: detail.into(),
         }
     }
+    /// 401 for a failed authentication attempt.
+    pub fn authentication_failed(code: &'static str, detail: impl Into<String>) -> Self {
+        Self::AuthenticationFailed {
+            code: code.into(),
+            detail: detail.into(),
+        }
+    }
     /// 403 with a code and client-safe detail.
     pub fn forbidden(code: &'static str, detail: impl Into<String>) -> Self {
         Self::Forbidden {
@@ -135,7 +150,7 @@ impl AppError {
     pub fn status(&self) -> StatusCode {
         match self {
             Self::BadRequest { .. } => StatusCode::BAD_REQUEST,
-            Self::Unauthorized => StatusCode::UNAUTHORIZED,
+            Self::Unauthorized | Self::AuthenticationFailed { .. } => StatusCode::UNAUTHORIZED,
             Self::Forbidden { .. } => StatusCode::FORBIDDEN,
             Self::NotFound { .. } => StatusCode::NOT_FOUND,
             Self::Conflict { .. } => StatusCode::CONFLICT,
@@ -149,6 +164,7 @@ impl AppError {
     pub fn code(&self) -> &str {
         match self {
             Self::BadRequest { code, .. }
+            | Self::AuthenticationFailed { code, .. }
             | Self::Forbidden { code, .. }
             | Self::Conflict { code, .. } => code,
             Self::Unauthorized => "unauthenticated",
@@ -161,6 +177,7 @@ impl AppError {
     fn detail(&self) -> String {
         match self {
             Self::BadRequest { detail, .. }
+            | Self::AuthenticationFailed { detail, .. }
             | Self::Forbidden { detail, .. }
             | Self::Conflict { detail, .. } => detail.clone(),
             Self::Unauthorized => "Authentication is required.".to_owned(),
@@ -253,6 +270,10 @@ mod tests {
         Err(match kind.as_str() {
             "400" => AppError::bad_request("malformed_json", "Body is not valid JSON."),
             "401" => AppError::Unauthorized,
+            "401b" => AppError::authentication_failed(
+                "invalid_credentials",
+                "Invalid username or password.",
+            ),
             "403" => AppError::forbidden("feature_disabled", "Your plan does not include DNS."),
             "404" => AppError::not_found("domain"),
             "409" => AppError::conflict("limit_reached", "Domain limit (10) reached."),
@@ -297,6 +318,7 @@ mod tests {
         for (kind, status, code) in [
             ("400", 400, "malformed_json"),
             ("401", 401, "unauthenticated"),
+            ("401b", 401, "invalid_credentials"),
             ("403", 403, "feature_disabled"),
             ("404", 404, "not_found"),
             ("409", 409, "limit_reached"),

@@ -4,8 +4,9 @@ use dhpanel_domain::{AccountKind, Email, Username};
 use sqlx::{PgPool, types::Uuid};
 
 /// Mirrors the `account_kind` PostgreSQL enum.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type, serde::Serialize)]
 #[sqlx(type_name = "account_kind", rename_all = "lowercase")]
+#[serde(rename_all = "lowercase")]
 pub enum DbAccountKind {
     /// Panel operator.
     Admin,
@@ -94,4 +95,178 @@ pub async fn count_accounts(pool: &PgPool, kind: AccountKind) -> Result<i64, sql
     )
     .fetch_one(pool)
     .await
+}
+
+/// Mirrors the `account_status` PostgreSQL enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type, serde::Serialize)]
+#[sqlx(type_name = "account_status", rename_all = "lowercase")]
+#[serde(rename_all = "lowercase")]
+pub enum DbAccountStatus {
+    /// May log in.
+    Active,
+    /// Temporarily blocked (e.g. unpaid).
+    Suspended,
+    /// Permanently blocked.
+    Disabled,
+}
+
+/// Fields needed to authenticate. Contains the password hash: never serialise or log.
+pub struct LoginAccount {
+    /// Account id.
+    pub id: Uuid,
+    /// Status.
+    pub status: DbAccountStatus,
+    /// Argon2id PHC string.
+    pub password_hash: String,
+}
+
+impl std::fmt::Debug for LoginAccount {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LoginAccount")
+            .field("id", &self.id)
+            .field("status", &self.status)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Public profile of an account.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AccountProfile {
+    /// Account id.
+    pub id: Uuid,
+    /// Kind.
+    pub kind: DbAccountKind,
+    /// Username.
+    pub username: String,
+    /// Email.
+    pub email: String,
+    /// Status.
+    pub status: DbAccountStatus,
+    /// UI locale.
+    pub locale: String,
+}
+
+/// Finds an account by normalised username or email for login.
+///
+/// # Errors
+/// Database errors.
+pub async fn find_for_login(
+    pool: &PgPool,
+    username: Option<&Username>,
+    email: Option<&Email>,
+) -> Result<Option<LoginAccount>, sqlx::Error> {
+    sqlx::query_as!(
+        LoginAccount,
+        r#"SELECT id, status AS "status: DbAccountStatus", password_hash
+           FROM accounts
+           WHERE ($1::text IS NOT NULL AND username = $1)
+              OR ($2::text IS NOT NULL AND email = $2)
+           LIMIT 1"#,
+        username.map(Username::as_str),
+        email.map(Email::as_str),
+    )
+    .fetch_optional(pool)
+    .await
+}
+
+/// Loads the public profile of an account.
+///
+/// # Errors
+/// Database errors.
+pub async fn find_profile(pool: &PgPool, id: Uuid) -> Result<Option<AccountProfile>, sqlx::Error> {
+    sqlx::query_as!(
+        AccountProfile,
+        r#"SELECT id, kind AS "kind: DbAccountKind", username, email,
+                  status AS "status: DbAccountStatus", locale
+           FROM accounts WHERE id = $1"#,
+        id
+    )
+    .fetch_optional(pool)
+    .await
+}
+
+/// Replaces the stored password hash (used when upgrading hash parameters).
+///
+/// # Errors
+/// Database errors.
+pub async fn update_password_hash(
+    pool: &PgPool,
+    id: Uuid,
+    password_hash: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        "UPDATE accounts SET password_hash = $2 WHERE id = $1",
+        id,
+        password_hash
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Outcome recorded in `login_events.reason`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoginOutcome {
+    /// Logged in.
+    Ok,
+    /// Unknown user or wrong password.
+    BadCredentials,
+    /// Correct password, account suspended.
+    AccountSuspended,
+    /// Correct password, account disabled.
+    AccountDisabled,
+    /// Rejected by rate limiting.
+    RateLimited,
+    /// Rejected by lockout.
+    LockedOut,
+}
+
+impl LoginOutcome {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Ok => "ok",
+            Self::BadCredentials => "bad_credentials",
+            Self::AccountSuspended => "account_suspended",
+            Self::AccountDisabled => "account_disabled",
+            Self::RateLimited => "rate_limited",
+            Self::LockedOut => "locked_out",
+        }
+    }
+}
+
+/// One login attempt to record.
+#[derive(Debug, Clone)]
+pub struct LoginEvent<'a> {
+    /// Matched account, if any.
+    pub account_id: Option<Uuid>,
+    /// What the client typed (truncated to 254 characters).
+    pub attempted: &'a str,
+    /// Client IP.
+    pub ip: std::net::IpAddr,
+    /// Client user agent (truncated to 512 characters).
+    pub user_agent: Option<&'a str>,
+    /// Outcome.
+    pub outcome: LoginOutcome,
+}
+
+/// Records a login attempt.
+///
+/// # Errors
+/// Database errors.
+pub async fn insert_login_event(pool: &PgPool, ev: &LoginEvent<'_>) -> Result<(), sqlx::Error> {
+    let attempted: String = ev.attempted.chars().take(254).collect();
+    let user_agent: Option<String> = ev.user_agent.map(|ua| ua.chars().take(512).collect());
+    sqlx::query!(
+        r#"INSERT INTO login_events (account_id, username_attempted, ip, user_agent, success, reason)
+           VALUES ($1, $2, $3::text::inet, $4, $5, $6)"#,
+        ev.account_id,
+        attempted,
+        ev.ip.to_string(),
+        user_agent,
+        matches!(ev.outcome, LoginOutcome::Ok),
+        ev.outcome.as_str(),
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
 }
