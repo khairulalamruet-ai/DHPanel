@@ -55,64 +55,50 @@ async function main() {
   });
 
   const context = await browser.newContext({
-    viewport: { width: 1280, height: 950 },
+    viewport: { width: 1280, height: 800 },
   });
 
   const page = await context.newPage();
 
-  console.log("Navigating to admin portal...");
+  // 1. Visit index route "/"
+  console.log("Navigating to index route '/' ...");
   await page.goto("http://127.0.0.1:8089/", { waitUntil: "domcontentloaded" });
   await wait(2000);
-
-  // Switch to UI Components Demo tab
-  const demoTab = page.locator("button:has-text('UI Components Demo (T00.12)')");
-  if (await demoTab.count() > 0) {
-    await demoTab.click();
-    await wait(1000);
-  }
-
-  // Trigger a success toast so toast is visible in screenshot
-  const successToastBtn = page.locator("button:has-text('Success Toast')");
-  if (await successToastBtn.count() > 0) {
-    await successToastBtn.click();
-    await wait(600);
-  }
-
-  // 1. Light Mode Demo Page
-  const sc1 = path.join(ARTIFACT_DIR, "ui-demo-light.png");
+  const sc1 = path.join(ARTIFACT_DIR, "router-dashboard.png");
   await page.screenshot({ path: sc1 });
-  console.log("Saved screenshot:", sc1);
+  console.log("Saved screenshot 1:", sc1);
 
-  // 2. Open ConfirmDialog to show high-stakes typed confirmation modal
-  const deleteBtn = page.locator("button:has-text('Delete Tenant (Typed Confirm)')");
-  if (await deleteBtn.count() > 0) {
-    await deleteBtn.click();
-    await wait(600);
-    const sc2 = path.join(ARTIFACT_DIR, "ui-demo-confirm-dialog.png");
-    await page.screenshot({ path: sc2 });
-    console.log("Saved screenshot:", sc2);
+  // 2. Visit invalid route "/not-found-random-page"
+  console.log("Navigating to invalid route '/not-found-random-page' ...");
+  await page.goto("http://127.0.0.1:8089/not-found-random-page", { waitUntil: "domcontentloaded" });
+  await wait(2000);
+  const sc2 = path.join(ARTIFACT_DIR, "router-404-light.png");
+  await page.screenshot({ path: sc2 });
+  console.log("Saved screenshot 2:", sc2);
 
-    // Cancel modal
-    const cancelBtn = page.locator("button:has-text('Cancel')");
-    if (await cancelBtn.count() > 0) {
-      await cancelBtn.click();
-      await wait(600);
-    }
-  }
-
-  // 3. Toggle to Dark Theme
+  // 3. Toggle to Dark theme on 404 page
   const themeToggle = page.locator("header button[aria-label='Toggle theme']");
   if (await themeToggle.count() > 0) {
     await themeToggle.click();
     await wait(1000);
-    const sc3 = path.join(ARTIFACT_DIR, "ui-demo-dark.png");
+    const sc3 = path.join(ARTIFACT_DIR, "router-404-dark.png");
     await page.screenshot({ path: sc3 });
-    console.log("Saved screenshot:", sc3);
+    console.log("Saved screenshot 3:", sc3);
+  }
+
+  // 4. Click Return to Dashboard button and verify return
+  const backHomeBtn = page.locator("button:has-text('ড্যাশবোর্ডে ফিরে যান'), button:has-text('Back to Dashboard')").first();
+  if (await backHomeBtn.count() > 0) {
+    await backHomeBtn.click();
+    await wait(1500);
+    const sc4 = path.join(ARTIFACT_DIR, "router-return-home.png");
+    await page.screenshot({ path: sc4 });
+    console.log("Saved screenshot 4:", sc4);
   }
 
   await browser.close();
   server.close();
-  console.log("UI Demo screenshots captured successfully!");
+  console.log("Router and 404 verification completed successfully!");
 }
 
 main().catch(err => {
