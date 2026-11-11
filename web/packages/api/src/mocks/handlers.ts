@@ -411,6 +411,85 @@ export const resetMockSettings = () => {
   mockSettingsStore = getInitialSettingsStore();
 };
 
+export interface MockFeatureSet {
+  id: string;
+  name: string;
+  description: string;
+  features: string[];
+  is_default: boolean;
+  plans_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export const getInitialFeatureSets = (): MockFeatureSet[] => [
+  {
+    id: "fs_default",
+    name: "Default (Full Stack)",
+    description: "Standard full-featured web, database, email and DNS hosting",
+    features: [
+      "domains",
+      "redirects",
+      "docroot",
+      "temporary_links",
+      "ssl_custom",
+      "ssl_letsencrypt",
+      "dns_zones",
+      "dns_records",
+      "db_mysql",
+      "db_remote",
+      "phpmyadmin",
+      "file_manager",
+      "ftp_accounts",
+      "email_inbox",
+      "email_forwarding",
+      "webmail",
+      "ip_blocker",
+      "modsecurity",
+    ],
+    is_default: true,
+    plans_count: 3,
+    created_at: new Date(Date.now() - 86400 * 1000 * 14).toISOString(),
+    updated_at: new Date(Date.now() - 86400 * 1000 * 2).toISOString(),
+  },
+  {
+    id: "fs_basic",
+    name: "Basic Web",
+    description: "Essential web hosting with basic SSL and file manager",
+    features: ["domains", "redirects", "docroot", "ssl_letsencrypt", "file_manager"],
+    is_default: false,
+    plans_count: 1,
+    created_at: new Date(Date.now() - 86400 * 1000 * 10).toISOString(),
+    updated_at: new Date(Date.now() - 86400 * 1000 * 5).toISOString(),
+  },
+  {
+    id: "fs_dns_only",
+    name: "DNS Only",
+    description: "Dedicated nameserver and DNS zone record hosting",
+    features: ["dns_zones", "dns_records"],
+    is_default: false,
+    plans_count: 0,
+    created_at: new Date(Date.now() - 86400 * 1000 * 8).toISOString(),
+    updated_at: new Date(Date.now() - 86400 * 1000 * 8).toISOString(),
+  },
+  {
+    id: "fs_db_only",
+    name: "Database Only",
+    description: "Managed MySQL database instance with phpMyAdmin",
+    features: ["db_mysql", "db_remote", "phpmyadmin"],
+    is_default: false,
+    plans_count: 0,
+    created_at: new Date(Date.now() - 86400 * 1000 * 7).toISOString(),
+    updated_at: new Date(Date.now() - 86400 * 1000 * 7).toISOString(),
+  },
+];
+
+let featureSets = getInitialFeatureSets();
+
+export const resetMockFeatureSets = () => {
+  featureSets = getInitialFeatureSets();
+};
+
 const mockMe = {
   id: "00000000-0000-0000-0000-000000000001",
   username: "admin",
@@ -1203,5 +1282,113 @@ export const handlers = [
       module: mod,
       values: mockSettingsStore[mod].values,
     });
+  }),
+
+  // Feature Sets: List all feature sets (GET /api/v1/admin/feature-sets)
+  // TODO(api:T04.02): Replace with real backend feature sets endpoint
+  http.get(/\/api\/v1\/admin\/feature-sets$/, () => {
+    return HttpResponse.json({
+      items: featureSets,
+      total: featureSets.length,
+    });
+  }),
+
+  // Feature Sets: Create feature set (POST /api/v1/admin/feature-sets)
+  // TODO(api:T04.02): Replace with real backend feature sets endpoint
+  http.post(/\/api\/v1\/admin\/feature-sets$/, async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as any;
+    const { name, description = "", features = [], is_default = false } = body || {};
+
+    if (!name || typeof name !== "string" || !name.trim()) {
+      return HttpResponse.json(
+        { error: "bad_request", message: "Feature set name is required" },
+        { status: 400 }
+      );
+    }
+
+    if (is_default) {
+      featureSets.forEach((fs) => {
+        fs.is_default = false;
+      });
+    }
+
+    const newFs: MockFeatureSet = {
+      id: `fs_${Date.now()}`,
+      name: name.trim(),
+      description: description.trim(),
+      features: Array.isArray(features) ? features : [],
+      is_default: Boolean(is_default),
+      plans_count: 0,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    featureSets.unshift(newFs);
+    return HttpResponse.json(newFs, { status: 201 });
+  }),
+
+  // Feature Sets: Update feature set (PUT /api/v1/admin/feature-sets/:id)
+  // TODO(api:T04.02): Replace with real backend feature sets endpoint
+  http.put(/\/api\/v1\/admin\/feature-sets\/([^/]+)$/, async ({ params, request }) => {
+    const id = params[0] as string;
+    const body = (await request.json().catch(() => ({}))) as any;
+    const { name, description, features, is_default } = body || {};
+
+    const index = featureSets.findIndex((fs) => fs.id === id);
+    if (index === -1) {
+      return HttpResponse.json(
+        { error: "not_found", message: "Feature set not found" },
+        { status: 404 }
+      );
+    }
+
+    if (name !== undefined && (!name || !name.trim())) {
+      return HttpResponse.json(
+        { error: "bad_request", message: "Feature set name cannot be empty" },
+        { status: 400 }
+      );
+    }
+
+    if (is_default) {
+      featureSets.forEach((fs) => {
+        fs.is_default = false;
+      });
+    }
+
+    const current = featureSets[index];
+    const updated: MockFeatureSet = {
+      ...current,
+      name: name !== undefined ? name.trim() : current.name,
+      description: description !== undefined ? description.trim() : current.description,
+      features: Array.isArray(features) ? features : current.features,
+      is_default: is_default !== undefined ? Boolean(is_default) : current.is_default,
+      updated_at: new Date().toISOString(),
+    };
+
+    featureSets[index] = updated;
+    return HttpResponse.json(updated);
+  }),
+
+  // Feature Sets: Delete feature set (DELETE /api/v1/admin/feature-sets/:id)
+  // TODO(api:T04.02): Replace with real backend feature sets endpoint
+  http.delete(/\/api\/v1\/admin\/feature-sets\/([^/]+)$/, ({ params }) => {
+    const id = params[0] as string;
+    const index = featureSets.findIndex((fs) => fs.id === id);
+    if (index === -1) {
+      return HttpResponse.json(
+        { error: "not_found", message: "Feature set not found" },
+        { status: 404 }
+      );
+    }
+
+    if (featureSets[index].is_default) {
+      return HttpResponse.json(
+        { error: "cannot_delete_default", message: "Cannot delete the default feature set" },
+        { status: 400 }
+      );
+    }
+
+    featureSets.splice(index, 1);
+    return HttpResponse.json({ success: true });
   }),
 ];

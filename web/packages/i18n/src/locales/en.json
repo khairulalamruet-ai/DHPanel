@@ -385,5 +385,62 @@
       "saveError": "Failed to update settings"
     },
     "empty": "No settings available for this module."
+  },
+  "featureSets": {
+    "nav": "Feature Sets",
+    "title": "Feature Sets",
+    "desc": "Define bundles of enabled module capabilities to attach to hosting plans",
+    "createBtn": "New Feature Set",
+    "editBtn": "Edit",
+    "deleteBtn": "Delete",
+    "defaultBadge": "Default",
+    "plansUsing": "{{count}} plans",
+    "featuresCount": "{{count}} features",
+    "table": {
+      "name": "Name",
+      "description": "Description",
+      "features": "Features",
+      "plans": "Plans",
+      "status": "Preset",
+      "actions": "Actions"
+    },
+    "categories": {
+      "web": "Web & Domains",
+      "dns": "DNS Management",
+      "db": "Databases",
+      "files": "Files & Storage",
+      "mail": "Email Services",
+      "security": "Security & WAF"
+    },
+    "dialog": {
+      "createTitle": "Create Feature Set",
+      "editTitle": "Edit Feature Set",
+      "desc": "Select which module features will be available to tenants assigned to this set",
+      "nameLabel": "Feature Set Name",
+      "namePlaceholder": "e.g. Standard Web & Database",
+      "descLabel": "Description",
+      "descPlaceholder": "Describe the target tier or purpose...",
+      "defaultLabel": "Set as Default Feature Set",
+      "defaultDesc": "Newly created plans will use this set by default",
+      "selectAll": "Select All",
+      "deselectAll": "Deselect All",
+      "selectedCount": "{{selected}}/{{total}} selected",
+      "cancel": "Cancel",
+      "save": "Save Feature Set",
+      "saving": "Saving..."
+    },
+    "deleteConfirm": {
+      "title": "Delete Feature Set",
+      "desc": "Are you sure you want to delete feature set '{{name}}'? This action cannot be undone.",
+      "confirm": "Delete Feature Set",
+      "cannotDeleteDefault": "The default feature set cannot be deleted."
+    },
+    "toast": {
+      "createSuccess": "Feature set '{{name}}' created successfully.",
+      "updateSuccess": "Feature set '{{name}}' updated successfully.",
+      "deleteSuccess": "Feature set '{{name}}' deleted successfully.",
+      "error": "Failed to save feature set."
+    },
+    "empty": "No feature sets found."
   }
 }

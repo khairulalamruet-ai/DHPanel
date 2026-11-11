@@ -1,5 +1,5 @@
 import React from "react";
-import { LayoutDashboard, ShieldCheck, Sparkles, Puzzle, Globe, Users, Settings, FileText, Boxes, Server, Activity } from "lucide-react";
+import { LayoutDashboard, ShieldCheck, Sparkles, Puzzle, Globe, Users, Settings, FileText, Boxes, Server, Activity, Layers } from "lucide-react";
 
 export interface ModuleManifest {
   name: string;
@@ -118,6 +118,25 @@ export const registeredFrontendModules: FrontendModule[] = [
         href: "/operations",
         order: 24,
         permission: "admin.operations.read",
+      },
+    ],
+  },
+  {
+    manifest: {
+      name: "feature-sets",
+      title: { en: "Feature Sets", bn: "ফিচার সেট" },
+      category: "core",
+      core: true,
+      permissions: ["admin.plans.read", "admin.plans.manage"],
+    },
+    adminNav: [
+      {
+        id: "feature-sets",
+        labelKey: "featureSets.nav",
+        icon: <Layers className="h-4 w-4" />,
+        href: "/feature-sets",
+        order: 30,
+        permission: "admin.plans.read",
       },
     ],
   },
