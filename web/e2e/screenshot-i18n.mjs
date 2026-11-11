@@ -3,8 +3,12 @@ import http from "http";
 import fs from "fs";
 import path from "path";
 
-const ARTIFACT_DIR = "/Users/khairulalam/.gemini/antigravity/brain/c35f3373-58dd-4e9d-9fe6-3d3e79e84e10";
-const DIST_DIR = "/Volumes/SSD/DHPanel-ag/web/apps/admin/dist";
+const ARTIFACT_DIR = process.env.ARTIFACT_DIR || path.resolve(process.cwd(), "screenshots");
+const DIST_DIR = process.env.DIST_DIR || path.resolve(process.cwd(), "apps/admin/dist");
+
+if (!fs.existsSync(ARTIFACT_DIR)) {
+  fs.mkdirSync(ARTIFACT_DIR, { recursive: true });
+}
 
 const MIME_TYPES = {
   ".html": "text/html",
@@ -50,7 +54,6 @@ async function main() {
 
   console.log("Launching headless Chrome...");
   const browser = await chromium.launch({
-    channel: "chrome",
     args: ["--headless=new", "--no-sandbox", "--disable-gpu"],
     timeout: 60000,
   });

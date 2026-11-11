@@ -49,37 +49,54 @@ export function LoginPage({ title, onSuccess }: LoginPageProps) {
 
     try {
       setIsLoading(true);
-      const res = await api.POST("/api/v1/public/login", {
-        body: {
-          username: username.trim(),
-          password,
-          totp_code: step === "totp" ? totpCode.trim() : undefined,
-        },
-      });
 
-      if (res.response.status === 202 || res.data?.requires_2fa) {
-        setStep("totp");
-        setErrorMessage(null);
-        return;
-      }
+      if (step === "credentials") {
+        const res = await api.POST("/api/v1/public/auth/login", {
+          body: {
+            login: username.trim(),
+            password,
+          },
+        });
 
-      if (res.error) {
-        const errorData = res.error as any;
-        if (errorData?.error === "invalid_2fa") {
-          setErrorMessage(t("auth.invalidTotp"));
-        } else {
-          setErrorMessage(t("auth.invalidCredentials"));
+        if (res.response.status === 202 || (res.data as any)?.mfa_required) {
+          setStep("totp");
+          setErrorMessage(null);
+          return;
         }
-        return;
-      }
 
-      if (res.data?.csrf_token) {
-        setCsrfToken(res.data.csrf_token);
-      }
+        if (res.error) {
+          setErrorMessage(t("auth.invalidCredentials"));
+          return;
+        }
 
-      await refetch();
-      if (onSuccess) {
-        onSuccess();
+        if (res.data && "csrf_token" in res.data) {
+          setCsrfToken(res.data.csrf_token);
+        }
+
+        await refetch();
+        if (onSuccess) {
+          onSuccess();
+        }
+      } else {
+        const res = await api.POST("/api/v1/public/auth/login/mfa", {
+          body: {
+            code: totpCode.trim(),
+          },
+        });
+
+        if (res.error) {
+          setErrorMessage(t("auth.invalidTotp"));
+          return;
+        }
+
+        if (res.data && "csrf_token" in res.data) {
+          setCsrfToken(res.data.csrf_token);
+        }
+
+        await refetch();
+        if (onSuccess) {
+          onSuccess();
+        }
       }
     } catch {
       setErrorMessage(t("common.error"));

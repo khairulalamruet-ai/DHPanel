@@ -2,7 +2,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import React from "react";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { AccountSecurityPage } from "./AccountSecurityPage";
-import { api } from "@dhpanel/api";
+import * as dhpanelApi from "@dhpanel/api";
+const { api } = dhpanelApi;
 
 vi.mock("@dhpanel/i18n", () => ({
   useTranslation: () => ({
@@ -80,28 +81,48 @@ describe("AccountSecurityPage", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
 
-    vi.spyOn(api, "GET").mockImplementation(async (url: any) => {
-      if (url === "/api/v1/account/2fa/status") {
-        return { data: { enabled: false, backup_codes_remaining: 0 }, response: new Response() } as any;
+    vi.spyOn(dhpanelApi, "apiFetch").mockImplementation(async (url: string) => {
+      if (url === "/api/v1/account/password") {
+        return { success: true };
       }
-      if (url === "/api/v1/account/sessions") {
+      if (url === "/api/v1/account/login-history") {
+        return {
+          events: [
+            {
+              id: "evt_1",
+              ip_address: "127.0.0.1",
+              user_agent: "Chrome 130",
+              status: "success",
+              created_at: new Date().toISOString(),
+            },
+          ],
+        };
+      }
+      return {};
+    });
+
+    vi.spyOn(api, "GET").mockImplementation(async (url: any) => {
+      if (url === "/api/v1/auth/mfa" || url === "/api/v1/account/2fa/status") {
+        return { data: { mfa_enabled: false, backup_codes_remaining: 0 }, response: new Response() } as any;
+      }
+      if (url === "/api/v1/auth/sessions" || url === "/api/v1/account/sessions") {
         return {
           data: {
             sessions: [
               {
                 id: "sess_curr",
-                ip_address: "127.0.0.1",
+                ip: "127.0.0.1",
                 user_agent: "Chrome 130",
                 created_at: new Date().toISOString(),
-                last_active_at: new Date().toISOString(),
+                last_seen_at: new Date().toISOString(),
                 current: true,
               },
               {
                 id: "sess_other",
-                ip_address: "10.0.0.2",
+                ip: "10.0.0.2",
                 user_agent: "Firefox 131",
                 created_at: new Date().toISOString(),
-                last_active_at: new Date().toISOString(),
+                last_seen_at: new Date().toISOString(),
                 current: false,
               },
             ],
@@ -128,23 +149,22 @@ describe("AccountSecurityPage", () => {
       return { data: null, response: new Response() } as any;
     });
 
-    vi.spyOn(api, "POST").mockImplementation(async (url: any, opts: any) => {
+    vi.spyOn(api, "POST").mockImplementation(async (url: any, _opts: any) => {
       if (url === "/api/v1/account/password") {
         return { data: { success: true }, response: new Response() } as any;
       }
-      if (url === "/api/v1/account/2fa/enroll") {
+      if (url === "/api/v1/auth/mfa/totp/enroll" || url === "/api/v1/account/2fa/enroll") {
         return {
           data: {
             secret: "TESTSECRETKEY123",
-            qr_code_uri: "otpauth://totp/DHPanel:test?secret=TESTSECRETKEY123",
+            otpauth_uri: "otpauth://totp/DHPanel:test?secret=TESTSECRETKEY123",
           },
           response: new Response(),
         } as any;
       }
-      if (url === "/api/v1/account/2fa/confirm") {
+      if (url === "/api/v1/auth/mfa/totp/confirm" || url === "/api/v1/account/2fa/confirm") {
         return {
           data: {
-            success: true,
             backup_codes: ["code1-1111", "code2-2222"],
           },
           response: new Response(),
@@ -243,7 +263,7 @@ describe("AccountSecurityPage", () => {
     fireEvent.click(revokeBtn);
 
     await waitFor(() => {
-      expect(api.DELETE).toHaveBeenCalledWith("/api/v1/account/sessions/{id}", expect.anything());
+      expect(api.DELETE).toHaveBeenCalledWith("/api/v1/auth/sessions/{id}", expect.anything());
     });
   });
 

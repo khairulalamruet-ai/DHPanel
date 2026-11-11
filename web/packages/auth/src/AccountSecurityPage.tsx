@@ -23,7 +23,7 @@ import {
   DialogFooter,
 } from "@dhpanel/ui";
 import { useTranslation, useFormatters } from "@dhpanel/i18n";
-import { api } from "@dhpanel/api";
+import { api, getCsrfToken, apiFetch } from "@dhpanel/api";
 import {
   ShieldCheck,
   ShieldAlert,
@@ -77,25 +77,20 @@ export function AccountSecurityPage() {
 
     try {
       setPasswordLoading(true);
-      const res = await api.POST("/api/v1/account/password", {
-        body: {
+      await apiFetch("/api/v1/account/password", {
+        method: "POST",
+        body: JSON.stringify({
           current_password: currentPassword,
           new_password: newPassword,
-        },
+        }),
       });
-
-      if (res.error) {
-        const err = res.error as any;
-        setPasswordError(err.message || t("common.error"));
-        return;
-      }
 
       setPasswordSuccess(t("security.password.success"));
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
-    } catch {
-      setPasswordError(t("common.error"));
+    } catch (err: any) {
+      setPasswordError(err.message || t("common.error"));
     } finally {
       setPasswordLoading(false);
     }
@@ -106,7 +101,7 @@ export function AccountSecurityPage() {
   // -------------------------------------------------------------
   const [mfaEnabled, setMfaEnabled] = useState(false);
   const [mfaLoading, setMfaLoading] = useState(true);
-  const [enrollData, setEnrollData] = useState<{ secret: string; qr_code_uri: string } | null>(null);
+  const [enrollData, setEnrollData] = useState<{ secret: string; otpauth_uri: string } | null>(null);
   const [totpInput, setTotpInput] = useState("");
   const [totpError, setTotpError] = useState<string | null>(null);
   const [backupCodes, setBackupCodes] = useState<string[] | null>(null);
@@ -122,9 +117,9 @@ export function AccountSecurityPage() {
   const fetchMfaStatus = async () => {
     try {
       setMfaLoading(true);
-      const res = await api.GET("/api/v1/account/2fa/status");
+      const res = await api.GET("/api/v1/auth/mfa");
       if (res.data) {
-        setMfaEnabled(res.data.enabled);
+        setMfaEnabled(res.data.totp_enabled);
       }
     } catch {
       // Ignore initial status fetch failure in tests
@@ -137,7 +132,9 @@ export function AccountSecurityPage() {
     try {
       setMfaLoading(true);
       setTotpError(null);
-      const res = await api.POST("/api/v1/account/2fa/enroll");
+      const res = await api.POST("/api/v1/auth/mfa/totp/enroll", {
+        params: { header: { "X-CSRF-Token": getCsrfToken() || "" } },
+      });
       if (res.data) {
         setEnrollData(res.data);
       }
@@ -158,8 +155,9 @@ export function AccountSecurityPage() {
 
     try {
       setMfaLoading(true);
-      const res = await api.POST("/api/v1/account/2fa/confirm", {
-        body: { totp_code: totpInput.trim() },
+      const res = await api.POST("/api/v1/auth/mfa/totp/confirm", {
+        params: { header: { "X-CSRF-Token": getCsrfToken() || "" } },
+        body: { code: totpInput.trim() },
       });
 
       if (res.error) {
@@ -183,9 +181,12 @@ export function AccountSecurityPage() {
   const handleRegenerateBackupCodes = async () => {
     try {
       setMfaLoading(true);
-      const res = await api.POST("/api/v1/account/2fa/backup-codes");
-      if (res.data?.backup_codes) {
-        setBackupCodes(res.data.backup_codes);
+      // Enrolling anew or getting backup codes
+      const res = await api.POST("/api/v1/auth/mfa/totp/enroll", {
+        params: { header: { "X-CSRF-Token": getCsrfToken() || "" } },
+      });
+      if (res.data) {
+        setEnrollData(res.data);
       }
     } catch {
       // Ignore
@@ -204,10 +205,15 @@ export function AccountSecurityPage() {
 
     try {
       setDisableLoading(true);
-      const res = await api.POST("/api/v1/account/2fa/disable", {
+      // Sudo check first
+      await api.POST("/api/v1/auth/sudo", {
+        params: { header: { "X-CSRF-Token": getCsrfToken() || "" } },
         body: { password: disablePassword },
       });
 
+      const res = await api.POST("/api/v1/auth/mfa/totp/disable", {
+        params: { header: { "X-CSRF-Token": getCsrfToken() || "" } },
+      });
       if (res.error) {
         setDisableError(t("auth.invalidCredentials"));
         return;
@@ -240,10 +246,10 @@ export function AccountSecurityPage() {
   // -------------------------------------------------------------
   interface SessionItem {
     id: string;
-    ip_address: string;
-    user_agent: string;
+    ip?: string | null;
+    user_agent?: string | null;
     created_at: string;
-    last_active_at: string;
+    last_seen_at?: string;
     current: boolean;
   }
   const [sessions, setSessions] = useState<SessionItem[]>([]);
@@ -253,9 +259,9 @@ export function AccountSecurityPage() {
   const fetchSessions = async () => {
     try {
       setSessionsLoading(true);
-      const res = await api.GET("/api/v1/account/sessions");
+      const res = await api.GET("/api/v1/auth/sessions");
       if (res.data?.sessions) {
-        setSessions(res.data.sessions);
+        setSessions(res.data.sessions as any);
       }
     } catch {
       // Ignore
@@ -266,8 +272,8 @@ export function AccountSecurityPage() {
 
   const handleRevokeSession = async (id: string) => {
     try {
-      const res = await api.DELETE("/api/v1/account/sessions/{id}", {
-        params: { path: { id } },
+      const res = await api.DELETE("/api/v1/auth/sessions/{id}", {
+        params: { path: { id }, header: { "X-CSRF-Token": getCsrfToken() || "" } },
       });
       if (res.error) {
         return;
@@ -281,7 +287,9 @@ export function AccountSecurityPage() {
 
   const handleRevokeAllOthers = async () => {
     try {
-      const res = await api.POST("/api/v1/account/sessions/revoke-others");
+      const res = await api.POST("/api/v1/auth/sessions/revoke-others", {
+        params: { header: { "X-CSRF-Token": getCsrfToken() || "" } },
+      });
       if (res.error) {
         return;
       }
@@ -308,9 +316,9 @@ export function AccountSecurityPage() {
   const fetchHistory = async () => {
     try {
       setHistoryLoading(true);
-      const res = await api.GET("/api/v1/account/login-history");
-      if (res.data?.events) {
-        setLoginHistory(res.data.events);
+      const res = await apiFetch<any>("/api/v1/account/login-history");
+      if (res?.events) {
+        setLoginHistory(res.events);
       }
     } catch {
       // Ignore
@@ -773,51 +781,56 @@ export function AccountSecurityPage() {
                       </TableCell>
                     </TableRow>
                   ) : (
-                    sessions.map((session) => (
-                      <TableRow key={session.id}>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            {session.user_agent.toLowerCase().includes("mobile") ||
-                            session.user_agent.toLowerCase().includes("iphone") ? (
-                              <Smartphone className="h-4 w-4 text-muted-foreground" />
-                            ) : (
-                              <Laptop className="h-4 w-4 text-muted-foreground" />
-                            )}
-                            <div className="flex flex-col">
-                              <span className="font-medium text-sm flex items-center gap-1.5">
-                                {session.user_agent.split(") ")[1] || session.user_agent.slice(0, 30)}
-                                {session.current && (
-                                  <Badge variant="success" className="text-[10px] py-0 px-1.5">
-                                    {t("security.sessions.current")}
-                                  </Badge>
-                                )}
-                              </span>
-                              <span className="text-xs text-muted-foreground truncate max-w-xs">{session.user_agent}</span>
+                    sessions.map((session) => {
+                      const ua = session.user_agent || "Browser Session";
+                      const ip = session.ip || "127.0.0.1";
+                      const activeTime = session.last_seen_at || session.created_at;
+                      return (
+                        <TableRow key={session.id}>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              {ua.toLowerCase().includes("mobile") ||
+                              ua.toLowerCase().includes("iphone") ? (
+                                <Smartphone className="h-4 w-4 text-muted-foreground" />
+                              ) : (
+                                <Laptop className="h-4 w-4 text-muted-foreground" />
+                              )}
+                              <div className="flex flex-col">
+                                <span className="font-medium text-sm flex items-center gap-1.5">
+                                  {ua.split(") ")[1] || ua.slice(0, 30)}
+                                  {session.current && (
+                                    <Badge variant="success" className="text-[10px] py-0 px-1.5">
+                                      {t("security.sessions.current")}
+                                    </Badge>
+                                  )}
+                                </span>
+                                <span className="text-xs text-muted-foreground truncate max-w-xs">{ua}</span>
+                              </div>
                             </div>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <span className="font-mono text-xs">{session.ip_address}</span>
-                        </TableCell>
-                        <TableCell>
-                          <span className="text-xs text-muted-foreground">
-                            {formatDate(new Date(session.last_active_at))}
-                          </span>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {!session.current && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleRevokeSession(session.id)}
-                              className="text-destructive hover:text-destructive hover:bg-destructive/10 text-xs h-8 px-2"
-                            >
-                              {t("security.sessions.revoke")}
-                            </Button>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    ))
+                          </TableCell>
+                          <TableCell>
+                            <span className="font-mono text-xs">{ip}</span>
+                          </TableCell>
+                          <TableCell>
+                            <span className="text-xs text-muted-foreground">
+                              {formatDate(new Date(activeTime))}
+                            </span>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {!session.current && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleRevokeSession(session.id)}
+                                className="text-destructive hover:text-destructive hover:bg-destructive/10 text-xs h-8 px-2"
+                              >
+                                {t("security.sessions.revoke")}
+                              </Button>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
                   )}
                 </TableBody>
               </Table>

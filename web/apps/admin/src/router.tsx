@@ -68,7 +68,7 @@ function RootLayout() {
     <ThemeProvider defaultTheme="system" storageKey="dhpanel-admin-theme">
       <QueryClientProvider client={queryClient}>
         <ToastProvider>
-          <SessionProvider bootstrapPath="/api/v1/admin/bootstrap">
+          <SessionProvider bootstrapPath="/api/v1/auth/me">
             <AuthenticatedContent />
           </SessionProvider>
         </ToastProvider>

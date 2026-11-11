@@ -5,7 +5,7 @@ import { useTranslation } from "@dhpanel/i18n";
 import { Activity, CheckCircle2, AlertCircle } from "lucide-react";
 
 interface HealthState {
-  status: "ok" | "degraded";
+  status: string;
   version: string;
   timestamp?: string;
 }
