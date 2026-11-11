@@ -9,6 +9,8 @@
 //! either `DATABASE_URL` pointing at a migrated database, or the committed
 //! `.sqlx/` offline cache (refresh with `cargo sqlx prepare --workspace`).
 
+pub mod accounts;
+
 use std::{future::Future, pin::Pin, time::Duration};
 
 use secrecy::{ExposeSecret, SecretString};

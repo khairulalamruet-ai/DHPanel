@@ -1,0 +1,36 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO accounts (kind, username, email, password_hash)\n           VALUES ($1, $2, $3, $4)\n           RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        {
+          "Custom": {
+            "name": "account_kind",
+            "kind": {
+              "Enum": [
+                "admin",
+                "reseller",
+                "client"
+              ]
+            }
+          }
+        },
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "67609a915fc8f7b0cd162d1181e847d62bd8accd52de30e292b3cc7bdce61920"
+}

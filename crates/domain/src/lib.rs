@@ -1,3 +1,8 @@
-//! Shared domain entities and value objects (no web or database dependencies).
+//! Shared domain entities and value objects.
 //!
-//! Skeleton crate created in T00.02; filled in by later roadmap tasks.
+//! No web, database or async dependencies: these types encode business rules
+//! that every layer (HTTP validation, CLI, repositories) must agree on.
+
+pub mod account;
+
+pub use account::{AccountKind, Email, Username, ValidationError};

@@ -12,12 +12,17 @@ name = "dhctl"
 path = "src/main.rs"
 
 [dependencies]
+dhpanel-auth-core.workspace = true
 dhpanel-common.workspace = true
 dhpanel-config.workspace = true
 dhpanel-database.workspace = true
+dhpanel-domain.workspace = true
 # Subcommand parsing; dhctl grows many commands (migrate, admin, ca, ...).
 clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+# Reads passwords from the terminal without echo.
+rpassword = "7.5.5"
+secrecy = "0.10"
 
 [lints]
 workspace = true

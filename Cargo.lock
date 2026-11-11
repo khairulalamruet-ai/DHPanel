@@ -694,6 +694,7 @@ dependencies = [
 name = "dhpanel-database"
 version = "0.1.0"
 dependencies = [
+ "dhpanel-domain",
  "secrecy",
  "sqlx",
  "thiserror",
@@ -706,15 +707,22 @@ name = "dhpanel-dhctl"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "dhpanel-auth-core",
  "dhpanel-common",
  "dhpanel-config",
  "dhpanel-database",
+ "dhpanel-domain",
+ "rpassword",
+ "secrecy",
  "tokio",
 ]
 
 [[package]]
 name = "dhpanel-domain"
 version = "0.1.0"
+dependencies = [
+ "thiserror",
+]
 
 [[package]]
 name = "dhpanel-http-kit"
@@ -2243,6 +2251,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "rpassword"
+version = "7.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1fa2c5d9304b618df61ff17f3d3485c6e1854a3d94902a49abbb8d43dfbe0464"
+dependencies = [
+ "libc",
+ "rtoolbox",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "rsa"
 version = "0.9.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2260,6 +2279,16 @@ dependencies = [
  "spki",
  "subtle",
  "zeroize",
+]
+
+[[package]]
+name = "rtoolbox"
+version = "0.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a1efe12a1469752d0e6ff5ebec0b6ef4924cc5c4c71046b0ec730040535819d"
+dependencies = [
+ "libc",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
