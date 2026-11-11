@@ -69,7 +69,14 @@ export function SessionProvider({ children, bootstrapPath = "/api/v1/auth/me" }:
   const hasPermission = (perm: string): boolean => {
     if (!data) return false;
     if (data.roles.includes("super_admin") || data.permissions.includes("*")) return true;
-    return data.permissions.includes(perm);
+    if (data.permissions.includes(perm)) return true;
+    return data.permissions.some((p) => {
+      if (p.endsWith(".*")) {
+        const prefix = p.slice(0, -2);
+        return perm === prefix || perm.startsWith(`${prefix}.`);
+      }
+      return false;
+    });
   };
 
   const hasFeature = (feature: string): boolean => {

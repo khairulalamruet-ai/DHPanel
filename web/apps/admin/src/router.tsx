@@ -9,12 +9,12 @@ import { ThemeProvider, ToastProvider } from "@dhpanel/ui";
 import { SessionProvider, useSession, LoginPage, AccountSecurityPage } from "@dhpanel/auth";
 import { queryClient, QueryClientProvider } from "@dhpanel/api";
 import { AppShell, NotFoundPage, RouteErrorFallback } from "@dhpanel/shell";
-import { DashboardPage, UiDemoPage } from "@dhpanel/modules";
+import { DashboardPage, UiDemoPage, AuditViewerPage } from "@dhpanel/modules";
 import { useTranslation } from "@dhpanel/i18n";
-import { LayoutDashboard, Sparkles, ShieldCheck } from "lucide-react";
+import { LayoutDashboard, Sparkles, ShieldCheck, FileText } from "lucide-react";
 
 function AuthenticatedContent() {
-  const { data: session, isLoading } = useSession();
+  const { data: session, isLoading, hasPermission } = useSession();
   const { t } = useTranslation();
 
   const navItems = [
@@ -30,6 +30,16 @@ function AuthenticatedContent() {
       icon: <ShieldCheck className="h-4 w-4" />,
       href: "/security",
     },
+    ...(hasPermission("admin.audit.read")
+      ? [
+          {
+            id: "audit",
+            labelKey: "audit.nav",
+            icon: <FileText className="h-4 w-4" />,
+            href: "/audit",
+          },
+        ]
+      : []),
     {
       id: "demo",
       labelKey: "UI Foundation (T00.12)",
@@ -105,7 +115,14 @@ const securityRoute = createRoute({
   component: AccountSecurityPage,
 });
 
-// 5. Login route
+// 5. Audit viewer route
+const auditRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/audit",
+  component: AuditViewerPage,
+});
+
+// 6. Login route
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/login",
@@ -120,8 +137,8 @@ const loginRoute = createRoute({
   },
 });
 
-// 6. Route Tree
-const routeTree = rootRoute.addChildren([indexRoute, demoRoute, securityRoute, loginRoute]);
+// 7. Route Tree
+const routeTree = rootRoute.addChildren([indexRoute, demoRoute, securityRoute, auditRoute, loginRoute]);
 
 // 6. Create Router
 export const router = createRouter({

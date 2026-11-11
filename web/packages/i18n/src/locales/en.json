@@ -124,5 +124,55 @@
       "failed": "Failed",
       "prompt": "2FA Prompt"
     }
+  },
+  "audit": {
+    "title": "Audit Logs",
+    "desc": "Append-only, immutable record of all administrative, tenant, and authentication events.",
+    "nav": "Audit Logs",
+    "filters": {
+      "title": "Filter Logs",
+      "action": "Action",
+      "actionPlaceholder": "e.g. auth. or auth.login",
+      "actor": "Actor ID",
+      "actorPlaceholder": "Filter by account UUID",
+      "outcome": "Outcome",
+      "outcomeAll": "All Outcomes",
+      "outcomeSuccess": "Success",
+      "outcomeFailure": "Failure",
+      "outcomeDenied": "Denied",
+      "targetType": "Target Type",
+      "targetTypePlaceholder": "e.g. session, account",
+      "from": "From Date",
+      "to": "To Date",
+      "apply": "Apply Filters",
+      "reset": "Reset Filters"
+    },
+    "table": {
+      "timestamp": "Timestamp",
+      "action": "Action",
+      "outcome": "Outcome",
+      "actor": "Actor",
+      "target": "Target",
+      "ip": "IP Address",
+      "details": "Details",
+      "viewMetadata": "View JSON"
+    },
+    "metadataModal": {
+      "title": "Audit Entry Details",
+      "correlationId": "Correlation ID",
+      "nodeId": "Node ID",
+      "actorIp": "Actor IP",
+      "metadata": "Structured JSON Metadata",
+      "copied": "Copied!",
+      "copyJson": "Copy JSON",
+      "close": "Close"
+    },
+    "pagination": {
+      "previous": "Previous",
+      "next": "Next",
+      "limit": "Per page",
+      "page": "Page"
+    },
+    "empty": "No audit records found matching the current filters."
   }
 }

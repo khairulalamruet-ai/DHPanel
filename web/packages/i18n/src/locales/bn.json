@@ -124,5 +124,55 @@
       "failed": "ব্যর্থ চেষ্টা",
       "prompt": "2FA প্রম্পট"
     }
+  },
+  "audit": {
+    "title": "অডিট লগ",
+    "desc": "সিস্টেমের সমস্ত অ্যাডমিনিস্ট্রেটিভ, টেন্যান্ট ও নিরাপত্তা কার্যক্রমের অপরিবর্তনীয় রেকর্ড।",
+    "nav": "অডিট লগ",
+    "filters": {
+      "title": "ফিল্টার করুন",
+      "action": "অ্যাকশন",
+      "actionPlaceholder": "যেমন: auth. বা auth.login",
+      "actor": "অ্যাক্টর আইডি",
+      "actorPlaceholder": "অ্যাকাউন্ট ইউইউআইডি...",
+      "outcome": "ফলাফল",
+      "outcomeAll": "সব ফলাফল",
+      "outcomeSuccess": "সফল",
+      "outcomeFailure": "ব্যর্থ",
+      "outcomeDenied": "প্রত্যাখ্যাত",
+      "targetType": "টার্গেট টাইপ",
+      "targetTypePlaceholder": "যেমন: session, account",
+      "from": "শুরুর তারিখ",
+      "to": "শেষের তারিখ",
+      "apply": "ফিল্টার প্রয়োগ করুন",
+      "reset": "রিসেট করুন"
+    },
+    "table": {
+      "timestamp": "সময়",
+      "action": "অ্যাকশন",
+      "outcome": "ফলাফল",
+      "actor": "অ্যাক্টর",
+      "target": "টার্গেট",
+      "ip": "আইপি ঠিকানা",
+      "details": "বিস্তারিত",
+      "viewMetadata": "জেসন দেখুন"
+    },
+    "metadataModal": {
+      "title": "অডিট এন্ট্রি বিবরণ",
+      "correlationId": "কোরিলেশন আইডি",
+      "nodeId": "নোড আইডি",
+      "actorIp": "অ্যাক্টর আইপি",
+      "metadata": "স্ট্রাকচার্ড জেসন মেটাডাটা",
+      "copied": "কপি করা হয়েছে!",
+      "copyJson": "জেসন কপি করুন",
+      "close": "বন্ধ করুন"
+    },
+    "pagination": {
+      "previous": "পূর্ববর্তী",
+      "next": "পরবর্তী",
+      "limit": "প্রতি পেজে",
+      "page": "পৃষ্ঠা"
+    },
+    "empty": "বর্তমান ফিল্টারের সাথে কোনো অডিট রেকর্ড পাওয়া যায়নি।"
   }
 }
