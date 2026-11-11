@@ -680,6 +680,18 @@ struct Browser {
 }
 
 impl Browser {
+    async fn post_empty(&self, app: &Router, uri: &str) -> Resp {
+        send_with(
+            app,
+            "POST",
+            uri,
+            Some(&self.cookie),
+            None,
+            &[("x-csrf-token", &self.csrf)],
+        )
+        .await
+    }
+
     async fn post(&self, app: &Router, uri: &str, body: Value) -> Resp {
         send_with(
             app,
@@ -704,13 +716,7 @@ async fn sign_in(app: &Router, name: &str) -> Browser {
 
 /// Enrols and confirms TOTP; returns the secret and the backup codes.
 async fn enable_totp(app: &Router, b: &Browser) -> (TotpSecret, Vec<String>) {
-    let r = b
-        .post(
-            app,
-            "/api/v1/auth/mfa/totp/enroll",
-            json!({"password": PASSWORD}),
-        )
-        .await;
+    let r = b.post_empty(app, "/api/v1/auth/mfa/totp/enroll").await;
     assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
     let base32 = r.body["secret"].as_str().unwrap();
     assert!(
@@ -941,43 +947,46 @@ async fn wrong_second_factors_lock_the_account_despite_correct_passwords(pool: P
     let _ = secret;
 }
 
+/// Like `state`, but sudo mode lasts only `sudo_secs`.
+fn sudo_state(pool: &PgPool, hasher: PasswordHasher, sudo_secs: u64) -> AuthState {
+    let mut st = state(pool, hasher);
+    st.sessions = SessionStore::new(
+        st.redis.clone(),
+        pool.clone(),
+        SessionConfig {
+            sudo_window: Duration::from_secs(sudo_secs),
+            ..SessionConfig::default()
+        },
+    );
+    st
+}
+
+const ENROLL: &str = "/api/v1/auth/mfa/totp/enroll";
+const CONFIRM: &str = "/api/v1/auth/mfa/totp/confirm";
+const DISABLE: &str = "/api/v1/auth/mfa/totp/disable";
+const SUDO: &str = "/api/v1/auth/sudo";
+
 #[sqlx::test(migrations = "../../../migrations")]
 #[ignore = "needs PostgreSQL + Redis"]
-async fn enrolment_and_disabling_need_password_csrf_and_a_valid_code(pool: PgPool) {
+async fn enrolment_needs_csrf_and_a_valid_code_and_can_be_restarted(pool: PgPool) {
     let hasher = PasswordHasher::new(fast_params(2)).unwrap();
     create_account(&pool, &hasher, "ruth", "active").await;
     let app = app(state(&pool, hasher));
     let b = sign_in(&app, "ruth").await;
-    let enroll = "/api/v1/auth/mfa/totp/enroll";
-    let confirm = "/api/v1/auth/mfa/totp/confirm";
-    let disable = "/api/v1/auth/mfa/totp/disable";
 
     // No CSRF header.
-    let r = send(
-        &app,
-        "POST",
-        enroll,
-        Some(&b.cookie),
-        Some(json!({"password": PASSWORD})),
-    )
-    .await;
+    let r = send(&app, "POST", ENROLL, Some(&b.cookie), None).await;
     assert_eq!(r.body["code"], "csrf_failed");
-    // Wrong password.
-    let r = b
-        .post(&app, enroll, json!({"password": "Wrong-Password-Here-9"}))
-        .await;
-    assert_eq!(r.status, StatusCode::FORBIDDEN);
-    assert_eq!(r.body["code"], "password_incorrect");
     // Nothing to confirm yet.
-    let r = b.post(&app, confirm, json!({"code": "123456"})).await;
+    let r = b.post(&app, CONFIRM, json!({"code": "123456"})).await;
     assert_eq!(r.status, StatusCode::CONFLICT);
     assert_eq!(r.body["code"], "mfa_not_pending");
 
     // Pending enrolment does not gate login, and a wrong code does not confirm it.
-    let r = b.post(&app, enroll, json!({"password": PASSWORD})).await;
-    assert_eq!(r.status, StatusCode::OK);
+    let r = b.post_empty(&app, ENROLL).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
     let first_secret = r.body["secret"].as_str().unwrap().to_owned();
-    let r = b.post(&app, confirm, json!({"code": "12345"})).await;
+    let r = b.post(&app, CONFIRM, json!({"code": "12345"})).await;
     assert_eq!(r.status, StatusCode::BAD_REQUEST);
     assert_eq!(r.body["code"], "invalid_mfa_code");
     assert_eq!(
@@ -987,32 +996,27 @@ async fn enrolment_and_disabling_need_password_csrf_and_a_valid_code(pool: PgPoo
 
     // Enrolling again issues a different secret; then confirm it.
     let b = sign_in(&app, "ruth").await;
-    let (_, _) = {
-        let r = b.post(&app, enroll, json!({"password": PASSWORD})).await;
-        assert_ne!(r.body["secret"].as_str().unwrap(), first_secret);
-        let secret = secret_from_base32(r.body["secret"].as_str().unwrap());
-        let r = b
-            .post(&app, confirm, json!({"code": secret.code_at(unix_now())}))
-            .await;
-        assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
-        (secret, ())
-    };
+    let r = b.post_empty(&app, ENROLL).await;
+    assert_ne!(r.body["secret"].as_str().unwrap(), first_secret);
+    let secret = secret_from_base32(r.body["secret"].as_str().unwrap());
+    let r = b
+        .post(&app, CONFIRM, json!({"code": secret.code_at(unix_now())}))
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
     // Already enabled.
-    let r = b.post(&app, enroll, json!({"password": PASSWORD})).await;
+    let r = b.post_empty(&app, ENROLL).await;
     assert_eq!(r.status, StatusCode::CONFLICT);
     assert_eq!(r.body["code"], "mfa_already_enabled");
 
-    // Disabling needs the password; afterwards login is one step again.
-    let r = b
-        .post(&app, disable, json!({"password": "Wrong-Password-Here-9"}))
-        .await;
-    assert_eq!(r.body["code"], "password_incorrect");
+    // Disabling (still inside the sudo window of this login) makes login one step again.
     assert_eq!(
         login(&app, "ruth", PASSWORD, None).await.status,
         StatusCode::ACCEPTED
     );
-    let r = b.post(&app, disable, json!({"password": PASSWORD})).await;
-    assert_eq!(r.status, StatusCode::NO_CONTENT);
+    assert_eq!(
+        b.post_empty(&app, DISABLE).await.status,
+        StatusCode::NO_CONTENT
+    );
     assert_eq!(
         login(&app, "ruth", PASSWORD, None).await.status,
         StatusCode::OK
@@ -1022,4 +1026,103 @@ async fn enrolment_and_disabling_need_password_csrf_and_a_valid_code(pool: PgPoo
         .await
         .unwrap();
     assert_eq!(left, 0);
+}
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn sensitive_actions_ask_for_the_password_again_after_the_sudo_window(pool: PgPool) {
+    let hasher = PasswordHasher::new(fast_params(2)).unwrap();
+    create_account(&pool, &hasher, "sybil", "active").await;
+    let app = app(sudo_state(&pool, hasher, 2));
+    let b = sign_in(&app, "sybil").await;
+
+    // Right after login the sensitive action is allowed.
+    assert_eq!(b.post_empty(&app, ENROLL).await.status, StatusCode::OK);
+
+    tokio::time::sleep(Duration::from_millis(3100)).await;
+    let r = b.post_empty(&app, ENROLL).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+    assert_eq!(r.body["code"], "reauth_required");
+    // Ordinary endpoints are unaffected.
+    let r = send(&app, "GET", "/api/v1/auth/me", Some(&b.cookie), None).await;
+    assert_eq!(r.status, StatusCode::OK);
+
+    // Wrong password, missing CSRF: no sudo.
+    let r = b
+        .post(&app, SUDO, json!({"password": "Wrong-Password-Here-9"}))
+        .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+    assert_eq!(r.body["code"], "password_incorrect");
+    let r = send(
+        &app,
+        "POST",
+        SUDO,
+        Some(&b.cookie),
+        Some(json!({"password": PASSWORD})),
+    )
+    .await;
+    assert_eq!(r.body["code"], "csrf_failed");
+    assert_eq!(
+        b.post_empty(&app, ENROLL).await.body["code"],
+        "reauth_required"
+    );
+
+    // Correct password: allowed again, for the configured window only.
+    let r = b.post(&app, SUDO, json!({"password": PASSWORD})).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert_eq!(r.body["sudo_expires_in"], 2);
+    assert_eq!(b.post_empty(&app, ENROLL).await.status, StatusCode::OK);
+    tokio::time::sleep(Duration::from_millis(3100)).await;
+    assert_eq!(
+        b.post_empty(&app, DISABLE).await.body["code"],
+        "reauth_required"
+    );
+}
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn with_2fa_on_sudo_needs_a_second_factor_so_a_password_cannot_disable_2fa(pool: PgPool) {
+    let hasher = PasswordHasher::new(fast_params(2)).unwrap();
+    create_account(&pool, &hasher, "trent", "active").await;
+    let app = app(sudo_state(&pool, hasher, 2));
+    let b = sign_in(&app, "trent").await;
+    let (secret, codes) = enable_totp(&app, &b).await;
+    tokio::time::sleep(Duration::from_millis(3100)).await;
+
+    // A thief with the session cookie and the password still cannot switch 2FA off.
+    assert_eq!(
+        b.post_empty(&app, DISABLE).await.body["code"],
+        "reauth_required"
+    );
+    let r = b.post(&app, SUDO, json!({"password": PASSWORD})).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+    assert_eq!(r.body["code"], "mfa_code_required");
+    let r = b
+        .post(&app, SUDO, json!({"password": PASSWORD, "code": "000000"}))
+        .await;
+    assert_eq!(r.body["code"], "invalid_mfa_code");
+    // The code that confirmed enrolment was already used: a replay is refused too.
+    let spent = secret.code_at(unix_now());
+    let r = b
+        .post(&app, SUDO, json!({"password": PASSWORD, "code": spent}))
+        .await;
+    assert_ne!(r.status, StatusCode::OK);
+    assert_eq!(
+        b.post_empty(&app, DISABLE).await.body["code"],
+        "reauth_required"
+    );
+    let r = send(&app, "GET", "/api/v1/auth/mfa", Some(&b.cookie), None).await;
+    assert_eq!(r.body["totp_enabled"], true);
+
+    // With a real second factor (here a backup code) sudo is granted and 2FA can be disabled.
+    let r = b
+        .post(&app, SUDO, json!({"password": PASSWORD, "code": codes[0]}))
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert_eq!(
+        b.post_empty(&app, DISABLE).await.status,
+        StatusCode::NO_CONTENT
+    );
+    let r = send(&app, "GET", "/api/v1/auth/mfa", Some(&b.cookie), None).await;
+    assert_eq!(r.body["totp_enabled"], false);
 }

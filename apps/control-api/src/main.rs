@@ -125,6 +125,7 @@ async fn main() -> ExitCode {
             absolute_timeout: std::time::Duration::from_secs(
                 u64::from(config.auth.session_absolute_hours) * 3600,
             ),
+            sudo_window: std::time::Duration::from_secs(u64::from(config.auth.sudo_minutes) * 60),
             ..dhpanel_session::SessionConfig::default()
         },
     );

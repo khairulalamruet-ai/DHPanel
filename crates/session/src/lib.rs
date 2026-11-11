@@ -16,6 +16,10 @@
 //!   `X-CSRF-Token` header to equal it (constant-time) and otherwise rejects
 //!   with 403 `csrf_failed`. Together with `SameSite=Strict` this protects all
 //!   session-authenticated state changes.
+//! * **Sudo mode**: a session records when its owner last proved their
+//!   identity (`auth_time`: login, or [`SessionStore::mark_reauthenticated`]).
+//!   The [`RecentAuth`] extractor guards sensitive routes and answers 403
+//!   `reauth_required` once that is older than [`SessionConfig::sudo_window`].
 
 use std::{
     net::IpAddr,
@@ -104,6 +108,8 @@ pub struct SessionConfig {
     pub absolute_timeout: Duration,
     /// Minimum time between TTL refreshes (limits Redis writes per request).
     pub touch_interval: Duration,
+    /// How long after authenticating sensitive actions stay allowed (sudo mode).
+    pub sudo_window: Duration,
 }
 
 impl Default for SessionConfig {
@@ -112,6 +118,7 @@ impl Default for SessionConfig {
             idle_timeout: Duration::from_secs(30 * 60),
             absolute_timeout: Duration::from_secs(12 * 60 * 60),
             touch_interval: Duration::from_secs(60),
+            sudo_window: Duration::from_secs(10 * 60),
         }
     }
 }
@@ -133,6 +140,23 @@ pub struct SessionData {
     /// Anti-CSRF token for state-changing requests.
     #[serde(default)]
     pub csrf_token: CsrfToken,
+    /// Unix seconds when the owner last proved their identity (login or a
+    /// later re-authentication). Sessions stored before sudo mode existed
+    /// have 0 and therefore always need re-authentication.
+    #[serde(default)]
+    pub auth_time: i64,
+}
+
+impl SessionData {
+    /// Seconds of sudo mode left at `now`, or `None` when re-authentication
+    /// is required. A clock that moved backwards never extends the window.
+    #[must_use]
+    pub fn sudo_remaining(&self, now: i64, window: Duration) -> Option<u64> {
+        let age = now.checked_sub(self.auth_time).filter(|age| *age >= 0)?;
+        u64::try_from(secs(window) - age)
+            .ok()
+            .filter(|left| *left > 0)
+    }
 }
 
 /// Input for [`SessionStore::create`].
@@ -331,6 +355,7 @@ impl SessionStore {
             last_seen_at: now,
             absolute_expires_at,
             csrf_token: CsrfToken::generate()?,
+            auth_time: now,
         };
         let payload = serde_json::to_string(&data).map_err(|_| SessionError::Corrupt)?;
         let ttl = self.ttl_from(now, absolute_expires_at);
@@ -383,6 +408,47 @@ impl SessionStore {
         Ok(Some(data))
     }
 
+    /// Records that the session's owner just re-authenticated, restarting the
+    /// sudo window. The session's expiry is unchanged. Returns `false` when
+    /// the session no longer exists.
+    ///
+    /// # Errors
+    /// Redis failures or a corrupt payload.
+    pub async fn mark_reauthenticated(&self, cookie_value: &str) -> Result<bool, SessionError> {
+        let Some(raw) = decode_token(cookie_value) else {
+            return Ok(false);
+        };
+        let key = redis_key(&token_hash(&raw));
+        let mut conn = self.redis.connection().await?;
+        let payload: Option<String> = conn.get(&key).await?;
+        let Some(payload) = payload else {
+            return Ok(false);
+        };
+        let mut data: SessionData =
+            serde_json::from_str(&payload).map_err(|_| SessionError::Corrupt)?;
+        let now = now_unix();
+        if now >= data.absolute_expires_at {
+            return Ok(false);
+        }
+        data.auth_time = now;
+        let payload = serde_json::to_string(&data).map_err(|_| SessionError::Corrupt)?;
+        // XX + KEEPTTL: never resurrect a revoked session, never extend its life.
+        let updated: Option<String> = dhpanel_cache::redis::cmd("SET")
+            .arg(&key)
+            .arg(payload)
+            .arg("XX")
+            .arg("KEEPTTL")
+            .query_async(&mut conn)
+            .await?;
+        Ok(updated.is_some())
+    }
+
+    /// Current Unix time as used for session timestamps.
+    #[must_use]
+    pub fn now(&self) -> i64 {
+        now_unix()
+    }
+
     /// Ends a session. Returns whether it existed in the hot store.
     ///
     /// # Errors
@@ -432,26 +498,62 @@ where
     type Rejection = AppError;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        authenticate(parts, &SessionStore::from_ref(state))
+            .await
+            .map(Self)
+    }
+}
+
+/// Session + CSRF checks shared by the extractors.
+async fn authenticate(parts: &Parts, store: &SessionStore) -> Result<SessionData, AppError> {
+    let Some(value) = cookie_value(&parts.headers) else {
+        return Err(AppError::Unauthorized);
+    };
+    let data = match store.load(value).await {
+        Ok(Some(data)) => data,
+        Ok(None) => return Err(AppError::Unauthorized),
+        Err(err) => return Err(AppError::internal(err)),
+    };
+    if !is_safe_method(&parts.method) {
+        let presented = parts
+            .headers
+            .get(CSRF_HEADER)
+            .map_or(&b""[..], |v| v.as_bytes());
+        if !data.csrf_token.matches(presented) {
+            return Err(AppError::forbidden(
+                "csrf_failed",
+                "Missing or invalid CSRF token.",
+            ));
+        }
+    }
+    Ok(data)
+}
+
+/// Extractor for sensitive routes (sudo mode): everything [`Authenticated`]
+/// checks, plus the owner must have authenticated within
+/// [`SessionConfig::sudo_window`]. Otherwise 403 `reauth_required`; the client
+/// re-authenticates (password, and second factor if enabled) and retries.
+#[derive(Debug, Clone)]
+pub struct RecentAuth(pub SessionData);
+
+impl<S> FromRequestParts<S> for RecentAuth
+where
+    SessionStore: FromRef<S>,
+    S: Send + Sync,
+{
+    type Rejection = AppError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let store = SessionStore::from_ref(state);
-        let Some(value) = cookie_value(&parts.headers) else {
-            return Err(AppError::Unauthorized);
-        };
-        let data = match store.load(value).await {
-            Ok(Some(data)) => data,
-            Ok(None) => return Err(AppError::Unauthorized),
-            Err(err) => return Err(AppError::internal(err)),
-        };
-        if !is_safe_method(&parts.method) {
-            let presented = parts
-                .headers
-                .get(CSRF_HEADER)
-                .map_or(&b""[..], |v| v.as_bytes());
-            if !data.csrf_token.matches(presented) {
-                return Err(AppError::forbidden(
-                    "csrf_failed",
-                    "Missing or invalid CSRF token.",
-                ));
-            }
+        let data = authenticate(parts, &store).await?;
+        if data
+            .sudo_remaining(now_unix(), store.config().sudo_window)
+            .is_none()
+        {
+            return Err(AppError::forbidden(
+                "reauth_required",
+                "Confirm your identity to continue.",
+            ));
         }
         Ok(Self(data))
     }
@@ -511,6 +613,25 @@ mod tests {
         let old = r#"{"id":"0190b6a2-0000-7000-8000-000000000000","account_id":"0190b6a2-0000-7000-8000-000000000001","created_at":1,"last_seen_at":1,"absolute_expires_at":2}"#;
         let data: SessionData = serde_json::from_str(old).unwrap();
         assert!(!data.csrf_token.matches(b""));
+    }
+
+    #[test]
+    fn sudo_window_counts_from_auth_time_and_fails_closed() {
+        let window = Duration::from_secs(600);
+        let mut data: SessionData = serde_json::from_str(
+            r#"{"id":"0190b6a2-0000-7000-8000-000000000000","account_id":"0190b6a2-0000-7000-8000-000000000001","created_at":1,"last_seen_at":1,"absolute_expires_at":2}"#,
+        )
+        .unwrap();
+        assert_eq!(data.auth_time, 0, "old sessions have no auth time");
+        assert_eq!(data.sudo_remaining(1_000_000, window), None);
+
+        data.auth_time = 1_000_000;
+        assert_eq!(data.sudo_remaining(1_000_000, window), Some(600));
+        assert_eq!(data.sudo_remaining(1_000_599, window), Some(1));
+        assert_eq!(data.sudo_remaining(1_000_600, window), None);
+        assert_eq!(data.sudo_remaining(2_000_000, window), None);
+        // Clock went backwards: do not grant.
+        assert_eq!(data.sudo_remaining(999_999, window), None);
     }
 
     #[test]

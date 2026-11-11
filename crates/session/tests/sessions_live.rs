@@ -14,8 +14,8 @@ use axum::{
 };
 use dhpanel_cache::RedisHandle;
 use dhpanel_session::{
-    Authenticated, CSRF_HEADER, MAX_USER_AGENT, NewSession, RevokeReason, SessionConfig,
-    SessionStore, set_cookie,
+    Authenticated, CSRF_HEADER, MAX_USER_AGENT, NewSession, RecentAuth, RevokeReason,
+    SessionConfig, SessionStore, set_cookie,
 };
 use secrecy::SecretString;
 use sqlx::PgPool;
@@ -50,6 +50,7 @@ fn store(pool: &PgPool, idle: u64, absolute: u64, touch: u64) -> SessionStore {
             idle_timeout: Duration::from_secs(idle),
             absolute_timeout: Duration::from_secs(absolute),
             touch_interval: Duration::from_secs(touch),
+            ..SessionConfig::default()
         },
     )
 }
@@ -304,4 +305,89 @@ async fn state_changing_requests_need_the_session_csrf_token(pool: PgPool) {
     let other_cookie = cookie_header(&set_cookie(&other_token));
     let (status, _) = post_act(app, Some(&other_cookie), Some(other.csrf_token.expose())).await;
     assert_eq!(status, StatusCode::OK);
+}
+
+async fn sensitive(RecentAuth(s): RecentAuth) -> String {
+    s.account_id.to_string()
+}
+
+async fn get_path(app: Router, path: &str, cookie: &str) -> (StatusCode, String) {
+    let req = Request::builder()
+        .uri(path)
+        .header(header::COOKIE, cookie)
+        .body(Body::empty())
+        .unwrap();
+    let res = app.oneshot(req).await.unwrap();
+    let status = res.status();
+    let body = axum::body::to_bytes(res.into_body(), 64 * 1024)
+        .await
+        .unwrap();
+    (status, String::from_utf8_lossy(&body).into_owned())
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs PostgreSQL + Redis: see module docs"]
+async fn sensitive_routes_need_recent_authentication(pool: PgPool) {
+    let acc = account(&pool).await;
+    let s = SessionStore::new(
+        redis(),
+        pool.clone(),
+        SessionConfig {
+            sudo_window: Duration::from_secs(2),
+            ..SessionConfig::default()
+        },
+    );
+    let (token, data) = s.create(new_session(acc)).await.expect("create");
+    assert!(data.auth_time > 0);
+    let app = Router::new()
+        .route("/me", get(whoami))
+        .route("/sensitive", get(sensitive))
+        .with_state(State {
+            sessions: s.clone(),
+        });
+    let cookie = cookie_header(&set_cookie(&token));
+
+    // Fresh login: sudo mode is active.
+    assert_eq!(
+        get_path(app.clone(), "/sensitive", &cookie).await.0,
+        StatusCode::OK
+    );
+
+    // After the window: sensitive routes ask for re-authentication, ordinary ones still work.
+    tokio::time::sleep(Duration::from_millis(3100)).await;
+    let (status, body) = get_path(app.clone(), "/sensitive", &cookie).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert!(body.contains(r#""code":"reauth_required""#), "{body}");
+    assert_eq!(
+        get_path(app.clone(), "/me", &cookie).await.0,
+        StatusCode::OK
+    );
+
+    // Re-authentication restarts the window without touching the lifetime.
+    assert!(s.mark_reauthenticated(token.expose()).await.expect("mark"));
+    let reloaded = s
+        .load(token.expose())
+        .await
+        .expect("load")
+        .expect("present");
+    assert!(reloaded.auth_time > data.auth_time);
+    assert_eq!(reloaded.absolute_expires_at, data.absolute_expires_at);
+    assert_eq!(reloaded.csrf_token, data.csrf_token);
+    assert_eq!(
+        get_path(app.clone(), "/sensitive", &cookie).await.0,
+        StatusCode::OK
+    );
+
+    // No session, no sudo: unauthenticated stays 401, and a revoked session cannot be revived.
+    assert_eq!(
+        get_path(app.clone(), "/sensitive", "__Host-dh_session=garbage")
+            .await
+            .0,
+        StatusCode::UNAUTHORIZED
+    );
+    s.revoke(token.expose(), RevokeReason::Logout)
+        .await
+        .expect("revoke");
+    assert!(!s.mark_reauthenticated(token.expose()).await.expect("mark"));
+    assert!(s.load(token.expose()).await.expect("load").is_none());
 }

@@ -574,11 +574,12 @@ impl Modify for SessionCookieScheme {
 #[openapi(
     paths(
         login, logout, me,
-        mfa::login_mfa, mfa::status, mfa::enroll_totp, mfa::confirm_totp, mfa::disable_totp
+        mfa::login_mfa, mfa::sudo, mfa::status, mfa::enroll_totp, mfa::confirm_totp,
+        mfa::disable_totp
     ),
     components(schemas(
         LoginRequest, Me, mfa::MfaChallenge, mfa::MfaLoginRequest, mfa::MfaStatus,
-        mfa::PasswordRequest, mfa::TotpEnrollment, mfa::CodeRequest, mfa::BackupCodes
+        mfa::SudoRequest, mfa::SudoStatus, mfa::TotpEnrollment, mfa::CodeRequest, mfa::BackupCodes
     )),
     modifiers(&SessionCookieScheme),
     tags((name = "auth", description = "Login, logout, the current account and two-factor authentication"))

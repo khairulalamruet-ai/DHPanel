@@ -209,7 +209,7 @@
         "tags": [
           "auth"
         ],
-        "summary": "Disable TOTP and delete all backup codes. Requires the current password.",
+        "summary": "Disable TOTP and delete all backup codes. Requires sudo mode.",
         "operationId": "disableTotp",
         "parameters": [
           {
@@ -222,32 +222,12 @@
             }
           }
         ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PasswordRequest"
-              }
-            }
-          },
-          "required": true
-        },
         "responses": {
           "204": {
             "description": "2FA disabled (also when it was not enabled)"
           },
           "403": {
-            "description": "`password_incorrect` or `csrf_failed`",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Too many wrong passwords",
+            "description": "`reauth_required` (call POST /api/v1/auth/sudo, then retry) or `csrf_failed`",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -282,16 +262,6 @@
             }
           }
         ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PasswordRequest"
-              }
-            }
-          },
-          "required": true
-        },
         "responses": {
           "200": {
             "description": "New secret; calling again before confirming replaces it",
@@ -304,7 +274,7 @@
             }
           },
           "403": {
-            "description": "`password_incorrect` or `csrf_failed`",
+            "description": "`reauth_required` (call POST /api/v1/auth/sudo, then retry) or `csrf_failed`",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -322,9 +292,66 @@
                 }
               }
             }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/sudo": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Enter sudo mode: prove identity again so sensitive actions are allowed\nfor the next few minutes (`auth.sudo_minutes`).",
+        "operationId": "enterSudoMode",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SudoRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Sudo mode active",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SudoStatus"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`password_incorrect`, `mfa_code_required` (2FA is on and no code was sent), `invalid_mfa_code` or `csrf_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
           },
           "429": {
-            "description": "Too many wrong passwords",
+            "description": "Too many failed attempts",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -791,21 +818,6 @@
           }
         }
       },
-      "PasswordRequest": {
-        "type": "object",
-        "description": "Current password, required for sensitive changes.",
-        "required": [
-          "password"
-        ],
-        "properties": {
-          "password": {
-            "type": "string",
-            "format": "password",
-            "description": "Current password."
-          }
-        },
-        "additionalProperties": false
-      },
       "ProblemDetails": {
         "type": "object",
         "description": "Wire format (RFC 9457 + DHPanel extensions `code`, `correlation_id`, `errors`).",
@@ -874,6 +886,44 @@
             "type": "string",
             "description": "`ready` or `not_ready`.",
             "example": "ready"
+          }
+        }
+      },
+      "SudoRequest": {
+        "type": "object",
+        "description": "Re-authentication to enter sudo mode.",
+        "required": [
+          "password"
+        ],
+        "properties": {
+          "code": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Authenticator or backup code; required when 2FA is enabled.",
+            "example": "123456"
+          },
+          "password": {
+            "type": "string",
+            "format": "password",
+            "description": "Current password."
+          }
+        },
+        "additionalProperties": false
+      },
+      "SudoStatus": {
+        "type": "object",
+        "description": "Sudo mode state.",
+        "required": [
+          "sudo_expires_in"
+        ],
+        "properties": {
+          "sudo_expires_in": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds until sensitive actions need re-authentication again.",
+            "minimum": 0
           }
         }
       },

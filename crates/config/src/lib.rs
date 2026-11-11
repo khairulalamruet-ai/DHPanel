@@ -75,6 +75,9 @@ pub struct AuthConfig {
     pub session_idle_minutes: u32,
     /// Hours after login after which a session ends regardless of activity (1..=720).
     pub session_absolute_hours: u32,
+    /// Minutes after authenticating during which sensitive actions need no
+    /// re-authentication ("sudo mode", 1..=60).
+    pub sudo_minutes: u32,
     /// Failed logins per account (or unknown login name) inside
     /// `lockout_window_minutes` that lock it (1..=100).
     pub lockout_threshold: u32,
@@ -162,6 +165,7 @@ impl Default for ControlConfig {
                 argon2_parallelism: 1,
                 session_idle_minutes: 30,
                 session_absolute_hours: 12,
+                sudo_minutes: 10,
                 lockout_threshold: 5,
                 lockout_window_minutes: 15,
                 lockout_minutes: 15,
@@ -311,7 +315,8 @@ impl ControlConfig {
                 reason: "must not exceed session_absolute_hours".to_owned(),
             });
         }
-        let range_checks: [(&'static str, u32, std::ops::RangeInclusive<u32>); 4] = [
+        let range_checks: [(&'static str, u32, std::ops::RangeInclusive<u32>); 5] = [
+            ("auth.sudo_minutes", self.auth.sudo_minutes, 1..=60),
             (
                 "auth.lockout_threshold",
                 self.auth.lockout_threshold,
@@ -656,6 +661,18 @@ mod tests {
             jail.set_env("DHPANEL_SECRETS__MASTER_KEY_FILE", "/nonexistent");
             let msg = load(jail).expect_err("both").to_string();
             assert!(msg.contains("secrets.master_key"), "{msg}");
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn sudo_minutes_default_and_range() {
+        Jail::expect_with(|jail| {
+            jail.clear_env();
+            assert_eq!(load(jail).expect("defaults").auth.sudo_minutes, 10);
+            jail.set_env("DHPANEL_AUTH__SUDO_MINUTES", "0");
+            let msg = load(jail).expect_err("zero").to_string();
+            assert!(msg.contains("auth.sudo_minutes"), "{msg}");
             Ok(())
         });
     }

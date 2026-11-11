@@ -4,9 +4,10 @@
 //! |---|---|---|
 //! | POST | `/api/v1/public/auth/login/mfa` | pending-login cookie |
 //! | GET  | `/api/v1/auth/mfa` | session |
-//! | POST | `/api/v1/auth/mfa/totp/enroll` | session + password |
+//! | POST | `/api/v1/auth/sudo` | session + password (+ second factor) |
+//! | POST | `/api/v1/auth/mfa/totp/enroll` | session in sudo mode |
 //! | POST | `/api/v1/auth/mfa/totp/confirm` | session |
-//! | POST | `/api/v1/auth/mfa/totp/disable` | session + password |
+//! | POST | `/api/v1/auth/mfa/totp/disable` | session in sudo mode |
 //!
 //! Login with 2FA enabled is two requests. The password step answers 202 and
 //! sets `__Host-dh_mfa`, an HttpOnly cookie holding a random token whose
@@ -20,7 +21,10 @@
 //!   older-or-equal steps are refused, atomically.
 //! * Wrong second-factor codes count toward the same lockout as wrong
 //!   passwords, and a correct password does not reset that count.
-//! * Enabling and disabling require the current password.
+//! * Enabling and disabling require sudo mode: the user authenticated within
+//!   the last few minutes (login, or `POST /api/v1/auth/sudo` with the password
+//!   and, when 2FA is on, a second factor). So a stolen session cannot switch
+//!   2FA off, and neither can a stolen session plus the password.
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -41,7 +45,7 @@ use dhpanel_http_kit::{
     AppError, ProblemDetails,
     client_ip::{client_ip, rate_limit_key},
 };
-use dhpanel_session::Authenticated;
+use dhpanel_session::{Authenticated, RecentAuth, cookie_value};
 use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
@@ -65,6 +69,7 @@ const MAX_CODE_BYTES: usize = 32;
 pub(crate) fn router() -> Router<AuthState> {
     Router::new()
         .route("/api/v1/public/auth/login/mfa", post(login_mfa))
+        .route("/api/v1/auth/sudo", post(sudo))
         .route("/api/v1/auth/mfa", get(status))
         .route("/api/v1/auth/mfa/totp/enroll", post(enroll_totp))
         .route("/api/v1/auth/mfa/totp/confirm", post(confirm_totp))
@@ -100,13 +105,24 @@ pub struct MfaStatus {
     pub backup_codes_remaining: i64,
 }
 
-/// Current password, required for sensitive changes.
+/// Re-authentication to enter sudo mode.
 #[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
-pub struct PasswordRequest {
+pub struct SudoRequest {
     /// Current password.
     #[schema(format = Password)]
     pub password: String,
+    /// Authenticator or backup code; required when 2FA is enabled.
+    #[serde(default)]
+    #[schema(example = "123456")]
+    pub code: Option<String>,
+}
+
+/// Sudo mode state.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct SudoStatus {
+    /// Seconds until sensitive actions need re-authentication again.
+    pub sudo_expires_in: u64,
 }
 
 /// A new, not yet confirmed TOTP secret.
@@ -404,6 +420,68 @@ async fn require_password(
     Ok(())
 }
 
+/// Enter sudo mode: prove identity again so sensitive actions are allowed
+/// for the next few minutes (`auth.sudo_minutes`).
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/sudo",
+    tag = "auth",
+    operation_id = "enterSudoMode",
+    security(("session" = [])),
+    params(("X-CSRF-Token" = String, Header, description = "The session's csrf_token")),
+    request_body = SudoRequest,
+    responses(
+        (status = 200, description = "Sudo mode active", body = SudoStatus),
+        (status = 403, description = "`password_incorrect`, `mfa_code_required` (2FA is on and no code was sent), `invalid_mfa_code` or `csrf_failed`", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 429, description = "Too many failed attempts", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+pub async fn sudo(
+    State(state): State<AuthState>,
+    Authenticated(session): Authenticated,
+    headers: HeaderMap,
+    Json(req): Json<SudoRequest>,
+) -> Result<Json<SudoStatus>, AppError> {
+    let account_id = session.account_id;
+    require_password(&state, account_id, req.password).await?;
+    if db::totp_enabled(&state.db, account_id)
+        .await
+        .map_err(AppError::internal)?
+    {
+        let code = req.code.ok_or_else(|| {
+            AppError::forbidden(
+                "mfa_code_required",
+                "Enter a code from your authenticator app.",
+            )
+        })?;
+        if !second_factor_ok(&state, account_id, &code).await? {
+            count_failure(
+                &state.limits.account,
+                &lockout_subject(Some(account_id), ""),
+            )
+            .await?;
+            return Err(AppError::forbidden(
+                "invalid_mfa_code",
+                "Invalid or already used code.",
+            ));
+        }
+    }
+    let marked = match cookie_value(&headers) {
+        Some(value) => state
+            .sessions
+            .mark_reauthenticated(value)
+            .await
+            .map_err(AppError::internal)?,
+        None => false,
+    };
+    if !marked {
+        return Err(AppError::Unauthorized);
+    }
+    Ok(Json(SudoStatus {
+        sudo_expires_in: state.sessions.config().sudo_window.as_secs(),
+    }))
+}
+
 /// 2FA state of the signed-in account.
 #[utoipa::path(
     get,
@@ -441,21 +519,17 @@ pub async fn status(
     operation_id = "enrollTotp",
     security(("session" = [])),
     params(("X-CSRF-Token" = String, Header, description = "The session's csrf_token")),
-    request_body = PasswordRequest,
     responses(
         (status = 200, description = "New secret; calling again before confirming replaces it", body = TotpEnrollment),
-        (status = 403, description = "`password_incorrect` or `csrf_failed`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "`mfa_already_enabled`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 429, description = "Too many wrong passwords", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 403, description = "`reauth_required` (call POST /api/v1/auth/sudo, then retry) or `csrf_failed`", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "`mfa_already_enabled`", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 pub async fn enroll_totp(
     State(state): State<AuthState>,
-    Authenticated(session): Authenticated,
-    Json(req): Json<PasswordRequest>,
+    RecentAuth(session): RecentAuth,
 ) -> Result<Response, AppError> {
     let account_id = session.account_id;
-    require_password(&state, account_id, req.password).await?;
     let profile = accounts::find_profile(&state.db, account_id)
         .await
         .map_err(AppError::internal)?
@@ -539,7 +613,7 @@ pub async fn confirm_totp(
     }))
 }
 
-/// Disable TOTP and delete all backup codes. Requires the current password.
+/// Disable TOTP and delete all backup codes. Requires sudo mode.
 #[utoipa::path(
     post,
     path = "/api/v1/auth/mfa/totp/disable",
@@ -547,19 +621,15 @@ pub async fn confirm_totp(
     operation_id = "disableTotp",
     security(("session" = [])),
     params(("X-CSRF-Token" = String, Header, description = "The session's csrf_token")),
-    request_body = PasswordRequest,
     responses(
         (status = 204, description = "2FA disabled (also when it was not enabled)"),
-        (status = 403, description = "`password_incorrect` or `csrf_failed`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 429, description = "Too many wrong passwords", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 403, description = "`reauth_required` (call POST /api/v1/auth/sudo, then retry) or `csrf_failed`", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 pub async fn disable_totp(
     State(state): State<AuthState>,
-    Authenticated(session): Authenticated,
-    Json(req): Json<PasswordRequest>,
+    RecentAuth(session): RecentAuth,
 ) -> Result<StatusCode, AppError> {
-    require_password(&state, session.account_id, req.password).await?;
     if db::remove_totp(&state.db, session.account_id)
         .await
         .map_err(AppError::internal)?

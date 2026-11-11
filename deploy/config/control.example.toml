@@ -41,6 +41,11 @@ argon2_parallelism = 1
 session_idle_minutes = 30     # 5..=1440
 session_absolute_hours = 12   # 1..=720
 
+# Sudo mode: sensitive actions (changing 2FA, ...) are allowed for this long
+# after login or re-authentication; afterwards the user must confirm their
+# password (and second factor, if enabled) again.
+sudo_minutes = 10             # 1..=60
+
 # Failed-login lockout. An account (or unknown login name) is locked after
 # `lockout_threshold` failures within `lockout_window_minutes`; one client
 # address (an IPv6 /64) after `ip_lockout_threshold`. Locked logins get
