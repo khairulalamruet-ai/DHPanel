@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*) AS \"n!\"\n           FROM accounts a\n           JOIN account_roles ar ON ar.account_id = a.id\n           JOIN roles r ON r.id = ar.role_id\n           WHERE a.kind = 'admin' AND a.status = 'active' AND r.name = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "n!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "902184d2bf362429dd3739b0afffb8393294474180d063ec2d00278acb8ae599"
+}

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT a.status AS \"status: DbAccountStatus\",\n                  a.kind AS \"kind: DbAccountKind\",\n                  COALESCE((SELECT array_agg(r.name ORDER BY r.name)\n                            FROM account_roles ar JOIN roles r ON r.id = ar.role_id\n                            WHERE ar.account_id = a.id), '{}') AS \"roles!\",\n                  COALESCE((SELECT array_agg(DISTINCT rp.permission ORDER BY rp.permission)\n                            FROM account_roles ar JOIN role_permissions rp ON rp.role_id = ar.role_id\n                            WHERE ar.account_id = a.id), '{}') AS \"permissions!\"\n           FROM accounts a WHERE a.id = $1",
+  "query": "SELECT a.status AS \"status: DbAccountStatus\",\n                  a.kind AS \"kind: DbAccountKind\",\n                  COALESCE((SELECT array_agg(r.name ORDER BY r.name)\n                            FROM account_roles ar JOIN roles r ON r.id = ar.role_id\n                            WHERE ar.account_id = a.id), '{}') AS \"roles!\",\n                  COALESCE((SELECT array_agg(DISTINCT rp.permission ORDER BY rp.permission)\n                            FROM account_roles ar JOIN role_permissions rp ON rp.role_id = ar.role_id\n                            WHERE ar.account_id = a.id), '{}') AS \"permissions!\",\n                  a.mfa_required,\n                  EXISTS (SELECT 1 FROM account_mfa m\n                          WHERE m.account_id = a.id AND m.kind = 'totp'\n                            AND m.confirmed_at IS NOT NULL) AS \"mfa_enabled!\"\n           FROM accounts a WHERE a.id = $1",
   "describe": {
     "columns": [
       {
@@ -58,6 +58,23 @@
         "name": "permissions!",
         "type_info": "TextArray",
         "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "mfa_required",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "accounts",
+            "name": "mfa_required"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "mfa_enabled!",
+        "type_info": "Bool",
+        "origin": "Expression"
       }
     ],
     "parameters": {
@@ -69,8 +86,10 @@
       false,
       false,
       null,
+      null,
+      false,
       null
     ]
   },
-  "hash": "058e1f7f8634e791add1731065daae42d733ad4a8d22ac24d8832b18fe18126a"
+  "hash": "d1068acc9939b763e221bbb416f8f874ba2221ab270907d7440ab32d6be24817"
 }

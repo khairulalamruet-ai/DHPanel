@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE accounts\n           SET email = COALESCE($2, email),\n               status = COALESCE($3, status),\n               mfa_required = COALESCE($4, mfa_required)\n           WHERE id = $1 AND kind = 'admin'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        {
+          "Custom": {
+            "name": "account_status",
+            "kind": {
+              "Enum": [
+                "active",
+                "suspended",
+                "disabled"
+              ]
+            }
+          }
+        },
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "bf47d6d307af4dc4419938763145830bfe97c195f615f36816a15c93ce83da81"
+}

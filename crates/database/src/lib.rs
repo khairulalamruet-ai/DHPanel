@@ -10,6 +10,7 @@
 //! `.sqlx/` offline cache (refresh with `cargo sqlx prepare --workspace`).
 
 pub mod accounts;
+pub mod admins;
 pub mod mfa;
 pub mod rbac;
 

@@ -75,6 +75,10 @@ enum AdminAction {
         /// `support` for restricted administrators.
         #[arg(long, default_value = "super_admin")]
         role: String,
+        /// Make two-factor authentication mandatory for this account: until it
+        /// enrols a second factor, it can only use its own security pages.
+        #[arg(long)]
+        require_mfa: bool,
     },
 }
 
@@ -100,8 +104,9 @@ async fn main() -> ExitCode {
                     email,
                     password_stdin,
                     role,
+                    require_mfa,
                 },
-        } => admin_create(&username, &email, password_stdin, &role).await,
+        } => admin_create(&username, &email, password_stdin, &role, require_mfa).await,
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -178,6 +183,7 @@ async fn admin_create(
     email: &str,
     password_stdin: bool,
     role: &str,
+    require_mfa: bool,
 ) -> Result<(), Failure> {
     // Validate identifiers before asking for the password.
     let username =
@@ -265,7 +271,14 @@ async fn admin_create(
         dhpanel_database::rbac::AssignRole::Assigned
         | dhpanel_database::rbac::AssignRole::AlreadyAssigned => {}
     }
-    println!("created admin '{username}' <{email}> id={id} role={role}{first}");
+    if require_mfa {
+        let mut conn = pool.acquire().await.map_err(db_err)?;
+        dhpanel_database::admins::update_admin(&mut conn, id, None, None, Some(true))
+            .await
+            .map_err(|e| Failure(EXIT_UNAVAILABLE, format!("database error: {e}")))?;
+    }
+    let mfa = if require_mfa { " (2FA required)" } else { "" };
+    println!("created admin '{username}' <{email}> id={id} role={role}{first}{mfa}");
     Ok(())
 }
 
@@ -296,7 +309,7 @@ mod tests {
 
     #[tokio::test]
     async fn invalid_username_is_rejected_before_any_io() {
-        let Err(f) = admin_create("No Spaces", "a@b.co", true, "super_admin").await else {
+        let Err(f) = admin_create("No Spaces", "a@b.co", true, "super_admin", false).await else {
             unreachable!("must fail");
         };
         assert_eq!(f.0, EXIT_USAGE);

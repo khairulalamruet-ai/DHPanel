@@ -19,7 +19,14 @@
 //! (session, CSRF on state-changing methods), then loads the account's roles
 //! and answers:
 //! * 401 when the account no longer exists or is not active (and ends the session),
+//! * 403 `mfa_setup_required` when the account must use two-factor
+//!   authentication and has not enrolled yet (it can still use its own
+//!   security endpoints to do so),
 //! * 403 `permission_denied` when no role grants the permission.
+//!
+//! [`RequireRecent`] additionally demands sudo mode (a recent login or
+//! re-authentication) and answers 403 `reauth_required` otherwise; use it for
+//! changes to other people's access.
 //!
 //! Permissions are read from PostgreSQL on every request, so a role change
 //! takes effect immediately.
@@ -259,6 +266,12 @@ where
         }
         return Err(AppError::Unauthorized);
     };
+    if access.mfa_required && !access.mfa_enabled {
+        return Err(AppError::forbidden(
+            "mfa_setup_required",
+            "Set up two-factor authentication to continue.",
+        ));
+    }
     Ok(Principal {
         session,
         kind: access.kind,
@@ -297,6 +310,38 @@ where
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let principal = load_principal(parts, state).await?;
         principal.ensure(P::KEY)?;
+        Ok(Self(principal, PhantomData))
+    }
+}
+
+/// Like [`Require`], and the caller must also be in sudo mode. The permission
+/// is checked first, so callers without it learn nothing about sudo mode.
+#[derive(Debug, Clone)]
+pub struct RequireRecent<P: PermissionKey>(pub Principal, pub PhantomData<P>);
+
+impl<S, P> FromRequestParts<S> for RequireRecent<P>
+where
+    SessionStore: FromRef<S>,
+    PgPool: FromRef<S>,
+    S: Send + Sync,
+    P: PermissionKey,
+{
+    type Rejection = AppError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let principal = load_principal(parts, state).await?;
+        principal.ensure(P::KEY)?;
+        let store = SessionStore::from_ref(state);
+        if principal
+            .session
+            .sudo_remaining(store.now(), store.config().sudo_window)
+            .is_none()
+        {
+            return Err(AppError::forbidden(
+                "reauth_required",
+                "Confirm your identity to continue.",
+            ));
+        }
         Ok(Self(principal, PhantomData))
     }
 }

@@ -206,6 +206,12 @@ pub struct Me {
     pub csrf_token: String,
     /// Whether two-factor authentication (TOTP) is enabled.
     pub mfa_enabled: bool,
+    /// An administrator made two-factor authentication mandatory for this account.
+    pub mfa_required: bool,
+    /// Two-factor authentication is mandatory but not set up yet: until it is,
+    /// permission-protected endpoints answer 403 `mfa_setup_required`. The UI
+    /// should send the user to the security page to enrol.
+    pub mfa_setup_required: bool,
     /// Role names, e.g. `["super_admin"]`.
     pub roles: Vec<String>,
     /// Permission grants from all roles: exact keys (`admin.roles.read`),
@@ -226,25 +232,14 @@ impl std::fmt::Debug for Me {
 impl Me {
     /// Builds the response from the account's profile, session and access.
     async fn load(db: &PgPool, p: AccountProfile, csrf: &CsrfToken) -> Result<Self, AppError> {
-        let mfa_enabled = dhpanel_database::mfa::totp_enabled(db, p.id)
-            .await
-            .map_err(AppError::internal)?;
         let access = dhpanel_database::rbac::load_access(db, p.id)
             .await
             .map_err(AppError::internal)?;
-        let (roles, permissions) =
-            access.map_or_else(Default::default, |a| (a.roles, a.permissions));
-        Ok(Self::new(p, csrf, mfa_enabled, roles, permissions))
-    }
-
-    fn new(
-        p: AccountProfile,
-        csrf: &CsrfToken,
-        mfa_enabled: bool,
-        roles: Vec<String>,
-        permissions: Vec<String>,
-    ) -> Self {
-        Self {
+        let (roles, permissions, mfa_enabled, mfa_required) = access
+            .map_or_else(Default::default, |a| {
+                (a.roles, a.permissions, a.mfa_enabled, a.mfa_required)
+            });
+        Ok(Self {
             id: p.id,
             kind: p.kind,
             username: p.username,
@@ -252,9 +247,11 @@ impl Me {
             locale: p.locale,
             csrf_token: csrf.expose().to_owned(),
             mfa_enabled,
+            mfa_required,
+            mfa_setup_required: mfa_required && !mfa_enabled,
             roles,
             permissions,
-        }
+        })
     }
 }
 

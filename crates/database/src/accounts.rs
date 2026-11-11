@@ -1,7 +1,7 @@
 //! Account persistence.
 
 use dhpanel_domain::{AccountKind, Email, Username};
-use sqlx::{PgPool, types::Uuid};
+use sqlx::{PgConnection, PgPool, types::Uuid};
 
 /// Mirrors the `account_kind` PostgreSQL enum.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type, serde::Serialize)]
@@ -62,6 +62,19 @@ pub async fn insert_account(
     pool: &PgPool,
     new: &NewAccount<'_>,
 ) -> Result<Uuid, InsertAccountError> {
+    let mut conn = pool.acquire().await?;
+    insert_account_in(&mut conn, new).await
+}
+
+/// Like [`insert_account`], on a plain connection so it can run inside a
+/// transaction (`&mut *tx`).
+///
+/// # Errors
+/// Same as [`insert_account`].
+pub async fn insert_account_in(
+    conn: &mut PgConnection,
+    new: &NewAccount<'_>,
+) -> Result<Uuid, InsertAccountError> {
     let kind = DbAccountKind::from(new.kind);
     sqlx::query_scalar!(
         r#"INSERT INTO accounts (kind, username, email, password_hash)
@@ -72,7 +85,7 @@ pub async fn insert_account(
         new.email.as_str(),
         new.password_hash,
     )
-    .fetch_one(pool)
+    .fetch_one(&mut *conn)
     .await
     .map_err(
         |err| match err.as_database_error().and_then(|e| e.constraint()) {

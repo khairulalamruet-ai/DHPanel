@@ -31,6 +31,7 @@ pub fn document() -> utoipa::openapi::OpenApi {
     let mut doc = ApiDoc::openapi();
     doc.merge(dhpanel_mod_auth::AuthApi::openapi());
     doc.merge(dhpanel_audit::AuditApi::openapi());
+    doc.merge(dhpanel_mod_admin::AdminApi::openapi());
     doc
 }
 

@@ -151,6 +151,11 @@ async fn main() -> ExitCode {
         window: minutes(config.auth.lockout_window_minutes),
         lockout: minutes(config.auth.lockout_minutes),
     };
+    let admin = dhpanel_mod_admin::AdminState {
+        db: db.clone(),
+        sessions: sessions.clone(),
+        hasher: hasher.clone(),
+    };
     let auth = dhpanel_mod_auth::AuthState {
         db: db.clone(),
         sessions,
@@ -175,6 +180,7 @@ async fn main() -> ExitCode {
             trusted_proxies: config.trusted_proxies.clone().into(),
         },
         Some(auth),
+        Some(admin),
     );
 
     let addr = config.listen;

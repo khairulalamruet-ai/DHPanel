@@ -1096,7 +1096,7 @@ async fn sensitive_actions_ask_for_the_password_again_after_the_sudo_window(pool
 #[ignore = "needs PostgreSQL + Redis"]
 async fn with_2fa_on_sudo_needs_a_second_factor_so_a_password_cannot_disable_2fa(pool: PgPool) {
     let hasher = PasswordHasher::new(fast_params(2)).unwrap();
-    create_account(&pool, &hasher, "trent", "active").await;
+    let trent = create_account(&pool, &hasher, "trent", "active").await;
     let app = app(sudo_state(&pool, hasher, 2));
     let b = sign_in(&app, "trent").await;
     let (secret, codes) = enable_totp(&app, &b).await;
@@ -1115,7 +1115,14 @@ async fn with_2fa_on_sudo_needs_a_second_factor_so_a_password_cannot_disable_2fa
         .await;
     assert_eq!(r.body["code"], "invalid_mfa_code");
     // The code that confirmed enrolment was already used: a replay is refused too.
-    let spent = secret.code_at(unix_now());
+    // (Take the step from the database: a 30 s step boundary may have passed since.)
+    let used_step: i64 =
+        sqlx::query_scalar("SELECT last_used_step FROM account_mfa WHERE account_id = $1")
+            .bind(trent)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let spent = secret.code_at(u64::try_from(used_step).unwrap() * 30);
     let r = b
         .post(&app, SUDO, json!({"password": PASSWORD, "code": spent}))
         .await;

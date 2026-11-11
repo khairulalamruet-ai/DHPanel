@@ -19,6 +19,7 @@ members = [
     "crates/rbac",
     "crates/audit",
     "crates/modules/auth",
+    "crates/modules/admin",
 ]
 
 [workspace.package]
@@ -44,6 +45,7 @@ dhpanel-session = { path = "crates/session" }
 dhpanel-rbac = { path = "crates/rbac" }
 dhpanel-audit = { path = "crates/audit" }
 dhpanel-mod-auth = { path = "crates/modules/auth" }
+dhpanel-mod-admin = { path = "crates/modules/admin" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

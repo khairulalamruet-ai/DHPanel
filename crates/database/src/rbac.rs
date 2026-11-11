@@ -1,6 +1,6 @@
 //! Role and permission persistence (`roles`, `role_permissions`, `account_roles`).
 
-use sqlx::{PgPool, types::Uuid};
+use sqlx::{PgConnection, PgPool, types::Uuid};
 
 use crate::accounts::{DbAccountKind, DbAccountStatus};
 
@@ -16,6 +16,10 @@ pub struct AccountAccess {
     pub roles: Vec<String>,
     /// Distinct permission grants, sorted.
     pub permissions: Vec<String>,
+    /// Two-factor authentication is mandatory for this account.
+    pub mfa_required: bool,
+    /// A second factor is enrolled and confirmed.
+    pub mfa_enabled: bool,
 }
 
 /// Loads an account's access. `None` when the account does not exist.
@@ -35,7 +39,11 @@ pub async fn load_access(
                             WHERE ar.account_id = a.id), '{}') AS "roles!",
                   COALESCE((SELECT array_agg(DISTINCT rp.permission ORDER BY rp.permission)
                             FROM account_roles ar JOIN role_permissions rp ON rp.role_id = ar.role_id
-                            WHERE ar.account_id = a.id), '{}') AS "permissions!"
+                            WHERE ar.account_id = a.id), '{}') AS "permissions!",
+                  a.mfa_required,
+                  EXISTS (SELECT 1 FROM account_mfa m
+                          WHERE m.account_id = a.id AND m.kind = 'totp'
+                            AND m.confirmed_at IS NOT NULL) AS "mfa_enabled!"
            FROM accounts a WHERE a.id = $1"#,
         account_id
     )
@@ -78,8 +86,23 @@ pub async fn assign_role(
     role: &str,
     granted_by: Option<Uuid>,
 ) -> Result<AssignRole, sqlx::Error> {
+    let mut conn = pool.acquire().await?;
+    assign_role_in(&mut conn, account_id, role, granted_by).await
+}
+
+/// Like [`assign_role`], on a plain connection so it can run inside a
+/// transaction (`&mut *tx`).
+///
+/// # Errors
+/// Same as [`assign_role`].
+pub async fn assign_role_in(
+    conn: &mut PgConnection,
+    account_id: Uuid,
+    role: &str,
+    granted_by: Option<Uuid>,
+) -> Result<AssignRole, sqlx::Error> {
     let Some(role_id) = sqlx::query_scalar!("SELECT id FROM roles WHERE name = $1", role)
-        .fetch_optional(pool)
+        .fetch_optional(&mut *conn)
         .await?
     else {
         return Ok(AssignRole::UnknownRole);
@@ -91,7 +114,7 @@ pub async fn assign_role(
         role_id,
         granted_by
     )
-    .execute(pool)
+    .execute(&mut *conn)
     .await?
     .rows_affected();
     Ok(if inserted == 1 {
@@ -106,13 +129,27 @@ pub async fn assign_role(
 /// # Errors
 /// Database errors.
 pub async fn revoke_role(pool: &PgPool, account_id: Uuid, role: &str) -> Result<bool, sqlx::Error> {
+    let mut conn = pool.acquire().await?;
+    revoke_role_in(&mut conn, account_id, role).await
+}
+
+/// Like [`revoke_role`], on a plain connection so it can run inside a
+/// transaction (`&mut *tx`).
+///
+/// # Errors
+/// Same as [`revoke_role`].
+pub async fn revoke_role_in(
+    conn: &mut PgConnection,
+    account_id: Uuid,
+    role: &str,
+) -> Result<bool, sqlx::Error> {
     let removed = sqlx::query!(
         r#"DELETE FROM account_roles ar USING roles r
            WHERE r.id = ar.role_id AND ar.account_id = $1 AND r.name = $2"#,
         account_id,
         role
     )
-    .execute(pool)
+    .execute(&mut *conn)
     .await?
     .rows_affected();
     Ok(removed == 1)
