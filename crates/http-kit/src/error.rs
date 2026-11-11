@@ -95,6 +95,16 @@ pub enum AppError {
         /// Per-field problems.
         errors: Vec<FieldError>,
     },
+    /// 429 — too many attempts. Sent with `Retry-After` (whole seconds).
+    #[error("too many requests: {code}")]
+    TooManyRequests {
+        /// Stable code, e.g. `too_many_attempts`.
+        code: Cow<'static, str>,
+        /// Explanation safe to show to the client.
+        detail: String,
+        /// Seconds until the client may retry (at least 1).
+        retry_after_secs: u64,
+    },
     /// 500 — unexpected failure. The source is logged, never sent.
     #[error("internal error: {0}")]
     Internal(#[source] Box<dyn std::error::Error + Send + Sync + 'static>),
@@ -140,6 +150,19 @@ impl AppError {
     pub fn validation(errors: Vec<FieldError>) -> Self {
         Self::Validation { errors }
     }
+    /// 429 with a code, client-safe detail and retry delay (rounded up to whole seconds).
+    pub fn too_many_requests(
+        code: &'static str,
+        detail: impl Into<String>,
+        retry_after: std::time::Duration,
+    ) -> Self {
+        let secs = retry_after.as_secs() + u64::from(retry_after.subsec_nanos() > 0);
+        Self::TooManyRequests {
+            code: code.into(),
+            detail: detail.into(),
+            retry_after_secs: secs.max(1),
+        }
+    }
     /// 500 wrapping any error.
     pub fn internal(err: impl Into<Box<dyn std::error::Error + Send + Sync + 'static>>) -> Self {
         Self::Internal(err.into())
@@ -155,6 +178,7 @@ impl AppError {
             Self::NotFound { .. } => StatusCode::NOT_FOUND,
             Self::Conflict { .. } => StatusCode::CONFLICT,
             Self::Validation { .. } => StatusCode::UNPROCESSABLE_ENTITY,
+            Self::TooManyRequests { .. } => StatusCode::TOO_MANY_REQUESTS,
             Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -166,7 +190,8 @@ impl AppError {
             Self::BadRequest { code, .. }
             | Self::AuthenticationFailed { code, .. }
             | Self::Forbidden { code, .. }
-            | Self::Conflict { code, .. } => code,
+            | Self::Conflict { code, .. }
+            | Self::TooManyRequests { code, .. } => code,
             Self::Unauthorized => "unauthenticated",
             Self::NotFound { .. } => "not_found",
             Self::Validation { .. } => "validation_failed",
@@ -179,7 +204,8 @@ impl AppError {
             Self::BadRequest { detail, .. }
             | Self::AuthenticationFailed { detail, .. }
             | Self::Forbidden { detail, .. }
-            | Self::Conflict { detail, .. } => detail.clone(),
+            | Self::Conflict { detail, .. }
+            | Self::TooManyRequests { detail, .. } => detail.clone(),
             Self::Unauthorized => "Authentication is required.".to_owned(),
             Self::NotFound { resource } => format!("The requested {resource} was not found."),
             Self::Validation { .. } => "One or more fields are invalid.".to_owned(),
@@ -244,10 +270,21 @@ impl IntoResponse for AppError {
             );
         }
         let body = ProblemDetails::from(&self);
+        let retry_after = match &self {
+            Self::TooManyRequests {
+                retry_after_secs, ..
+            } => Some(*retry_after_secs),
+            _ => None,
+        };
         let mut response = (self.status(), Json(body)).into_response();
         response
             .headers_mut()
             .insert(header::CONTENT_TYPE, HeaderValue::from_static(PROBLEM_JSON));
+        if let Some(secs) = retry_after {
+            response
+                .headers_mut()
+                .insert(header::RETRY_AFTER, HeaderValue::from(secs));
+        }
         response
     }
 }
@@ -277,6 +314,11 @@ mod tests {
             "403" => AppError::forbidden("feature_disabled", "Your plan does not include DNS."),
             "404" => AppError::not_found("domain"),
             "409" => AppError::conflict("limit_reached", "Domain limit (10) reached."),
+            "429" => AppError::too_many_requests(
+                "too_many_attempts",
+                "Too many attempts.",
+                std::time::Duration::from_millis(89_001),
+            ),
             "422" => AppError::validation(vec![FieldError::new(
                 "email",
                 "invalid_format",
@@ -323,6 +365,7 @@ mod tests {
             ("404", 404, "not_found"),
             ("409", 409, "limit_reached"),
             ("422", 422, "validation_failed"),
+            ("429", 429, "too_many_attempts"),
             ("500", 500, "internal_error"),
         ] {
             let (got, ct, body) = call(kind).await;
@@ -337,6 +380,36 @@ mod tests {
                 "{kind}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn too_many_requests_sets_retry_after_rounded_up() {
+        let app = Router::new().route("/fail/{kind}", get(fail));
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .uri("/fail/429")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(res.headers()[header::RETRY_AFTER], "90");
+        let (_, _, body) = call("409").await;
+        assert!(body.get("retry_after_secs").is_none());
+    }
+
+    #[test]
+    fn retry_after_is_never_zero() {
+        let err = AppError::too_many_requests("x", "y", std::time::Duration::ZERO);
+        assert!(matches!(
+            err,
+            AppError::TooManyRequests {
+                retry_after_secs: 1,
+                ..
+            }
+        ));
     }
 
     #[tokio::test]

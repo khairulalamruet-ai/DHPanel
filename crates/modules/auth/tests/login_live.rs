@@ -2,7 +2,10 @@
 //! Ignored by default: `eval "$(deploy/dev/devenv.sh test-env)" && cargo test -p dhpanel-mod-auth -- --include-ignored`
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-use std::{net::SocketAddr, time::Duration};
+use std::{
+    net::{IpAddr, SocketAddr},
+    time::Duration,
+};
 
 use axum::{
     Router,
@@ -11,8 +14,11 @@ use axum::{
     http::{Request, StatusCode, header},
 };
 use dhpanel_auth_core::password::{Argon2Params, PasswordHasher};
-use dhpanel_cache::RedisHandle;
-use dhpanel_mod_auth::{AuthState, router};
+use dhpanel_cache::{
+    RedisHandle,
+    lockout::{FailureLimiter, LockoutPolicy},
+};
+use dhpanel_mod_auth::{AuthState, LoginLimits, router};
 use dhpanel_session::{SessionConfig, SessionStore};
 use secrecy::SecretString;
 use serde_json::{Value, json};
@@ -31,12 +37,39 @@ fn fast_params(iterations: u32) -> Argon2Params {
 }
 
 fn state(pool: &PgPool, hasher: PasswordHasher) -> AuthState {
+    limited_state(pool, hasher, 5, 50, &[])
+}
+
+/// Lockout counters live in a namespace unique to this state, so tests and
+/// repeated runs never share Redis keys.
+fn limited_state(
+    pool: &PgPool,
+    hasher: PasswordHasher,
+    account_threshold: u32,
+    ip_threshold: u32,
+    trusted_proxies: &[IpAddr],
+) -> AuthState {
     let url = std::env::var("REDIS_URL").expect("REDIS_URL must be set");
     let redis = RedisHandle::new(&SecretString::from(url)).expect("valid REDIS_URL");
+    let ns = Uuid::now_v7().simple().to_string();
+    let policy = |threshold| LockoutPolicy {
+        threshold,
+        window: Duration::from_secs(900),
+        lockout: Duration::from_secs(900),
+    };
     AuthState {
         db: pool.clone(),
-        sessions: SessionStore::new(redis, pool.clone(), SessionConfig::default()),
+        sessions: SessionStore::new(redis.clone(), pool.clone(), SessionConfig::default()),
         hasher,
+        limits: LoginLimits {
+            account: FailureLimiter::new(
+                redis.clone(),
+                format!("test:{ns}:account"),
+                policy(account_threshold),
+            ),
+            ip: FailureLimiter::new(redis, format!("test:{ns}:ip"), policy(ip_threshold)),
+        },
+        trusted_proxies: trusted_proxies.to_vec().into(),
     }
 }
 
@@ -73,6 +106,7 @@ async fn create_account(
 struct Resp {
     status: StatusCode,
     set_cookie: Option<String>,
+    retry_after: Option<u64>,
     body: Value,
 }
 
@@ -83,10 +117,24 @@ async fn send(
     cookie: Option<&str>,
     body: Option<Value>,
 ) -> Resp {
+    send_with(app, method, uri, cookie, body, &[]).await
+}
+
+async fn send_with(
+    app: &Router,
+    method: &str,
+    uri: &str,
+    cookie: Option<&str>,
+    body: Option<Value>,
+    extra_headers: &[(&str, &str)],
+) -> Resp {
     let mut req = Request::builder()
         .method(method)
         .uri(uri)
         .header(header::USER_AGENT, "test-agent/1.0");
+    for (k, v) in extra_headers {
+        req = req.header(*k, *v);
+    }
     if let Some(c) = cookie {
         req = req.header(header::COOKIE, c);
     }
@@ -103,6 +151,10 @@ async fn send(
         .headers()
         .get(header::SET_COOKIE)
         .map(|v| v.to_str().unwrap().to_owned());
+    let retry_after = res
+        .headers()
+        .get(header::RETRY_AFTER)
+        .map(|v| v.to_str().unwrap().parse().unwrap());
     let bytes = axum::body::to_bytes(res.into_body(), 64 * 1024)
         .await
         .unwrap();
@@ -114,6 +166,7 @@ async fn send(
     Resp {
         status,
         set_cookie,
+        retry_after,
         body,
     }
 }
@@ -361,4 +414,170 @@ async fn unknown_fields_and_non_json_bodies_are_rejected(pool: PgPool) {
         .unwrap();
     let res = app.clone().oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+}
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn sixth_attempt_after_five_failures_is_429_even_with_correct_password(pool: PgPool) {
+    let hasher = PasswordHasher::new(fast_params(2)).unwrap();
+    let id = create_account(&pool, &hasher, "ivan", "active").await;
+    let app = app(state(&pool, hasher));
+
+    // Mixing username and email still counts against the one account.
+    for (n, who) in [
+        "ivan",
+        "IVAN@example.com",
+        "ivan",
+        "ivan@example.com",
+        "ivan",
+    ]
+    .iter()
+    .enumerate()
+    {
+        let r = login(&app, who, "Wrong-Password-Here-9", None).await;
+        assert_eq!(r.status, StatusCode::UNAUTHORIZED, "attempt {}", n + 1);
+    }
+    let r = login(&app, "ivan", PASSWORD, None).await;
+    assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS, "{:?}", r.body);
+    assert_eq!(r.body["code"], "too_many_attempts");
+    assert!(r.set_cookie.is_none());
+    let retry = r.retry_after.expect("Retry-After");
+    assert!((1..=900).contains(&retry), "{retry}");
+
+    let evs = events(&pool).await;
+    assert_eq!(evs.len(), 6);
+    assert_eq!(evs[5], (Some(id), "locked_out".to_owned(), false));
+}
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn unknown_login_names_lock_out_the_same_way(pool: PgPool) {
+    let hasher = PasswordHasher::new(fast_params(2)).unwrap();
+    let app = app(state(&pool, hasher));
+    for _ in 0..5 {
+        let r = login(&app, "ghost-user", PASSWORD, None).await;
+        assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+    }
+    let r = login(&app, "Ghost-User", PASSWORD, None).await;
+    assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS);
+    // A different name from the same address is not affected by the per-name lock.
+    let r = login(&app, "someone-else", PASSWORD, None).await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+}
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn successful_login_resets_the_failure_count(pool: PgPool) {
+    let hasher = PasswordHasher::new(fast_params(2)).unwrap();
+    create_account(&pool, &hasher, "judy", "active").await;
+    let app = app(state(&pool, hasher));
+    for _ in 0..4 {
+        login(&app, "judy", "Wrong-Password-Here-9", None).await;
+    }
+    assert_eq!(
+        login(&app, "judy", PASSWORD, None).await.status,
+        StatusCode::OK
+    );
+    for _ in 0..4 {
+        let r = login(&app, "judy", "Wrong-Password-Here-9", None).await;
+        assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+    }
+    assert_eq!(
+        login(&app, "judy", PASSWORD, None).await.status,
+        StatusCode::OK
+    );
+}
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn spraying_many_names_from_one_address_locks_the_address(pool: PgPool) {
+    let hasher = PasswordHasher::new(fast_params(2)).unwrap();
+    create_account(&pool, &hasher, "kate", "active").await;
+    let app = app(limited_state(&pool, hasher, 5, 3, &[]));
+    for name in ["spray-a", "spray-b", "spray-c"] {
+        assert_eq!(
+            login(&app, name, PASSWORD, None).await.status,
+            StatusCode::UNAUTHORIZED
+        );
+    }
+    // Even a real account with the right password is refused from this address.
+    let r = login(&app, "kate", PASSWORD, None).await;
+    assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS);
+    assert!(r.retry_after.is_some());
+    let last = events(&pool).await.pop().unwrap();
+    assert_eq!(last, (None, "rate_limited".to_owned(), false));
+}
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn client_ip_comes_from_trusted_proxy_header_only(pool: PgPool) {
+    let hasher = PasswordHasher::new(fast_params(2)).unwrap();
+    create_account(&pool, &hasher, "leo", "active").await;
+    // The mock peer (198.51.100.23) plays the trusted reverse proxy.
+    let proxy: IpAddr = "198.51.100.23".parse().unwrap();
+    let app = app(limited_state(&pool, hasher, 5, 2, &[proxy]));
+    let body = || Some(json!({"login": "leo", "password": "Wrong-Password-Here-9"}));
+    let uri = "/api/v1/public/auth/login";
+
+    // Two clients behind the proxy, each with a spoofed left-most entry.
+    for client in ["203.0.113.1", "203.0.113.2"] {
+        let xff = format!("6.6.6.6, {client}");
+        let r = send_with(
+            &app,
+            "POST",
+            uri,
+            None,
+            body(),
+            &[("x-forwarded-for", &xff)],
+        )
+        .await;
+        assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+    }
+    // Each client has one failure; neither address is locked (threshold 2).
+    let r = send_with(
+        &app,
+        "POST",
+        uri,
+        None,
+        body(),
+        &[("x-forwarded-for", "203.0.113.1")],
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+    // That was 203.0.113.1's second failure: it is now locked, the other is not.
+    let r = send_with(
+        &app,
+        "POST",
+        uri,
+        None,
+        body(),
+        &[("x-forwarded-for", "203.0.113.1")],
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS);
+    let r = send_with(
+        &app,
+        "POST",
+        uri,
+        None,
+        body(),
+        &[("x-forwarded-for", "203.0.113.2")],
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+
+    let ips: Vec<String> = sqlx::query_scalar("SELECT host(ip) FROM login_events ORDER BY at, id")
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        ips,
+        [
+            "203.0.113.1",
+            "203.0.113.2",
+            "203.0.113.1",
+            "203.0.113.1",
+            "203.0.113.2"
+        ]
+    );
 }

@@ -13,12 +13,20 @@
 //! * Any session presented at login is revoked first (session fixation).
 //! * Every attempt is recorded in `login_events`.
 //! * Oversized input is rejected before hashing (bounded CPU per request).
+//! * Lockout (see [`LoginLimits`]): failed logins are counted per account
+//!   (per hashed login name when no account matches, so unknown and existing
+//!   names behave the same) and per client address. Reaching a threshold
+//!   answers 429 `too_many_attempts` with `Retry-After` until the lock expires,
+//!   even for the correct password. A successful login clears the account count.
 //!
 //! The server must be run with `into_make_service_with_connect_info::<SocketAddr>()`
-//! so the client IP is available. Rate limiting (T01.06) and CSRF (T01.07) are
-//! layered on separately.
+//! so the client IP is available. CSRF (T01.07) is layered on separately.
 
-use std::net::SocketAddr;
+use std::{
+    net::{IpAddr, SocketAddr},
+    sync::Arc,
+    time::Duration,
+};
 
 use axum::{
     Json, Router,
@@ -27,18 +35,27 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use dhpanel_auth_core::password::PasswordHasher;
+use dhpanel_cache::{
+    RedisHandle,
+    lockout::{FailureLimiter, LockoutPolicy},
+};
 use dhpanel_database::{
     accounts::{self, AccountProfile, DbAccountKind, DbAccountStatus, LoginEvent, LoginOutcome},
     sqlx::PgPool,
 };
 use dhpanel_domain::{Email, Username};
-use dhpanel_http_kit::{AppError, ProblemDetails};
+use dhpanel_http_kit::{
+    AppError, ProblemDetails,
+    client_ip::{client_ip, rate_limit_key},
+};
 use dhpanel_session::{
     Authenticated, NewSession, RevokeReason, SessionStore, clear_cookie, cookie_value, set_cookie,
 };
 use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest as _, Sha256};
 use utoipa::{
     Modify, OpenApi, ToSchema,
     openapi::security::{ApiKey, ApiKeyValue, SecurityScheme},
@@ -60,6 +77,51 @@ pub struct AuthState {
     pub sessions: SessionStore,
     /// Password hasher with the configured cost.
     pub hasher: PasswordHasher,
+    /// Failed-login lockout.
+    pub limits: LoginLimits,
+    /// Reverse proxies whose `X-Forwarded-For` is trusted.
+    pub trusted_proxies: Arc<[IpAddr]>,
+}
+
+/// Failed-login counters: one per account (or login name), one per client
+/// address (IPv6 per /64).
+#[derive(Debug, Clone)]
+pub struct LoginLimits {
+    /// Per account / login name.
+    pub account: FailureLimiter,
+    /// Per client address.
+    pub ip: FailureLimiter,
+}
+
+impl LoginLimits {
+    /// Builds both limiters on one Redis handle.
+    #[must_use]
+    pub fn new(redis: RedisHandle, account: LockoutPolicy, ip: LockoutPolicy) -> Self {
+        Self {
+            account: FailureLimiter::new(redis.clone(), "login:account", account),
+            ip: FailureLimiter::new(redis, "login:ip", ip),
+        }
+    }
+}
+
+/// Lockout subject for a login attempt: the account when one matched,
+/// otherwise a hash of the normalised login name (never raw input in keys).
+fn lockout_subject(account_id: Option<Uuid>, normalised_login: &str) -> String {
+    match account_id {
+        Some(id) => format!("a:{}", id.simple()),
+        None => format!(
+            "n:{}",
+            URL_SAFE_NO_PAD.encode(Sha256::digest(normalised_login.as_bytes()))
+        ),
+    }
+}
+
+fn too_many_attempts(retry_after: Duration) -> AppError {
+    AppError::too_many_requests(
+        "too_many_attempts",
+        "Too many failed login attempts. Try again later.",
+        retry_after,
+    )
 }
 
 impl FromRef<AuthState> for SessionStore {
@@ -134,6 +196,23 @@ fn user_agent(headers: &HeaderMap) -> Option<&str> {
         .and_then(|v| v.to_str().ok())
 }
 
+async fn count_failure(limiter: &FailureLimiter, subject: &str) -> Result<(), AppError> {
+    let recorded = limiter
+        .record_failure(subject)
+        .await
+        .map_err(AppError::internal)?;
+    if recorded.locked {
+        let policy = limiter.policy();
+        tracing::warn!(
+            subject,
+            failures = recorded.failures,
+            lockout_secs = policy.lockout.as_secs(),
+            "login lockout started"
+        );
+    }
+    Ok(())
+}
+
 async fn record(db: &PgPool, ev: LoginEvent<'_>) -> Result<(), AppError> {
     accounts::insert_login_event(db, &ev)
         .await
@@ -152,7 +231,9 @@ async fn record(db: &PgPool, ev: LoginEvent<'_>) -> Result<(), AppError> {
          headers(("set-cookie" = String, description = "__Host-dh_session=…; Path=/; Secure; HttpOnly; SameSite=Strict"))),
         (status = 401, description = "Invalid username or password", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "Correct password but account suspended or disabled", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 422, description = "Malformed body", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 422, description = "Malformed body", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 429, description = "Too many failed attempts for this account or address", body = ProblemDetails, content_type = "application/problem+json",
+         headers(("retry-after" = u64, description = "Seconds until the lock expires")))
     )
 )]
 pub async fn login(
@@ -161,7 +242,8 @@ pub async fn login(
     headers: HeaderMap,
     Json(req): Json<LoginRequest>,
 ) -> Result<Response, AppError> {
-    let ip = peer.ip();
+    let ip = client_ip(peer.ip(), &headers, &state.trusted_proxies);
+    let ip_subject = rate_limit_key(ip);
     let ua = user_agent(&headers);
     let attempted = req.login.trim();
     let password = SecretString::from(req.password);
@@ -174,9 +256,21 @@ pub async fn login(
         outcome,
     };
 
+    if let Some(left) = state
+        .limits
+        .ip
+        .locked_for(&ip_subject)
+        .await
+        .map_err(AppError::internal)?
+    {
+        record(&state.db, event(None, LoginOutcome::RateLimited)).await?;
+        return Err(too_many_attempts(left));
+    }
+
     if attempted.chars().count() > MAX_LOGIN_CHARS
         || secrecy::ExposeSecret::expose_secret(&password).len() > MAX_PASSWORD_BYTES
     {
+        count_failure(&state.limits.ip, &ip_subject).await?;
         record(&state.db, event(None, LoginOutcome::BadCredentials)).await?;
         return Err(invalid_credentials());
     }
@@ -195,8 +289,28 @@ pub async fn login(
         None
     };
 
+    let normalised = match (&username, &email) {
+        (Some(u), _) => u.as_str().to_owned(),
+        (_, Some(e)) => e.as_str().to_owned(),
+        _ => attempted.to_lowercase(),
+    };
+    let subject = lockout_subject(account.as_ref().map(|a| a.id), &normalised);
+    let account_id = account.as_ref().map(|a| a.id);
+    if let Some(left) = state
+        .limits
+        .account
+        .locked_for(&subject)
+        .await
+        .map_err(AppError::internal)?
+    {
+        record(&state.db, event(account_id, LoginOutcome::LockedOut)).await?;
+        return Err(too_many_attempts(left));
+    }
+
     let Some(account) = account else {
         let _ = state.hasher.verify_dummy_async(password).await;
+        count_failure(&state.limits.account, &subject).await?;
+        count_failure(&state.limits.ip, &ip_subject).await?;
         record(&state.db, event(None, LoginOutcome::BadCredentials)).await?;
         return Err(invalid_credentials());
     };
@@ -207,6 +321,8 @@ pub async fn login(
         .await
         .map_err(AppError::internal)?;
     if !verification.matches {
+        count_failure(&state.limits.account, &subject).await?;
+        count_failure(&state.limits.ip, &ip_subject).await?;
         record(
             &state.db,
             event(Some(account.id), LoginOutcome::BadCredentials),
@@ -239,6 +355,10 @@ pub async fn login(
                 "This account is disabled.",
             ));
         }
+    }
+
+    if let Err(err) = state.limits.account.reset(&subject).await {
+        tracing::warn!(error = %err, "failed-login counter not reset");
     }
 
     if verification.needs_rehash {
@@ -387,6 +507,20 @@ mod tests {
         };
         let dbg = format!("{req:?}");
         assert!(dbg.contains("alice") && !dbg.contains("hunter2"), "{dbg}");
+    }
+
+    #[test]
+    fn lockout_subjects_never_contain_raw_input() {
+        let id = Uuid::now_v7();
+        assert_eq!(
+            lockout_subject(Some(id), "ignored"),
+            format!("a:{}", id.simple())
+        );
+        let s = lockout_subject(None, "victim@example.com");
+        assert!(s.starts_with("n:") && !s.contains("victim"), "{s}");
+        assert_eq!(s.len(), 2 + 43);
+        assert_eq!(s, lockout_subject(None, "victim@example.com"));
+        assert_ne!(s, lockout_subject(None, "other@example.com"));
     }
 
     #[test]

@@ -128,10 +128,22 @@ async fn main() -> ExitCode {
             ..dhpanel_session::SessionConfig::default()
         },
     );
+    let minutes = |m: u32| std::time::Duration::from_secs(u64::from(m) * 60);
+    let lockout = |threshold| dhpanel_cache::lockout::LockoutPolicy {
+        threshold,
+        window: minutes(config.auth.lockout_window_minutes),
+        lockout: minutes(config.auth.lockout_minutes),
+    };
     let auth = dhpanel_mod_auth::AuthState {
         db: db.clone(),
         sessions,
         hasher,
+        limits: dhpanel_mod_auth::LoginLimits::new(
+            redis.clone(),
+            lockout(config.auth.lockout_threshold),
+            lockout(config.auth.ip_lockout_threshold),
+        ),
+        trusted_proxies: config.trusted_proxies.clone().into(),
     };
 
     let handle = telemetry.prometheus_handle();

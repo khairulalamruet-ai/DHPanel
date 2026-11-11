@@ -11,7 +11,7 @@
 //! Secrets never appear in `Debug` output.
 
 use std::{
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     path::{Path, PathBuf},
 };
 
@@ -33,6 +33,10 @@ pub const CONFIG_PATH_ENV: &str = "DHPANEL_CONFIG";
 pub struct ControlConfig {
     /// Address the HTTP API binds to.
     pub listen: SocketAddr,
+    /// Reverse proxies (exact addresses, e.g. the local Caddy) whose
+    /// `X-Forwarded-For` header is trusted for the client IP. Empty: the TCP
+    /// peer is always the client.
+    pub trusted_proxies: Vec<IpAddr>,
     /// Logging and tracing.
     pub log: LogConfig,
     /// PostgreSQL connection.
@@ -57,6 +61,17 @@ pub struct AuthConfig {
     pub session_idle_minutes: u32,
     /// Hours after login after which a session ends regardless of activity (1..=720).
     pub session_absolute_hours: u32,
+    /// Failed logins per account (or unknown login name) inside
+    /// `lockout_window_minutes` that lock it (1..=100).
+    pub lockout_threshold: u32,
+    /// Sliding window for counting failed logins, minutes (1..=1440).
+    pub lockout_window_minutes: u32,
+    /// How long a lockout lasts, minutes (1..=1440).
+    pub lockout_minutes: u32,
+    /// Failed logins from one IP (IPv6: one /64) inside the window that lock
+    /// that address (`lockout_threshold`..=100000). Higher than the per-account
+    /// limit because many users can share one address (NAT).
+    pub ip_lockout_threshold: u32,
 }
 
 /// Logging settings.
@@ -109,6 +124,7 @@ impl Default for ControlConfig {
     fn default() -> Self {
         Self {
             listen: SocketAddr::from(([127, 0, 0, 1], 8080)),
+            trusted_proxies: Vec::new(),
             log: LogConfig {
                 format: LogFormat::Json,
                 filter: "info".to_owned(),
@@ -130,6 +146,10 @@ impl Default for ControlConfig {
                 argon2_parallelism: 1,
                 session_idle_minutes: 30,
                 session_absolute_hours: 12,
+                lockout_threshold: 5,
+                lockout_window_minutes: 15,
+                lockout_minutes: 15,
+                ip_lockout_threshold: 50,
             },
         }
     }
@@ -269,6 +289,32 @@ impl ControlConfig {
                 key: "auth.session_idle_minutes",
                 reason: "must not exceed session_absolute_hours".to_owned(),
             });
+        }
+        let range_checks: [(&'static str, u32, std::ops::RangeInclusive<u32>); 4] = [
+            (
+                "auth.lockout_threshold",
+                self.auth.lockout_threshold,
+                1..=100,
+            ),
+            (
+                "auth.lockout_window_minutes",
+                self.auth.lockout_window_minutes,
+                1..=1440,
+            ),
+            ("auth.lockout_minutes", self.auth.lockout_minutes, 1..=1440),
+            (
+                "auth.ip_lockout_threshold",
+                self.auth.ip_lockout_threshold,
+                self.auth.lockout_threshold..=100_000,
+            ),
+        ];
+        for (key, value, range) in range_checks {
+            if !range.contains(&value) {
+                return Err(ConfigError::Invalid {
+                    key,
+                    reason: format!("must be {}..={}, got {value}", range.start(), range.end()),
+                });
+            }
         }
         if self.database.url.is_some() && self.database.url_file.is_some() {
             return Err(ConfigError::Invalid {
@@ -514,6 +560,58 @@ mod tests {
             jail.set_env("DHPANEL_AUTH__SESSION_ABSOLUTE_HOURS", "1");
             let msg = load(jail).expect_err("idle > absolute").to_string();
             assert!(msg.contains("must not exceed"), "{msg}");
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn lockout_settings_are_validated() {
+        Jail::expect_with(|jail| {
+            jail.clear_env();
+            let cfg = load(jail).expect("defaults");
+            assert_eq!(
+                (
+                    cfg.auth.lockout_threshold,
+                    cfg.auth.lockout_window_minutes,
+                    cfg.auth.lockout_minutes,
+                    cfg.auth.ip_lockout_threshold
+                ),
+                (5, 15, 15, 50)
+            );
+            jail.set_env("DHPANEL_AUTH__LOCKOUT_THRESHOLD", "0");
+            let msg = load(jail).expect_err("zero").to_string();
+            assert!(msg.contains("auth.lockout_threshold"), "{msg}");
+            jail.set_env("DHPANEL_AUTH__LOCKOUT_THRESHOLD", "10");
+            jail.set_env("DHPANEL_AUTH__IP_LOCKOUT_THRESHOLD", "5");
+            let msg = load(jail).expect_err("ip < account").to_string();
+            assert!(msg.contains("auth.ip_lockout_threshold"), "{msg}");
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn shipped_example_config_is_valid() {
+        Jail::expect_with(|jail| {
+            jail.clear_env();
+            let example = include_str!("../../../deploy/config/control.example.toml");
+            jail.create_file("control.toml", example)?;
+            let cfg = load(jail).expect("example config must load");
+            assert_eq!(cfg.auth.lockout_threshold, 5);
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn trusted_proxies_parse_from_file() {
+        Jail::expect_with(|jail| {
+            jail.clear_env();
+            assert!(load(jail).expect("defaults").trusted_proxies.is_empty());
+            jail.create_file("control.toml", r#"trusted_proxies = ["127.0.0.1", "::1"]"#)?;
+            let cfg = load(jail).expect("valid");
+            assert_eq!(cfg.trusted_proxies.len(), 2);
+            jail.create_file("control.toml", r#"trusted_proxies = ["10.0.0.0/8"]"#)?;
+            let msg = load(jail).expect_err("CIDR is not an address").to_string();
+            assert!(msg.contains("trusted_proxies"), "{msg}");
             Ok(())
         });
     }

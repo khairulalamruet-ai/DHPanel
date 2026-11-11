@@ -145,6 +145,26 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "Too many failed attempts for this account or address",
+            "headers": {
+              "retry-after": {
+                "schema": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                },
+                "description": "Seconds until the lock expires"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
           }
         }
       }

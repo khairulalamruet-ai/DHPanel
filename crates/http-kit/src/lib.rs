@@ -1,5 +1,6 @@
 //! Axum extractors, middleware, problem-details errors and OpenAPI helpers.
 
+pub mod client_ip;
 pub mod error;
 pub mod health;
 pub mod metrics;

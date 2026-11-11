@@ -8,6 +8,12 @@
 
 listen = "127.0.0.1:8080"
 
+# Reverse proxies whose X-Forwarded-For header is trusted for the client IP
+# (exact addresses). Set this to the local Caddy when it fronts the API;
+# leave empty when clients connect directly, otherwise clients could spoof
+# their address and dodge login lockouts.
+trusted_proxies = []   # e.g. ["127.0.0.1", "::1"]
+
 [log]
 format = "json"          # json | pretty
 filter = "info"          # EnvFilter directives, e.g. "info,dhpanel=debug"
@@ -34,3 +40,12 @@ argon2_parallelism = 1
 # Sessions: idle window (sliding) and absolute lifetime (fixed).
 session_idle_minutes = 30     # 5..=1440
 session_absolute_hours = 12   # 1..=720
+
+# Failed-login lockout. An account (or unknown login name) is locked after
+# `lockout_threshold` failures within `lockout_window_minutes`; one client
+# address (an IPv6 /64) after `ip_lockout_threshold`. Locked logins get
+# 429 with Retry-After for `lockout_minutes`, even with the right password.
+lockout_threshold = 5          # 1..=100
+lockout_window_minutes = 15    # 1..=1440
+lockout_minutes = 15           # 1..=1440
+ip_lockout_threshold = 50      # lockout_threshold..=100000

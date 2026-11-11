@@ -17,6 +17,8 @@ use redis::{
 use secrecy::{ExposeSecret, SecretString};
 use tokio::sync::OnceCell;
 
+pub mod lockout;
+
 pub use redis;
 
 /// Time allowed to establish a TCP connection.

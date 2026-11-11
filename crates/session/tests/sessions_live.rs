@@ -147,14 +147,30 @@ async fn idle_timeout_expires_session_and_extractor_returns_401(pool: PgPool) {
 #[ignore = "needs PostgreSQL + Redis: see module docs"]
 async fn absolute_timeout_wins_over_activity(pool: PgPool) {
     let acc = account(&pool).await;
-    // Idle window is long and every load refreshes it, but the absolute limit is 3s.
-    let s = store(&pool, 60, 3, 0);
+    // Idle window is long and every load refreshes it, but the absolute limit is 8s.
+    // Timing is measured, not assumed, so a heavily loaded machine cannot make
+    // the "still alive" checks run after the absolute deadline.
+    let s = store(&pool, 60, 8, 0);
+    let before_create = std::time::Instant::now();
     let (token, _) = s.create(new_session(acc)).await.expect("create");
-    for _ in 0..2 {
-        tokio::time::sleep(Duration::from_millis(1000)).await;
-        assert!(s.load(token.expose()).await.expect("load").is_some());
+    let after_create = std::time::Instant::now();
+    let mut alive_checks = 0;
+    for pause in [0, 1000, 1000] {
+        tokio::time::sleep(Duration::from_millis(pause)).await;
+        let loaded = s.load(token.expose()).await.expect("load");
+        // The session is at most `before_create.elapsed()` old.
+        if before_create.elapsed() < Duration::from_millis(7000) {
+            assert!(loaded.is_some(), "activity inside the absolute window");
+            alive_checks += 1;
+        }
     }
-    tokio::time::sleep(Duration::from_millis(1600)).await;
+    assert!(
+        alive_checks > 0,
+        "machine too slow to observe the live session"
+    );
+    // The session is at least `after_create.elapsed()` old.
+    let past_deadline = Duration::from_millis(9500);
+    tokio::time::sleep(past_deadline.saturating_sub(after_create.elapsed())).await;
     assert!(s.load(token.expose()).await.expect("load").is_none());
 }
 
