@@ -14,10 +14,9 @@ export default defineConfig({
   },
   projects: [
     {
-      name: "chrome",
+      name: "chromium",
       use: {
         ...devices["Desktop Chrome"],
-        channel: "chrome",
         headless: true,
       },
     },
@@ -25,7 +24,7 @@ export default defineConfig({
   webServer: {
     command: "pnpm --filter @dhpanel/admin dev --port 5173",
     url: "http://localhost:5173",
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: true,
     timeout: 60000,
     cwd: "..",
   },

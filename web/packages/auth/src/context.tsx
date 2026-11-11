@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
-import { setCsrfToken, apiFetch } from "@dhpanel/api";
+import { setCsrfToken, apiFetch, api } from "@dhpanel/api";
 import { BootstrapData } from "./types";
 
 interface SessionContextType {
@@ -10,6 +10,8 @@ interface SessionContextType {
   hasFeature: (feature: string) => boolean;
   hasRole: (role: string) => boolean;
   refetch: () => Promise<void>;
+  logout: () => Promise<void>;
+  setSessionData: (data: BootstrapData | null) => void;
 }
 
 const SessionContext = createContext<SessionContextType | undefined>(undefined);
@@ -61,6 +63,17 @@ export function SessionProvider({ children, bootstrapPath }: SessionProviderProp
     return data.roles.includes(role);
   };
 
+  const logout = async () => {
+    try {
+      await api.POST("/api/v1/public/logout");
+    } catch {
+      // Ignore network errors on logout
+    } finally {
+      setData(null);
+      setCsrfToken(null);
+    }
+  };
+
   return (
     <SessionContext.Provider
       value={{
@@ -71,6 +84,8 @@ export function SessionProvider({ children, bootstrapPath }: SessionProviderProp
         hasFeature,
         hasRole,
         refetch: fetchSession,
+        logout,
+        setSessionData: setData,
       }}
     >
       {children}

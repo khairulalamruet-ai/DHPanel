@@ -30,5 +30,24 @@
     "errorBoundaryDesc": "An unexpected error occurred while rendering this page.",
     "retry": "Try again",
     "reload": "Reload page"
+  },
+  "auth": {
+    "login": "Sign In",
+    "signInTitle": "Sign in to DHPanel",
+    "signInDesc": "Enter your credentials to access your control panel",
+    "username": "Username or Email",
+    "usernamePlaceholder": "admin or your email",
+    "password": "Password",
+    "passwordPlaceholder": "••••••••",
+    "totpCode": "Two-Factor Authentication Code",
+    "totpPlaceholder": "6-digit code (e.g. 123456)",
+    "totpDesc": "Enter the 6-digit code from your authenticator app",
+    "submit": "Sign In",
+    "verifying": "Verifying...",
+    "invalidCredentials": "Invalid username or password",
+    "invalidTotp": "Invalid two-factor authentication code",
+    "backToLogin": "Back to username and password",
+    "logoutConfirm": "Are you sure you want to log out?",
+    "loggedOut": "You have been logged out"
   }
 }

@@ -73,4 +73,54 @@ export const handlers = [
       csrfToken: "mock-csrf-token-client-12345",
     });
   }),
+
+  // TODO(api:T01.05): Backend Login API with optional 2FA check
+  http.post(/\/api\/v1\/public\/login$/, async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as any;
+    const { username, password, totp_code } = body || {};
+
+    if (!username || !password) {
+      return HttpResponse.json(
+        { error: "invalid_credentials", message: "Invalid username or password" },
+        { status: 401 }
+      );
+    }
+
+    if (username === "invalid" || password === "wrong") {
+      return HttpResponse.json(
+        { error: "invalid_credentials", message: "Invalid username or password" },
+        { status: 401 }
+      );
+    }
+
+    // If 2FA enabled account and code not yet provided, return 202
+    if (username === "admin_2fa" && !totp_code) {
+      return HttpResponse.json(
+        { requires_2fa: true, message: "Please provide your 2FA verification code" },
+        { status: 202 }
+      );
+    }
+
+    if (username === "admin_2fa" && totp_code !== "123456") {
+      return HttpResponse.json(
+        { error: "invalid_2fa", message: "Invalid 2FA verification code" },
+        { status: 401 }
+      );
+    }
+
+    return HttpResponse.json({
+      user: {
+        id: "usr_admin_01",
+        username: username || "admin",
+        email: `${username || "admin"}@dhpanel.local`,
+        name: "DHPanel Administrator",
+      },
+      csrf_token: "csrf-token-login-verified-9988",
+    });
+  }),
+
+  // TODO(api:T01.05): Backend Logout API
+  http.post(/\/api\/v1\/public\/logout$/, () => {
+    return HttpResponse.json({ success: true });
+  }),
 ];

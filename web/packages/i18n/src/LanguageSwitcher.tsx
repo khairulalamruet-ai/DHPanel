@@ -7,8 +7,8 @@ export function LanguageSwitcher() {
   const toggleLanguage = () => {
     const nextLng = i18n.language.startsWith("bn") ? "en" : "bn";
     i18n.changeLanguage(nextLng);
-    if (typeof window !== "undefined") {
-      localStorage.setItem("dhpanel-locale", nextLng);
+    if (typeof window !== "undefined" && typeof window.localStorage !== "undefined") {
+      window.localStorage?.setItem?.("dhpanel-locale", nextLng);
     }
   };
 

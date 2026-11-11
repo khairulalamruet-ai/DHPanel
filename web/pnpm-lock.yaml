@@ -194,6 +194,15 @@ importers:
       '@dhpanel/api':
         specifier: workspace:*
         version: link:../api
+      '@dhpanel/i18n':
+        specifier: workspace:*
+        version: link:../i18n
+      '@dhpanel/ui':
+        specifier: workspace:*
+        version: link:../ui
+      lucide-react:
+        specifier: ^0.475.0
+        version: 0.475.0(react@19.3.1)
       react:
         specifier: ^19.0.0
         version: 19.3.1

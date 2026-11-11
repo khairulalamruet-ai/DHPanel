@@ -31,6 +31,80 @@ export interface paths {
     };
   };
 
+  "/api/v1/public/login": {
+    /** Authenticate with username and password, optional 2FA code */
+    post: {
+      requestBody: {
+        content: {
+          "application/json": {
+            username: string;
+            password: string;
+            totp_code?: string;
+          };
+        };
+      };
+      responses: {
+        /** Login successful */
+        200: {
+          content: {
+            "application/json": {
+              user: {
+                id: string;
+                username: string;
+                email: string;
+                name: string;
+              };
+              requires_2fa?: false;
+              csrf_token: string;
+            };
+          };
+        };
+        /** 2FA code required */
+        202: {
+          content: {
+            "application/json": {
+              requires_2fa: true;
+              message: string;
+            };
+          };
+        };
+        /** Invalid credentials */
+        401: {
+          content: {
+            "application/json": {
+              error: string;
+              message: string;
+            };
+          };
+        };
+        /** Rate limited / locked out */
+        429: {
+          content: {
+            "application/json": {
+              error: string;
+              retry_after?: number;
+            };
+          };
+        };
+      };
+    };
+  };
+
+  "/api/v1/public/logout": {
+    /** Terminate session */
+    post: {
+      responses: {
+        200: {
+          content: {
+            "application/json": {
+              success: boolean;
+            };
+          };
+        };
+      };
+    };
+  };
+
   "/api/v1/admin/bootstrap": {
     /** Admin session and capability bootstrap */
     get: {

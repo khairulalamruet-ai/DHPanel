@@ -10,6 +10,7 @@ import {
   Globe,
   Users,
   Settings,
+  LogOut,
 } from "lucide-react";
 
 export interface NavItem {
@@ -28,7 +29,7 @@ export interface AppShellProps {
 }
 
 export function AppShell({ title, navItems, children }: AppShellProps) {
-  const { data: session } = useSession();
+  const { data: session, logout } = useSession();
   const { t } = useTranslation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -118,14 +119,24 @@ export function AppShell({ title, navItems, children }: AppShellProps) {
 
           {session?.user && (
             <div className="absolute bottom-4 left-4 right-4 border-t pt-4">
-              <div className="flex items-center gap-3 px-2 py-1">
-                <div className="h-8 w-8 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold text-xs">
-                  {session.user.username.slice(0, 2).toUpperCase()}
+              <div className="flex items-center justify-between px-2 py-1">
+                <div className="flex items-center gap-3 overflow-hidden">
+                  <div className="h-8 w-8 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold text-xs shrink-0">
+                    {session.user.username.slice(0, 2).toUpperCase()}
+                  </div>
+                  <div className="overflow-hidden">
+                    <p className="text-sm font-medium truncate">{session.user.name}</p>
+                    <p className="text-xs text-muted-foreground truncate">{session.user.email}</p>
+                  </div>
                 </div>
-                <div className="overflow-hidden">
-                  <p className="text-sm font-medium truncate">{session.user.name}</p>
-                  <p className="text-xs text-muted-foreground truncate">{session.user.email}</p>
-                </div>
+                <button
+                  onClick={() => logout()}
+                  className="rounded p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors shrink-0"
+                  aria-label={t("common.logout")}
+                  title={t("common.logout")}
+                >
+                  <LogOut className="h-4 w-4" />
+                </button>
               </div>
             </div>
           )}
@@ -142,6 +153,15 @@ export function AppShell({ title, navItems, children }: AppShellProps) {
             <div className="flex items-center gap-3">
               <LanguageSwitcher />
               <ThemeToggle />
+              <button
+                onClick={() => logout()}
+                className="inline-flex items-center gap-1.5 rounded-md border border-input bg-background px-2.5 py-1.5 text-xs font-medium shadow-sm transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                aria-label={t("common.logout")}
+                title={t("common.logout")}
+              >
+                <LogOut className="h-3.5 w-3.5" />
+                <span className="hidden lg:inline">{t("common.logout")}</span>
+              </button>
             </div>
           </header>
 
