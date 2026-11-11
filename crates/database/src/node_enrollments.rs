@@ -220,3 +220,22 @@ pub async fn consume_token(
     .fetch_optional(conn)
     .await
 }
+
+/// Records which node a consumed token created.
+///
+/// # Errors
+/// Database errors.
+pub async fn attach_node(
+    conn: &mut PgConnection,
+    token_id: Uuid,
+    node_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        "UPDATE node_enrollment_tokens SET node_id = $2 WHERE id = $1 AND consumed_at IS NOT NULL",
+        token_id,
+        node_id
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
+}

@@ -38,6 +38,7 @@ struct Browser {
 fn env(pool: &PgPool, public_url: Option<&str>, sudo_secs: u64) -> Env {
     let url = std::env::var("REDIS_URL").expect("REDIS_URL must be set");
     let redis = RedisHandle::new(&SecretString::from(url)).expect("valid REDIS_URL");
+    let redis_for_limiter = redis.clone();
     let sessions = SessionStore::new(
         redis,
         pool.clone(),
@@ -52,6 +53,9 @@ fn env(pool: &PgPool, public_url: Option<&str>, sudo_secs: u64) -> Env {
             sessions: sessions.clone(),
             public_url: public_url.map(Arc::from),
             token_ttl: Duration::from_secs(900),
+            ca: None,
+            limiter: dhpanel_mod_nodes::enrollment_limiter(redis_for_limiter),
+            audit: dhpanel_audit::AuditWriter::new(pool.clone()),
         })
         .layer(MockConnectInfo(std::net::SocketAddr::from((
             [198, 51, 100, 7],

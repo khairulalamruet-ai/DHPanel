@@ -30,11 +30,14 @@ dhpanel-mod-admin.workspace = true
 dhpanel-mod-auth.workspace = true
 dhpanel-mod-nodes.workspace = true
 dhpanel-observability.workspace = true
+dhpanel-pki.workspace = true
 dhpanel-session.workspace = true
 # HTTP framework and async runtime (fixed stack).
 axum = "0.8"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal"] }
 tracing = "0.1.44"
+# Loading the node CA checks its validity against the current time.
+time = "0.3"
 # Standard HTTP middleware: timeout, body limit, gzip, panic -> 500.
 tower-http = { version = "0.7", features = ["timeout", "limit", "compression-gzip", "catch-panic"] }
 utoipa = "6"

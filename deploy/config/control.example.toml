@@ -66,6 +66,11 @@ totp_issuer = "DHPanel"
 # dump, stored TOTP secrets are exposed.
 master_key_file = "/etc/dhpanel/secrets/master_key"
 
+[pki]
+# Where `dhctl ca init` put node_ca.crt and node_ca.key. Without a CA, node
+# enrollment is switched off (the rest of the panel works).
+ca_dir = "/etc/dhpanel/secrets"
+
 [agent]
 # Where node agents reach this control plane (its agent port). Shown to
 # administrators in the command that enrols a new node. https is required;

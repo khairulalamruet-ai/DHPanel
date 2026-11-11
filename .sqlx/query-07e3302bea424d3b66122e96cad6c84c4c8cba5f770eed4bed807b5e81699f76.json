@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO nodes (id, name, hostname, public_ip, agent_version)\n           VALUES ($1, $2, $3, $4::text::inet, $5)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "07e3302bea424d3b66122e96cad6c84c4c8cba5f770eed4bed807b5e81699f76"
+}

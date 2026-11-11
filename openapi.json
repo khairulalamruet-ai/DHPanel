@@ -1713,6 +1713,97 @@
         }
       }
     },
+    "/api/v1/public/nodes/enroll": {
+      "post": {
+        "tags": [
+          "nodes"
+        ],
+        "summary": "Exchange an enrollment token and a certificate request for a node certificate.",
+        "operationId": "enrollNode",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnrollRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Enrolled; the token is used up",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnrollResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`invalid_enrollment_token`: unknown, used, cancelled or expired (deliberately indistinguishable)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`node_name_taken`: a node with that name appeared meanwhile; the token is still usable once the name is free",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid certificate request or fields; the token is not used up",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many failed attempts from this address",
+            "headers": {
+              "retry-after": {
+                "schema": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                },
+                "description": "Seconds until the lock expires"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`enrollment_unavailable`: this control plane has no node CA yet (run `dhctl ca init`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/public/ready": {
       "get": {
         "tags": [
@@ -2124,6 +2215,92 @@
             "type": "integer",
             "format": "int64",
             "description": "Number of sessions ended.",
+            "minimum": 0
+          }
+        }
+      },
+      "EnrollRequest": {
+        "type": "object",
+        "description": "What an agent sends to enrol.",
+        "required": [
+          "token",
+          "csr_pem"
+        ],
+        "properties": {
+          "agent_version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Agent build version."
+          },
+          "csr_pem": {
+            "type": "string",
+            "description": "PEM certificate signing request made with a fresh ECDSA P-256 key that\nnever leaves the node."
+          },
+          "hostname": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Host name of the server."
+          },
+          "token": {
+            "type": "string",
+            "description": "The one-time token from the \"add node\" screen.",
+            "example": "dhn_…"
+          }
+        }
+      },
+      "EnrollResponse": {
+        "type": "object",
+        "description": "The node's new identity.",
+        "required": [
+          "node_id",
+          "name",
+          "certificate_pem",
+          "ca_certificate_pem",
+          "ca_fingerprint_sha256",
+          "not_before",
+          "not_after",
+          "protocol_version"
+        ],
+        "properties": {
+          "ca_certificate_pem": {
+            "type": "string",
+            "description": "The CA certificate (PEM) that signed it and that signs the control\nplane's server certificate."
+          },
+          "ca_fingerprint_sha256": {
+            "type": "string",
+            "description": "SHA-256 fingerprint of the CA certificate, to compare with the one in\nthe enrol command."
+          },
+          "certificate_pem": {
+            "type": "string",
+            "description": "The node certificate (PEM): client authentication for the mTLS connection."
+          },
+          "name": {
+            "type": "string",
+            "description": "The node's name."
+          },
+          "node_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The node's id."
+          },
+          "not_after": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Certificate expiry (RFC 3339, UTC). The agent renews before this."
+          },
+          "not_before": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Certificate validity start (RFC 3339, UTC)."
+          },
+          "protocol_version": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Protocol version the control plane speaks.",
             "minimum": 0
           }
         }

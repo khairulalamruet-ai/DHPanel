@@ -151,6 +151,28 @@ async fn main() -> ExitCode {
         window: minutes(config.auth.lockout_window_minutes),
         lockout: minutes(config.auth.lockout_minutes),
     };
+    // No CA yet is fine (enrollment then answers 503); a CA that exists but is
+    // unusable (expired, wrong key, key readable by others) must not be ignored.
+    let ca = match dhpanel_pki::load_ca_dir(&config.pki.ca_dir, time::OffsetDateTime::now_utc()) {
+        Ok(ca) => {
+            tracing::info!(fingerprint = ca.fingerprint_sha256(), "node CA loaded");
+            Some(Arc::new(ca))
+        }
+        Err(dhpanel_pki::PkiError::Io { source, .. })
+            if source.kind() == std::io::ErrorKind::NotFound =>
+        {
+            tracing::warn!(
+                dir = %config.pki.ca_dir.display(),
+                "no node CA found: node enrollment is switched off; create one with `dhctl ca init`"
+            );
+            None
+        }
+        Err(err) => {
+            tracing::error!(error = %err, "node CA unusable");
+            telemetry.shutdown();
+            return ExitCode::from(EXIT_CONFIG);
+        }
+    };
     let nodes = dhpanel_mod_nodes::NodesState {
         db: db.clone(),
         sessions: sessions.clone(),
@@ -158,6 +180,9 @@ async fn main() -> ExitCode {
         token_ttl: std::time::Duration::from_secs(
             u64::from(config.agent.enrollment_token_minutes) * 60,
         ),
+        ca,
+        limiter: dhpanel_mod_nodes::enrollment_limiter(redis.clone()),
+        audit: dhpanel_audit::AuditWriter::new(db.clone()),
     };
     let admin = dhpanel_mod_admin::AdminState {
         db: db.clone(),

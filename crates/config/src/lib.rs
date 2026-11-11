@@ -49,6 +49,18 @@ pub struct ControlConfig {
     pub secrets: SecretsConfig,
     /// Node agents: how they reach the control plane.
     pub agent: AgentConfig,
+    /// The internal certificate authority for node mTLS.
+    pub pki: PkiConfig,
+}
+
+/// Internal certificate authority settings.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PkiConfig {
+    /// Directory holding `node_ca.crt` and `node_ca.key` (created by
+    /// `dhctl ca init`). If the CA is missing, node enrollment is switched off
+    /// and says so; a CA that exists but is unusable stops the service.
+    pub ca_dir: PathBuf,
 }
 
 /// Node agent settings.
@@ -216,6 +228,9 @@ impl Default for ControlConfig {
             agent: AgentConfig {
                 public_url: None,
                 enrollment_token_minutes: 15,
+            },
+            pki: PkiConfig {
+                ca_dir: PathBuf::from("/etc/dhpanel/secrets"),
             },
         }
     }
@@ -715,6 +730,21 @@ mod tests {
             jail.set_env("DHPANEL_SECRETS__MASTER_KEY_FILE", "/nonexistent");
             let msg = load(jail).expect_err("both").to_string();
             assert!(msg.contains("secrets.master_key"), "{msg}");
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn the_ca_directory_has_a_default_and_can_be_overridden() {
+        Jail::expect_with(|jail| {
+            jail.clear_env();
+            let cfg = load(jail).expect("defaults");
+            assert_eq!(cfg.pki.ca_dir, PathBuf::from("/etc/dhpanel/secrets"));
+            jail.set_env("DHPANEL_PKI__CA_DIR", "/srv/ca");
+            assert_eq!(
+                load(jail).expect("env").pki.ca_dir,
+                PathBuf::from("/srv/ca")
+            );
             Ok(())
         });
     }

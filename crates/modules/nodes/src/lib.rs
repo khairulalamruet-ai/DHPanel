@@ -5,6 +5,7 @@
 //! | POST   | `/api/v1/admin/nodes` | `admin.nodes.manage`, sudo mode |
 //! | GET    | `/api/v1/admin/nodes/enrollments` | `admin.nodes.read` |
 //! | DELETE | `/api/v1/admin/nodes/enrollments/{id}` | `admin.nodes.manage`, sudo mode |
+//! | POST   | `/api/v1/public/nodes/enroll` | the enrollment token itself (see [`enroll`]) |
 //!
 //! Adding a node starts with an **enrollment token**: `POST /api/v1/admin/nodes`
 //! with the planned node name returns the token **once**, together with the
@@ -17,6 +18,7 @@
 //! * Creating and cancelling are audited in the same transaction as the change.
 //!   The token never appears in the audit log or in any log line.
 
+pub mod enroll;
 pub mod token;
 
 use std::{sync::Arc, time::Duration};
@@ -28,12 +30,17 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{delete, get},
 };
-use dhpanel_audit::{AuditEntry, Outcome};
+use dhpanel_audit::{AuditEntry, AuditWriter, Outcome};
+use dhpanel_cache::{
+    RedisHandle,
+    lockout::{FailureLimiter, LockoutPolicy},
+};
 use dhpanel_database::{
     node_enrollments::{self, EnrollmentToken, RevokeOutcome},
     sqlx::PgPool,
 };
 use dhpanel_http_kit::{AppError, FieldError, ProblemDetails};
+use dhpanel_pki::CertificateAuthority;
 use dhpanel_rbac::{
     Require, RequireRecent,
     permissions::{NodesManage, NodesRead},
@@ -59,6 +66,34 @@ pub struct NodesState {
     pub public_url: Option<Arc<str>>,
     /// How long a new token stays valid.
     pub token_ttl: Duration,
+    /// The node CA. Without it enrollment answers 503 `enrollment_unavailable`.
+    pub ca: Option<Arc<CertificateAuthority>>,
+    /// Counts failed enrollment attempts per client address.
+    pub limiter: FailureLimiter,
+    /// Audit log for outcomes that have no transaction of their own.
+    pub audit: AuditWriter,
+}
+
+/// Failed enrollment attempts from one address (an IPv6 /64) allowed inside
+/// [`ENROLL_WINDOW`] before it is locked out.
+pub const ENROLL_MAX_FAILURES: u32 = 10;
+/// Window in which failures are counted.
+pub const ENROLL_WINDOW: Duration = Duration::from_secs(10 * 60);
+/// How long a locked-out address must wait.
+pub const ENROLL_LOCKOUT: Duration = Duration::from_secs(15 * 60);
+
+/// The limiter used for enrollment attempts.
+#[must_use]
+pub fn enrollment_limiter(redis: RedisHandle) -> FailureLimiter {
+    FailureLimiter::new(
+        redis,
+        "node-enroll:ip",
+        LockoutPolicy {
+            threshold: ENROLL_MAX_FAILURES,
+            window: ENROLL_WINDOW,
+            lockout: ENROLL_LOCKOUT,
+        },
+    )
 }
 
 impl FromRef<NodesState> for PgPool {
@@ -84,6 +119,10 @@ pub fn router() -> Router<NodesState> {
         .route(
             "/api/v1/admin/nodes/enrollments/{id}",
             delete(revoke_enrollment),
+        )
+        .route(
+            "/api/v1/public/nodes/enroll",
+            axum::routing::post(enroll::enroll_node),
         )
 }
 
@@ -234,10 +273,17 @@ pub async fn create_enrollment(
     tx.commit().await.map_err(internal)?;
 
     let token_text = secret.expose_secret().to_owned();
+    // The CA fingerprint lets the agent pin the control plane's CA instead of
+    // trusting whoever answers at that address.
+    let pin = state
+        .ca
+        .as_deref()
+        .map(|ca| format!(" --ca-fingerprint sha256:{}", ca.fingerprint_sha256()))
+        .unwrap_or_default();
     let enroll_command = state
         .public_url
         .as_deref()
-        .map(|url| format!("dhpanel-agent enroll --server {url} --token {token_text}"));
+        .map(|url| format!("dhpanel-agent enroll --server {url}{pin} --token {token_text}"));
     let body = CreatedEnrollment {
         id: created.id,
         name: created.name.clone(),
@@ -333,8 +379,11 @@ pub async fn revoke_enrollment(
 /// OpenAPI fragment (full paths; merge into the root document).
 #[derive(OpenApi)]
 #[openapi(
-    paths(create_enrollment, list_enrollments, revoke_enrollment),
-    components(schemas(CreateEnrollment, CreatedEnrollment, EnrollmentView, EnrollmentList)),
+    paths(create_enrollment, list_enrollments, revoke_enrollment, enroll::enroll_node),
+    components(schemas(
+        CreateEnrollment, CreatedEnrollment, EnrollmentView, EnrollmentList,
+        enroll::EnrollRequest, enroll::EnrollResponse
+    )),
     tags((name = "nodes", description = "Add and manage servers (nodes)"))
 )]
 pub struct NodesApi;

@@ -105,6 +105,14 @@ pub enum AppError {
         /// Seconds until the client may retry (at least 1).
         retry_after_secs: u64,
     },
+    /// 503 — a feature is switched off or not set up (e.g. no node CA yet).
+    #[error("unavailable: {code}")]
+    Unavailable {
+        /// Stable code, e.g. `enrollment_unavailable`.
+        code: Cow<'static, str>,
+        /// Explanation safe to show to the client.
+        detail: String,
+    },
     /// 500 — unexpected failure. The source is logged, never sent.
     #[error("internal error: {0}")]
     Internal(#[source] Box<dyn std::error::Error + Send + Sync + 'static>),
@@ -163,6 +171,13 @@ impl AppError {
             retry_after_secs: secs.max(1),
         }
     }
+    /// 503 with a code and client-safe detail.
+    pub fn unavailable(code: &'static str, detail: impl Into<String>) -> Self {
+        Self::Unavailable {
+            code: code.into(),
+            detail: detail.into(),
+        }
+    }
     /// 500 wrapping any error.
     pub fn internal(err: impl Into<Box<dyn std::error::Error + Send + Sync + 'static>>) -> Self {
         Self::Internal(err.into())
@@ -179,6 +194,7 @@ impl AppError {
             Self::Conflict { .. } => StatusCode::CONFLICT,
             Self::Validation { .. } => StatusCode::UNPROCESSABLE_ENTITY,
             Self::TooManyRequests { .. } => StatusCode::TOO_MANY_REQUESTS,
+            Self::Unavailable { .. } => StatusCode::SERVICE_UNAVAILABLE,
             Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -191,7 +207,8 @@ impl AppError {
             | Self::AuthenticationFailed { code, .. }
             | Self::Forbidden { code, .. }
             | Self::Conflict { code, .. }
-            | Self::TooManyRequests { code, .. } => code,
+            | Self::TooManyRequests { code, .. }
+            | Self::Unavailable { code, .. } => code,
             Self::Unauthorized => "unauthenticated",
             Self::NotFound { .. } => "not_found",
             Self::Validation { .. } => "validation_failed",
@@ -205,7 +222,8 @@ impl AppError {
             | Self::AuthenticationFailed { detail, .. }
             | Self::Forbidden { detail, .. }
             | Self::Conflict { detail, .. }
-            | Self::TooManyRequests { detail, .. } => detail.clone(),
+            | Self::TooManyRequests { detail, .. }
+            | Self::Unavailable { detail, .. } => detail.clone(),
             Self::Unauthorized => "Authentication is required.".to_owned(),
             Self::NotFound { resource } => format!("The requested {resource} was not found."),
             Self::Validation { .. } => "One or more fields are invalid.".to_owned(),
@@ -314,6 +332,7 @@ mod tests {
             "403" => AppError::forbidden("feature_disabled", "Your plan does not include DNS."),
             "404" => AppError::not_found("domain"),
             "409" => AppError::conflict("limit_reached", "Domain limit (10) reached."),
+            "503" => AppError::unavailable("enrollment_unavailable", "Not set up."),
             "429" => AppError::too_many_requests(
                 "too_many_attempts",
                 "Too many attempts.",
@@ -366,6 +385,7 @@ mod tests {
             ("409", 409, "limit_reached"),
             ("422", 422, "validation_failed"),
             ("429", 429, "too_many_attempts"),
+            ("503", 503, "enrollment_unavailable"),
             ("500", 500, "internal_error"),
         ] {
             let (got, ct, body) = call(kind).await;

@@ -187,6 +187,7 @@ export DHPANEL_CONFIG='$repo/deploy/dev/control.dev.toml'
 export DHPANEL_DATABASE__URL_FILE='$SECRETS/database_url'
 export DHPANEL_REDIS__URL_FILE='$SECRETS/redis_url'
 export DHPANEL_SECRETS__MASTER_KEY_FILE='$SECRETS/master_key'
+export DHPANEL_PKI__CA_DIR='$SECRETS'
 export SQLX_OFFLINE=true
 EOF
 }
