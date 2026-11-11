@@ -10,12 +10,12 @@ use axum::{
     body::Body,
     extract::FromRef,
     http::{Request, StatusCode, header},
-    routing::get,
+    routing::{get, post},
 };
 use dhpanel_cache::RedisHandle;
 use dhpanel_session::{
-    Authenticated, MAX_USER_AGENT, NewSession, RevokeReason, SessionConfig, SessionStore,
-    set_cookie,
+    Authenticated, CSRF_HEADER, MAX_USER_AGENT, NewSession, RevokeReason, SessionConfig,
+    SessionStore, set_cookie,
 };
 use secrecy::SecretString;
 use sqlx::PgPool;
@@ -249,4 +249,59 @@ async fn long_multibyte_user_agent_is_truncated_not_dropped(pool: PgPool) {
         .await
         .expect("row");
     assert_eq!(len, i32::try_from(MAX_USER_AGENT).unwrap());
+}
+
+async fn post_act(app: Router, cookie: Option<&str>, csrf: Option<&str>) -> (StatusCode, String) {
+    let mut req = Request::builder().method("POST").uri("/act");
+    if let Some(c) = cookie {
+        req = req.header(header::COOKIE, c);
+    }
+    if let Some(t) = csrf {
+        req = req.header(CSRF_HEADER, t);
+    }
+    let res = app.oneshot(req.body(Body::empty()).unwrap()).await.unwrap();
+    let status = res.status();
+    let body = axum::body::to_bytes(res.into_body(), 64 * 1024)
+        .await
+        .unwrap();
+    (status, String::from_utf8_lossy(&body).into_owned())
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs PostgreSQL + Redis: see module docs"]
+async fn state_changing_requests_need_the_session_csrf_token(pool: PgPool) {
+    let acc = account(&pool).await;
+    let s = store(&pool, 60, 3600, 60);
+    let (token, data) = s.create(new_session(acc)).await.expect("create");
+    let (other_token, other) = s.create(new_session(acc)).await.expect("second session");
+    assert_ne!(data.csrf_token, other.csrf_token);
+    let app = Router::new()
+        .route("/me", get(whoami))
+        .route("/act", post(whoami))
+        .with_state(State { sessions: s });
+    let cookie = cookie_header(&set_cookie(&token));
+    let csrf = data.csrf_token.expose();
+
+    // Safe methods need no token.
+    assert_eq!(call(app.clone(), Some(&cookie)).await.0, StatusCode::OK);
+
+    // POST without, with a wrong, or with another session's token: 403.
+    for bad in [None, Some("wrong"), Some(other.csrf_token.expose())] {
+        let (status, body) = post_act(app.clone(), Some(&cookie), bad).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{bad:?}");
+        assert!(body.contains(r#""code":"csrf_failed""#), "{body}");
+    }
+    // The session's own token: allowed.
+    let (status, body) = post_act(app.clone(), Some(&cookie), Some(csrf)).await;
+    assert_eq!((status, body), (StatusCode::OK, acc.to_string()));
+
+    // No session at all is still 401, not 403, even with a token.
+    assert_eq!(
+        post_act(app.clone(), None, Some(csrf)).await.0,
+        StatusCode::UNAUTHORIZED
+    );
+    // The CSRF token survives a reload of the session.
+    let other_cookie = cookie_header(&set_cookie(&other_token));
+    let (status, _) = post_act(app, Some(&other_cookie), Some(other.csrf_token.expose())).await;
+    assert_eq!(status, StatusCode::OK);
 }

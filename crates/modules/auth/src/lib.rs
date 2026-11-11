@@ -20,7 +20,13 @@
 //!   even for the correct password. A successful login clears the account count.
 //!
 //! The server must be run with `into_make_service_with_connect_info::<SocketAddr>()`
-//! so the client IP is available. CSRF (T01.07) is layered on separately.
+//! so the client IP is available.
+//!
+//! CSRF: login and `/me` return the session's `csrf_token`; the client keeps it
+//! in memory and sends it as `X-CSRF-Token` on every state-changing request
+//! (enforced by [`dhpanel_session::Authenticated`]). Login itself is exempt:
+//! it has no session yet, accepts only `application/json` (which a cross-site
+//! form cannot send without a CORS preflight) and rotates any prior session.
 
 use std::{
     net::{IpAddr, SocketAddr},
@@ -51,7 +57,8 @@ use dhpanel_http_kit::{
     client_ip::{client_ip, rate_limit_key},
 };
 use dhpanel_session::{
-    Authenticated, NewSession, RevokeReason, SessionStore, clear_cookie, cookie_value, set_cookie,
+    Authenticated, CsrfToken, NewSession, RevokeReason, SessionStore, clear_cookie, cookie_value,
+    set_cookie,
 };
 use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
@@ -158,8 +165,8 @@ impl std::fmt::Debug for LoginRequest {
     }
 }
 
-/// The signed-in account.
-#[derive(Debug, Serialize, ToSchema)]
+/// The signed-in account and its session's CSRF token.
+#[derive(Serialize, ToSchema)]
 pub struct Me {
     /// Account id.
     pub id: Uuid,
@@ -172,18 +179,39 @@ pub struct Me {
     pub email: String,
     /// UI locale (`en` or `bn`).
     pub locale: String,
+    /// Send as `X-CSRF-Token` on POST/PUT/PATCH/DELETE. Keep in memory only.
+    pub csrf_token: String,
 }
 
-impl From<AccountProfile> for Me {
-    fn from(p: AccountProfile) -> Self {
+impl std::fmt::Debug for Me {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Me")
+            .field("id", &self.id)
+            .field("username", &self.username)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Me {
+    fn new(p: AccountProfile, csrf: &CsrfToken) -> Self {
         Self {
             id: p.id,
             kind: p.kind,
             username: p.username,
             email: p.email,
             locale: p.locale,
+            csrf_token: csrf.expose().to_owned(),
         }
     }
+}
+
+/// JSON response that must never be cached (it carries the CSRF token).
+fn no_store_json(me: Me) -> Response {
+    let mut response = Json(me).into_response();
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
 }
 
 fn invalid_credentials() -> AppError {
@@ -380,7 +408,7 @@ pub async fn login(
         tracing::warn!(error = %err, "previous session not revoked at login");
     }
 
-    let (token, _session) = state
+    let (token, session) = state
         .sessions
         .create(NewSession {
             account_id: account.id,
@@ -399,11 +427,8 @@ pub async fn login(
         })?;
 
     let cookie = HeaderValue::from_str(&set_cookie(&token)).map_err(AppError::internal)?;
-    let mut response = Json(Me::from(profile)).into_response();
+    let mut response = no_store_json(Me::new(profile, &session.csrf_token));
     response.headers_mut().insert(header::SET_COOKIE, cookie);
-    response
-        .headers_mut()
-        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     Ok(response)
 }
 
@@ -414,9 +439,11 @@ pub async fn login(
     tag = "auth",
     operation_id = "logout",
     security(("session" = [])),
+    params(("X-CSRF-Token" = String, Header, description = "The session's csrf_token")),
     responses(
         (status = 204, description = "Logged out; cookie cleared"),
-        (status = 401, description = "Not logged in", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 401, description = "Not logged in", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "Missing or wrong X-CSRF-Token (code csrf_failed)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 pub async fn logout(
@@ -445,7 +472,7 @@ pub async fn logout(
     operation_id = "getMe",
     security(("session" = [])),
     responses(
-        (status = 200, description = "Current account", body = Me),
+        (status = 200, description = "Current account and the session's CSRF token", body = Me),
         (status = 401, description = "Not logged in", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
@@ -453,12 +480,14 @@ pub async fn me(
     State(state): State<AuthState>,
     Authenticated(session): Authenticated,
     headers: HeaderMap,
-) -> Result<Json<Me>, AppError> {
+) -> Result<Response, AppError> {
     let profile = accounts::find_profile(&state.db, session.account_id)
         .await
         .map_err(AppError::internal)?;
     match profile {
-        Some(p) if p.status == DbAccountStatus::Active => Ok(Json(Me::from(p))),
+        Some(p) if p.status == DbAccountStatus::Active => {
+            Ok(no_store_json(Me::new(p, &session.csrf_token)))
+        }
         _ => {
             // Account deleted or blocked after login: end the session.
             if let Some(value) = cookie_value(&headers) {

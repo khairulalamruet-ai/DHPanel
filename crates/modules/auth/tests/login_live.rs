@@ -216,12 +216,26 @@ async fn login_me_logout_flow(pool: PgPool) {
         assert!(set.contains(attr), "{set}");
     }
     let cookie = cookie_pair(&set);
+    let csrf = r.body["csrf_token"]
+        .as_str()
+        .expect("csrf_token")
+        .to_owned();
+    assert_eq!(csrf.len(), 43);
 
     let r = send(&app, "GET", "/api/v1/auth/me", Some(&cookie), None).await;
     assert_eq!(r.status, StatusCode::OK);
     assert_eq!(r.body["id"], id.to_string());
+    assert_eq!(r.body["csrf_token"], csrf.as_str());
 
-    let r = send(&app, "POST", "/api/v1/auth/logout", Some(&cookie), None).await;
+    let r = send_with(
+        &app,
+        "POST",
+        "/api/v1/auth/logout",
+        Some(&cookie),
+        None,
+        &[("x-csrf-token", &csrf)],
+    )
+    .await;
     assert_eq!(r.status, StatusCode::NO_CONTENT);
     assert!(r.set_cookie.unwrap().contains("Max-Age=0"));
 
@@ -580,4 +594,66 @@ async fn client_ip_comes_from_trusted_proxy_header_only(pool: PgPool) {
             "203.0.113.2"
         ]
     );
+}
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn logout_without_csrf_header_is_403_and_keeps_the_session(pool: PgPool) {
+    let hasher = PasswordHasher::new(fast_params(2)).unwrap();
+    create_account(&pool, &hasher, "mallory", "active").await;
+    let app = app(state(&pool, hasher));
+    let r = login(&app, "mallory", PASSWORD, None).await;
+    let cookie = cookie_pair(&r.set_cookie.unwrap());
+    let csrf = r.body["csrf_token"].as_str().unwrap().to_owned();
+
+    // What a cross-site request riding the cookie would look like.
+    let r = send(&app, "POST", "/api/v1/auth/logout", Some(&cookie), None).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+    assert_eq!(r.body["code"], "csrf_failed");
+    assert!(r.set_cookie.is_none());
+
+    // Change the last character, guaranteeing a different token.
+    let last = if csrf.ends_with('A') { 'B' } else { 'A' };
+    let wrong = format!("{}{last}", &csrf[..42]);
+    assert_ne!(wrong, csrf);
+    let r = send_with(
+        &app,
+        "POST",
+        "/api/v1/auth/logout",
+        Some(&cookie),
+        None,
+        &[("x-csrf-token", &wrong)],
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+
+    // The session is untouched by the rejected requests.
+    let r = send(&app, "GET", "/api/v1/auth/me", Some(&cookie), None).await;
+    assert_eq!(r.status, StatusCode::OK);
+
+    // A new login issues a new CSRF token; the old one no longer works.
+    let r2 = login(&app, "mallory", PASSWORD, Some(&cookie)).await;
+    let cookie2 = cookie_pair(&r2.set_cookie.unwrap());
+    let csrf2 = r2.body["csrf_token"].as_str().unwrap().to_owned();
+    assert_ne!(csrf, csrf2);
+    let r = send_with(
+        &app,
+        "POST",
+        "/api/v1/auth/logout",
+        Some(&cookie2),
+        None,
+        &[("x-csrf-token", &csrf)],
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+    let r = send_with(
+        &app,
+        "POST",
+        "/api/v1/auth/logout",
+        Some(&cookie2),
+        None,
+        &[("x-csrf-token", &csrf2)],
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT);
 }

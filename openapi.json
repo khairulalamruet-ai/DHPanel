@@ -22,12 +22,33 @@
         ],
         "summary": "End the current session.",
         "operationId": "logout",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "204": {
             "description": "Logged out; cookie cleared"
           },
           "401": {
             "description": "Not logged in",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Missing or wrong X-CSRF-Token (code csrf_failed)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -53,7 +74,7 @@
         "operationId": "getMe",
         "responses": {
           "200": {
-            "description": "Current account",
+            "description": "Current account and the session's CSRF token",
             "content": {
               "application/json": {
                 "schema": {
@@ -323,15 +344,20 @@
       },
       "Me": {
         "type": "object",
-        "description": "The signed-in account.",
+        "description": "The signed-in account and its session's CSRF token.",
         "required": [
           "id",
           "kind",
           "username",
           "email",
-          "locale"
+          "locale",
+          "csrf_token"
         ],
         "properties": {
+          "csrf_token": {
+            "type": "string",
+            "description": "Send as `X-CSRF-Token` on POST/PUT/PATCH/DELETE. Keep in memory only."
+          },
           "email": {
             "type": "string",
             "description": "Email."

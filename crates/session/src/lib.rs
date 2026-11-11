@@ -10,6 +10,12 @@
 //! * **History**: PostgreSQL `sessions` row on create (token hash, IP, UA,
 //!   absolute expiry) and `revoked_at`/`revoke_reason` on revoke.
 //! * **Extractor**: [`Authenticated`] yields the session or a 401 Problem.
+//! * **CSRF**: every session carries a random [`CsrfToken`]. The client gets it
+//!   in a response body (login, `/me`) and keeps it in memory only. For any
+//!   method other than GET/HEAD/OPTIONS/TRACE, [`Authenticated`] requires the
+//!   `X-CSRF-Token` header to equal it (constant-time) and otherwise rejects
+//!   with 403 `csrf_failed`. Together with `SameSite=Strict` this protects all
+//!   session-authenticated state changes.
 
 use std::{
     net::IpAddr,
@@ -18,7 +24,7 @@ use std::{
 
 use axum::{
     extract::{FromRef, FromRequestParts},
-    http::{HeaderMap, header, request::Parts},
+    http::{HeaderMap, Method, header, request::Parts},
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use dhpanel_cache::{RedisHandle, redis::AsyncCommands as _};
@@ -37,6 +43,57 @@ pub const TOKEN_BYTES: usize = 32;
 const KEY_PREFIX: &str = "dhpanel:session:";
 /// Maximum stored user-agent length in characters (matches the DB CHECK).
 pub const MAX_USER_AGENT: usize = 512;
+/// Request header carrying the CSRF token.
+pub const CSRF_HEADER: &str = "x-csrf-token";
+
+/// Per-session anti-CSRF token (32 random bytes, base64url). Useless without
+/// the session cookie; `Debug` is redacted so it never reaches logs.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(transparent)]
+pub struct CsrfToken(String);
+
+impl CsrfToken {
+    fn generate() -> Result<Self, SessionError> {
+        let mut raw = [0u8; TOKEN_BYTES];
+        getrandom::fill(&mut raw).map_err(|_| SessionError::Rng)?;
+        Ok(Self(URL_SAFE_NO_PAD.encode(raw)))
+    }
+
+    /// The value to hand to the client.
+    #[must_use]
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+
+    /// Constant-time comparison with a presented value. An empty stored
+    /// token (sessions created before CSRF existed) never matches.
+    #[must_use]
+    pub fn matches(&self, presented: &[u8]) -> bool {
+        let expected = self.0.as_bytes();
+        if expected.is_empty() || expected.len() != presented.len() {
+            return false;
+        }
+        expected
+            .iter()
+            .zip(presented)
+            .fold(0u8, |acc, (a, b)| acc | (a ^ b))
+            == 0
+    }
+}
+
+impl std::fmt::Debug for CsrfToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("CsrfToken(<redacted>)")
+    }
+}
+
+/// Methods that must not change state and therefore skip the CSRF check.
+fn is_safe_method(method: &Method) -> bool {
+    matches!(
+        *method,
+        Method::GET | Method::HEAD | Method::OPTIONS | Method::TRACE
+    )
+}
 
 /// Session timeouts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,7 +116,8 @@ impl Default for SessionConfig {
     }
 }
 
-/// What is stored per session. No secrets.
+/// What is stored per session. The only secret is the CSRF token, which is
+/// worthless without the session cookie (whose raw value is never stored).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionData {
     /// Session id (primary key of the `sessions` row).
@@ -72,6 +130,9 @@ pub struct SessionData {
     pub last_seen_at: i64,
     /// Unix seconds after which the session is invalid no matter what.
     pub absolute_expires_at: i64,
+    /// Anti-CSRF token for state-changing requests.
+    #[serde(default)]
+    pub csrf_token: CsrfToken,
 }
 
 /// Input for [`SessionStore::create`].
@@ -269,6 +330,7 @@ impl SessionStore {
             created_at: now,
             last_seen_at: now,
             absolute_expires_at,
+            csrf_token: CsrfToken::generate()?,
         };
         let payload = serde_json::to_string(&data).map_err(|_| SessionError::Corrupt)?;
         let ttl = self.ttl_from(now, absolute_expires_at);
@@ -356,7 +418,9 @@ impl SessionStore {
 }
 
 /// Extractor for routes that require a logged-in user. Rejects with a
-/// Problem Details 401 when the cookie is missing, malformed or expired.
+/// Problem Details 401 when the cookie is missing, malformed or expired, and
+/// with 403 `csrf_failed` when a state-changing request lacks the session's
+/// CSRF token in `X-CSRF-Token`.
 #[derive(Debug, Clone)]
 pub struct Authenticated(pub SessionData);
 
@@ -372,11 +436,24 @@ where
         let Some(value) = cookie_value(&parts.headers) else {
             return Err(AppError::Unauthorized);
         };
-        match store.load(value).await {
-            Ok(Some(data)) => Ok(Self(data)),
-            Ok(None) => Err(AppError::Unauthorized),
-            Err(err) => Err(AppError::internal(err)),
+        let data = match store.load(value).await {
+            Ok(Some(data)) => data,
+            Ok(None) => return Err(AppError::Unauthorized),
+            Err(err) => return Err(AppError::internal(err)),
+        };
+        if !is_safe_method(&parts.method) {
+            let presented = parts
+                .headers
+                .get(CSRF_HEADER)
+                .map_or(&b""[..], |v| v.as_bytes());
+            if !data.csrf_token.matches(presented) {
+                return Err(AppError::forbidden(
+                    "csrf_failed",
+                    "Missing or invalid CSRF token.",
+                ));
+            }
         }
+        Ok(Self(data))
     }
 }
 
@@ -402,6 +479,38 @@ mod tests {
         }
         assert!(!c.to_ascii_lowercase().contains("domain="), "{c}");
         assert!(clear_cookie().contains("Max-Age=0"));
+    }
+
+    #[test]
+    fn csrf_tokens_compare_exactly_and_are_redacted() {
+        let t = CsrfToken::generate().unwrap();
+        assert_eq!(t.expose().len(), 43);
+        assert_ne!(t, CsrfToken::generate().unwrap());
+        assert!(t.matches(t.expose().as_bytes()));
+        let mut wrong = t.expose().as_bytes().to_vec();
+        wrong[0] ^= 1;
+        assert!(!t.matches(&wrong));
+        assert!(!t.matches(&t.expose().as_bytes()[..42]));
+        assert!(!t.matches(b""));
+        assert!(!CsrfToken::default().matches(b""));
+        assert_eq!(format!("{t:?}"), "CsrfToken(<redacted>)");
+    }
+
+    #[test]
+    fn only_unsafe_methods_need_csrf() {
+        for m in [Method::GET, Method::HEAD, Method::OPTIONS, Method::TRACE] {
+            assert!(is_safe_method(&m), "{m}");
+        }
+        for m in [Method::POST, Method::PUT, Method::PATCH, Method::DELETE] {
+            assert!(!is_safe_method(&m), "{m}");
+        }
+    }
+
+    #[test]
+    fn sessions_stored_before_csrf_still_parse_but_never_pass() {
+        let old = r#"{"id":"0190b6a2-0000-7000-8000-000000000000","account_id":"0190b6a2-0000-7000-8000-000000000001","created_at":1,"last_seen_at":1,"absolute_expires_at":2}"#;
+        let data: SessionData = serde_json::from_str(old).unwrap();
+        assert!(!data.csrf_token.matches(b""));
     }
 
     #[test]
