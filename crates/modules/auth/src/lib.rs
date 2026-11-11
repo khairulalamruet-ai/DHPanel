@@ -48,6 +48,7 @@ use axum::{
     routing::{get, post},
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use dhpanel_audit::{AuditEntry, AuditWriter, Outcome};
 use dhpanel_auth_core::{password::PasswordHasher, secretbox::MasterKey};
 use dhpanel_cache::{
     RedisHandle,
@@ -100,6 +101,14 @@ pub struct AuthState {
     pub master_key: MasterKey,
     /// Issuer name shown in authenticator apps.
     pub totp_issuer: Arc<str>,
+    /// Audit log.
+    pub audit: AuditWriter,
+}
+
+impl FromRef<AuthState> for PgPool {
+    fn from_ref(s: &AuthState) -> Self {
+        s.db.clone()
+    }
 }
 
 /// Failed-login counters: one per account (or login name), one per client
@@ -285,10 +294,40 @@ pub(crate) async fn count_failure(limiter: &FailureLimiter, subject: &str) -> Re
     Ok(())
 }
 
-pub(crate) async fn record(db: &PgPool, ev: LoginEvent<'_>) -> Result<(), AppError> {
-    accounts::insert_login_event(db, &ev)
+/// Records a login attempt in `login_events` and, except for the
+/// intermediate "password ok, second factor needed" step, in the audit log.
+pub(crate) async fn record(state: &AuthState, ev: LoginEvent<'_>) -> Result<(), AppError> {
+    accounts::insert_login_event(&state.db, &ev)
         .await
-        .map_err(AppError::internal)
+        .map_err(AppError::internal)?;
+    if let Some(entry) = login_audit_entry(&ev) {
+        state.audit.record_or_log(entry).await;
+    }
+    Ok(())
+}
+
+/// The audit entry for a login outcome. The name that was typed is not
+/// copied: people sometimes type their password into the username field.
+fn login_audit_entry(ev: &LoginEvent<'_>) -> Option<AuditEntry> {
+    let (action, outcome) = match ev.outcome {
+        LoginOutcome::Ok => ("auth.login", Outcome::Success),
+        LoginOutcome::MfaRequired => return None,
+        LoginOutcome::BadCredentials | LoginOutcome::MfaFailed => {
+            ("auth.login_failed", Outcome::Failure)
+        }
+        LoginOutcome::AccountSuspended
+        | LoginOutcome::AccountDisabled
+        | LoginOutcome::RateLimited
+        | LoginOutcome::LockedOut => ("auth.login_failed", Outcome::Denied),
+    };
+    let mut entry = AuditEntry::new(action, outcome).actor_ip(ev.ip);
+    if let Some(id) = ev.account_id {
+        entry = entry.actor(id);
+    }
+    if outcome != Outcome::Success {
+        entry = entry.metadata(serde_json::json!({ "reason": ev.outcome.as_str() }));
+    }
+    Some(entry)
 }
 
 /// Log in with username or email and password.
@@ -336,7 +375,7 @@ pub async fn login(
         .await
         .map_err(AppError::internal)?
     {
-        record(&state.db, event(None, LoginOutcome::RateLimited)).await?;
+        record(&state, event(None, LoginOutcome::RateLimited)).await?;
         return Err(too_many_attempts(left));
     }
 
@@ -344,7 +383,7 @@ pub async fn login(
         || secrecy::ExposeSecret::expose_secret(&password).len() > MAX_PASSWORD_BYTES
     {
         count_failure(&state.limits.ip, &ip_subject).await?;
-        record(&state.db, event(None, LoginOutcome::BadCredentials)).await?;
+        record(&state, event(None, LoginOutcome::BadCredentials)).await?;
         return Err(invalid_credentials());
     }
 
@@ -376,7 +415,7 @@ pub async fn login(
         .await
         .map_err(AppError::internal)?
     {
-        record(&state.db, event(account_id, LoginOutcome::LockedOut)).await?;
+        record(&state, event(account_id, LoginOutcome::LockedOut)).await?;
         return Err(too_many_attempts(left));
     }
 
@@ -384,7 +423,7 @@ pub async fn login(
         let _ = state.hasher.verify_dummy_async(password).await;
         count_failure(&state.limits.account, &subject).await?;
         count_failure(&state.limits.ip, &ip_subject).await?;
-        record(&state.db, event(None, LoginOutcome::BadCredentials)).await?;
+        record(&state, event(None, LoginOutcome::BadCredentials)).await?;
         return Err(invalid_credentials());
     };
 
@@ -397,7 +436,7 @@ pub async fn login(
         count_failure(&state.limits.account, &subject).await?;
         count_failure(&state.limits.ip, &ip_subject).await?;
         record(
-            &state.db,
+            &state,
             event(Some(account.id), LoginOutcome::BadCredentials),
         )
         .await?;
@@ -408,7 +447,7 @@ pub async fn login(
         DbAccountStatus::Active => {}
         DbAccountStatus::Suspended => {
             record(
-                &state.db,
+                &state,
                 event(Some(account.id), LoginOutcome::AccountSuspended),
             )
             .await?;
@@ -419,7 +458,7 @@ pub async fn login(
         }
         DbAccountStatus::Disabled => {
             record(
-                &state.db,
+                &state,
                 event(Some(account.id), LoginOutcome::AccountDisabled),
             )
             .await?;
@@ -448,11 +487,7 @@ pub async fn login(
     {
         // The failure counter is deliberately not reset here: knowing the
         // password must not buy unlimited guesses at the second factor.
-        record(
-            &state.db,
-            event(Some(account.id), LoginOutcome::MfaRequired),
-        )
-        .await?;
+        record(&state, event(Some(account.id), LoginOutcome::MfaRequired)).await?;
         return mfa::challenge(&state, account.id, attempted).await;
     }
 
@@ -490,7 +525,7 @@ pub(crate) async fn finish_login(
         .await
         .map_err(AppError::internal)?;
     record(
-        &state.db,
+        state,
         LoginEvent {
             account_id: Some(account_id),
             attempted,
@@ -531,7 +566,7 @@ pub(crate) async fn finish_login(
 )]
 pub async fn logout(
     State(state): State<AuthState>,
-    _auth: Authenticated,
+    Authenticated(session): Authenticated,
     headers: HeaderMap,
 ) -> Result<Response, AppError> {
     if let Some(value) = cookie_value(&headers) {
@@ -541,6 +576,14 @@ pub async fn logout(
             .await
             .map_err(AppError::internal)?;
     }
+    state
+        .audit
+        .record_or_log(
+            AuditEntry::new("auth.logout", Outcome::Success)
+                .actor(session.account_id)
+                .target("session", session.id),
+        )
+        .await;
     let cookie = HeaderValue::from_str(&clear_cookie()).map_err(AppError::internal)?;
     let mut response = StatusCode::NO_CONTENT.into_response();
     response.headers_mut().insert(header::SET_COOKIE, cookie);

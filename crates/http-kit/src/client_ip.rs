@@ -7,9 +7,50 @@
 //! client-supplied and therefore ignored, so a client cannot spoof its IP by
 //! sending its own `X-Forwarded-For`.
 
-use std::net::IpAddr;
+use std::{
+    net::{IpAddr, SocketAddr},
+    sync::Arc,
+};
 
-use axum::http::HeaderMap;
+use axum::{
+    extract::{ConnectInfo, Request, State, rejection::ExtensionRejection},
+    http::HeaderMap,
+    middleware::Next,
+    response::Response,
+};
+
+tokio::task_local! {
+    static CLIENT_IP: IpAddr;
+}
+
+/// The current request's client address, if called inside the
+/// [`client_ip_layer`] scope. Used by the audit log to record the actor's IP
+/// without every handler passing it along.
+#[must_use]
+pub fn current() -> Option<IpAddr> {
+    CLIENT_IP.try_with(|ip| *ip).ok()
+}
+
+/// Middleware: resolves the client address once ([`client_ip`]) and runs the
+/// rest of the stack inside its scope, so [`current`] works in handlers.
+/// Needs the server to provide `ConnectInfo<SocketAddr>`; without it the
+/// request simply has no client address.
+pub async fn client_ip_layer(
+    State(trusted): State<Arc<[IpAddr]>>,
+    // The extractor (not a raw extension lookup) so the test helper
+    // `MockConnectInfo` works as well as a real server.
+    connect: Result<ConnectInfo<SocketAddr>, ExtensionRejection>,
+    request: Request,
+    next: Next,
+) -> Response {
+    match connect {
+        Ok(ConnectInfo(peer)) => {
+            let ip = client_ip(peer.ip(), request.headers(), &trusted);
+            CLIENT_IP.scope(ip, next.run(request)).await
+        }
+        Err(_) => next.run(request).await,
+    }
+}
 
 /// Header appended to by reverse proxies.
 pub const X_FORWARDED_FOR: &str = "x-forwarded-for";
@@ -123,6 +164,54 @@ mod tests {
             client_ip(ip("::ffff:127.0.0.1"), &h, &[ip(PROXY)]),
             ip("198.51.100.7")
         );
+    }
+
+    #[tokio::test]
+    async fn layer_exposes_the_resolved_client_ip_to_handlers() {
+        use axum::{Router, body::Body, extract::connect_info::MockConnectInfo, routing::get};
+        use tower::ServiceExt as _;
+
+        async fn show() -> String {
+            current().map_or_else(|| "none".to_owned(), |ip| ip.to_string())
+        }
+        let trusted: Arc<[IpAddr]> = Arc::from(vec![ip(PROXY)]);
+        let build = |peer: &str| {
+            Router::new()
+                .route("/", get(show))
+                .layer(axum::middleware::from_fn_with_state(
+                    trusted.clone(),
+                    client_ip_layer,
+                ))
+                .layer(MockConnectInfo(SocketAddr::new(ip(peer), 4000)))
+        };
+        let get_body = |app: Router, xff: Option<&'static str>| async move {
+            let mut req = axum::http::Request::builder().uri("/");
+            if let Some(v) = xff {
+                req = req.header(X_FORWARDED_FOR, v);
+            }
+            let res = app.oneshot(req.body(Body::empty()).unwrap()).await.unwrap();
+            let bytes = axum::body::to_bytes(res.into_body(), 1024).await.unwrap();
+            String::from_utf8(bytes.to_vec()).unwrap()
+        };
+        // Behind the trusted proxy the forwarded address wins; a direct client cannot spoof it.
+        assert_eq!(
+            get_body(build(PROXY), Some("6.6.6.6, 198.51.100.7")).await,
+            "198.51.100.7"
+        );
+        assert_eq!(
+            get_body(build("203.0.113.9"), Some("6.6.6.6")).await,
+            "203.0.113.9"
+        );
+        // Outside the layer there is no client address.
+        assert_eq!(current(), None);
+        // Without ConnectInfo the request just has no client address.
+        let bare = Router::new()
+            .route("/", get(show))
+            .layer(axum::middleware::from_fn_with_state(
+                trusted,
+                client_ip_layer,
+            ));
+        assert_eq!(get_body(bare, None).await, "none");
     }
 
     #[test]

@@ -242,7 +242,9 @@ pub enum LoginOutcome {
 }
 
 impl LoginOutcome {
-    fn as_str(self) -> &'static str {
+    /// Value stored in `login_events.reason`.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::Ok => "ok",
             Self::BadCredentials => "bad_credentials",

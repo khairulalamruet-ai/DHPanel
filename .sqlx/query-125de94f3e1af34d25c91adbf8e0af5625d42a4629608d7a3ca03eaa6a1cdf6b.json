@@ -1,0 +1,159 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id,\n                  (extract(epoch FROM at) * 1000000)::bigint AS \"at_micros!\",\n                  actor_id, host(actor_ip) AS actor_ip, action, target_type, target_id,\n                  tenant_id, node_id, outcome, correlation_id, metadata\n           FROM audit_logs\n           WHERE ($1::text IS NULL OR starts_with(action, $1))\n             AND ($2::uuid IS NULL OR actor_id = $2)\n             AND ($3::text IS NULL OR outcome = $3)\n             AND ($4::text IS NULL OR target_type = $4)\n             AND ($5::text IS NULL OR target_id = $5)\n             AND ($6::bigint IS NULL OR at >= 'epoch'::timestamptz + $6::bigint * interval '1 microsecond')\n             AND ($7::bigint IS NULL OR at <  'epoch'::timestamptz + $7::bigint * interval '1 microsecond')\n             AND ($8::bigint IS NULL\n                  OR (at, id) < ('epoch'::timestamptz + $8::bigint * interval '1 microsecond', $9::uuid))\n           ORDER BY at DESC, id DESC\n           LIMIT $10",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "audit_logs",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "at_micros!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "actor_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "audit_logs",
+            "name": "actor_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "actor_ip",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "action",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "audit_logs",
+            "name": "action"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "target_type",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "audit_logs",
+            "name": "target_type"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "target_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "audit_logs",
+            "name": "target_id"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "tenant_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "audit_logs",
+            "name": "tenant_id"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "node_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "audit_logs",
+            "name": "node_id"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "outcome",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "audit_logs",
+            "name": "outcome"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "correlation_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "audit_logs",
+            "name": "correlation_id"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "metadata",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "audit_logs",
+            "name": "metadata"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      true,
+      null,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "125de94f3e1af34d25c91adbf8e0af5625d42a4629608d7a3ca03eaa6a1cdf6b"
+}

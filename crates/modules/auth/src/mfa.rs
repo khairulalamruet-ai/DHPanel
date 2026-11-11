@@ -36,6 +36,7 @@ use axum::{
     routing::{get, post},
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use dhpanel_audit::{AuditEntry, Outcome};
 use dhpanel_auth_core::totp::{self, TotpSecret};
 use dhpanel_database::{
     accounts::{self, DbAccountStatus, LoginEvent, LoginOutcome},
@@ -336,7 +337,7 @@ pub async fn login_mfa(
         .await
         .map_err(AppError::internal)?
     {
-        record(&state.db, event(LoginOutcome::RateLimited)).await?;
+        record(&state, event(LoginOutcome::RateLimited)).await?;
         return Err(too_many_attempts(left));
     }
     let subject = lockout_subject(Some(account_id), "");
@@ -347,7 +348,7 @@ pub async fn login_mfa(
         .await
         .map_err(AppError::internal)?
     {
-        record(&state.db, event(LoginOutcome::LockedOut)).await?;
+        record(&state, event(LoginOutcome::LockedOut)).await?;
         return Err(too_many_attempts(left));
     }
 
@@ -364,7 +365,7 @@ pub async fn login_mfa(
     if !second_factor_ok(&state, account_id, &req.code).await? {
         count_failure(&state.limits.account, &subject).await?;
         count_failure(&state.limits.ip, &ip_subject).await?;
-        record(&state.db, event(LoginOutcome::MfaFailed)).await?;
+        record(&state, event(LoginOutcome::MfaFailed)).await?;
         return Err(invalid_mfa_code());
     }
 
@@ -443,28 +444,16 @@ pub async fn sudo(
     Json(req): Json<SudoRequest>,
 ) -> Result<Json<SudoStatus>, AppError> {
     let account_id = session.account_id;
-    require_password(&state, account_id, req.password).await?;
-    if db::totp_enabled(&state.db, account_id)
-        .await
-        .map_err(AppError::internal)?
-    {
-        let code = req.code.ok_or_else(|| {
-            AppError::forbidden(
-                "mfa_code_required",
-                "Enter a code from your authenticator app.",
+    if let Err(err) = verify_sudo(&state, account_id, req).await {
+        state
+            .audit
+            .record_or_log(
+                AuditEntry::new("auth.sudo_failed", Outcome::Denied)
+                    .actor(account_id)
+                    .metadata(serde_json::json!({ "reason": err.code() })),
             )
-        })?;
-        if !second_factor_ok(&state, account_id, &code).await? {
-            count_failure(
-                &state.limits.account,
-                &lockout_subject(Some(account_id), ""),
-            )
-            .await?;
-            return Err(AppError::forbidden(
-                "invalid_mfa_code",
-                "Invalid or already used code.",
-            ));
-        }
+            .await;
+        return Err(err);
     }
     let marked = match cookie_value(&headers) {
         Some(value) => state
@@ -477,9 +466,45 @@ pub async fn sudo(
     if !marked {
         return Err(AppError::Unauthorized);
     }
+    state
+        .audit
+        .record_or_log(AuditEntry::new("auth.sudo_entered", Outcome::Success).actor(account_id))
+        .await;
     Ok(Json(SudoStatus {
         sudo_expires_in: state.sessions.config().sudo_window.as_secs(),
     }))
+}
+
+/// Checks the password and, when 2FA is on, a second factor.
+async fn verify_sudo(
+    state: &AuthState,
+    account_id: Uuid,
+    req: SudoRequest,
+) -> Result<(), AppError> {
+    require_password(state, account_id, req.password).await?;
+    if db::totp_enabled(&state.db, account_id)
+        .await
+        .map_err(AppError::internal)?
+    {
+        let code = req.code.ok_or_else(|| {
+            AppError::forbidden(
+                "mfa_code_required",
+                "Enter a code from your authenticator app.",
+            )
+        })?;
+        if !second_factor_ok(state, account_id, &code).await? {
+            count_failure(
+                &state.limits.account,
+                &lockout_subject(Some(account_id), ""),
+            )
+            .await?;
+            return Err(AppError::forbidden(
+                "invalid_mfa_code",
+                "Invalid or already used code.",
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// 2FA state of the signed-in account.
@@ -552,6 +577,12 @@ pub async fn enroll_totp(
     let otpauth_uri = secret
         .otpauth_uri(&state.totp_issuer, &profile.username)
         .map_err(AppError::internal)?;
+    state
+        .audit
+        .record_or_log(
+            AuditEntry::new("auth.mfa_enrollment_started", Outcome::Success).actor(account_id),
+        )
+        .await;
     Ok(no_store_json(TotpEnrollment {
         secret: secret.to_base32(),
         otpauth_uri,
@@ -607,7 +638,10 @@ pub async fn confirm_totp(
     {
         return Err(not_pending());
     }
-    tracing::info!(%account_id, "two-factor authentication enabled");
+    state
+        .audit
+        .record_or_log(AuditEntry::new("auth.mfa_enabled", Outcome::Success).actor(account_id))
+        .await;
     Ok(no_store_json(BackupCodes {
         backup_codes: codes.iter().map(|c| c.expose().to_owned()).collect(),
     }))
@@ -634,7 +668,12 @@ pub async fn disable_totp(
         .await
         .map_err(AppError::internal)?
     {
-        tracing::info!(account_id = %session.account_id, "two-factor authentication disabled");
+        state
+            .audit
+            .record_or_log(
+                AuditEntry::new("auth.mfa_disabled", Outcome::Success).actor(session.account_id),
+            )
+            .await;
     }
     Ok(StatusCode::NO_CONTENT)
 }

@@ -17,6 +17,7 @@ members = [
     "crates/observability",
     "crates/session",
     "crates/rbac",
+    "crates/audit",
     "crates/modules/auth",
 ]
 
@@ -41,6 +42,7 @@ dhpanel-http-kit = { path = "crates/http-kit" }
 dhpanel-observability = { path = "crates/observability" }
 dhpanel-session = { path = "crates/session" }
 dhpanel-rbac = { path = "crates/rbac" }
+dhpanel-audit = { path = "crates/audit" }
 dhpanel-mod-auth = { path = "crates/modules/auth" }
 
 [workspace.lints.rust]

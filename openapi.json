@@ -15,6 +15,145 @@
     }
   ],
   "paths": {
+    "/api/v1/admin/audit-logs": {
+      "get": {
+        "tags": [
+          "audit"
+        ],
+        "summary": "List audit entries, newest first.",
+        "operationId": "listAuditLogs",
+        "parameters": [
+          {
+            "name": "action",
+            "in": "query",
+            "description": "Only actions starting with this text, e.g. `auth.` or `auth.login_failed`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "actor_id",
+            "in": "query",
+            "description": "Only entries by this account.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "outcome",
+            "in": "query",
+            "description": "`success`, `failure` or `denied`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "target_type",
+            "in": "query",
+            "description": "Only entries about this kind of object, e.g. `session`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "target_id",
+            "in": "query",
+            "description": "Only entries about this object (use with `target_type`).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "description": "Earliest time, inclusive (RFC 3339).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "Latest time, exclusive (RFC 3339).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Entries per page, 1..=100 (default 50).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "`next_cursor` of the previous page.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of entries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not logged in",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied`: needs admin.audit.read",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid filter",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/auth/logout": {
       "post": {
         "tags": [
@@ -766,6 +905,119 @@
   },
   "components": {
     "schemas": {
+      "AuditItem": {
+        "type": "object",
+        "description": "One audit entry.",
+        "required": [
+          "id",
+          "at",
+          "action",
+          "outcome",
+          "metadata"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "What happened, e.g. `auth.login_failed`.",
+            "example": "auth.login"
+          },
+          "actor_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Account that acted, if known."
+          },
+          "actor_ip": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "IP address the request came from."
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it happened (RFC 3339, UTC, microseconds).",
+            "example": "2026-11-11T09:30:00.123456Z"
+          },
+          "correlation_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Request correlation id; matches the `x-request-id` header and the logs."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Entry id (time-ordered)."
+          },
+          "metadata": {
+            "type": "object",
+            "description": "Extra details (never secrets)."
+          },
+          "node_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Node the action ran on."
+          },
+          "outcome": {
+            "type": "string",
+            "description": "`success`, `failure` or `denied`.",
+            "example": "success"
+          },
+          "target_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Object acted on."
+          },
+          "target_type": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Kind of object acted on."
+          },
+          "tenant_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Tenant the action belongs to."
+          }
+        }
+      },
+      "AuditPage": {
+        "type": "object",
+        "description": "A page of audit entries.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AuditItem"
+            },
+            "description": "Newest first."
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Pass as `cursor` to get the next (older) page; absent on the last page."
+          }
+        }
+      },
       "BackupCodes": {
         "type": "object",
         "description": "Backup codes, shown exactly once.",
@@ -1245,6 +1497,10 @@
     {
       "name": "auth",
       "description": "Login, logout, the current account and two-factor authentication"
+    },
+    {
+      "name": "audit",
+      "description": "Append-only audit log (read only)"
     }
   ]
 }

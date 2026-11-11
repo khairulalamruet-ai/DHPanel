@@ -74,12 +74,22 @@ fn limited_state(
         redis: redis_handle,
         master_key: dhpanel_auth_core::secretbox::MasterKey::from_bytes(&[42; 32]),
         totp_issuer: "DHPanel Test".into(),
+        audit: dhpanel_audit::AuditWriter::new(pool.clone()),
     }
 }
 
 fn app(state: AuthState) -> Router {
+    let trusted = state.trusted_proxies.clone();
     router()
+        .merge(dhpanel_audit::router::<AuthState>())
         .with_state(state)
+        .layer(axum::middleware::from_fn_with_state(
+            trusted,
+            dhpanel_http_kit::client_ip::client_ip_layer,
+        ))
+        .layer(axum::middleware::from_fn(
+            dhpanel_http_kit::request_id::correlation_id_layer,
+        ))
         .layer(MockConnectInfo(SocketAddr::from((
             [198, 51, 100, 23],
             40000,
@@ -1314,4 +1324,235 @@ async fn me_lists_roles_and_permissions(pool: PgPool) {
             "admin.roles.read"
         ])
     );
+}
+
+// -------------------------------------------------------------- audit (T01.12)
+
+/// (action, outcome, actor_id) of every audit row, oldest first.
+async fn audit_rows(pool: &PgPool) -> Vec<(String, String, Option<Uuid>)> {
+    sqlx::query_as("SELECT action, outcome, actor_id FROM audit_logs ORDER BY at, id")
+        .fetch_all(pool)
+        .await
+        .unwrap()
+}
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn login_failed_login_and_logout_appear_in_the_audit_log(pool: PgPool) {
+    let hasher = PasswordHasher::new(fast_params(2)).unwrap();
+    let id = create_account(&pool, &hasher, "audrey", "active").await;
+    dhpanel_database::rbac::assign_role(&pool, id, "super_admin", None)
+        .await
+        .unwrap();
+    let app = app(state(&pool, hasher));
+
+    // A stranger and a wrong password, then a real login.
+    assert_eq!(
+        login(&app, "ghost-user", "Whatever-Typed-Here-1", None)
+            .await
+            .status,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        login(&app, "audrey", "Wrong-Password-Here-9", None)
+            .await
+            .status,
+        StatusCode::UNAUTHORIZED
+    );
+    let b = sign_in(&app, "audrey").await;
+
+    // The administrator reads the log through the API.
+    let r = send(
+        &app,
+        "GET",
+        "/api/v1/admin/audit-logs?action=auth.",
+        Some(&b.cookie),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    let items = r.body["items"].as_array().unwrap();
+    let actions: Vec<(&str, &str)> = items
+        .iter()
+        .map(|i| {
+            (
+                i["action"].as_str().unwrap(),
+                i["outcome"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    // Newest first.
+    assert_eq!(
+        actions,
+        [
+            ("auth.login", "success"),
+            ("auth.login_failed", "failure"),
+            ("auth.login_failed", "failure")
+        ]
+    );
+    assert_eq!(items[0]["actor_id"], id.to_string());
+    assert_eq!(items[0]["actor_ip"], "198.51.100.23");
+    assert!(
+        items[0]["correlation_id"]
+            .as_str()
+            .is_some_and(|c| !c.is_empty())
+    );
+    assert_eq!(
+        items[1]["actor_id"],
+        id.to_string(),
+        "wrong password of a known account"
+    );
+    assert_eq!(items[1]["metadata"], json!({"reason": "bad_credentials"}));
+    assert_eq!(items[2]["actor_id"], Value::Null, "unknown login name");
+    assert_eq!(items[2]["actor_ip"], "198.51.100.23");
+
+    // Logout is recorded too, as is the target session.
+    assert_eq!(
+        b.post_empty(&app, "/api/v1/auth/logout").await.status,
+        StatusCode::NO_CONTENT
+    );
+    let (action, target): (String, String) = sqlx::query_as(
+        "SELECT action, target_type || ':' || target_id FROM audit_logs ORDER BY at DESC, id DESC LIMIT 1",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(action, "auth.logout");
+    assert!(target.starts_with("session:"), "{target}");
+
+    // What was typed into the username field is never copied into the log.
+    let leaked: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_logs WHERE metadata::text ILIKE '%ghost%' OR metadata::text ILIKE '%Whatever%'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(leaked, 0);
+}
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn lockouts_and_suspended_accounts_are_audited_as_denied(pool: PgPool) {
+    let hasher = PasswordHasher::new(fast_params(2)).unwrap();
+    let id = create_account(&pool, &hasher, "lena", "active").await;
+    create_account(&pool, &hasher, "susan", "suspended").await;
+    let app = app(state(&pool, hasher));
+    for _ in 0..5 {
+        login(&app, "lena", "Wrong-Password-Here-9", None).await;
+    }
+    assert_eq!(
+        login(&app, "lena", PASSWORD, None).await.status,
+        StatusCode::TOO_MANY_REQUESTS
+    );
+    assert_eq!(
+        login(&app, "susan", PASSWORD, None).await.status,
+        StatusCode::FORBIDDEN
+    );
+
+    let rows = audit_rows(&pool).await;
+    assert_eq!(rows.len(), 7);
+    assert!(
+        rows[..5]
+            .iter()
+            .all(|r| r.0 == "auth.login_failed" && r.1 == "failure")
+    );
+    assert_eq!(
+        rows[5],
+        (
+            "auth.login_failed".to_owned(),
+            "denied".to_owned(),
+            Some(id)
+        )
+    );
+    assert_eq!(rows[6].1, "denied");
+    let reasons: Vec<String> = sqlx::query_scalar(
+        "SELECT metadata->>'reason' FROM audit_logs WHERE outcome = 'denied' ORDER BY at, id",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(reasons, ["locked_out", "account_suspended"]);
+}
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn security_changes_are_audited_without_secrets(pool: PgPool) {
+    let hasher = PasswordHasher::new(fast_params(2)).unwrap();
+    let id = create_account(&pool, &hasher, "mona", "active").await;
+    let app = app(sudo_state(&pool, hasher, 600));
+    let b = sign_in(&app, "mona").await;
+    let _other = sign_in(&app, "mona").await;
+
+    let r = b
+        .post(&app, SUDO, json!({"password": "Wrong-Password-Here-9"}))
+        .await;
+    assert_eq!(r.body["code"], "password_incorrect");
+    assert_eq!(
+        b.post(&app, SUDO, json!({"password": PASSWORD}))
+            .await
+            .status,
+        StatusCode::OK
+    );
+    let (_secret, codes) = enable_totp(&app, &b).await;
+    let r = b
+        .post_empty(&app, &format!("{SESSIONS}/revoke-others"))
+        .await;
+    assert_eq!(r.body["revoked"], 1);
+    assert_eq!(
+        b.post_empty(&app, DISABLE).await.status,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        b.post_empty(&app, "/api/v1/auth/logout-all").await.status,
+        StatusCode::NO_CONTENT
+    );
+
+    let rows = audit_rows(&pool).await;
+    let actions: Vec<&str> = rows.iter().map(|r| r.0.as_str()).collect();
+    assert_eq!(
+        actions,
+        [
+            "auth.login",
+            "auth.login",
+            "auth.sudo_failed",
+            "auth.sudo_entered",
+            "auth.mfa_enrollment_started",
+            "auth.mfa_enabled",
+            "auth.sessions_revoked_others",
+            "auth.mfa_disabled",
+            "auth.logout_all"
+        ]
+    );
+    assert!(rows.iter().all(|r| r.2 == Some(id)));
+    let sudo_failed: Value =
+        sqlx::query_scalar("SELECT metadata FROM audit_logs WHERE action = 'auth.sudo_failed'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(sudo_failed, json!({"reason": "password_incorrect"}));
+    let logout_all: Value =
+        sqlx::query_scalar("SELECT metadata FROM audit_logs WHERE action = 'auth.logout_all'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(logout_all, json!({"revoked": 1}));
+
+    // No password, TOTP code or backup code anywhere in the log.
+    let everything: String = sqlx::query_scalar(
+        "SELECT COALESCE(string_agg(row_to_json(a)::text, ' '), '') FROM audit_logs a",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    for secret in [
+        PASSWORD,
+        "Wrong-Password-Here-9",
+        codes[0].as_str(),
+        b.csrf.as_str(),
+    ] {
+        assert!(
+            !everything.contains(secret),
+            "secret found in audit log: {secret}"
+        );
+    }
 }

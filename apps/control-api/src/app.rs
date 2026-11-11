@@ -1,6 +1,6 @@
 //! HTTP application: shared state, routes and middleware stack.
 
-use std::{any::Any, sync::Arc, time::Duration};
+use std::{any::Any, net::IpAddr, sync::Arc, time::Duration};
 
 use axum::{
     Router,
@@ -35,6 +35,9 @@ pub struct AppState {
     pub metrics: MetricsHandle,
     /// Readiness probes for `/api/v1/public/ready`.
     pub readiness: Readiness,
+    /// Reverse proxies whose `X-Forwarded-For` is trusted when resolving the
+    /// client address (recorded in the audit log).
+    pub trusted_proxies: Arc<[IpAddr]>,
 }
 
 impl FromRef<AppState> for Readiness {
@@ -52,7 +55,8 @@ impl FromRef<AppState> for MetricsHandle {
 /// Builds the HTTP router.
 ///
 /// Layer order, outermost first:
-/// correlation ID -> panic catcher -> metrics -> timeout -> body limit -> compression -> routes.
+/// correlation ID -> client address -> panic catcher -> metrics -> timeout -> body limit
+/// -> compression -> routes.
 /// Unknown routes answer with a Problem Details 404.
 pub fn router(state: AppState, auth: Option<dhpanel_mod_auth::AuthState>) -> Router {
     let public = Router::new()
@@ -72,10 +76,13 @@ pub fn router(state: AppState, auth: Option<dhpanel_mod_auth::AuthState>) -> Rou
     };
 
     let router = match auth {
-        Some(auth) => router.merge(dhpanel_mod_auth::router().with_state(auth)),
+        Some(auth) => router
+            .merge(dhpanel_mod_auth::router().with_state(auth.clone()))
+            .merge(dhpanel_audit::router::<dhpanel_mod_auth::AuthState>().with_state(auth)),
         None => router,
     };
 
+    let trusted_proxies = state.trusted_proxies.clone();
     router
         .fallback(|| async { AppError::not_found("route") })
         .layer(CompressionLayer::new())
@@ -88,6 +95,10 @@ pub fn router(state: AppState, auth: Option<dhpanel_mod_auth::AuthState>) -> Rou
             dhpanel_http_kit::metrics::track_http_metrics,
         ))
         .layer(CatchPanicLayer::custom(panic_response))
+        .layer(axum::middleware::from_fn_with_state(
+            trusted_proxies,
+            dhpanel_http_kit::client_ip::client_ip_layer,
+        ))
         .layer(axum::middleware::from_fn(
             dhpanel_http_kit::request_id::correlation_id_layer,
         ))
@@ -137,6 +148,7 @@ mod tests {
         AppState {
             metrics: Arc::new(|| "http_requests_total 1\n".to_owned()),
             readiness,
+            trusted_proxies: Arc::from(Vec::new()),
         }
     }
 

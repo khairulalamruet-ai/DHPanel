@@ -19,6 +19,7 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{delete, get, post},
 };
+use dhpanel_audit::{AuditEntry, Outcome};
 use dhpanel_http_kit::{AppError, ProblemDetails};
 use dhpanel_session::{Authenticated, RevokeReason, SessionInfo, clear_cookie, rfc3339};
 use serde::Serialize;
@@ -152,6 +153,15 @@ pub async fn revoke(
     if !revoked {
         return Err(AppError::not_found("session"));
     }
+    state
+        .audit
+        .record_or_log(
+            AuditEntry::new("auth.session_revoked", Outcome::Success)
+                .actor(session.account_id)
+                .target("session", id)
+                .metadata(serde_json::json!({ "current": id == session.id })),
+        )
+        .await;
     if id == session.id {
         return cleared_cookie_response();
     }
@@ -184,6 +194,14 @@ pub async fn revoke_others(
         )
         .await
         .map_err(AppError::internal)?;
+    state
+        .audit
+        .record_or_log(
+            AuditEntry::new("auth.sessions_revoked_others", Outcome::Success)
+                .actor(session.account_id)
+                .metadata(serde_json::json!({ "revoked": revoked })),
+        )
+        .await;
     Ok(Json(RevokedCount { revoked }))
 }
 
@@ -204,10 +222,18 @@ pub async fn logout_all(
     State(state): State<AuthState>,
     Authenticated(session): Authenticated,
 ) -> Result<Response, AppError> {
-    state
+    let revoked = state
         .sessions
         .revoke_all(session.account_id, None, RevokeReason::LogoutAll)
         .await
         .map_err(AppError::internal)?;
+    state
+        .audit
+        .record_or_log(
+            AuditEntry::new("auth.logout_all", Outcome::Success)
+                .actor(session.account_id)
+                .metadata(serde_json::json!({ "revoked": revoked })),
+        )
+        .await;
     cleared_cookie_response()
 }

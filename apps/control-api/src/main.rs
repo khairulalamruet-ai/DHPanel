@@ -164,6 +164,7 @@ async fn main() -> ExitCode {
         redis: redis.clone(),
         master_key,
         totp_issuer: config.auth.totp_issuer.trim().into(),
+        audit: dhpanel_audit::AuditWriter::new(db.clone()),
     };
 
     let handle = telemetry.prometheus_handle();
@@ -171,6 +172,7 @@ async fn main() -> ExitCode {
         app::AppState {
             metrics: Arc::new(move || handle.render()),
             readiness,
+            trusted_proxies: config.trusted_proxies.clone().into(),
         },
         Some(auth),
     );

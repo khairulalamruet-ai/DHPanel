@@ -685,6 +685,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "dhpanel-audit"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "dhpanel-cache",
+ "dhpanel-database",
+ "dhpanel-http-kit",
+ "dhpanel-rbac",
+ "dhpanel-session",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "time",
+ "tokio",
+ "tower",
+ "tracing",
+ "utoipa",
+ "uuid",
+]
+
+[[package]]
 name = "dhpanel-auth-core"
 version = "0.1.0"
 dependencies = [
@@ -730,6 +752,7 @@ name = "dhpanel-control-api"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "dhpanel-audit",
  "dhpanel-auth-core",
  "dhpanel-cache",
  "dhpanel-common",
@@ -812,6 +835,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "base64 0.23.1",
+ "dhpanel-audit",
  "dhpanel-auth-core",
  "dhpanel-cache",
  "dhpanel-database",
