@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO account_mfa (account_id, kind, secret_enc)\n           VALUES ($1, 'totp', $2)\n           ON CONFLICT (account_id, kind) DO UPDATE\n               SET secret_enc = EXCLUDED.secret_enc, last_used_step = NULL\n               WHERE account_mfa.confirmed_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bytea"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2a6be783678b432e54da6b9ba8287d391f4ded217a4742d45c2be93db64d6266"
+}

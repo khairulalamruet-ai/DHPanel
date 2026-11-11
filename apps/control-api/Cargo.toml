@@ -18,6 +18,8 @@ otel = ["dhpanel-observability/otel"]
 
 [dependencies]
 dhpanel-auth-core.workspace = true
+# Reads the master key out of its SecretString wrapper at startup.
+secrecy = "0.10"
 dhpanel-cache.workspace = true
 dhpanel-common.workspace = true
 dhpanel-config.workspace = true

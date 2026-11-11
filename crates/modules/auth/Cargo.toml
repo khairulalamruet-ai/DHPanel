@@ -21,6 +21,8 @@ axum = "0.8"
 # Lockout keys for unknown login names are SHA-256 hashed (no raw user input
 # in Redis key names).
 base64 = "0.23"
+# OS CSPRNG for the pending-2FA token.
+getrandom = "0.4"
 sha2 = "0.11"
 secrecy = "0.10"
 serde = { version = "1", features = ["derive"] }

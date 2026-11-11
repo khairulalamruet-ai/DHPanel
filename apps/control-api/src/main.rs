@@ -128,6 +128,22 @@ async fn main() -> ExitCode {
             ..dhpanel_session::SessionConfig::default()
         },
     );
+    let master_key = match config
+        .master_key()
+        .map_err(|e| e.to_string())
+        .and_then(|key| {
+            dhpanel_auth_core::secretbox::MasterKey::from_base64(
+                secrecy::ExposeSecret::expose_secret(&key),
+            )
+            .map_err(|e| format!("secrets.master_key: {e}"))
+        }) {
+        Ok(key) => key,
+        Err(err) => {
+            tracing::error!(error = %err, "master key unavailable");
+            telemetry.shutdown();
+            return ExitCode::from(EXIT_CONFIG);
+        }
+    };
     let minutes = |m: u32| std::time::Duration::from_secs(u64::from(m) * 60);
     let lockout = |threshold| dhpanel_cache::lockout::LockoutPolicy {
         threshold,
@@ -144,6 +160,9 @@ async fn main() -> ExitCode {
             lockout(config.auth.ip_lockout_threshold),
         ),
         trusted_proxies: config.trusted_proxies.clone().into(),
+        redis: redis.clone(),
+        master_key,
+        totp_issuer: config.auth.totp_issuer.trim().into(),
     };
 
     let handle = telemetry.prometheus_handle();

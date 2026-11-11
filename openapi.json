@@ -101,6 +101,246 @@
         ]
       }
     },
+    "/api/v1/auth/mfa": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "2FA state of the signed-in account.",
+        "operationId": "getMfaStatus",
+        "responses": {
+          "200": {
+            "description": "2FA state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MfaStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not logged in",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/mfa/totp/confirm": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Confirm TOTP enrolment with a code from the authenticator app. Enables\n2FA and returns the backup codes (shown only this once).",
+        "operationId": "confirmTotp",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CodeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "2FA enabled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupCodes"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_mfa_code`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`mfa_not_pending`: no enrolment in progress",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/mfa/totp/disable": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Disable TOTP and delete all backup codes. Requires the current password.",
+        "operationId": "disableTotp",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "2FA disabled (also when it was not enabled)"
+          },
+          "403": {
+            "description": "`password_incorrect` or `csrf_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many wrong passwords",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/mfa/totp/enroll": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Start TOTP enrolment: returns a new secret to add to an authenticator app.\n2FA is not active until the secret is confirmed with a code.",
+        "operationId": "enrollTotp",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "New secret; calling again before confirming replaces it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TotpEnrollment"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`password_incorrect` or `csrf_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`mfa_already_enabled`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many wrong passwords",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/public/auth/login": {
       "post": {
         "tags": [
@@ -137,6 +377,16 @@
               }
             }
           },
+          "202": {
+            "description": "Password accepted but a second factor is required: a short-lived `__Host-dh_mfa` cookie is set; continue with POST /api/v1/public/auth/login/mfa",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MfaChallenge"
+                }
+              }
+            }
+          },
           "401": {
             "description": "Invalid username or password",
             "content": {
@@ -169,6 +419,67 @@
           },
           "429": {
             "description": "Too many failed attempts for this account or address",
+            "headers": {
+              "retry-after": {
+                "schema": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                },
+                "description": "Seconds until the lock expires"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/public/auth/login/mfa": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Second login step: verify a TOTP or backup code and start the session.",
+        "operationId": "loginMfa",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MfaLoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Logged in; session cookie set, pending cookie cleared",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Me"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`invalid_mfa_code`, or `mfa_session_expired` when the pending login is missing or older than 5 minutes",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many failed attempts",
             "headers": {
               "retry-after": {
                 "schema": {
@@ -245,6 +556,22 @@
   },
   "components": {
     "schemas": {
+      "BackupCodes": {
+        "type": "object",
+        "description": "Backup codes, shown exactly once.",
+        "required": [
+          "backup_codes"
+        ],
+        "properties": {
+          "backup_codes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Ten single-use codes; store them somewhere safe."
+          }
+        }
+      },
       "CheckResult": {
         "type": "object",
         "description": "Public result for one probe.",
@@ -278,6 +605,21 @@
           "failed",
           "timeout"
         ]
+      },
+      "CodeRequest": {
+        "type": "object",
+        "description": "A 6-digit authenticator code.",
+        "required": [
+          "code"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Code currently shown by the authenticator app.",
+            "example": "123456"
+          }
+        },
+        "additionalProperties": false
       },
       "FieldError": {
         "type": "object",
@@ -351,7 +693,8 @@
           "username",
           "email",
           "locale",
-          "csrf_token"
+          "csrf_token",
+          "mfa_enabled"
         ],
         "properties": {
           "csrf_token": {
@@ -376,11 +719,92 @@
             "type": "string",
             "description": "UI locale (`en` or `bn`)."
           },
+          "mfa_enabled": {
+            "type": "boolean",
+            "description": "Whether two-factor authentication (TOTP) is enabled."
+          },
           "username": {
             "type": "string",
             "description": "Username."
           }
         }
+      },
+      "MfaChallenge": {
+        "type": "object",
+        "description": "Body of the 202 answer to a password login when 2FA is enabled.",
+        "required": [
+          "mfa_required",
+          "methods",
+          "expires_in"
+        ],
+        "properties": {
+          "expires_in": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds until the pending login expires.",
+            "minimum": 0
+          },
+          "methods": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Accepted second factors: `totp`, `backup_code`."
+          },
+          "mfa_required": {
+            "type": "boolean",
+            "description": "Always `true`."
+          }
+        }
+      },
+      "MfaLoginRequest": {
+        "type": "object",
+        "description": "Second login step.",
+        "required": [
+          "code"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "A 6-digit authenticator code or a backup code.",
+            "example": "123456"
+          }
+        },
+        "additionalProperties": false
+      },
+      "MfaStatus": {
+        "type": "object",
+        "description": "2FA state of the signed-in account.",
+        "required": [
+          "totp_enabled",
+          "backup_codes_remaining"
+        ],
+        "properties": {
+          "backup_codes_remaining": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Backup codes not yet used."
+          },
+          "totp_enabled": {
+            "type": "boolean",
+            "description": "TOTP is enabled (enrolment confirmed)."
+          }
+        }
+      },
+      "PasswordRequest": {
+        "type": "object",
+        "description": "Current password, required for sensitive changes.",
+        "required": [
+          "password"
+        ],
+        "properties": {
+          "password": {
+            "type": "string",
+            "format": "password",
+            "description": "Current password."
+          }
+        },
+        "additionalProperties": false
       },
       "ProblemDetails": {
         "type": "object",
@@ -452,6 +876,24 @@
             "example": "ready"
           }
         }
+      },
+      "TotpEnrollment": {
+        "type": "object",
+        "description": "A new, not yet confirmed TOTP secret.",
+        "required": [
+          "secret",
+          "otpauth_uri"
+        ],
+        "properties": {
+          "otpauth_uri": {
+            "type": "string",
+            "description": "`otpauth://` URI; render it as a QR code for the authenticator app."
+          },
+          "secret": {
+            "type": "string",
+            "description": "Base32 secret for manual entry."
+          }
+        }
       }
     },
     "securitySchemes": {
@@ -470,7 +912,7 @@
     },
     {
       "name": "auth",
-      "description": "Login, logout and the current account"
+      "description": "Login, logout, the current account and two-factor authentication"
     }
   ]
 }

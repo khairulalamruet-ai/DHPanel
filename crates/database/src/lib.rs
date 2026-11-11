@@ -10,6 +10,7 @@
 //! `.sqlx/` offline cache (refresh with `cargo sqlx prepare --workspace`).
 
 pub mod accounts;
+pub mod mfa;
 
 use std::{future::Future, pin::Pin, time::Duration};
 

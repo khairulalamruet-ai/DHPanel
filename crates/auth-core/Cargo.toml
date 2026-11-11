@@ -12,6 +12,11 @@ workspace = true
 
 [dependencies]
 argon2 = "0.6.0"
+# Master key text encoding; OS CSPRNG for nonces, TOTP secrets and backup codes;
+# SHA-256 for backup-code hashes. All already used by dhpanel-session.
+base64 = "0.23"
+getrandom = "0.4"
+sha2 = "0.11"
 # XChaCha20-Poly1305 for secrets at rest (TOTP secrets; docs/01-architecture/07-security-model.md).
 chacha20poly1305 = { version = "0.11", features = ["zeroize"] }
 # RFC 6238 TOTP for 2FA (named in docs/01-architecture/02-tech-stack.md);

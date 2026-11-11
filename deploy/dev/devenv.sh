@@ -37,6 +37,10 @@ sha256_check() { # file.sha256 in the current directory
 }
 port_in_use() { lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1; }
 random_secret() { openssl rand -base64 32 | tr -d '/+=\n'; }
+# 32 random bytes, standard base64 (the format secrets.master_key_file expects).
+ensure_master_key() {
+  [ -s "$SECRETS/master_key" ] || ( umask 077; openssl rand -base64 32 >"$SECRETS/master_key" )
+}
 
 cmd_install() {
   local src="$HOME_DIR/src"
@@ -86,6 +90,7 @@ cmd_init() {
   for name in pg_superuser_password pg_dhpanel_password redis_password; do
     [ -s "$SECRETS/$name" ] || ( umask 077; random_secret >"$SECRETS/$name" )
   done
+  ensure_master_key
 
   if [ ! -f "$PGDATA/PG_VERSION" ]; then
     log "initialising PostgreSQL data directory"
@@ -174,12 +179,14 @@ cmd_status() {
 }
 
 cmd_env() { # file paths only; secrets stay in their 0600 files
+  [ -d "$SECRETS" ] && ensure_master_key # environments created before 2FA existed
   local repo
   repo="$(cd "$(dirname "$0")/../.." && pwd)"
   cat <<EOF
 export DHPANEL_CONFIG='$repo/deploy/dev/control.dev.toml'
 export DHPANEL_DATABASE__URL_FILE='$SECRETS/database_url'
 export DHPANEL_REDIS__URL_FILE='$SECRETS/redis_url'
+export DHPANEL_SECRETS__MASTER_KEY_FILE='$SECRETS/master_key'
 export SQLX_OFFLINE=true
 EOF
 }

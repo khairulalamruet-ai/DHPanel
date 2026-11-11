@@ -49,3 +49,14 @@ lockout_threshold = 5          # 1..=100
 lockout_window_minutes = 15    # 1..=1440
 lockout_minutes = 15           # 1..=1440
 ip_lockout_threshold = 50      # lockout_threshold..=100000
+
+# Two-factor authentication: the name authenticator apps show for this panel.
+totp_issuer = "DHPanel"
+
+[secrets]
+# Master key that encrypts secrets stored in the database (TOTP secrets, ...).
+# Create once and back it up separately from the database:
+#   (umask 077; openssl rand -base64 32 > /etc/dhpanel/secrets/master_key)
+# If it is lost, users must re-enrol 2FA; if it leaks together with a database
+# dump, stored TOTP secrets are exposed.
+master_key_file = "/etc/dhpanel/secrets/master_key"

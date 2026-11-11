@@ -45,6 +45,20 @@ pub struct ControlConfig {
     pub redis: RedisConfig,
     /// Authentication settings.
     pub auth: AuthConfig,
+    /// Keys for secrets stored encrypted in the database.
+    pub secrets: SecretsConfig,
+}
+
+/// Keys for secrets at rest.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SecretsConfig {
+    /// Master key: 32 random bytes, base64 (`openssl rand -base64 32`).
+    /// Prefer `master_key_file`. Losing it makes stored TOTP secrets unreadable.
+    #[serde(default, skip_serializing)]
+    pub master_key: Option<SecretString>,
+    /// File holding the master key (mode 0600).
+    pub master_key_file: Option<PathBuf>,
 }
 
 /// Authentication settings.
@@ -72,6 +86,8 @@ pub struct AuthConfig {
     /// that address (`lockout_threshold`..=100000). Higher than the per-account
     /// limit because many users can share one address (NAT).
     pub ip_lockout_threshold: u32,
+    /// Name shown in authenticator apps for TOTP entries (1..=64 characters, no `:`).
+    pub totp_issuer: String,
 }
 
 /// Logging settings.
@@ -150,6 +166,11 @@ impl Default for ControlConfig {
                 lockout_window_minutes: 15,
                 lockout_minutes: 15,
                 ip_lockout_threshold: 50,
+                totp_issuer: "DHPanel".to_owned(),
+            },
+            secrets: SecretsConfig {
+                master_key: None,
+                master_key_file: None,
             },
         }
     }
@@ -316,6 +337,19 @@ impl ControlConfig {
                 });
             }
         }
+        let issuer = self.auth.totp_issuer.trim();
+        if issuer.is_empty() || issuer.chars().count() > 64 || issuer.contains(':') {
+            return Err(ConfigError::Invalid {
+                key: "auth.totp_issuer",
+                reason: "must be 1..=64 characters and must not contain ':'".to_owned(),
+            });
+        }
+        if self.secrets.master_key.is_some() && self.secrets.master_key_file.is_some() {
+            return Err(ConfigError::Invalid {
+                key: "secrets.master_key",
+                reason: "set either `master_key` or `master_key_file`, not both".to_owned(),
+            });
+        }
         if self.database.url.is_some() && self.database.url_file.is_some() {
             return Err(ConfigError::Invalid {
                 key: "database.url",
@@ -329,6 +363,20 @@ impl ControlConfig {
             });
         }
         Ok(())
+    }
+
+    /// Resolves the base64 master key from `secrets.master_key` or
+    /// `secrets.master_key_file`. Decoding and length checks are done by
+    /// `dhpanel_auth_core::secretbox::MasterKey::from_base64`.
+    ///
+    /// # Errors
+    /// Missing secret, unreadable file or unsafe permissions.
+    pub fn master_key(&self) -> Result<SecretString, ConfigError> {
+        resolve_secret(
+            "secrets.master_key",
+            self.secrets.master_key.as_ref(),
+            self.secrets.master_key_file.as_deref(),
+        )
     }
 
     /// Resolves the PostgreSQL URL from `database.url` or `database.url_file`.
@@ -585,6 +633,43 @@ mod tests {
             jail.set_env("DHPANEL_AUTH__IP_LOCKOUT_THRESHOLD", "5");
             let msg = load(jail).expect_err("ip < account").to_string();
             assert!(msg.contains("auth.ip_lockout_threshold"), "{msg}");
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn master_key_is_resolved_validated_and_never_printed() {
+        Jail::expect_with(|jail| {
+            jail.clear_env();
+            let cfg = load(jail).expect("defaults");
+            let msg = cfg.master_key().expect_err("missing").to_string();
+            assert!(msg.contains("secrets.master_key"), "{msg}");
+
+            jail.set_env(
+                "DHPANEL_SECRETS__MASTER_KEY",
+                "c2VjcmV0LWtleS1tYXRlcmlhbA==",
+            );
+            let cfg = load(jail).expect("inline");
+            assert!(cfg.master_key().is_ok());
+            assert!(!format!("{cfg:?}").contains("c2VjcmV0"), "{cfg:?}");
+
+            jail.set_env("DHPANEL_SECRETS__MASTER_KEY_FILE", "/nonexistent");
+            let msg = load(jail).expect_err("both").to_string();
+            assert!(msg.contains("secrets.master_key"), "{msg}");
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn totp_issuer_is_validated() {
+        Jail::expect_with(|jail| {
+            jail.clear_env();
+            assert_eq!(load(jail).expect("defaults").auth.totp_issuer, "DHPanel");
+            for bad in ["", "My:Panel"] {
+                jail.set_env("DHPANEL_AUTH__TOTP_ISSUER", bad);
+                let msg = load(jail).expect_err("bad issuer").to_string();
+                assert!(msg.contains("auth.totp_issuer"), "{msg}");
+            }
             Ok(())
         });
     }

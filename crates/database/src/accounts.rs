@@ -185,6 +185,22 @@ pub async fn find_profile(pool: &PgPool, id: Uuid) -> Result<Option<AccountProfi
     .await
 }
 
+/// Loads an account's status and password hash by id, for re-authenticating
+/// an already signed-in user (enabling/disabling 2FA, sudo mode).
+///
+/// # Errors
+/// Database errors.
+pub async fn find_for_reauth(pool: &PgPool, id: Uuid) -> Result<Option<LoginAccount>, sqlx::Error> {
+    sqlx::query_as!(
+        LoginAccount,
+        r#"SELECT id, status AS "status: DbAccountStatus", password_hash
+           FROM accounts WHERE id = $1"#,
+        id
+    )
+    .fetch_optional(pool)
+    .await
+}
+
 /// Replaces the stored password hash (used when upgrading hash parameters).
 ///
 /// # Errors
@@ -219,6 +235,10 @@ pub enum LoginOutcome {
     RateLimited,
     /// Rejected by lockout.
     LockedOut,
+    /// Password accepted; a second factor is now required.
+    MfaRequired,
+    /// Second factor wrong, replayed or expired.
+    MfaFailed,
 }
 
 impl LoginOutcome {
@@ -230,6 +250,8 @@ impl LoginOutcome {
             Self::AccountDisabled => "account_disabled",
             Self::RateLimited => "rate_limited",
             Self::LockedOut => "locked_out",
+            Self::MfaRequired => "mfa_required",
+            Self::MfaFailed => "mfa_failed",
         }
     }
 }

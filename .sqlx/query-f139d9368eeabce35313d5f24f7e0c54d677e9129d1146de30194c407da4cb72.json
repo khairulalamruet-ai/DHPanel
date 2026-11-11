@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM account_mfa WHERE account_id = $1 AND kind = 'totp'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f139d9368eeabce35313d5f24f7e0c54d677e9129d1146de30194c407da4cb72"
+}

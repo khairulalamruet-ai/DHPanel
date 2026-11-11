@@ -689,8 +689,11 @@ name = "dhpanel-auth-core"
 version = "0.1.0"
 dependencies = [
  "argon2",
+ "base64 0.23.1",
  "chacha20poly1305",
+ "getrandom 0.4.3",
  "secrecy",
+ "sha2 0.11.1",
  "thiserror",
  "tokio",
  "totp-rs",
@@ -736,6 +739,7 @@ dependencies = [
  "dhpanel-mod-auth",
  "dhpanel-observability",
  "dhpanel-session",
+ "secrecy",
  "serde_json",
  "tokio",
  "tower",
@@ -814,6 +818,7 @@ dependencies = [
  "dhpanel-domain",
  "dhpanel-http-kit",
  "dhpanel-session",
+ "getrandom 0.4.3",
  "secrecy",
  "serde",
  "serde_json",

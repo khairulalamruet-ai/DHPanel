@@ -28,6 +28,8 @@
 //! it has no session yet, accepts only `application/json` (which a cross-site
 //! form cannot send without a CORS preflight) and rotates any prior session.
 
+pub mod mfa;
+
 use std::{
     net::{IpAddr, SocketAddr},
     sync::Arc,
@@ -42,7 +44,7 @@ use axum::{
     routing::{get, post},
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use dhpanel_auth_core::password::PasswordHasher;
+use dhpanel_auth_core::{password::PasswordHasher, secretbox::MasterKey};
 use dhpanel_cache::{
     RedisHandle,
     lockout::{FailureLimiter, LockoutPolicy},
@@ -88,6 +90,12 @@ pub struct AuthState {
     pub limits: LoginLimits,
     /// Reverse proxies whose `X-Forwarded-For` is trusted.
     pub trusted_proxies: Arc<[IpAddr]>,
+    /// Redis, for short-lived pending 2FA logins.
+    pub redis: RedisHandle,
+    /// Key that encrypts TOTP secrets at rest.
+    pub master_key: MasterKey,
+    /// Issuer name shown in authenticator apps.
+    pub totp_issuer: Arc<str>,
 }
 
 /// Failed-login counters: one per account (or login name), one per client
@@ -113,7 +121,7 @@ impl LoginLimits {
 
 /// Lockout subject for a login attempt: the account when one matched,
 /// otherwise a hash of the normalised login name (never raw input in keys).
-fn lockout_subject(account_id: Option<Uuid>, normalised_login: &str) -> String {
+pub(crate) fn lockout_subject(account_id: Option<Uuid>, normalised_login: &str) -> String {
     match account_id {
         Some(id) => format!("a:{}", id.simple()),
         None => format!(
@@ -123,7 +131,7 @@ fn lockout_subject(account_id: Option<Uuid>, normalised_login: &str) -> String {
     }
 }
 
-fn too_many_attempts(retry_after: Duration) -> AppError {
+pub(crate) fn too_many_attempts(retry_after: Duration) -> AppError {
     AppError::too_many_requests(
         "too_many_attempts",
         "Too many failed login attempts. Try again later.",
@@ -143,6 +151,7 @@ pub fn router() -> Router<AuthState> {
         .route("/api/v1/public/auth/login", post(login))
         .route("/api/v1/auth/logout", post(logout))
         .route("/api/v1/auth/me", get(me))
+        .merge(mfa::router())
 }
 
 /// Login request body.
@@ -181,6 +190,8 @@ pub struct Me {
     pub locale: String,
     /// Send as `X-CSRF-Token` on POST/PUT/PATCH/DELETE. Keep in memory only.
     pub csrf_token: String,
+    /// Whether two-factor authentication (TOTP) is enabled.
+    pub mfa_enabled: bool,
 }
 
 impl std::fmt::Debug for Me {
@@ -193,7 +204,7 @@ impl std::fmt::Debug for Me {
 }
 
 impl Me {
-    fn new(p: AccountProfile, csrf: &CsrfToken) -> Self {
+    fn new(p: AccountProfile, csrf: &CsrfToken, mfa_enabled: bool) -> Self {
         Self {
             id: p.id,
             kind: p.kind,
@@ -201,13 +212,14 @@ impl Me {
             email: p.email,
             locale: p.locale,
             csrf_token: csrf.expose().to_owned(),
+            mfa_enabled,
         }
     }
 }
 
-/// JSON response that must never be cached (it carries the CSRF token).
-fn no_store_json(me: Me) -> Response {
-    let mut response = Json(me).into_response();
+/// JSON response that must never be cached (it carries tokens or secrets).
+pub(crate) fn no_store_json<T: Serialize>(body: T) -> Response {
+    let mut response = Json(body).into_response();
     response
         .headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
@@ -218,13 +230,13 @@ fn invalid_credentials() -> AppError {
     AppError::authentication_failed("invalid_credentials", "Invalid username or password.")
 }
 
-fn user_agent(headers: &HeaderMap) -> Option<&str> {
+pub(crate) fn user_agent(headers: &HeaderMap) -> Option<&str> {
     headers
         .get(header::USER_AGENT)
         .and_then(|v| v.to_str().ok())
 }
 
-async fn count_failure(limiter: &FailureLimiter, subject: &str) -> Result<(), AppError> {
+pub(crate) async fn count_failure(limiter: &FailureLimiter, subject: &str) -> Result<(), AppError> {
     let recorded = limiter
         .record_failure(subject)
         .await
@@ -241,7 +253,7 @@ async fn count_failure(limiter: &FailureLimiter, subject: &str) -> Result<(), Ap
     Ok(())
 }
 
-async fn record(db: &PgPool, ev: LoginEvent<'_>) -> Result<(), AppError> {
+pub(crate) async fn record(db: &PgPool, ev: LoginEvent<'_>) -> Result<(), AppError> {
     accounts::insert_login_event(db, &ev)
         .await
         .map_err(AppError::internal)
@@ -255,6 +267,7 @@ async fn record(db: &PgPool, ev: LoginEvent<'_>) -> Result<(), AppError> {
     operation_id = "login",
     request_body = LoginRequest,
     responses(
+        (status = 202, description = "Password accepted but a second factor is required: a short-lived `__Host-dh_mfa` cookie is set; continue with POST /api/v1/public/auth/login/mfa", body = mfa::MfaChallenge),
         (status = 200, description = "Logged in; session cookie set", body = Me,
          headers(("set-cookie" = String, description = "__Host-dh_session=…; Path=/; Secure; HttpOnly; SameSite=Strict"))),
         (status = 401, description = "Invalid username or password", body = ProblemDetails, content_type = "application/problem+json"),
@@ -385,10 +398,6 @@ pub async fn login(
         }
     }
 
-    if let Err(err) = state.limits.account.reset(&subject).await {
-        tracing::warn!(error = %err, "failed-login counter not reset");
-    }
-
     if verification.needs_rehash {
         match state.hasher.hash_async(password).await {
             Ok(hash) => {
@@ -401,8 +410,39 @@ pub async fn login(
         }
     }
 
+    if dhpanel_database::mfa::totp_enabled(&state.db, account.id)
+        .await
+        .map_err(AppError::internal)?
+    {
+        // The failure counter is deliberately not reset here: knowing the
+        // password must not buy unlimited guesses at the second factor.
+        record(
+            &state.db,
+            event(Some(account.id), LoginOutcome::MfaRequired),
+        )
+        .await?;
+        return mfa::challenge(&state, account.id, attempted).await;
+    }
+
+    if let Err(err) = state.limits.account.reset(&subject).await {
+        tracing::warn!(error = %err, "failed-login counter not reset");
+    }
+    finish_login(&state, account.id, attempted, ip, &headers).await
+}
+
+/// Completes a login after every required factor has been verified: rotates
+/// any previous session, creates the new one, records the event and returns
+/// the account with the session cookie.
+pub(crate) async fn finish_login(
+    state: &AuthState,
+    account_id: Uuid,
+    attempted: &str,
+    ip: IpAddr,
+    headers: &HeaderMap,
+) -> Result<Response, AppError> {
+    let ua = user_agent(headers);
     // Session fixation: never keep a session that existed before authentication.
-    if let Some(previous) = cookie_value(&headers)
+    if let Some(previous) = cookie_value(headers)
         && let Err(err) = state.sessions.revoke(previous, RevokeReason::Logout).await
     {
         tracing::warn!(error = %err, "previous session not revoked at login");
@@ -411,23 +451,36 @@ pub async fn login(
     let (token, session) = state
         .sessions
         .create(NewSession {
-            account_id: account.id,
+            account_id,
             ip: Some(ip),
             user_agent: ua.map(str::to_owned),
         })
         .await
         .map_err(AppError::internal)?;
-    record(&state.db, event(Some(account.id), LoginOutcome::Ok)).await?;
+    record(
+        &state.db,
+        LoginEvent {
+            account_id: Some(account_id),
+            attempted,
+            ip,
+            user_agent: ua,
+            outcome: LoginOutcome::Ok,
+        },
+    )
+    .await?;
 
-    let profile = accounts::find_profile(&state.db, account.id)
+    let profile = accounts::find_profile(&state.db, account_id)
         .await
         .map_err(AppError::internal)?
         .ok_or_else(|| {
             AppError::internal(std::io::Error::other("account vanished during login"))
         })?;
+    let mfa_enabled = dhpanel_database::mfa::totp_enabled(&state.db, account_id)
+        .await
+        .map_err(AppError::internal)?;
 
     let cookie = HeaderValue::from_str(&set_cookie(&token)).map_err(AppError::internal)?;
-    let mut response = no_store_json(Me::new(profile, &session.csrf_token));
+    let mut response = no_store_json(Me::new(profile, &session.csrf_token, mfa_enabled));
     response.headers_mut().insert(header::SET_COOKIE, cookie);
     Ok(response)
 }
@@ -486,7 +539,10 @@ pub async fn me(
         .map_err(AppError::internal)?;
     match profile {
         Some(p) if p.status == DbAccountStatus::Active => {
-            Ok(no_store_json(Me::new(p, &session.csrf_token)))
+            let mfa_enabled = dhpanel_database::mfa::totp_enabled(&state.db, session.account_id)
+                .await
+                .map_err(AppError::internal)?;
+            Ok(no_store_json(Me::new(p, &session.csrf_token, mfa_enabled)))
         }
         _ => {
             // Account deleted or blocked after login: end the session.
@@ -516,10 +572,16 @@ impl Modify for SessionCookieScheme {
 /// OpenAPI fragment for this module (full paths; merge into the root document).
 #[derive(OpenApi)]
 #[openapi(
-    paths(login, logout, me),
-    components(schemas(LoginRequest, Me)),
+    paths(
+        login, logout, me,
+        mfa::login_mfa, mfa::status, mfa::enroll_totp, mfa::confirm_totp, mfa::disable_totp
+    ),
+    components(schemas(
+        LoginRequest, Me, mfa::MfaChallenge, mfa::MfaLoginRequest, mfa::MfaStatus,
+        mfa::PasswordRequest, mfa::TotpEnrollment, mfa::CodeRequest, mfa::BackupCodes
+    )),
     modifiers(&SessionCookieScheme),
-    tags((name = "auth", description = "Login, logout and the current account"))
+    tags((name = "auth", description = "Login, logout, the current account and two-factor authentication"))
 )]
 pub struct AuthApi;
 

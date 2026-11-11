@@ -1,0 +1,47 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT secret_enc, confirmed_at IS NOT NULL AS \"confirmed!\", last_used_step\n           FROM account_mfa WHERE account_id = $1 AND kind = 'totp'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "secret_enc",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "account_mfa",
+            "name": "secret_enc"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "confirmed!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "last_used_step",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "account_mfa",
+            "name": "last_used_step"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      true
+    ]
+  },
+  "hash": "68ea742806568d65acafe7d6b70c4e21b9797b05e05479d82c8a182b5a993440"
+}

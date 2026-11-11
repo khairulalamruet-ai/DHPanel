@@ -51,6 +51,7 @@ fn limited_state(
 ) -> AuthState {
     let url = std::env::var("REDIS_URL").expect("REDIS_URL must be set");
     let redis = RedisHandle::new(&SecretString::from(url)).expect("valid REDIS_URL");
+    let redis_handle = redis.clone();
     let ns = Uuid::now_v7().simple().to_string();
     let policy = |threshold| LockoutPolicy {
         threshold,
@@ -70,6 +71,9 @@ fn limited_state(
             ip: FailureLimiter::new(redis, format!("test:{ns}:ip"), policy(ip_threshold)),
         },
         trusted_proxies: trusted_proxies.to_vec().into(),
+        redis: redis_handle,
+        master_key: dhpanel_auth_core::secretbox::MasterKey::from_bytes(&[42; 32]),
+        totp_issuer: "DHPanel Test".into(),
     }
 }
 
@@ -656,4 +660,366 @@ async fn logout_without_csrf_header_is_403_and_keeps_the_session(pool: PgPool) {
     )
     .await;
     assert_eq!(r.status, StatusCode::NO_CONTENT);
+}
+
+// ---------------------------------------------------------------- 2FA (T01.08)
+
+use dhpanel_auth_core::totp::TotpSecret;
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+}
+
+/// A logged-in browser: session cookie + CSRF token.
+struct Browser {
+    cookie: String,
+    csrf: String,
+}
+
+impl Browser {
+    async fn post(&self, app: &Router, uri: &str, body: Value) -> Resp {
+        send_with(
+            app,
+            "POST",
+            uri,
+            Some(&self.cookie),
+            Some(body),
+            &[("x-csrf-token", &self.csrf)],
+        )
+        .await
+    }
+}
+
+async fn sign_in(app: &Router, name: &str) -> Browser {
+    let r = login(app, name, PASSWORD, None).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    Browser {
+        cookie: cookie_pair(&r.set_cookie.unwrap()),
+        csrf: r.body["csrf_token"].as_str().unwrap().to_owned(),
+    }
+}
+
+/// Enrols and confirms TOTP; returns the secret and the backup codes.
+async fn enable_totp(app: &Router, b: &Browser) -> (TotpSecret, Vec<String>) {
+    let r = b
+        .post(
+            app,
+            "/api/v1/auth/mfa/totp/enroll",
+            json!({"password": PASSWORD}),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    let base32 = r.body["secret"].as_str().unwrap();
+    assert!(
+        r.body["otpauth_uri"]
+            .as_str()
+            .unwrap()
+            .contains(&format!("secret={base32}"))
+    );
+    let secret = secret_from_base32(base32);
+    let r = b
+        .post(
+            app,
+            "/api/v1/auth/mfa/totp/confirm",
+            json!({"code": secret.code_at(unix_now())}),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    let codes: Vec<String> = r.body["backup_codes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c.as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(codes.len(), 10);
+    (secret, codes)
+}
+
+/// RFC 4648 base32 (no padding) decoder, enough for 20-byte secrets.
+fn secret_from_base32(text: &str) -> TotpSecret {
+    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+    let mut bits = 0u32;
+    let mut acc = 0u32;
+    let mut out = Vec::new();
+    for c in text.bytes() {
+        let v = ALPHABET.iter().position(|a| *a == c).expect("base32") as u32;
+        acc = (acc << 5) | v;
+        bits += 5;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((acc >> bits) as u8);
+            acc &= (1 << bits) - 1;
+        }
+    }
+    TotpSecret::from_bytes(&out).expect("20 bytes")
+}
+
+/// First login step for a 2FA account; returns the pending cookie.
+async fn password_step(app: &Router, name: &str) -> String {
+    let r = login(app, name, PASSWORD, None).await;
+    assert_eq!(r.status, StatusCode::ACCEPTED, "{:?}", r.body);
+    assert_eq!(r.body["mfa_required"], true);
+    assert!(r.body.get("csrf_token").is_none());
+    let set = r.set_cookie.expect("pending cookie");
+    for attr in [
+        "__Host-dh_mfa=",
+        "HttpOnly",
+        "Secure",
+        "SameSite=Strict",
+        "Max-Age=300",
+    ] {
+        assert!(set.contains(attr), "{set}");
+    }
+    assert!(
+        !set.contains("__Host-dh_session"),
+        "no session before the second factor"
+    );
+    cookie_pair(&set)
+}
+
+async fn mfa_step(app: &Router, pending: Option<&str>, code: &str) -> Resp {
+    send(
+        app,
+        "POST",
+        "/api/v1/public/auth/login/mfa",
+        pending,
+        Some(json!({"code": code})),
+    )
+    .await
+}
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn account_with_2fa_cannot_log_in_without_the_second_step(pool: PgPool) {
+    let hasher = PasswordHasher::new(fast_params(2)).unwrap();
+    let id = create_account(&pool, &hasher, "nina", "active").await;
+    let app = app(state(&pool, hasher));
+    let browser = sign_in(&app, "nina").await;
+
+    let r = send(&app, "GET", "/api/v1/auth/mfa", Some(&browser.cookie), None).await;
+    assert_eq!(
+        r.body,
+        json!({"totp_enabled": false, "backup_codes_remaining": 0})
+    );
+    let (secret, _codes) = enable_totp(&app, &browser).await;
+    let r = send(&app, "GET", "/api/v1/auth/mfa", Some(&browser.cookie), None).await;
+    assert_eq!(
+        r.body,
+        json!({"totp_enabled": true, "backup_codes_remaining": 10})
+    );
+    let r = send(&app, "GET", "/api/v1/auth/me", Some(&browser.cookie), None).await;
+    assert_eq!(r.body["mfa_enabled"], true);
+
+    // The secret is not readable in the database.
+    let stored: Vec<u8> =
+        sqlx::query_scalar("SELECT secret_enc FROM account_mfa WHERE account_id = $1")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(!stored.windows(20).any(|w| w == secret.as_bytes()));
+
+    // Password alone: 202, a pending cookie, and no way to reach the API with it.
+    let pending = password_step(&app, "nina").await;
+    let r = send(&app, "GET", "/api/v1/auth/me", Some(&pending), None).await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+    let as_session = pending.replace("__Host-dh_mfa", "__Host-dh_session");
+    let r = send(&app, "GET", "/api/v1/auth/me", Some(&as_session), None).await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+
+    // Second step with a code from the next time step (the confirming step is spent).
+    let code = secret.code_at(unix_now() + 30);
+    let r = mfa_step(&app, Some(&pending), &code).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert_eq!(r.body["username"], "nina");
+    assert_eq!(r.body["mfa_enabled"], true);
+    let session = cookie_pair(&r.set_cookie.unwrap());
+    assert!(session.starts_with("__Host-dh_session="), "{session}");
+    let r = send(&app, "GET", "/api/v1/auth/me", Some(&session), None).await;
+    assert_eq!(r.status, StatusCode::OK);
+
+    let reasons: Vec<String> =
+        sqlx::query_scalar("SELECT reason FROM login_events ORDER BY at, id")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(reasons, ["ok", "mfa_required", "ok"]);
+}
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn totp_codes_and_pending_logins_are_single_use(pool: PgPool) {
+    let hasher = PasswordHasher::new(fast_params(2)).unwrap();
+    create_account(&pool, &hasher, "oscar", "active").await;
+    let app = app(state(&pool, hasher));
+    let browser = sign_in(&app, "oscar").await;
+    let (secret, _) = enable_totp(&app, &browser).await;
+
+    let code = secret.code_at(unix_now() + 30);
+    let pending = password_step(&app, "oscar").await;
+    assert_eq!(
+        mfa_step(&app, Some(&pending), &code).await.status,
+        StatusCode::OK
+    );
+
+    // The pending login is gone after success.
+    let r = mfa_step(&app, Some(&pending), &code).await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(r.body["code"], "mfa_session_expired");
+
+    // A fresh password step cannot reuse the same code (replay).
+    let pending = password_step(&app, "oscar").await;
+    let r = mfa_step(&app, Some(&pending), &code).await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(r.body["code"], "invalid_mfa_code");
+
+    // No pending cookie, or a forged one: expired, not a code check.
+    for cookie in [
+        None,
+        Some("__Host-dh_mfa=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"),
+    ] {
+        let r = mfa_step(&app, cookie, &code).await;
+        assert_eq!(r.body["code"], "mfa_session_expired", "{cookie:?}");
+    }
+}
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn backup_codes_work_once_in_any_typed_form(pool: PgPool) {
+    let hasher = PasswordHasher::new(fast_params(2)).unwrap();
+    create_account(&pool, &hasher, "peggy", "active").await;
+    let app = app(state(&pool, hasher));
+    let browser = sign_in(&app, "peggy").await;
+    let (_, codes) = enable_totp(&app, &browser).await;
+
+    let typed = codes[0].to_uppercase().replace('-', " ");
+    let pending = password_step(&app, "peggy").await;
+    let r = mfa_step(&app, Some(&pending), &typed).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+
+    let pending = password_step(&app, "peggy").await;
+    let r = mfa_step(&app, Some(&pending), &codes[0]).await;
+    assert_eq!(
+        r.body["code"], "invalid_mfa_code",
+        "a backup code works once"
+    );
+    let r = mfa_step(&app, Some(&pending), &codes[1]).await;
+    assert_eq!(
+        r.status,
+        StatusCode::OK,
+        "pending login survives a wrong code"
+    );
+
+    let session = cookie_pair(&r.set_cookie.unwrap());
+    let r = send(&app, "GET", "/api/v1/auth/mfa", Some(&session), None).await;
+    assert_eq!(r.body["backup_codes_remaining"], 8);
+}
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn wrong_second_factors_lock_the_account_despite_correct_passwords(pool: PgPool) {
+    let hasher = PasswordHasher::new(fast_params(2)).unwrap();
+    create_account(&pool, &hasher, "quinn", "active").await;
+    let app = app(state(&pool, hasher));
+    let browser = sign_in(&app, "quinn").await;
+    let (secret, _) = enable_totp(&app, &browser).await;
+
+    // An attacker who knows the password guesses codes, redoing the password
+    // step each time; the correct password must not reset the counter.
+    for attempt in 1..=5 {
+        let pending = password_step(&app, "quinn").await;
+        let r = mfa_step(&app, Some(&pending), "000000").await;
+        assert_eq!(r.status, StatusCode::UNAUTHORIZED, "attempt {attempt}");
+        assert_eq!(r.body["code"], "invalid_mfa_code");
+    }
+    let r = login(&app, "quinn", PASSWORD, None).await;
+    assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS);
+    assert!(r.retry_after.is_some());
+    let _ = secret;
+}
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn enrolment_and_disabling_need_password_csrf_and_a_valid_code(pool: PgPool) {
+    let hasher = PasswordHasher::new(fast_params(2)).unwrap();
+    create_account(&pool, &hasher, "ruth", "active").await;
+    let app = app(state(&pool, hasher));
+    let b = sign_in(&app, "ruth").await;
+    let enroll = "/api/v1/auth/mfa/totp/enroll";
+    let confirm = "/api/v1/auth/mfa/totp/confirm";
+    let disable = "/api/v1/auth/mfa/totp/disable";
+
+    // No CSRF header.
+    let r = send(
+        &app,
+        "POST",
+        enroll,
+        Some(&b.cookie),
+        Some(json!({"password": PASSWORD})),
+    )
+    .await;
+    assert_eq!(r.body["code"], "csrf_failed");
+    // Wrong password.
+    let r = b
+        .post(&app, enroll, json!({"password": "Wrong-Password-Here-9"}))
+        .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+    assert_eq!(r.body["code"], "password_incorrect");
+    // Nothing to confirm yet.
+    let r = b.post(&app, confirm, json!({"code": "123456"})).await;
+    assert_eq!(r.status, StatusCode::CONFLICT);
+    assert_eq!(r.body["code"], "mfa_not_pending");
+
+    // Pending enrolment does not gate login, and a wrong code does not confirm it.
+    let r = b.post(&app, enroll, json!({"password": PASSWORD})).await;
+    assert_eq!(r.status, StatusCode::OK);
+    let first_secret = r.body["secret"].as_str().unwrap().to_owned();
+    let r = b.post(&app, confirm, json!({"code": "12345"})).await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    assert_eq!(r.body["code"], "invalid_mfa_code");
+    assert_eq!(
+        login(&app, "ruth", PASSWORD, None).await.status,
+        StatusCode::OK
+    );
+
+    // Enrolling again issues a different secret; then confirm it.
+    let b = sign_in(&app, "ruth").await;
+    let (_, _) = {
+        let r = b.post(&app, enroll, json!({"password": PASSWORD})).await;
+        assert_ne!(r.body["secret"].as_str().unwrap(), first_secret);
+        let secret = secret_from_base32(r.body["secret"].as_str().unwrap());
+        let r = b
+            .post(&app, confirm, json!({"code": secret.code_at(unix_now())}))
+            .await;
+        assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+        (secret, ())
+    };
+    // Already enabled.
+    let r = b.post(&app, enroll, json!({"password": PASSWORD})).await;
+    assert_eq!(r.status, StatusCode::CONFLICT);
+    assert_eq!(r.body["code"], "mfa_already_enabled");
+
+    // Disabling needs the password; afterwards login is one step again.
+    let r = b
+        .post(&app, disable, json!({"password": "Wrong-Password-Here-9"}))
+        .await;
+    assert_eq!(r.body["code"], "password_incorrect");
+    assert_eq!(
+        login(&app, "ruth", PASSWORD, None).await.status,
+        StatusCode::ACCEPTED
+    );
+    let r = b.post(&app, disable, json!({"password": PASSWORD})).await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT);
+    assert_eq!(
+        login(&app, "ruth", PASSWORD, None).await.status,
+        StatusCode::OK
+    );
+    let left: i64 = sqlx::query_scalar("SELECT count(*) FROM mfa_backup_codes")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(left, 0);
 }
