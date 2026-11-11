@@ -53,6 +53,10 @@ pub struct AuthConfig {
     pub argon2_iterations: u32,
     /// Argon2id lanes (1..=8).
     pub argon2_parallelism: u32,
+    /// Minutes of inactivity after which a session ends (5..=1440).
+    pub session_idle_minutes: u32,
+    /// Hours after login after which a session ends regardless of activity (1..=720).
+    pub session_absolute_hours: u32,
 }
 
 /// Logging settings.
@@ -124,6 +128,8 @@ impl Default for ControlConfig {
                 argon2_memory_kib: 19 * 1024,
                 argon2_iterations: 2,
                 argon2_parallelism: 1,
+                session_idle_minutes: 30,
+                session_absolute_hours: 12,
             },
         }
     }
@@ -242,6 +248,26 @@ impl ControlConfig {
             return Err(ConfigError::Invalid {
                 key: "auth.argon2_parallelism",
                 reason: format!("must be 1..=8, got {}", self.auth.argon2_parallelism),
+            });
+        }
+        if !(5..=1440).contains(&self.auth.session_idle_minutes) {
+            return Err(ConfigError::Invalid {
+                key: "auth.session_idle_minutes",
+                reason: format!("must be 5..=1440, got {}", self.auth.session_idle_minutes),
+            });
+        }
+        if !(1..=720).contains(&self.auth.session_absolute_hours) {
+            return Err(ConfigError::Invalid {
+                key: "auth.session_absolute_hours",
+                reason: format!("must be 1..=720, got {}", self.auth.session_absolute_hours),
+            });
+        }
+        if u64::from(self.auth.session_idle_minutes)
+            > u64::from(self.auth.session_absolute_hours) * 60
+        {
+            return Err(ConfigError::Invalid {
+                key: "auth.session_idle_minutes",
+                reason: "must not exceed session_absolute_hours".to_owned(),
             });
         }
         if self.database.url.is_some() && self.database.url_file.is_some() {
@@ -473,6 +499,21 @@ mod tests {
             jail.set_env("DHPANEL_AUTH__ARGON2_MEMORY_KIB", "4096");
             let msg = load(jail).expect_err("too little memory").to_string();
             assert!(msg.contains("auth.argon2_memory_kib"), "{msg}");
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn session_timeouts_are_validated() {
+        Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DHPANEL_AUTH__SESSION_IDLE_MINUTES", "1");
+            let msg = load(jail).expect_err("too short").to_string();
+            assert!(msg.contains("auth.session_idle_minutes"), "{msg}");
+            jail.set_env("DHPANEL_AUTH__SESSION_IDLE_MINUTES", "120");
+            jail.set_env("DHPANEL_AUTH__SESSION_ABSOLUTE_HOURS", "1");
+            let msg = load(jail).expect_err("idle > absolute").to_string();
+            assert!(msg.contains("must not exceed"), "{msg}");
             Ok(())
         });
     }

@@ -776,6 +776,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "dhpanel-session"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "base64 0.22.1",
+ "dhpanel-cache",
+ "dhpanel-http-kit",
+ "getrandom 0.3.4",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "tower",
+ "uuid",
+]
+
+[[package]]
 name = "dhpanel-worker"
 version = "0.1.0"
 dependencies = [
@@ -3241,6 +3261,7 @@ checksum = "2ef6dac1e96601b4fb3acccccff2139741fcb757cb9a36089bf5be91cfb285ce"
 dependencies = [
  "getrandom 0.4.3",
  "js-sys",
+ "serde_core",
  "wasm-bindgen",
 ]
 

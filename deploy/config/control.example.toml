@@ -30,3 +30,7 @@ url_file = "/etc/dhpanel/secrets/redis_url"
 argon2_memory_kib = 19456   # KiB, minimum 19456
 argon2_iterations = 2       # minimum 2
 argon2_parallelism = 1
+
+# Sessions: idle window (sliding) and absolute lifetime (fixed).
+session_idle_minutes = 30     # 5..=1440
+session_absolute_hours = 12   # 1..=720

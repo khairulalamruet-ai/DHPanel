@@ -1,0 +1,450 @@
+//! Server-side sessions.
+//!
+//! * **Token**: 32 bytes from the OS CSPRNG, base64url-encoded, sent only in the
+//!   `__Host-dh_session` cookie (`HttpOnly; Secure; SameSite=Strict; Path=/`).
+//! * **Hot store**: Redis key `dhpanel:session:<sha256(token)>` holding
+//!   [`SessionData`] as JSON. The raw token is never stored anywhere.
+//! * **Expiry**: an idle timeout (sliding) and an absolute lifetime (fixed);
+//!   the Redis TTL is always the smaller of the two remaining windows. Activity
+//!   refreshes the TTL at most once per [`SessionConfig::touch_interval`].
+//! * **History**: PostgreSQL `sessions` row on create (token hash, IP, UA,
+//!   absolute expiry) and `revoked_at`/`revoke_reason` on revoke.
+//! * **Extractor**: [`Authenticated`] yields the session or a 401 Problem.
+
+use std::{
+    net::IpAddr,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
+
+use axum::{
+    extract::{FromRef, FromRequestParts},
+    http::{HeaderMap, header, request::Parts},
+};
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use dhpanel_cache::{RedisHandle, redis::AsyncCommands as _};
+use dhpanel_http_kit::AppError;
+use secrecy::{ExposeSecret, SecretString};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest as _, Sha256};
+use sqlx::PgPool;
+use uuid::Uuid;
+
+/// Cookie name. The `__Host-` prefix makes browsers require `Secure`,
+/// `Path=/` and no `Domain`, so subdomains cannot set or read it.
+pub const COOKIE_NAME: &str = "__Host-dh_session";
+/// Raw token length in bytes (256 bits).
+pub const TOKEN_BYTES: usize = 32;
+const KEY_PREFIX: &str = "dhpanel:session:";
+/// Maximum stored user-agent length in characters (matches the DB CHECK).
+pub const MAX_USER_AGENT: usize = 512;
+
+/// Session timeouts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SessionConfig {
+    /// Session ends after this long without activity.
+    pub idle_timeout: Duration,
+    /// Session ends this long after creation regardless of activity.
+    pub absolute_timeout: Duration,
+    /// Minimum time between TTL refreshes (limits Redis writes per request).
+    pub touch_interval: Duration,
+}
+
+impl Default for SessionConfig {
+    fn default() -> Self {
+        Self {
+            idle_timeout: Duration::from_secs(30 * 60),
+            absolute_timeout: Duration::from_secs(12 * 60 * 60),
+            touch_interval: Duration::from_secs(60),
+        }
+    }
+}
+
+/// What is stored per session. No secrets.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionData {
+    /// Session id (primary key of the `sessions` row).
+    pub id: Uuid,
+    /// Owner.
+    pub account_id: Uuid,
+    /// Unix seconds.
+    pub created_at: i64,
+    /// Unix seconds of the last TTL refresh.
+    pub last_seen_at: i64,
+    /// Unix seconds after which the session is invalid no matter what.
+    pub absolute_expires_at: i64,
+}
+
+/// Input for [`SessionStore::create`].
+#[derive(Debug, Clone)]
+pub struct NewSession {
+    /// Owner.
+    pub account_id: Uuid,
+    /// Client IP (recorded for the session list and audit).
+    pub ip: Option<IpAddr>,
+    /// Client user agent (truncated to 512 bytes).
+    pub user_agent: Option<String>,
+}
+
+/// Why a session was ended (matches the `sessions_revoke_reason` CHECK).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RevokeReason {
+    /// User logged out.
+    Logout,
+    /// User logged out everywhere.
+    LogoutAll,
+    /// An administrator ended it.
+    Admin,
+    /// Password changed.
+    PasswordChanged,
+    /// Security response (e.g. suspected compromise).
+    Security,
+}
+
+impl RevokeReason {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Logout => "logout",
+            Self::LogoutAll => "logout_all",
+            Self::Admin => "admin",
+            Self::PasswordChanged => "password_changed",
+            Self::Security => "security",
+        }
+    }
+}
+
+/// Session errors. None of them contain token material.
+#[derive(Debug, thiserror::Error)]
+pub enum SessionError {
+    /// OS randomness unavailable.
+    #[error("random number generator unavailable")]
+    Rng,
+    /// Redis failure.
+    #[error("session store: {0}")]
+    Cache(#[from] dhpanel_cache::CacheError),
+    /// Redis command failure.
+    #[error("session store: {0}")]
+    Redis(#[from] dhpanel_cache::redis::RedisError),
+    /// PostgreSQL failure.
+    #[error("session history: {0}")]
+    Database(#[from] sqlx::Error),
+    /// Corrupt session payload in Redis.
+    #[error("session payload is corrupt")]
+    Corrupt,
+}
+
+/// The cookie value handed to the browser. Never logged.
+pub struct SessionToken(SecretString);
+
+impl SessionToken {
+    /// The value to put in the cookie.
+    #[must_use]
+    pub fn expose(&self) -> &str {
+        self.0.expose_secret()
+    }
+}
+
+impl std::fmt::Debug for SessionToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("SessionToken(<redacted>)")
+    }
+}
+
+fn now_unix() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
+}
+
+fn secs(d: Duration) -> i64 {
+    i64::try_from(d.as_secs()).unwrap_or(i64::MAX)
+}
+
+/// Decodes a cookie value; anything that is not exactly 32 base64url bytes is rejected.
+fn decode_token(value: &str) -> Option<[u8; TOKEN_BYTES]> {
+    if value.len() != 43 {
+        return None;
+    }
+    let bytes = URL_SAFE_NO_PAD.decode(value).ok()?;
+    bytes.try_into().ok()
+}
+
+fn token_hash(raw: &[u8; TOKEN_BYTES]) -> [u8; 32] {
+    Sha256::digest(raw).into()
+}
+
+fn redis_key(hash: &[u8; 32]) -> String {
+    let mut key = String::with_capacity(KEY_PREFIX.len() + 64);
+    key.push_str(KEY_PREFIX);
+    for b in hash {
+        key.push_str(&format!("{b:02x}"));
+    }
+    key
+}
+
+/// `Set-Cookie` value establishing the session (browser-session lifetime;
+/// expiry is enforced server-side).
+#[must_use]
+pub fn set_cookie(token: &SessionToken) -> String {
+    format!(
+        "{COOKIE_NAME}={}; Path=/; Secure; HttpOnly; SameSite=Strict",
+        token.expose()
+    )
+}
+
+/// `Set-Cookie` value that deletes the session cookie.
+#[must_use]
+pub fn clear_cookie() -> String {
+    format!("{COOKIE_NAME}=; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=0")
+}
+
+/// Extracts the session cookie value from request headers.
+#[must_use]
+pub fn cookie_value(headers: &HeaderMap) -> Option<&str> {
+    headers
+        .get_all(header::COOKIE)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .flat_map(|v| v.split(';'))
+        .filter_map(|pair| pair.trim().split_once('='))
+        .find(|(name, _)| *name == COOKIE_NAME)
+        .map(|(_, value)| value)
+}
+
+/// Creates, loads and revokes sessions. Cheap to clone.
+#[derive(Clone, Debug)]
+pub struct SessionStore {
+    redis: RedisHandle,
+    db: PgPool,
+    config: SessionConfig,
+}
+
+impl SessionStore {
+    /// New store.
+    #[must_use]
+    pub fn new(redis: RedisHandle, db: PgPool, config: SessionConfig) -> Self {
+        Self { redis, db, config }
+    }
+
+    /// The configured timeouts.
+    #[must_use]
+    pub fn config(&self) -> SessionConfig {
+        self.config
+    }
+
+    /// Creates a session and returns the cookie token. The caller must send
+    /// [`set_cookie`] and should discard any previous session (rotation).
+    ///
+    /// # Errors
+    /// RNG, Redis or PostgreSQL failures.
+    pub async fn create(
+        &self,
+        new: NewSession,
+    ) -> Result<(SessionToken, SessionData), SessionError> {
+        let mut raw = [0u8; TOKEN_BYTES];
+        getrandom::fill(&mut raw).map_err(|_| SessionError::Rng)?;
+        let hash = token_hash(&raw);
+        let now = now_unix();
+        let absolute_expires_at = now.saturating_add(secs(self.config.absolute_timeout));
+
+        // The DB limit counts characters (PostgreSQL length()), so truncate by chars.
+        let user_agent = new
+            .user_agent
+            .map(|ua| ua.chars().take(MAX_USER_AGENT).collect::<String>());
+        let id = sqlx::query_scalar!(
+            r#"INSERT INTO sessions (account_id, token_sha256, ip, user_agent, expires_at)
+               VALUES ($1, $2, $3::text::inet, $4, to_timestamp($5::bigint))
+               RETURNING id"#,
+            new.account_id,
+            &hash[..],
+            new.ip.map(|ip| ip.to_string()),
+            user_agent,
+            absolute_expires_at,
+        )
+        .fetch_one(&self.db)
+        .await?;
+
+        let data = SessionData {
+            id,
+            account_id: new.account_id,
+            created_at: now,
+            last_seen_at: now,
+            absolute_expires_at,
+        };
+        let payload = serde_json::to_string(&data).map_err(|_| SessionError::Corrupt)?;
+        let ttl = self.ttl_from(now, absolute_expires_at);
+        let mut conn = self.redis.connection().await?;
+        let () = conn.set_ex(redis_key(&hash), payload, ttl).await?;
+
+        Ok((
+            SessionToken(SecretString::from(URL_SAFE_NO_PAD.encode(raw))),
+            data,
+        ))
+    }
+
+    /// Loads a session by cookie value, enforcing both timeouts and refreshing
+    /// the idle window. `Ok(None)` for unknown, malformed or expired tokens.
+    ///
+    /// # Errors
+    /// Redis failures or a corrupt payload.
+    pub async fn load(&self, cookie_value: &str) -> Result<Option<SessionData>, SessionError> {
+        let Some(raw) = decode_token(cookie_value) else {
+            return Ok(None);
+        };
+        let key = redis_key(&token_hash(&raw));
+        let mut conn = self.redis.connection().await?;
+        let payload: Option<String> = conn.get(&key).await?;
+        let Some(payload) = payload else {
+            return Ok(None);
+        };
+        let mut data: SessionData =
+            serde_json::from_str(&payload).map_err(|_| SessionError::Corrupt)?;
+
+        let now = now_unix();
+        if now >= data.absolute_expires_at {
+            let _: u64 = conn.del(&key).await?;
+            return Ok(None);
+        }
+        if now - data.last_seen_at >= secs(self.config.touch_interval) {
+            data.last_seen_at = now;
+            let payload = serde_json::to_string(&data).map_err(|_| SessionError::Corrupt)?;
+            let ttl = self.ttl_from(now, data.absolute_expires_at);
+            // XX: only refresh if it still exists (a concurrent revoke wins).
+            let _: Option<String> = dhpanel_cache::redis::cmd("SET")
+                .arg(&key)
+                .arg(payload)
+                .arg("EX")
+                .arg(ttl)
+                .arg("XX")
+                .query_async(&mut conn)
+                .await?;
+        }
+        Ok(Some(data))
+    }
+
+    /// Ends a session. Returns whether it existed in the hot store.
+    ///
+    /// # Errors
+    /// Redis or PostgreSQL failures.
+    pub async fn revoke(
+        &self,
+        cookie_value: &str,
+        reason: RevokeReason,
+    ) -> Result<bool, SessionError> {
+        let Some(raw) = decode_token(cookie_value) else {
+            return Ok(false);
+        };
+        let hash = token_hash(&raw);
+        let mut conn = self.redis.connection().await?;
+        let removed: u64 = conn.del(redis_key(&hash)).await?;
+        sqlx::query!(
+            r#"UPDATE sessions SET revoked_at = now(), revoke_reason = $2
+               WHERE token_sha256 = $1 AND revoked_at IS NULL"#,
+            &hash[..],
+            reason.as_str(),
+        )
+        .execute(&self.db)
+        .await?;
+        Ok(removed > 0)
+    }
+
+    /// Seconds until the earlier of idle and absolute expiry (at least 1).
+    fn ttl_from(&self, now: i64, absolute_expires_at: i64) -> u64 {
+        let idle = secs(self.config.idle_timeout);
+        let remaining = absolute_expires_at.saturating_sub(now);
+        u64::try_from(idle.min(remaining).max(1)).unwrap_or(1)
+    }
+}
+
+/// Extractor for routes that require a logged-in user. Rejects with a
+/// Problem Details 401 when the cookie is missing, malformed or expired.
+#[derive(Debug, Clone)]
+pub struct Authenticated(pub SessionData);
+
+impl<S> FromRequestParts<S> for Authenticated
+where
+    SessionStore: FromRef<S>,
+    S: Send + Sync,
+{
+    type Rejection = AppError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let store = SessionStore::from_ref(state);
+        let Some(value) = cookie_value(&parts.headers) else {
+            return Err(AppError::Unauthorized);
+        };
+        match store.load(value).await {
+            Ok(Some(data)) => Ok(Self(data)),
+            Ok(None) => Err(AppError::Unauthorized),
+            Err(err) => Err(AppError::internal(err)),
+        }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::unwrap_used)]
+mod tests {
+    use axum::http::HeaderValue;
+
+    use super::*;
+
+    #[test]
+    fn cookie_attributes_are_hardened() {
+        let token = SessionToken(SecretString::from("abc".to_owned()));
+        let c = set_cookie(&token);
+        for attr in [
+            "__Host-dh_session=abc",
+            "Path=/",
+            "Secure",
+            "HttpOnly",
+            "SameSite=Strict",
+        ] {
+            assert!(c.contains(attr), "{c}");
+        }
+        assert!(!c.to_ascii_lowercase().contains("domain="), "{c}");
+        assert!(clear_cookie().contains("Max-Age=0"));
+    }
+
+    #[test]
+    fn token_debug_is_redacted() {
+        let token = SessionToken(SecretString::from("supersecret".to_owned()));
+        assert_eq!(format!("{token:?}"), "SessionToken(<redacted>)");
+    }
+
+    #[test]
+    fn only_well_formed_tokens_decode() {
+        let good = URL_SAFE_NO_PAD.encode([7u8; TOKEN_BYTES]);
+        assert_eq!(good.len(), 43);
+        assert!(decode_token(&good).is_some());
+        for bad in [
+            "",
+            "short",
+            &good[..42],
+            &format!("{good}A"),
+            "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!",
+        ] {
+            assert!(decode_token(bad).is_none(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn redis_key_uses_hash_not_token() {
+        let raw = [1u8; TOKEN_BYTES];
+        let key = redis_key(&token_hash(&raw));
+        assert!(key.starts_with("dhpanel:session:"));
+        assert_eq!(key.len(), "dhpanel:session:".len() + 64);
+        assert!(!key.contains(&URL_SAFE_NO_PAD.encode(raw)));
+    }
+
+    #[test]
+    fn cookie_value_is_found_among_others() {
+        let mut h = HeaderMap::new();
+        h.append(
+            header::COOKIE,
+            HeaderValue::from_static("a=1; __Host-dh_session=tok; b=2"),
+        );
+        assert_eq!(cookie_value(&h), Some("tok"));
+        let mut h = HeaderMap::new();
+        h.append(header::COOKIE, HeaderValue::from_static("dh_session=spoof"));
+        assert_eq!(cookie_value(&h), None);
+    }
+}
