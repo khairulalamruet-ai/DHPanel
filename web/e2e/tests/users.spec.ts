@@ -22,6 +22,7 @@ test.describe("Users Management UI (T04.15)", () => {
 
     // Navigate to page 2
     const nextBtn = page.getByRole("button", { name: "Next page" });
+    await expect(nextBtn).toBeEnabled();
     await nextBtn.click();
 
     await expect(page.getByText(/Page 2 of 100|[1১][0০][0০] পৃষ্ঠার মধ্যে [2২] নং পৃষ্ঠা/i)).toBeVisible();

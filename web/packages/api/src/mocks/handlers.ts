@@ -1201,6 +1201,116 @@ export const resetMockDns = () => {
   mockDnsRecords = getInitialDnsRecords();
 };
 
+interface MockSslCert {
+  id: string;
+  domain_id: string;
+  domain_name: string;
+  status: "active" | "pending" | "expired" | "self_signed" | "none";
+  type: "lets_encrypt" | "zerossl" | "custom" | "self_signed" | "none";
+  issuer: string | null;
+  subject: string;
+  sans: string[];
+  expires_at: string | null;
+  days_remaining: number;
+  auto_renew: boolean;
+  force_https: boolean;
+  hsts_enabled: boolean;
+  hsts_subdomains: boolean;
+  hsts_preload: boolean;
+  created_at: string;
+  updated_at: string;
+  cert_fingerprint?: string | null;
+}
+
+const getInitialSslCertificates = (): MockSslCert[] => [
+  {
+    id: "cert_01",
+    domain_id: "dom_01",
+    domain_name: "alpha-hosting.com",
+    status: "active",
+    type: "lets_encrypt",
+    issuer: "Let's Encrypt Authority X3",
+    subject: "CN=alpha-hosting.com",
+    sans: ["alpha-hosting.com", "www.alpha-hosting.com"],
+    expires_at: new Date(Date.now() + 76 * 86400 * 1000).toISOString(),
+    days_remaining: 76,
+    auto_renew: true,
+    force_https: true,
+    hsts_enabled: true,
+    hsts_subdomains: true,
+    hsts_preload: false,
+    created_at: new Date(Date.now() - 14 * 86400 * 1000).toISOString(),
+    updated_at: new Date(Date.now() - 14 * 86400 * 1000).toISOString(),
+    cert_fingerprint: "SHA256:4a:8b:c9:e1:2f:33:9a:b4:c7:d2:e5:6f:88:99:aa:bb",
+  },
+  {
+    id: "cert_02",
+    domain_id: "dom_02",
+    domain_name: "blog.alpha-hosting.com",
+    status: "active",
+    type: "lets_encrypt",
+    issuer: "Let's Encrypt Authority X3",
+    subject: "CN=blog.alpha-hosting.com",
+    sans: ["blog.alpha-hosting.com"],
+    expires_at: new Date(Date.now() + 12 * 86400 * 1000).toISOString(),
+    days_remaining: 12,
+    auto_renew: true,
+    force_https: false,
+    hsts_enabled: false,
+    hsts_subdomains: false,
+    hsts_preload: false,
+    created_at: new Date(Date.now() - 78 * 86400 * 1000).toISOString(),
+    updated_at: new Date(Date.now() - 78 * 86400 * 1000).toISOString(),
+    cert_fingerprint: "SHA256:11:22:33:44:55:66:77:88:99:aa:bb:cc:dd:ee:ff:00",
+  },
+  {
+    id: "cert_03",
+    domain_id: "dom_03",
+    domain_name: "beta-app.io",
+    status: "expired",
+    type: "zerossl",
+    issuer: "ZeroSSL RSA Domain Secure Site CA",
+    subject: "CN=beta-app.io",
+    sans: ["beta-app.io", "*.beta-app.io"],
+    expires_at: new Date(Date.now() - 2 * 86400 * 1000).toISOString(),
+    days_remaining: 0,
+    auto_renew: false,
+    force_https: false,
+    hsts_enabled: false,
+    hsts_subdomains: false,
+    hsts_preload: false,
+    created_at: new Date(Date.now() - 92 * 86400 * 1000).toISOString(),
+    updated_at: new Date(Date.now() - 2 * 86400 * 1000).toISOString(),
+    cert_fingerprint: "SHA256:aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99",
+  },
+  {
+    id: "cert_04",
+    domain_id: "dom_04",
+    domain_name: "dev.internal-net.org",
+    status: "self_signed",
+    type: "self_signed",
+    issuer: "DHPanel Internal Self-Signed CA",
+    subject: "CN=dev.internal-net.org",
+    sans: ["dev.internal-net.org"],
+    expires_at: new Date(Date.now() + 350 * 86400 * 1000).toISOString(),
+    days_remaining: 350,
+    auto_renew: false,
+    force_https: false,
+    hsts_enabled: false,
+    hsts_subdomains: false,
+    hsts_preload: false,
+    created_at: new Date(Date.now() - 15 * 86400 * 1000).toISOString(),
+    updated_at: new Date(Date.now() - 15 * 86400 * 1000).toISOString(),
+    cert_fingerprint: "SHA256:99:88:77:66:55:44:33:22:11:00:ff:ee:dd:cc:bb:aa",
+  },
+];
+
+let mockSslCertificates = getInitialSslCertificates();
+
+export const resetMockSsl = () => {
+  mockSslCertificates = getInitialSslCertificates();
+};
+
 
 const mockMe = {
   id: "00000000-0000-0000-0000-000000000001",
@@ -1222,6 +1332,7 @@ const mockMe = {
     "audit",
     "domains",
     "dns",
+    "ssl",
     "settings",
     "demo",
   ],
@@ -3194,6 +3305,160 @@ export const handlers = [
       queried_at: new Date().toISOString(),
       status: "active",
       message: "Nameservers successfully verified and delegating properly.",
+    });
+  }),
+
+  // SSL: List all certificates (GET /api/v1/client/ssl)
+  // TODO(api:T05.16): Replace with real backend SSL list endpoint
+  http.get(/\/api\/v1\/client\/ssl$/, () => {
+    return HttpResponse.json({
+      items: mockSslCertificates,
+      total: mockSslCertificates.length,
+    });
+  }),
+
+  // SSL: Get domain certificate (GET /api/v1/client/ssl/:domainId)
+  // TODO(api:T05.16): Replace with real backend SSL detail endpoint
+  http.get(/\/api\/v1\/client\/ssl\/([^/]+)$/, ({ params }) => {
+    const key = (params.domainId || params[0]) as string;
+    const cert = mockSslCertificates.find(
+      (c) => c.domain_id === key || c.domain_name === key || c.id === key
+    );
+    if (!cert) {
+      return HttpResponse.json({ message: "Certificate not found" }, { status: 404 });
+    }
+    return HttpResponse.json(cert);
+  }),
+
+  // SSL: Re-issue / Renew certificate via ACME (POST /api/v1/client/ssl/:domainId/reissue)
+  // TODO(api:T05.16): Replace with real ACME reissue endpoint
+  http.post(/\/api\/v1\/client\/ssl\/([^/]+)\/reissue$/, ({ params }) => {
+    const key = (params.domainId || params[0]) as string;
+    const cert = mockSslCertificates.find(
+      (c) => c.domain_id === key || c.domain_name === key || c.id === key
+    );
+    if (!cert) {
+      return HttpResponse.json({ message: "Certificate not found" }, { status: 404 });
+    }
+
+    const opId = `op_ssl_renew_${Date.now()}`;
+    cert.status = "active";
+    cert.type = "lets_encrypt";
+    cert.issuer = "Let's Encrypt Authority X3";
+    cert.expires_at = new Date(Date.now() + 90 * 86400 * 1000).toISOString();
+    cert.days_remaining = 90;
+    cert.auto_renew = true;
+    cert.updated_at = new Date().toISOString();
+
+    return HttpResponse.json({
+      success: true,
+      operation_id: opId,
+      status: "succeeded",
+      message: `SSL Certificate for ${cert.domain_name} renewed successfully. Valid for 90 days.`,
+      certificate: cert,
+    });
+  }),
+
+  // SSL: Custom certificate upload (POST /api/v1/client/ssl/:domainId/custom)
+  // TODO(api:T05.17): Replace with real custom cert upload endpoint
+  http.post(/\/api\/v1\/client\/ssl\/([^/]+)\/custom$/, async ({ params, request }) => {
+    const key = (params.domainId || params[0]) as string;
+    const cert = mockSslCertificates.find(
+      (c) => c.domain_id === key || c.domain_name === key || c.id === key
+    );
+    if (!cert) {
+      return HttpResponse.json({ message: "Certificate not found" }, { status: 404 });
+    }
+
+    const body = (await request.json().catch(() => ({}))) as any;
+    const { cert_pem = "", key_pem = "" } = body || {};
+
+    if (!cert_pem.includes("BEGIN CERTIFICATE") || !cert_pem.includes("END CERTIFICATE")) {
+      return HttpResponse.json(
+        { message: "Invalid PEM format: Missing 'BEGIN CERTIFICATE' or 'END CERTIFICATE' header" },
+        { status: 422 }
+      );
+    }
+
+    if (!key_pem.includes("BEGIN PRIVATE KEY") && !key_pem.includes("BEGIN RSA PRIVATE KEY")) {
+      return HttpResponse.json(
+        { message: "Invalid PEM format: Missing 'BEGIN PRIVATE KEY' header" },
+        { status: 422 }
+      );
+    }
+
+    // Check for simulated key mismatch
+    if (key_pem.includes("MISMATCH_KEY")) {
+      return HttpResponse.json(
+        { message: "Private key does not match the provided public certificate modulus" },
+        { status: 422 }
+      );
+    }
+
+    cert.status = "active";
+    cert.type = "custom";
+    cert.issuer = "Custom Uploaded CA";
+    cert.expires_at = new Date(Date.now() + 365 * 86400 * 1000).toISOString();
+    cert.days_remaining = 365;
+    cert.auto_renew = false;
+    cert.cert_fingerprint = `SHA256:custom:${Date.now().toString(16)}`;
+    cert.updated_at = new Date().toISOString();
+
+    return HttpResponse.json({
+      success: true,
+      message: `Custom SSL certificate installed successfully for ${cert.domain_name}.`,
+      certificate: cert,
+    });
+  }),
+
+  // SSL: Update settings like force_https, HSTS, auto_renew (PUT /api/v1/client/ssl/:domainId/settings)
+  // TODO(api:T05.18): Replace with real SSL settings endpoint
+  http.put(/\/api\/v1\/client\/ssl\/([^/]+)\/settings$/, async ({ params, request }) => {
+    const key = (params.domainId || params[0]) as string;
+    const cert = mockSslCertificates.find(
+      (c) => c.domain_id === key || c.domain_name === key || c.id === key
+    );
+    if (!cert) {
+      return HttpResponse.json({ message: "Certificate not found" }, { status: 404 });
+    }
+
+    const body = (await request.json().catch(() => ({}))) as any;
+    if (body.auto_renew !== undefined) cert.auto_renew = Boolean(body.auto_renew);
+    if (body.force_https !== undefined) cert.force_https = Boolean(body.force_https);
+    if (body.hsts_enabled !== undefined) cert.hsts_enabled = Boolean(body.hsts_enabled);
+    if (body.hsts_subdomains !== undefined) cert.hsts_subdomains = Boolean(body.hsts_subdomains);
+    if (body.hsts_preload !== undefined) cert.hsts_preload = Boolean(body.hsts_preload);
+    cert.updated_at = new Date().toISOString();
+
+    return HttpResponse.json(cert);
+  }),
+
+  // SSL: Revoke / Revert to None (DELETE /api/v1/client/ssl/:domainId)
+  // TODO(api:T05.17): Replace with real SSL revoke endpoint
+  http.delete(/\/api\/v1\/client\/ssl\/([^/]+)$/, ({ params }) => {
+    const key = (params.domainId || params[0]) as string;
+    const cert = mockSslCertificates.find(
+      (c) => c.domain_id === key || c.domain_name === key || c.id === key
+    );
+    if (!cert) {
+      return HttpResponse.json({ message: "Certificate not found" }, { status: 404 });
+    }
+
+    cert.status = "none";
+    cert.type = "none";
+    cert.issuer = null;
+    cert.expires_at = null;
+    cert.days_remaining = 0;
+    cert.auto_renew = false;
+    cert.force_https = false;
+    cert.hsts_enabled = false;
+    cert.updated_at = new Date().toISOString();
+
+    return HttpResponse.json({
+      success: true,
+      status: "revoked",
+      id: cert.id,
+      certificate: cert,
     });
   }),
 ];

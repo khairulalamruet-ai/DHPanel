@@ -1,5 +1,5 @@
 import React from "react";
-import { LayoutDashboard, ShieldCheck, Sparkles, Puzzle, Globe, Users, Settings, FileText, Boxes, Server, Activity, Layers } from "lucide-react";
+import { LayoutDashboard, ShieldCheck, Sparkles, Puzzle, Globe, Users, Settings, FileText, Boxes, Server, Activity, Layers, Lock } from "lucide-react";
 
 export interface ModuleManifest {
   name: string;
@@ -308,6 +308,38 @@ export const registeredFrontendModules: FrontendModule[] = [
         order: 22,
         permission: "dns.read",
         feature: "dns",
+      },
+    ],
+  },
+  {
+    manifest: {
+      name: "ssl",
+      title: { en: "SSL / TLS", bn: "এসএসএল / টিএলএস" },
+      category: "security",
+      core: false,
+      permissions: ["ssl.read", "ssl.manage", "ssl.upload"],
+      features: ["ssl", "custom_ssl", "hsts", "force_https"],
+    },
+    adminNav: [
+      {
+        id: "ssl",
+        labelKey: "ssl.nav",
+        icon: <Lock className="h-4 w-4" />,
+        href: "/ssl",
+        order: 34,
+        permission: "ssl.read",
+        feature: "ssl",
+      },
+    ],
+    clientNav: [
+      {
+        id: "ssl",
+        labelKey: "ssl.nav",
+        icon: <Lock className="h-4 w-4" />,
+        href: "/ssl",
+        order: 24,
+        permission: "ssl.read",
+        feature: "ssl",
       },
     ],
   },

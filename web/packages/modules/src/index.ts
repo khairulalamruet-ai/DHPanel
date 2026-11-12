@@ -18,3 +18,5 @@ export * from "./user-detail";
 export * from "./client-dashboard";
 export * from "./domains";
 export * from "./dns";
+export * from "./ssl";
+export type { SslStatus } from "./domains";

@@ -27,6 +27,7 @@ import {
   ClientDomainsPage,
   AdminDomainsPage,
   DnsEditorPage,
+  SslPage,
   filterNavItems,
   registeredFrontendModules,
 } from "@dhpanel/modules";
@@ -212,6 +213,13 @@ const dnsRoute = createRoute({
   component: DnsEditorPage,
 });
 
+// 20. SSL / TLS Certificate route (T05.19)
+const sslRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/ssl",
+  component: SslPage,
+});
+
 // 18. Login route
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -247,6 +255,7 @@ const routeTree = rootRoute.addChildren([
   clientDomainsRoute,
   domainsRoute,
   dnsRoute,
+  sslRoute,
   loginRoute,
 ]);
 

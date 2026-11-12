@@ -1024,5 +1024,85 @@
       "deleteFailed": "Failed to delete record",
       "nsVerifyFailed": "Nameserver verification failed"
     }
+  },
+  "ssl": {
+    "title": "SSL / TLS Certificates",
+    "subtitle": "Manage Let's Encrypt automated issuance, custom commercial certificates, and HTTPS transport policies.",
+    "metrics": {
+      "total": "Total Managed Domains",
+      "active": "Active & Encrypted",
+      "expiringSoon": "Expiring Soon (< 30d)",
+      "expiredOrNone": "Expired / Action Needed"
+    },
+    "searchPlaceholder": "Search domains or issuers...",
+    "empty": "No domain SSL certificates found",
+    "status": {
+      "active": "Active & Encrypted",
+      "expired": "Expired",
+      "selfSigned": "Self-Signed",
+      "pending": "Issuing...",
+      "none": "No Certificate"
+    },
+    "days": {
+      "expired": "Expired",
+      "remaining": "{{days}} days left"
+    },
+    "fields": {
+      "issuer": "Issuer",
+      "expires": "Validity",
+      "certPem": "Certificate (CRT / PEM)",
+      "keyPem": "Private Key (KEY / PEM)",
+      "chainPem": "CA Bundle / Intermediate Certificates (Optional)"
+    },
+    "actions": {
+      "reissue": "Renew / Re-issue",
+      "custom": "Custom Cert",
+      "uploadCustom": "Upload Custom Certificate",
+      "settings": "Settings",
+      "securitySettings": "HTTPS & HSTS Settings",
+      "revoke": "Revoke Certificate",
+      "revokeConfirm": "Revoke Certificate",
+      "installCert": "Install Certificate"
+    },
+    "customDialog": {
+      "title": "Install Custom SSL Certificate",
+      "description": "Upload a commercial or third-party SSL certificate and private key for {{domain}}."
+    },
+    "settingsDialog": {
+      "title": "HTTPS & Security Headers",
+      "description": "Configure automatic HTTPS redirect, HSTS policy, and automated renewal for {{domain}}."
+    },
+    "settings": {
+      "forceHttps": "Force HTTPS Redirection",
+      "forceHttpsDesc": "Automatically redirect all insecure HTTP traffic (port 80) to HTTPS (port 443) with an HTTP 301 Permanent Redirect.",
+      "hsts": "HTTP Strict Transport Security (HSTS)",
+      "hstsDesc": "Instruct browsers to only communicate with this domain over HTTPS. Note: Only enable if you maintain a valid certificate.",
+      "includeSubdomains": "Include all subdomains (includeSubDomains)",
+      "preload": "Enable browser HSTS preload list eligibility (preload)",
+      "autoRenew": "Automatic Certificate Renewal",
+      "autoRenewDesc": "Automatically renew ACME certificates 30 days prior to expiration via background cron job."
+    },
+    "revokeDialog": {
+      "title": "Revoke SSL Certificate",
+      "description": "Are you sure you want to revoke the SSL certificate for {{domain}}? Insecure HTTP traffic will no longer be encrypted until a new certificate is issued."
+    },
+    "toast": {
+      "reissuedTitle": "SSL Re-issued",
+      "reissuedDesc": "New 90-day Let's Encrypt certificate generated and installed for {{domain}}.",
+      "customInstalled": "Custom SSL certificate installed successfully",
+      "settingsUpdated": "Security settings saved successfully",
+      "revoked": "Certificate removed and reverted to unencrypted state"
+    },
+    "errors": {
+      "fetchFailed": "Failed to load SSL certificates",
+      "reissueFailed": "Failed to re-issue SSL certificate",
+      "revokeFailed": "Failed to revoke certificate",
+      "certRequired": "Certificate PEM content is required",
+      "invalidCertPem": "Invalid certificate format. Expected PEM format starting with -----BEGIN CERTIFICATE-----",
+      "keyRequired": "Private Key PEM content is required",
+      "invalidKeyPem": "Invalid private key format. Expected PEM format starting with -----BEGIN (RSA|EC)? PRIVATE KEY-----",
+      "uploadFailed": "Failed to install custom SSL certificate",
+      "updateSettingsFailed": "Failed to update security settings"
+    }
   }
 }
