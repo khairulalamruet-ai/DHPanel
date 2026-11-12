@@ -1955,4 +1955,176 @@ export const handlers = [
       completed_at: new Date().toISOString(),
     });
   }),
+
+  // Users: Get detailed tenant user (GET /api/v1/admin/users/:id)
+  // TODO(api:T04.12): Replace with real backend tenant detail endpoint
+  ...(() => {
+    const mockDetailStore: Record<string, any> = {};
+
+    return [
+      http.get(/\/api\/v1\/admin\/users\/([^/]+)$/, ({ params }) => {
+        const id = (params.id || params[0]) as string;
+        if (!mockDetailStore[id]) {
+          const username = id.startsWith("usr_") ? "alpha" : id;
+          mockDetailStore[id] = {
+            id,
+            username,
+            email: `${username}@example.com`,
+            status: "active",
+            uid: 1001,
+            root_path: `/srv/tenants/${username}`,
+            plan_id: "plan_standard",
+            plan_name: "Standard Business",
+            node_id: "node-sgp-01",
+            node_name: "node-sgp-01 (Singapore)",
+            primary_domain: `${username}.com`,
+            created_at: new Date(Date.now() - 86400 * 1000 * 14).toISOString(),
+            suspended_at: null,
+            suspended_reason: null,
+            resources: {
+              cpu_cores: 2,
+              cpu_used_pct: 28,
+              memory_limit_mb: 2048,
+              memory_used_mb: 850,
+              disk_limit_mb: 25600,
+              disk_used_mb: 1240,
+              inodes_limit: 250000,
+              inodes_used: 12450,
+              bandwidth_limit_mb: -1,
+              bandwidth_used_mb: 4800,
+              pids_limit: 256,
+              pids_used: 42,
+            },
+            container: {
+              id: `cnt_${username}_01`,
+              name: `dh-tenant-${username}`,
+              status: "running",
+              image: "dhpanel/stack-php83-nginx:latest",
+              ip_address: "172.28.0.5",
+              started_at: new Date(Date.now() - 86400 * 1000 * 14).toISOString(),
+              uptime: "Up 14 days",
+            },
+            domains: [
+              {
+                id: "dom_01",
+                domain: `${username}.com`,
+                is_primary: true,
+                docroot: `/srv/tenants/${username}/domains/${username}.com/public_html`,
+                ssl_status: "active",
+                php_version: "PHP 8.3",
+              },
+              {
+                id: "dom_02",
+                domain: `blog.${username}.com`,
+                is_primary: false,
+                docroot: `/srv/tenants/${username}/domains/blog.${username}.com/public_html`,
+                ssl_status: "active",
+                php_version: "PHP 8.3",
+              },
+            ],
+            databases: [
+              {
+                id: "db_01",
+                name: `${username}_wp`,
+                type: "mysql",
+                size_mb: 48,
+                charset: "utf8mb4",
+              },
+              {
+                id: "db_02",
+                name: `${username}_app`,
+                type: "postgres",
+                size_mb: 18,
+                charset: "UTF8",
+              },
+            ],
+            logs: [
+              {
+                id: "log_01",
+                timestamp: new Date(Date.now() - 60 * 1000 * 2).toISOString(),
+                level: "info",
+                source: "nginx",
+                message: '192.168.1.105 - - "GET / HTTP/2.0" 200 4820 "-" "Mozilla/5.0 Chrome/130.0"',
+              },
+              {
+                id: "log_02",
+                timestamp: new Date(Date.now() - 60 * 1000 * 5).toISOString(),
+                level: "info",
+                source: "php-fpm",
+                message: "[pool www] child 42 ready to handle requests",
+              },
+              {
+                id: "log_03",
+                timestamp: new Date(Date.now() - 60 * 1000 * 15).toISOString(),
+                level: "warn",
+                source: "nginx",
+                message: 'Client sent invalid header: "X-Forwarded-Host: evil.com", dropped',
+              },
+            ],
+            activities: [
+              {
+                id: "act_01",
+                action: "user.login",
+                actor: username,
+                timestamp: new Date(Date.now() - 3600 * 1000 * 2).toISOString(),
+                status: "success",
+                details: "Client portal session initiated from 192.168.1.105",
+              },
+              {
+                id: "act_02",
+                action: "tenant.container_start",
+                actor: "system",
+                timestamp: new Date(Date.now() - 86400 * 1000 * 14).toISOString(),
+                status: "success",
+                details: "Rootless container stack provisioned and healthy",
+              },
+            ],
+          };
+        }
+        return HttpResponse.json(mockDetailStore[id]);
+      }),
+
+      // Suspend
+      http.post(/\/api\/v1\/admin\/users\/([^/]+)\/suspend$/, ({ params }) => {
+        const id = (params.id || params[0]) as string;
+        if (mockDetailStore[id]) {
+          mockDetailStore[id].status = "suspended";
+          mockDetailStore[id].suspended_at = new Date().toISOString();
+        }
+        return HttpResponse.json({ success: true, status: "suspended" });
+      }),
+
+      // Unsuspend
+      http.post(/\/api\/v1\/admin\/users\/([^/]+)\/unsuspend$/, ({ params }) => {
+        const id = (params.id || params[0]) as string;
+        if (mockDetailStore[id]) {
+          mockDetailStore[id].status = "active";
+          mockDetailStore[id].suspended_at = null;
+        }
+        return HttpResponse.json({ success: true, status: "active" });
+      }),
+
+      // Password Reset
+      http.post(/\/api\/v1\/admin\/users\/([^/]+)\/password$/, () => {
+        return HttpResponse.json({ success: true, message: "Password updated successfully" });
+      }),
+
+      // Impersonate
+      http.post(/\/api\/v1\/admin\/users\/([^/]+)\/impersonate$/, ({ params }) => {
+        const id = (params.id || params[0]) as string;
+        return HttpResponse.json({
+          token: `mock_imp_token_${Date.now()}`,
+          expires_in_seconds: 60,
+          redirect_url: `/client?user=${id}`,
+        });
+      }),
+
+      // Delete
+      http.delete(/\/api\/v1\/admin\/users\/([^/]+)$/, ({ params }) => {
+        const id = (params.id || params[0]) as string;
+        delete mockDetailStore[id];
+        return new HttpResponse(null, { status: 204 });
+      }),
+    ];
+  })(),
 ];

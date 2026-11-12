@@ -672,5 +672,75 @@
       "success": "Tenant user '{{username}}' created and container is running",
       "error": "Failed to provision tenant stack"
     }
+  },
+  "userDetail": {
+    "title": "Tenant Details",
+    "backToUsers": "Back to Users",
+    "status": {
+      "active": "Active",
+      "suspended": "Suspended",
+      "pending": "Pending"
+    },
+    "actions": {
+      "impersonate": "Login as User",
+      "suspend": "Suspend Account",
+      "unsuspend": "Unsuspend Account",
+      "resetPassword": "Reset Password",
+      "delete": "Delete Tenant"
+    },
+    "tabs": {
+      "overview": "Overview",
+      "resources": "Resources & Quota",
+      "domains": "Domains",
+      "databases": "Databases",
+      "logs": "Container Logs",
+      "activity": "Activity Ledger"
+    },
+    "overview": {
+      "accountDetails": "Account Identity & Root",
+      "containerStack": "Container Runtime Stack"
+    },
+    "resources": {
+      "title": "Hardware Resource Allocations",
+      "desc": "Real-time resource utilization against enforced cgroup and filesystem limits"
+    },
+    "domains": {
+      "title": "Configured Web Domains",
+      "desc": "Vhosts and routing associated with this tenant's web server container"
+    },
+    "databases": {
+      "title": "Database Allocations",
+      "desc": "Managed database instances provisioned for this tenant container (Phase 07 Preview)"
+    },
+    "logs": {
+      "title": "Container Log Streams",
+      "desc": "Standard output and error streams from tenant web and runtime containers"
+    },
+    "activity": {
+      "title": "Tenant Activity & Audit Ledger",
+      "desc": "Chronological history of administrative actions, logins, and container operations"
+    },
+    "dialog": {
+      "resetPasswordTitle": "Reset Password: {{username}}",
+      "resetPasswordDesc": "Generate or assign a new secure password for {{username}}.",
+      "newPasswordLabel": "New Password",
+      "generateNew": "Generate",
+      "passwordMinLength": "Password must be at least 8 characters",
+      "updatePassword": "Save New Password",
+      "confirmDelete": "Are you sure you want to permanently delete user '{{username}}'? All containers, files, and databases will be removed."
+    },
+    "toast": {
+      "loadError": "Failed to load user details",
+      "impersonateSuccess": "Impersonation session created for {{username}}",
+      "impersonateDesc": "Redirecting to client portal...",
+      "impersonateError": "Failed to initiate impersonation",
+      "suspendSuccess": "Account for '{{username}}' has been suspended",
+      "unsuspendSuccess": "Account for '{{username}}' has been unsuspended",
+      "statusError": "Failed to update account status",
+      "passwordResetSuccess": "Password for '{{username}}' updated successfully",
+      "passwordResetError": "Failed to reset password",
+      "deleteSuccess": "Tenant '{{username}}' deleted successfully",
+      "deleteError": "Failed to delete tenant"
+    }
   }
 }
