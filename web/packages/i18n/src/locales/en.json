@@ -31,7 +31,10 @@
     "errorBoundaryTitle": "Something went wrong",
     "errorBoundaryDesc": "An unexpected error occurred while rendering this page.",
     "retry": "Try again",
-    "reload": "Reload page"
+    "reload": "Reload page",
+    "cancel": "Cancel",
+    "saving": "Saving...",
+    "processing": "Processing..."
   },
   "auth": {
     "login": "Sign In",
@@ -504,5 +507,96 @@
       "error": "Failed to save hosting plan."
     },
     "empty": "No hosting plans found."
+  },
+  "users": {
+    "nav": "Users",
+    "title": "User Accounts",
+    "desc": "Manage client tenant accounts, assigned hosting plans, nodes, and quotas",
+    "refresh": "Refresh",
+    "createUser": "New User",
+    "stats": {
+      "total": "Total Users",
+      "active": "Active",
+      "suspended": "Suspended",
+      "storageAllocated": "Total Disk Used"
+    },
+    "filter": {
+      "searchPlaceholder": "Search by username or email...",
+      "allStatuses": "All Statuses",
+      "allPlans": "All Plans",
+      "allNodes": "All Nodes",
+      "reset": "Clear Filters"
+    },
+    "status": {
+      "active": "Active",
+      "suspended": "Suspended",
+      "pending": "Pending"
+    },
+    "bulk": {
+      "selectedCount": "{{count}} users selected",
+      "changePlan": "Change Plan",
+      "suspend": "Suspend",
+      "unsuspend": "Unsuspend",
+      "clear": "Clear Selection"
+    },
+    "table": {
+      "selectAll": "Select all users on this page",
+      "user": "User & Domain",
+      "email": "Email",
+      "plan": "Hosting Plan",
+      "node": "Node",
+      "status": "Status",
+      "diskUsage": "Disk Usage",
+      "actions": "Actions",
+      "noUsersFound": "No user accounts match the selected criteria."
+    },
+    "actions": {
+      "impersonate": "Log in as user",
+      "changePlan": "Change hosting plan",
+      "suspend": "Suspend account",
+      "unsuspend": "Unsuspend account",
+      "delete": "Delete account"
+    },
+    "pagination": {
+      "showing": "Showing {{start}}–{{end}} of {{total}} users",
+      "perPage": "Per page",
+      "pageOf": "Page {{current}} of {{total}}"
+    },
+    "dialog": {
+      "changePlanTitle": "Change Plan: {{username}}",
+      "changePlanDesc": "Select a new hosting plan for {{username}} (currently on {{current}}).",
+      "bulkChangePlanTitle": "Change Plan for {{count}} Users",
+      "bulkChangePlanDesc": "Select a target hosting plan to apply to all {{count}} selected user accounts.",
+      "targetPlanLabel": "Target Hosting Plan",
+      "selectPlanError": "Please select a valid hosting plan",
+      "applyPlan": "Apply Plan",
+      "suspendTitle": "Suspend User: {{username}}",
+      "suspendDesc": "Suspending this user will stop containers and route web traffic to a suspended landing page.",
+      "unsuspendTitle": "Unsuspend User: {{username}}",
+      "unsuspendDesc": "Unsuspending will restore container stacks and re-enable website traffic.",
+      "bulkSuspendTitle": "Suspend {{count}} Users",
+      "bulkSuspendDesc": "Are you sure you want to suspend all {{count}} selected user accounts?",
+      "bulkUnsuspendTitle": "Unsuspend {{count}} Users",
+      "bulkUnsuspendDesc": "Are you sure you want to restore active status for all {{count}} selected users?",
+      "reasonLabel": "Reason for Suspension (Optional)",
+      "reasonPlaceholder": "e.g. Terms of Service violation, payment overdue",
+      "confirmSuspend": "Suspend Account",
+      "confirmUnsuspend": "Unsuspend Account",
+      "confirmDelete": "Are you sure you want to delete user '{{username}}'? This action cannot be undone."
+    },
+    "toast": {
+      "loadError": "Failed to load user accounts",
+      "bulkPlanSuccess": "Updated hosting plan for {{count}} users to '{{plan}}'",
+      "bulkPlanError": "Failed to update hosting plan",
+      "bulkSuspendSuccess": "Successfully suspended {{count}} user accounts",
+      "bulkUnsuspendSuccess": "Successfully unsuspended {{count}} user accounts",
+      "suspendError": "Failed to update user status",
+      "impersonateSuccess": "Impersonation session created for {{username}}",
+      "impersonateDesc": "Redirecting to client control panel...",
+      "impersonateError": "Failed to initiate impersonation",
+      "deleteSuccess": "User '{{username}}' has been deleted",
+      "deleteError": "Failed to delete user"
+    }
+  }
   }
 }

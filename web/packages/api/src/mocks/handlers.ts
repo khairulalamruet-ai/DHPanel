@@ -629,6 +629,92 @@ export const resetMockPlans = () => {
   plans = getInitialPlans();
 };
 
+export interface MockUser {
+  id: string;
+  username: string;
+  email: string;
+  status: "active" | "suspended" | "pending";
+  plan_id: string;
+  plan_name: string;
+  node_id: string;
+  node_name: string;
+  primary_domain: string;
+  disk_used_bytes: number;
+  disk_limit_bytes: number;
+  bandwidth_used_bytes: number;
+  bandwidth_limit_bytes: number;
+  domains_count: number;
+  created_at: string;
+  suspended_at: string | null;
+  suspended_reason: string | null;
+}
+
+const mockPlansList = [
+  { id: "plan_starter", name: "Starter Cloud", disk_limit: 10 * 1024 * 1024 * 1024 },
+  { id: "plan_standard", name: "Standard Business", disk_limit: 25 * 1024 * 1024 * 1024 },
+  { id: "plan_pro", name: "Pro Developer", disk_limit: 50 * 1024 * 1024 * 1024 },
+  { id: "plan_enterprise", name: "Enterprise Dedicated", disk_limit: -1 },
+];
+
+const mockNodesList = [
+  { id: "node-sgp-01", name: "node-sgp-01 (Singapore)" },
+  { id: "node-fra-01", name: "node-fra-01 (Frankfurt)" },
+  { id: "node-nyc-01", name: "node-nyc-01 (New York)" },
+];
+
+export const getInitialUsers = (): MockUser[] => {
+  const usersList: MockUser[] = [];
+  const baseUsernames = [
+    "alpha", "beta", "gamma", "delta", "nexus", "vertex", "horizon", "aurora",
+    "zenith", "stellar", "quantum", "solaris", "vortex", "cosmic", "prism",
+    "cyber", "apex", "ember", "titan", "phoenix",
+  ];
+
+  for (let i = 1; i <= 1000; i++) {
+    const base = baseUsernames[(i - 1) % baseUsernames.length];
+    const username = i <= 20 ? base : `${base}_${i}`;
+    const plan = mockPlansList[(i - 1) % mockPlansList.length];
+    const node = mockNodesList[(i - 1) % mockNodesList.length];
+
+    const status: "active" | "suspended" | "pending" =
+      i % 10 === 0 ? "suspended" : i % 20 === 0 ? "pending" : "active";
+
+    const diskLimit = plan.disk_limit;
+    const diskUsed =
+      diskLimit === -1
+        ? 4294967296
+        : Math.min(diskLimit, ((i * 12345678) % (10 * 1024 * 1024 * 1024)) + 104857600);
+
+    usersList.push({
+      id: `usr_${String(i).padStart(4, "0")}`,
+      username,
+      email: `${username}@example.com`,
+      status,
+      plan_id: plan.id,
+      plan_name: plan.name,
+      node_id: node.id,
+      node_name: node.name,
+      primary_domain: `${username}.com`,
+      disk_used_bytes: diskUsed,
+      disk_limit_bytes: diskLimit,
+      bandwidth_used_bytes: (i * 9876543) % (50 * 1024 * 1024 * 1024),
+      bandwidth_limit_bytes: -1,
+      domains_count: (i % 5) + 1,
+      created_at: new Date(Date.now() - i * 86400 * 1000).toISOString(),
+      suspended_at:
+        status === "suspended" ? new Date(Date.now() - 3600 * 1000 * 12).toISOString() : null,
+      suspended_reason: status === "suspended" ? "Terms of service violation review" : null,
+    });
+  }
+  return usersList;
+};
+
+let mockUsers = getInitialUsers();
+
+export const resetMockUsers = () => {
+  mockUsers = getInitialUsers();
+};
+
 const mockMe = {
   id: "00000000-0000-0000-0000-000000000001",
   username: "admin",
@@ -1670,5 +1756,148 @@ export const handlers = [
 
     plans.splice(index, 1);
     return HttpResponse.json({ success: true });
+  }),
+
+  // Users: List users with pagination and search/filters (GET /api/v1/admin/users)
+  // TODO(api:T04.12): Replace with real backend users endpoint
+  http.get(/\/api\/v1\/admin\/users(\?.*)?$/, ({ request }) => {
+    const url = new URL(request.url);
+    const search = (url.searchParams.get("search") || "").trim().toLowerCase();
+    const status = url.searchParams.get("status");
+    const planId = url.searchParams.get("plan_id");
+    const nodeId = url.searchParams.get("node_id");
+    const page = Math.max(1, parseInt(url.searchParams.get("page") || "1", 10));
+    const perPage = Math.max(1, parseInt(url.searchParams.get("per_page") || "10", 10));
+
+    let filtered = [...mockUsers];
+
+    if (search) {
+      filtered = filtered.filter(
+        (u) =>
+          u.username.toLowerCase().includes(search) ||
+          u.email.toLowerCase().includes(search) ||
+          (u.primary_domain && u.primary_domain.toLowerCase().includes(search))
+      );
+    }
+
+    if (status && status !== "all") {
+      filtered = filtered.filter((u) => u.status === status);
+    }
+
+    if (planId && planId !== "all") {
+      filtered = filtered.filter((u) => u.plan_id === planId);
+    }
+
+    if (nodeId && nodeId !== "all") {
+      filtered = filtered.filter((u) => u.node_id === nodeId);
+    }
+
+    const total = filtered.length;
+    const totalPages = Math.max(1, Math.ceil(total / perPage));
+    const startIndex = (page - 1) * perPage;
+    const items = filtered.slice(startIndex, startIndex + perPage);
+
+    return HttpResponse.json({
+      items,
+      total,
+      page,
+      per_page: perPage,
+      total_pages: totalPages,
+    });
+  }),
+
+  // Users: Bulk actions (POST /api/v1/admin/users/bulk)
+  // TODO(api:T04.12): Replace with real backend bulk endpoint
+  http.post(/\/api\/v1\/admin\/users\/bulk$/, async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as any;
+    const { action, user_ids = [], plan_id, reason } = body || {};
+
+    const targetSet = new Set(user_ids);
+
+    if (action === "suspend") {
+      mockUsers.forEach((u) => {
+        if (targetSet.has(u.id)) {
+          u.status = "suspended";
+          u.suspended_at = new Date().toISOString();
+          u.suspended_reason = reason || "Suspended by admin";
+        }
+      });
+    } else if (action === "unsuspend") {
+      mockUsers.forEach((u) => {
+        if (targetSet.has(u.id)) {
+          u.status = "active";
+          u.suspended_at = null;
+          u.suspended_reason = null;
+        }
+      });
+    } else if (action === "change_plan" && plan_id) {
+      const targetPlan = mockPlansList.find((p) => p.id === plan_id);
+      if (targetPlan) {
+        mockUsers.forEach((u) => {
+          if (targetSet.has(u.id)) {
+            u.plan_id = targetPlan.id;
+            u.plan_name = targetPlan.name;
+            u.disk_limit_bytes = targetPlan.disk_limit;
+          }
+        });
+      }
+    } else if (action === "delete") {
+      mockUsers = mockUsers.filter((u) => !targetSet.has(u.id));
+    }
+
+    return HttpResponse.json({ success: true, affected: targetSet.size });
+  }),
+
+  // Users: Single suspend (POST /api/v1/admin/users/:id/suspend)
+  // TODO(api:T04.12): Replace with real backend endpoint
+  http.post(/\/api\/v1\/admin\/users\/([^/]+)\/suspend$/, ({ params }) => {
+    const id = (params.id || params[0]) as string;
+    const user = mockUsers.find((u) => u.id === id);
+    if (!user) {
+      return HttpResponse.json({ error: "not_found" }, { status: 404 });
+    }
+    user.status = "suspended";
+    user.suspended_at = new Date().toISOString();
+    return HttpResponse.json(user);
+  }),
+
+  // Users: Single unsuspend (POST /api/v1/admin/users/:id/unsuspend)
+  // TODO(api:T04.12): Replace with real backend endpoint
+  http.post(/\/api\/v1\/admin\/users\/([^/]+)\/unsuspend$/, ({ params }) => {
+    const id = (params.id || params[0]) as string;
+    const user = mockUsers.find((u) => u.id === id);
+    if (!user) {
+      return HttpResponse.json({ error: "not_found" }, { status: 404 });
+    }
+    user.status = "active";
+    user.suspended_at = null;
+    return HttpResponse.json(user);
+  }),
+
+  // Users: Impersonate user (POST /api/v1/admin/users/:id/impersonate)
+  // TODO(api:T04.13): Replace with real impersonation endpoint
+  http.post(/\/api\/v1\/admin\/users\/([^/]+)\/impersonate$/, ({ params }) => {
+    const id = (params.id || params[0]) as string;
+    const user = mockUsers.find((u) => u.id === id);
+    if (!user) {
+      return HttpResponse.json({ error: "not_found" }, { status: 404 });
+    }
+    return HttpResponse.json({
+      token: `mock_impersonate_${user.id}_${Date.now()}`,
+      expires_in_seconds: 60,
+      redirect_url: `/client?impersonate=${user.id}`,
+    });
+  }),
+
+  // Users: Delete single user (DELETE /api/v1/admin/users/:id)
+  // TODO(api:T04.12): Replace with real backend delete endpoint
+  http.delete(/\/api\/v1\/admin\/users\/([^/]+)$/, ({ params }) => {
+    const id = (params.id || params[0]) as string;
+    const index = mockUsers.findIndex((u) => u.id === id);
+    if (index === -1) {
+      return HttpResponse.json({ error: "not_found" }, { status: 404 });
+    }
+    mockUsers.splice(index, 1);
+    return new HttpResponse(null, { status: 204 });
   }),
 ];
