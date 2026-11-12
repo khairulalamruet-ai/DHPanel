@@ -1000,6 +1000,207 @@ export const resetMockOperations = () => {
   mockOperations = getInitialOperations();
 };
 
+interface MockDnsRecord {
+  id: string;
+  zone_id: string;
+  name: string;
+  type: string;
+  content: string;
+  ttl: number;
+  priority?: number | null;
+  weight?: number | null;
+  port?: number | null;
+  flags?: number | null;
+  tag?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface MockDnsZone {
+  id: string;
+  domain_id: string;
+  domain_name: string;
+  tenant_id: string;
+  nameservers: string[];
+  soa_serial: number;
+  records_count: number;
+  is_custom_ns: boolean;
+  dnssec_enabled: boolean;
+  updated_at: string;
+}
+
+const getInitialDnsZones = (): MockDnsZone[] => [
+  {
+    id: "zone_alpha_01",
+    domain_id: "dom_01",
+    domain_name: "alpha-hosting.com",
+    tenant_id: "usr_0001",
+    nameservers: ["ns1.dhpanel.net", "ns2.dhpanel.net"],
+    soa_serial: 2026111301,
+    records_count: 7,
+    is_custom_ns: false,
+    dnssec_enabled: true,
+    updated_at: new Date(Date.now() - 3600 * 1000).toISOString(),
+  },
+  {
+    id: "zone_alpha_02",
+    domain_id: "dom_02",
+    domain_name: "blog.alpha-hosting.com",
+    tenant_id: "usr_0001",
+    nameservers: ["ns1.dhpanel.net", "ns2.dhpanel.net"],
+    soa_serial: 2026111302,
+    records_count: 2,
+    is_custom_ns: false,
+    dnssec_enabled: false,
+    updated_at: new Date(Date.now() - 7200 * 1000).toISOString(),
+  },
+  {
+    id: "zone_beta_01",
+    domain_id: "dom_03",
+    domain_name: "beta-app.io",
+    tenant_id: "usr_0001",
+    nameservers: ["ns1.dhpanel.net", "ns2.dhpanel.net"],
+    soa_serial: 2026111303,
+    records_count: 2,
+    is_custom_ns: false,
+    dnssec_enabled: false,
+    updated_at: new Date(Date.now() - 86400 * 1000).toISOString(),
+  },
+];
+
+const getInitialDnsRecords = (): MockDnsRecord[] => [
+  {
+    id: "rec_01",
+    zone_id: "zone_alpha_01",
+    name: "@",
+    type: "A",
+    content: "192.168.1.100",
+    ttl: 3600,
+    priority: null,
+    created_at: new Date(Date.now() - 86400000).toISOString(),
+    updated_at: new Date(Date.now() - 86400000).toISOString(),
+  },
+  {
+    id: "rec_02",
+    zone_id: "zone_alpha_01",
+    name: "www",
+    type: "CNAME",
+    content: "alpha-hosting.com.",
+    ttl: 3600,
+    priority: null,
+    created_at: new Date(Date.now() - 86400000).toISOString(),
+    updated_at: new Date(Date.now() - 86400000).toISOString(),
+  },
+  {
+    id: "rec_03",
+    zone_id: "zone_alpha_01",
+    name: "@",
+    type: "MX",
+    content: "mail.alpha-hosting.com.",
+    ttl: 3600,
+    priority: 10,
+    created_at: new Date(Date.now() - 86400000).toISOString(),
+    updated_at: new Date(Date.now() - 86400000).toISOString(),
+  },
+  {
+    id: "rec_04",
+    zone_id: "zone_alpha_01",
+    name: "@",
+    type: "TXT",
+    content: "v=spf1 a mx ~all",
+    ttl: 3600,
+    priority: null,
+    created_at: new Date(Date.now() - 86400000).toISOString(),
+    updated_at: new Date(Date.now() - 86400000).toISOString(),
+  },
+  {
+    id: "rec_05",
+    zone_id: "zone_alpha_01",
+    name: "@",
+    type: "AAAA",
+    content: "2001:db8::1",
+    ttl: 3600,
+    priority: null,
+    created_at: new Date(Date.now() - 86400000).toISOString(),
+    updated_at: new Date(Date.now() - 86400000).toISOString(),
+  },
+  {
+    id: "rec_06",
+    zone_id: "zone_alpha_01",
+    name: "mail",
+    type: "A",
+    content: "192.168.1.105",
+    ttl: 3600,
+    priority: null,
+    created_at: new Date(Date.now() - 86400000).toISOString(),
+    updated_at: new Date(Date.now() - 86400000).toISOString(),
+  },
+  {
+    id: "rec_07",
+    zone_id: "zone_alpha_01",
+    name: "@",
+    type: "CAA",
+    content: "0 issue \"letsencrypt.org\"",
+    ttl: 3600,
+    flags: 0,
+    tag: "issue",
+    created_at: new Date(Date.now() - 86400000).toISOString(),
+    updated_at: new Date(Date.now() - 86400000).toISOString(),
+  },
+  {
+    id: "rec_08",
+    zone_id: "zone_alpha_02",
+    name: "@",
+    type: "A",
+    content: "192.168.1.102",
+    ttl: 3600,
+    priority: null,
+    created_at: new Date(Date.now() - 86400000).toISOString(),
+    updated_at: new Date(Date.now() - 86400000).toISOString(),
+  },
+  {
+    id: "rec_09",
+    zone_id: "zone_alpha_02",
+    name: "www",
+    type: "CNAME",
+    content: "blog.alpha-hosting.com.",
+    ttl: 3600,
+    priority: null,
+    created_at: new Date(Date.now() - 86400000).toISOString(),
+    updated_at: new Date(Date.now() - 86400000).toISOString(),
+  },
+  {
+    id: "rec_10",
+    zone_id: "zone_beta_01",
+    name: "@",
+    type: "A",
+    content: "192.168.1.110",
+    ttl: 3600,
+    priority: null,
+    created_at: new Date(Date.now() - 86400000).toISOString(),
+    updated_at: new Date(Date.now() - 86400000).toISOString(),
+  },
+  {
+    id: "rec_11",
+    zone_id: "zone_beta_01",
+    name: "www",
+    type: "CNAME",
+    content: "beta-app.io.",
+    ttl: 3600,
+    priority: null,
+    created_at: new Date(Date.now() - 86400000).toISOString(),
+    updated_at: new Date(Date.now() - 86400000).toISOString(),
+  },
+];
+
+let mockDnsZones = getInitialDnsZones();
+let mockDnsRecords = getInitialDnsRecords();
+
+export const resetMockDns = () => {
+  mockDnsZones = getInitialDnsZones();
+  mockDnsRecords = getInitialDnsRecords();
+};
+
 
 const mockMe = {
   id: "00000000-0000-0000-0000-000000000001",
@@ -1020,6 +1221,7 @@ const mockMe = {
     "plans",
     "audit",
     "domains",
+    "dns",
     "settings",
     "demo",
   ],
@@ -2714,5 +2916,284 @@ export const handlers = [
     }
     mockAdminDomains = mockAdminDomains.filter((d) => d.id !== id);
     return HttpResponse.json({ status: "deleted", id });
+  }),
+
+  // DNS: List zones (GET /api/v1/client/dns/zones)
+  // TODO(api:T05.10): Replace with real DNS zone list endpoint
+  http.get(/\/api\/v1\/client\/dns\/zones$/, () => {
+    return HttpResponse.json({
+      items: mockDnsZones,
+      total: mockDnsZones.length,
+    });
+  }),
+
+  // DNS: Get zone detail with records (GET /api/v1/client/dns/zones/:id)
+  // TODO(api:T05.10): Replace with real DNS zone detail endpoint
+  http.get(/\/api\/v1\/client\/dns\/zones\/([^/]+)$/, ({ params }) => {
+    const key = (params.id || params[0]) as string;
+    const zone = mockDnsZones.find((z) => z.id === key || z.domain_id === key || z.domain_name === key);
+    if (!zone) {
+      return HttpResponse.json({ message: "DNS zone not found" }, { status: 404 });
+    }
+    const records = mockDnsRecords.filter((r) => r.zone_id === zone.id);
+    return HttpResponse.json({
+      zone,
+      records,
+    });
+  }),
+
+  // DNS: Create record (POST /api/v1/client/dns/zones/:id/records)
+  // TODO(api:T05.10): Replace with real DNS create record endpoint
+  http.post(/\/api\/v1\/client\/dns\/zones\/([^/]+)\/records$/, async ({ params, request }) => {
+    const key = (params.id || params[0]) as string;
+    const zone = mockDnsZones.find((z) => z.id === key || z.domain_id === key || z.domain_name === key);
+    if (!zone) {
+      return HttpResponse.json({ message: "DNS zone not found" }, { status: 404 });
+    }
+
+    const body = (await request.json().catch(() => ({}))) as any;
+    const { name, type, content, ttl = 3600, priority = null, weight = null, port = null, flags = null, tag = null } = body || {};
+
+    if (!name || !type || !content) {
+      return HttpResponse.json({ message: "Name, type, and content are required" }, { status: 422 });
+    }
+
+    // Validation: CNAME conflict check
+    if (type === "CNAME") {
+      const existing = mockDnsRecords.find((r) => r.zone_id === zone.id && r.name.toLowerCase() === String(name).toLowerCase());
+      if (existing) {
+        return HttpResponse.json(
+          { message: "CNAME cannot coexist with other records for the same name" },
+          { status: 422 }
+        );
+      }
+    } else {
+      const existingCname = mockDnsRecords.find((r) => r.zone_id === zone.id && r.name.toLowerCase() === String(name).toLowerCase() && r.type === "CNAME");
+      if (existingCname) {
+        return HttpResponse.json(
+          { message: "Cannot add record: A CNAME record already exists for this name" },
+          { status: 422 }
+        );
+      }
+    }
+
+    const newRecord: MockDnsRecord = {
+      id: `rec_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+      zone_id: zone.id,
+      name: String(name).trim(),
+      type: String(type).toUpperCase(),
+      content: String(content).trim(),
+      ttl: Number(ttl) || 3600,
+      priority: priority !== undefined ? Number(priority) : null,
+      weight: weight !== undefined ? Number(weight) : null,
+      port: port !== undefined ? Number(port) : null,
+      flags: flags !== undefined ? Number(flags) : null,
+      tag: tag || null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    mockDnsRecords = [newRecord, ...mockDnsRecords];
+    zone.records_count = mockDnsRecords.filter((r) => r.zone_id === zone.id).length;
+    zone.soa_serial += 1;
+    zone.updated_at = new Date().toISOString();
+
+    return HttpResponse.json(newRecord, { status: 201 });
+  }),
+
+  // DNS: Update record (PUT /api/v1/client/dns/zones/:id/records/:recordId)
+  // TODO(api:T05.10): Replace with real DNS update record endpoint
+  http.put(/\/api\/v1\/client\/dns\/zones\/([^/]+)\/records\/([^/]+)$/, async ({ params, request }) => {
+    const recordId = params[1] as string;
+
+    const record = mockDnsRecords.find((r) => r.id === recordId);
+    if (!record) {
+      return HttpResponse.json({ message: "DNS record not found" }, { status: 404 });
+    }
+
+    const body = (await request.json().catch(() => ({}))) as any;
+    if (body.name !== undefined) record.name = String(body.name).trim();
+    if (body.type !== undefined) record.type = String(body.type).toUpperCase();
+    if (body.content !== undefined) record.content = String(body.content).trim();
+    if (body.ttl !== undefined) record.ttl = Number(body.ttl);
+    if (body.priority !== undefined) record.priority = body.priority !== null ? Number(body.priority) : null;
+    if (body.weight !== undefined) record.weight = body.weight !== null ? Number(body.weight) : null;
+    if (body.port !== undefined) record.port = body.port !== null ? Number(body.port) : null;
+    if (body.flags !== undefined) record.flags = body.flags !== null ? Number(body.flags) : null;
+    if (body.tag !== undefined) record.tag = body.tag || null;
+    record.updated_at = new Date().toISOString();
+
+    const zone = mockDnsZones.find((z) => z.id === record.zone_id);
+    if (zone) {
+      zone.soa_serial += 1;
+      zone.updated_at = new Date().toISOString();
+    }
+
+    return HttpResponse.json(record);
+  }),
+
+  // DNS: Delete record (DELETE /api/v1/client/dns/zones/:id/records/:recordId)
+  // TODO(api:T05.10): Replace with real DNS delete record endpoint
+  http.delete(/\/api\/v1\/client\/dns\/zones\/([^/]+)\/records\/([^/]+)$/, ({ params }) => {
+    const recordId = params[1] as string;
+    const record = mockDnsRecords.find((r) => r.id === recordId);
+    if (!record) {
+      return HttpResponse.json({ message: "DNS record not found" }, { status: 404 });
+    }
+
+    mockDnsRecords = mockDnsRecords.filter((r) => r.id !== recordId);
+    const zone = mockDnsZones.find((z) => z.id === record.zone_id);
+    if (zone) {
+      zone.records_count = mockDnsRecords.filter((r) => r.zone_id === zone.id).length;
+      zone.soa_serial += 1;
+      zone.updated_at = new Date().toISOString();
+    }
+
+    return HttpResponse.json({ status: "deleted", id: recordId });
+  }),
+
+  // DNS: Export BIND zone (POST /api/v1/client/dns/zones/:id/export)
+  // TODO(api:T05.10): Replace with real BIND export endpoint
+  http.post(/\/api\/v1\/client\/dns\/zones\/([^/]+)\/export$/, ({ params }) => {
+    const key = (params.id || params[0]) as string;
+    const zone = mockDnsZones.find((z) => z.id === key || z.domain_id === key || z.domain_name === key);
+    if (!zone) {
+      return HttpResponse.json({ message: "DNS zone not found" }, { status: 404 });
+    }
+
+    const records = mockDnsRecords.filter((r) => r.zone_id === zone.id);
+    const lines = [
+      `; BIND Zone File for ${zone.domain_name}`,
+      `; Exported from DHPanel at ${new Date().toISOString()}`,
+      `$ORIGIN ${zone.domain_name}.`,
+      `$TTL 3600`,
+      `@   IN  SOA ${zone.nameservers[0]}. hostmaster.${zone.domain_name}. (`,
+      `        ${zone.soa_serial} ; Serial`,
+      `        7200       ; Refresh`,
+      `        3600       ; Retry`,
+      `        1209600    ; Expire`,
+      `        3600 )     ; Minimum TTL`,
+      `;`,
+      `; Nameservers`,
+      ...zone.nameservers.map((ns) => `@   IN  NS  ${ns}.`),
+      `;`,
+      `; Resource Records`,
+      ...records.map((r) => {
+        const prio = r.priority !== null && r.priority !== undefined ? `${r.priority} ` : "";
+        return `${r.name.padEnd(16)} IN  ${r.type.padEnd(6)} ${prio}${r.content}`;
+      }),
+    ];
+
+    return HttpResponse.json({
+      zone_name: zone.domain_name,
+      soa_serial: zone.soa_serial,
+      bind_text: lines.join("\n"),
+    });
+  }),
+
+  // DNS: Import BIND zone (POST /api/v1/client/dns/zones/:id/import)
+  // TODO(api:T05.10): Replace with real BIND import endpoint
+  http.post(/\/api\/v1\/client\/dns\/zones\/([^/]+)\/import$/, async ({ params, request }) => {
+    const key = (params.id || params[0]) as string;
+    const zone = mockDnsZones.find((z) => z.id === key || z.domain_id === key || z.domain_name === key);
+    if (!zone) {
+      return HttpResponse.json({ message: "DNS zone not found" }, { status: 404 });
+    }
+
+    const body = (await request.json().catch(() => ({}))) as any;
+    const { bind_text = "", overwrite = false } = body || {};
+
+    if (!bind_text.trim()) {
+      return HttpResponse.json({ message: "BIND zone content is required" }, { status: 422 });
+    }
+
+    const lines = bind_text.split("\n");
+    const newRecords: MockDnsRecord[] = [];
+    const warnings: string[] = [];
+
+    for (let line of lines) {
+      line = line.trim();
+      if (!line || line.startsWith(";") || line.startsWith("$")) continue;
+      const commentIdx = line.indexOf(";");
+      if (commentIdx !== -1) line = line.substring(0, commentIdx).trim();
+
+      const tokens = line.split(/\s+/);
+      if (tokens.length < 3) continue;
+
+      const name = tokens[0];
+      let idx = 1;
+      let ttl = 3600;
+
+      if (/^\d+$/.test(tokens[idx])) {
+        ttl = parseInt(tokens[idx], 10);
+        idx++;
+      }
+      if (tokens[idx]?.toUpperCase() === "IN") {
+        idx++;
+      }
+
+      const type = tokens[idx]?.toUpperCase();
+      idx++;
+      if (!["A", "AAAA", "CNAME", "MX", "TXT", "SRV", "CAA", "NS"].includes(type)) {
+        continue;
+      }
+
+      let priority: number | null = null;
+      if (type === "MX" && /^\d+$/.test(tokens[idx])) {
+        priority = parseInt(tokens[idx], 10);
+        idx++;
+      }
+
+      const content = tokens.slice(idx).join(" ");
+      if (!content) continue;
+
+      newRecords.push({
+        id: `rec_imp_${Date.now()}_${newRecords.length}`,
+        zone_id: zone.id,
+        name,
+        type,
+        content,
+        ttl,
+        priority,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+    }
+
+    if (overwrite) {
+      mockDnsRecords = [...newRecords, ...mockDnsRecords.filter((r) => r.zone_id !== zone.id)];
+    } else {
+      mockDnsRecords = [...newRecords, ...mockDnsRecords];
+    }
+
+    zone.records_count = mockDnsRecords.filter((r) => r.zone_id === zone.id).length;
+    zone.soa_serial += 1;
+    zone.updated_at = new Date().toISOString();
+
+    return HttpResponse.json({
+      imported_count: newRecords.length,
+      skipped_count: 0,
+      warnings,
+      records: mockDnsRecords.filter((r) => r.zone_id === zone.id),
+    });
+  }),
+
+  // DNS: Verify NS resolution (POST /api/v1/client/dns/zones/:id/verify-ns)
+  // TODO(api:T05.10): Replace with real NS verification endpoint
+  http.post(/\/api\/v1\/client\/dns\/zones\/([^/]+)\/verify-ns$/, ({ params }) => {
+    const key = (params.id || params[0]) as string;
+    const zone = mockDnsZones.find((z) => z.id === key || z.domain_id === key || z.domain_name === key);
+    if (!zone) {
+      return HttpResponse.json({ message: "DNS zone not found" }, { status: 404 });
+    }
+
+    return HttpResponse.json({
+      valid: true,
+      delegated: true,
+      nameservers: zone.nameservers,
+      queried_at: new Date().toISOString(),
+      status: "active",
+      message: "Nameservers successfully verified and delegating properly.",
+    });
   }),
 ];

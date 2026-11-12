@@ -950,5 +950,79 @@
       "statusFailed": "Failed to update domain status",
       "deleteFailed": "Failed to delete domain"
     }
+  },
+  "dns": {
+    "title": "DNS Zone Editor",
+    "subtitle": "Manage host records, mail routing, verification tokens, and BIND zone exports.",
+    "nav": "DNS Editor",
+    "recordsLabel": "records",
+    "searchPlaceholder": "Search records...",
+    "banner": {
+      "delegatedNs": "Authoritative Nameservers:",
+      "signed": "Signed",
+      "unsigned": "Unsigned",
+      "verifyNsBtn": "Verify NS Resolution"
+    },
+    "fields": {
+      "name": "Host / Name",
+      "type": "Type",
+      "content": "Target / Value",
+      "ttl": "TTL",
+      "priority": "Priority",
+      "weight": "Weight",
+      "port": "Port",
+      "flags": "Flags",
+      "tag": "Tag"
+    },
+    "actions": {
+      "addRecord": "Add Record",
+      "bindFile": "BIND Zone"
+    },
+    "table": {
+      "title": "Resource Records",
+      "totalShown": "entries",
+      "description": "Click any record to edit directly or add custom routing entries",
+      "empty": "No DNS records found for this filter"
+    },
+    "createDialog": {
+      "title": "Add DNS Record"
+    },
+    "deleteDialog": {
+      "title": "Delete DNS Record",
+      "warning": "Are you sure you want to delete this DNS record? This may impact website accessibility or email delivery."
+    },
+    "bind": {
+      "dialogTitle": "BIND Zone File Management",
+      "exportTab": "Export BIND Zone",
+      "importTab": "Import BIND Zone",
+      "exportDesc": "Standard RFC 1035 BIND zone file for {{domain}}. Compatible with PowerDNS, BIND9, and Cloudflare DNS imports.",
+      "importDesc": "Paste BIND-formatted zone file records to batch import or restore your DNS zone.",
+      "downloadZone": "Download .zone",
+      "pasteLabel": "BIND Zone Content",
+      "overwriteLabel": "Overwrite existing records in this zone",
+      "importBtn": "Import Records",
+      "emptyError": "Please paste valid BIND zone file contents.",
+      "importSuccess": "Successfully imported {{count}} DNS records into zone.",
+      "importError": "Failed to import BIND zone file"
+    },
+    "toast": {
+      "recordAdded": "Record added successfully",
+      "recordUpdated": "DNS record updated successfully",
+      "recordDeleted": "DNS record deleted successfully",
+      "nsVerifiedTitle": "Nameservers Verified"
+    },
+    "errors": {
+      "nameRequired": "Record name is required (use @ for root)",
+      "contentRequired": "Record content value is required",
+      "invalidIpv4": "Please enter a valid IPv4 address (e.g. 192.168.1.1)",
+      "invalidIpv6": "Please enter a valid IPv6 address (e.g. 2001:db8::1)",
+      "invalidPriority": "Valid MX priority between 0 and 65535 is required",
+      "fetchZonesFailed": "Failed to load DNS zones",
+      "fetchDetailsFailed": "Failed to load zone records",
+      "createFailed": "Failed to create DNS record",
+      "updateFailed": "Failed to update record",
+      "deleteFailed": "Failed to delete record",
+      "nsVerifyFailed": "Nameserver verification failed"
+    }
   }
 }

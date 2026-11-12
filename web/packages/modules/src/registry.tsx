@@ -281,6 +281,38 @@ export const registeredFrontendModules: FrontendModule[] = [
   },
   {
     manifest: {
+      name: "dns",
+      title: { en: "DNS Editor", bn: "ডিএনএস এডিটর" },
+      category: "web",
+      core: false,
+      permissions: ["dns.read", "dns.create", "dns.update", "dns.delete"],
+      features: ["dns", "bind_export", "bind_import"],
+    },
+    adminNav: [
+      {
+        id: "dns",
+        labelKey: "dns.nav",
+        icon: <Globe className="h-4 w-4" />,
+        href: "/dns",
+        order: 32,
+        permission: "dns.read",
+        feature: "dns",
+      },
+    ],
+    clientNav: [
+      {
+        id: "dns",
+        labelKey: "dns.nav",
+        icon: <Globe className="h-4 w-4" />,
+        href: "/dns",
+        order: 22,
+        permission: "dns.read",
+        feature: "dns",
+      },
+    ],
+  },
+  {
+    manifest: {
       name: "users",
       title: { en: "Users", bn: "ব্যবহারকারী" },
       category: "core",

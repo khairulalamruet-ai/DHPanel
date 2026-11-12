@@ -26,6 +26,7 @@ import {
   ClientDashboardPage,
   ClientDomainsPage,
   AdminDomainsPage,
+  DnsEditorPage,
   filterNavItems,
   registeredFrontendModules,
 } from "@dhpanel/modules";
@@ -204,6 +205,13 @@ const domainsRoute = createRoute({
   component: AdminDomainsPage,
 });
 
+// 19. DNS Zone Editor route (T05.11)
+const dnsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/dns",
+  component: DnsEditorPage,
+});
+
 // 18. Login route
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -238,6 +246,7 @@ const routeTree = rootRoute.addChildren([
   clientRoute,
   clientDomainsRoute,
   domainsRoute,
+  dnsRoute,
   loginRoute,
 ]);
 

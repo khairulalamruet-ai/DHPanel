@@ -9,7 +9,7 @@ import { ThemeProvider, ToastProvider } from "@dhpanel/ui";
 import { SessionProvider, useSession, LoginPage, AccountSecurityPage } from "@dhpanel/auth";
 import { queryClient, QueryClientProvider } from "@dhpanel/api";
 import { AppShell, NotFoundPage, RouteErrorFallback } from "@dhpanel/shell";
-import { ClientDashboardPage, ClientDomainsPage } from "@dhpanel/modules";
+import { ClientDashboardPage, ClientDomainsPage, DnsEditorPage } from "@dhpanel/modules";
 import { useTranslation } from "@dhpanel/i18n";
 import { LayoutDashboard, ShieldCheck, Globe } from "lucide-react";
 
@@ -29,6 +29,12 @@ function AuthenticatedContent() {
       labelKey: "domains.nav",
       icon: <Globe className="h-4 w-4" />,
       href: "/domains",
+    },
+    {
+      id: "dns",
+      labelKey: "dns.nav",
+      icon: <Globe className="h-4 w-4" />,
+      href: "/dns",
     },
     {
       id: "security",
@@ -94,6 +100,12 @@ const domainsRoute = createRoute({
   component: ClientDomainsPage,
 });
 
+const dnsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/dns",
+  component: DnsEditorPage,
+});
+
 const securityRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/security",
@@ -114,7 +126,7 @@ const loginRoute = createRoute({
   },
 });
 
-const routeTree = rootRoute.addChildren([indexRoute, domainsRoute, securityRoute, loginRoute]);
+const routeTree = rootRoute.addChildren([indexRoute, domainsRoute, dnsRoute, securityRoute, loginRoute]);
 
 export const router = createRouter({
   routeTree,
