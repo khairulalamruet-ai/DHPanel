@@ -1016,8 +1016,29 @@ dependencies = [
 name = "dhpanel-node-agent"
 version = "0.1.0"
 dependencies = [
+ "axum",
+ "clap",
+ "dhpanel-audit",
+ "dhpanel-cache",
  "dhpanel-common",
+ "dhpanel-database",
+ "dhpanel-http-kit",
+ "dhpanel-mod-nodes",
+ "dhpanel-node-protocol",
+ "dhpanel-pki",
+ "dhpanel-session",
+ "rcgen",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "sqlx",
+ "thiserror",
+ "time",
+ "tokio",
  "ureq",
+ "uuid",
+ "x509-parser",
 ]
 
 [[package]]
@@ -1027,6 +1048,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+ "utoipa",
  "uuid",
 ]
 

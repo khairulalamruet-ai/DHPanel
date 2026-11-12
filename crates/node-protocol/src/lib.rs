@@ -335,6 +335,65 @@ pub enum ControlMessage {
     Operation(OperationEnvelope),
 }
 
+// -------------------------------------------------------------- enrollment
+
+/// Path of the enrollment endpoint on the control plane.
+pub const ENROLL_PATH: &str = "/api/v1/public/nodes/enroll";
+
+/// What an agent sends to enrol (plain HTTPS, before it has a certificate).
+#[derive(Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct EnrollRequest {
+    /// The one-time token from the "add node" screen.
+    #[cfg_attr(feature = "openapi", schema(example = "dhn_…"))]
+    pub token: String,
+    /// PEM certificate signing request made with a fresh ECDSA P-256 key that
+    /// never leaves the node.
+    pub csr_pem: String,
+    /// Host name of the server.
+    #[serde(default)]
+    pub hostname: Option<String>,
+    /// Agent build version.
+    #[serde(default)]
+    pub agent_version: Option<String>,
+}
+
+impl std::fmt::Debug for EnrollRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Never the token or the request body.
+        f.debug_struct("EnrollRequest")
+            .field("hostname", &self.hostname)
+            .field("agent_version", &self.agent_version)
+            .finish_non_exhaustive()
+    }
+}
+
+/// The node's new identity.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct EnrollResponse {
+    /// The node's id.
+    pub node_id: Uuid,
+    /// The node's name.
+    pub name: String,
+    /// The node certificate (PEM): client authentication for the mTLS connection.
+    pub certificate_pem: String,
+    /// The CA certificate (PEM) that signed it and that signs the control
+    /// plane's server certificate.
+    pub ca_certificate_pem: String,
+    /// SHA-256 fingerprint of the CA certificate (lowercase hex), to compare
+    /// with the one in the enrol command.
+    pub ca_fingerprint_sha256: String,
+    /// Certificate validity start (RFC 3339, UTC).
+    #[cfg_attr(feature = "openapi", schema(format = DateTime))]
+    pub not_before: String,
+    /// Certificate expiry (RFC 3339, UTC). The agent renews before this.
+    #[cfg_attr(feature = "openapi", schema(format = DateTime))]
+    pub not_after: String,
+    /// Protocol version the control plane speaks.
+    pub protocol_version: u16,
+}
+
 // ----------------------------------------------------------------- framing
 
 /// Why a frame could not be produced or read.
@@ -624,6 +683,58 @@ mod tests {
                 r#"{{"type":"result","op_id":"{ID}","status":"failed","output":null,"error":{{"code":"unsupported_operation","message":"no such operation","retryable":false}}}}"#
             )
         );
+    }
+
+    #[test]
+    fn the_enrollment_wire_format_is_pinned() {
+        let request = EnrollRequest {
+            token: "dhn_x".into(),
+            csr_pem: "csr".into(),
+            hostname: Some("h".into()),
+            agent_version: None,
+        };
+        assert_eq!(
+            serde_json::to_string(&request).unwrap(),
+            r#"{"token":"dhn_x","csr_pem":"csr","hostname":"h","agent_version":null}"#
+        );
+        // Older agents may omit the optional fields.
+        let minimal: EnrollRequest =
+            serde_json::from_str(r#"{"token":"t","csr_pem":"c"}"#).unwrap();
+        assert_eq!((minimal.hostname, minimal.agent_version), (None, None));
+        let dbg = format!("{request:?}");
+        assert!(
+            dbg.contains("hostname") && !dbg.contains("dhn_x") && !dbg.contains("csr"),
+            "{dbg}"
+        );
+
+        let response = EnrollResponse {
+            node_id: id(),
+            name: "n1".into(),
+            certificate_pem: "cert".into(),
+            ca_certificate_pem: "ca".into(),
+            ca_fingerprint_sha256: "ab".into(),
+            not_before: "2026-01-01T00:00:00Z".into(),
+            not_after: "2026-04-01T00:00:00Z".into(),
+            protocol_version: 1,
+        };
+        let json = serde_json::to_string(&response).unwrap();
+        assert_eq!(
+            json,
+            format!(
+                r#"{{"node_id":"{ID}","name":"n1","certificate_pem":"cert","ca_certificate_pem":"ca","ca_fingerprint_sha256":"ab","not_before":"2026-01-01T00:00:00Z","not_after":"2026-04-01T00:00:00Z","protocol_version":1}}"#
+            )
+        );
+        assert_eq!(
+            serde_json::from_str::<EnrollResponse>(&json).unwrap(),
+            response
+        );
+        // A newer control plane may add fields.
+        let newer = json.replacen('{', r#"{"future":true,"#, 1);
+        assert_eq!(
+            serde_json::from_str::<EnrollResponse>(&newer).unwrap(),
+            response
+        );
+        assert_eq!(ENROLL_PATH, "/api/v1/public/nodes/enroll");
     }
 
     #[test]

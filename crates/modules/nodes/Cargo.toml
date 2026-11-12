@@ -15,7 +15,7 @@ dhpanel-audit.workspace = true
 dhpanel-cache.workspace = true
 dhpanel-database.workspace = true
 dhpanel-http-kit.workspace = true
-dhpanel-node-protocol.workspace = true
+dhpanel-node-protocol = { workspace = true, features = ["openapi"] }
 dhpanel-pki.workspace = true
 dhpanel-rbac.workspace = true
 dhpanel-session.workspace = true

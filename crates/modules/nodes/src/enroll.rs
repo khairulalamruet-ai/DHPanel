@@ -33,10 +33,9 @@ use dhpanel_http_kit::{
     client_ip::{self, rate_limit_key},
 };
 use dhpanel_node_protocol::PROTOCOL_VERSION;
+pub use dhpanel_node_protocol::{EnrollRequest, EnrollResponse};
 use dhpanel_pki::{DEFAULT_NODE_VALIDITY, PkiError, format_rfc3339};
-use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
-use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::{NodesState, token};
@@ -45,57 +44,6 @@ use crate::{NodesState, token};
 pub const MAX_CSR_BYTES: usize = 8 * 1024;
 /// Largest accepted token field, in bytes (a real token is 47).
 const MAX_TOKEN_BYTES: usize = 256;
-
-/// What an agent sends to enrol.
-#[derive(Deserialize, ToSchema)]
-pub struct EnrollRequest {
-    /// The one-time token from the "add node" screen.
-    #[schema(example = "dhn_…")]
-    pub token: String,
-    /// PEM certificate signing request made with a fresh ECDSA P-256 key that
-    /// never leaves the node.
-    pub csr_pem: String,
-    /// Host name of the server.
-    #[serde(default)]
-    pub hostname: Option<String>,
-    /// Agent build version.
-    #[serde(default)]
-    pub agent_version: Option<String>,
-}
-
-impl std::fmt::Debug for EnrollRequest {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("EnrollRequest")
-            .field("hostname", &self.hostname)
-            .field("agent_version", &self.agent_version)
-            .finish_non_exhaustive()
-    }
-}
-
-/// The node's new identity.
-#[derive(Debug, Serialize, ToSchema)]
-pub struct EnrollResponse {
-    /// The node's id.
-    pub node_id: Uuid,
-    /// The node's name.
-    pub name: String,
-    /// The node certificate (PEM): client authentication for the mTLS connection.
-    pub certificate_pem: String,
-    /// The CA certificate (PEM) that signed it and that signs the control
-    /// plane's server certificate.
-    pub ca_certificate_pem: String,
-    /// SHA-256 fingerprint of the CA certificate, to compare with the one in
-    /// the enrol command.
-    pub ca_fingerprint_sha256: String,
-    /// Certificate validity start (RFC 3339, UTC).
-    #[schema(format = DateTime)]
-    pub not_before: String,
-    /// Certificate expiry (RFC 3339, UTC). The agent renews before this.
-    #[schema(format = DateTime)]
-    pub not_after: String,
-    /// Protocol version the control plane speaks.
-    pub protocol_version: u16,
-}
 
 fn invalid_token() -> AppError {
     AppError::authentication_failed(
@@ -389,21 +337,5 @@ mod tests {
             );
         }
         assert!(clean_fields(&request(None, None, &"c".repeat(MAX_CSR_BYTES + 1))).is_err());
-    }
-
-    #[test]
-    fn the_request_debug_output_hides_the_token_and_csr() {
-        let dbg = format!(
-            "{:?}",
-            request(
-                Some("n1.example.com"),
-                None,
-                "-----BEGIN CERTIFICATE REQUEST-----"
-            )
-        );
-        assert!(
-            dbg.contains("n1.example.com") && !dbg.contains("dhn_") && !dbg.contains("BEGIN"),
-            "{dbg}"
-        );
     }
 }

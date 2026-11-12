@@ -15,3 +15,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2.0.21"
 uuid = { version = "1", features = ["serde"] }
+# Lets the control plane describe these types in its OpenAPI document; the agent does not need it.
+utoipa = { version = "6", features = ["uuid"], optional = true }
+
+[features]
+openapi = ["dep:utoipa"]
