@@ -19,6 +19,7 @@ import {
   OperationsPage,
   SettingsPage,
   FeatureSetsPage,
+  PlansPage,
   filterNavItems,
   registeredFrontendModules,
 } from "@dhpanel/modules";
@@ -140,7 +141,14 @@ const featureSetsRoute = createRoute({
   component: FeatureSetsPage,
 });
 
-// 12. Login route
+// 12. Plans route (T04.04)
+const plansRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/plans",
+  component: PlansPage,
+});
+
+// 13. Login route
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/login",
@@ -155,7 +163,7 @@ const loginRoute = createRoute({
   },
 });
 
-// 13. Route Tree
+// 14. Route Tree
 const routeTree = rootRoute.addChildren([
   indexRoute,
   demoRoute,
@@ -167,6 +175,7 @@ const routeTree = rootRoute.addChildren([
   operationsRoute,
   settingsRoute,
   featureSetsRoute,
+  plansRoute,
   loginRoute,
 ]);
 

@@ -442,5 +442,67 @@
       "error": "Failed to save feature set."
     },
     "empty": "No feature sets found."
+  },
+  "plans": {
+    "nav": "Hosting Plans",
+    "title": "Hosting Plans",
+    "desc": "Create and manage hosting plans with resource allocations and module limits",
+    "createBtn": "New Plan",
+    "editBtn": "Edit",
+    "deleteBtn": "Delete",
+    "defaultBadge": "Default",
+    "unlimited": "Unlimited",
+    "usersAssigned": "{{count}} users",
+    "table": {
+      "name": "Plan Name",
+      "resources": "Resources (CPU / RAM / Disk)",
+      "limits": "Limits (Domains / DBs)",
+      "featureSet": "Feature Set",
+      "users": "Assigned Users",
+      "actions": "Actions"
+    },
+    "dialog": {
+      "createTitle": "Create Hosting Plan",
+      "editTitle": "Edit Hosting Plan",
+      "desc": "Define resource boundaries and service limits for tenants assigned to this plan",
+      "basicSection": "Basic Information",
+      "nameLabel": "Plan Name",
+      "namePlaceholder": "e.g. Standard Cloud",
+      "descLabel": "Description",
+      "descPlaceholder": "Target audience or plan tier...",
+      "featureSetLabel": "Feature Set",
+      "defaultLabel": "Set as Default Plan",
+      "defaultDesc": "New tenants will be provisioned on this plan by default",
+      "resourcesSection": "Container Resource Allocation",
+      "cpuLabel": "CPU Limit (Cores)",
+      "memoryLabel": "Memory Limit (MB)",
+      "diskLabel": "Disk Storage Quota (MB)",
+      "bandwidthLabel": "Monthly Bandwidth (MB)",
+      "pidsLabel": "Process (PID) Limit",
+      "limitsSection": "Module Quotas & Limits",
+      "domainsLabel": "Max Domains",
+      "subdomainsLabel": "Max Subdomains",
+      "databasesLabel": "Max Databases",
+      "ftpLabel": "Max FTP Accounts",
+      "emailsLabel": "Max Email Inboxes",
+      "unlimitedToggle": "Unlimited",
+      "cancel": "Cancel",
+      "save": "Save Plan",
+      "saving": "Saving..."
+    },
+    "deleteConfirm": {
+      "title": "Delete Hosting Plan",
+      "desc": "Are you sure you want to delete plan '{{name}}'? This action cannot be undone.",
+      "confirm": "Delete Plan",
+      "cannotDeleteDefault": "The default plan cannot be deleted.",
+      "cannotDeleteWithUsers": "Cannot delete a plan with active users assigned."
+    },
+    "toast": {
+      "createSuccess": "Plan '{{name}}' created successfully.",
+      "updateSuccess": "Plan '{{name}}' updated successfully.",
+      "deleteSuccess": "Plan '{{name}}' deleted successfully.",
+      "error": "Failed to save hosting plan."
+    },
+    "empty": "No hosting plans found."
   }
 }

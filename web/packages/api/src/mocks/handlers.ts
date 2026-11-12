@@ -490,6 +490,145 @@ export const resetMockFeatureSets = () => {
   featureSets = getInitialFeatureSets();
 };
 
+export interface MockPlanResources {
+  cpu: number;
+  memory_mb: number;
+  disk_mb: number;
+  bandwidth_mb: number;
+  pids_limit: number;
+}
+
+export interface MockPlanLimits {
+  max_domains: number;
+  max_subdomains: number;
+  max_databases: number;
+  max_ftp_accounts: number;
+  max_email_accounts: number;
+}
+
+export interface MockPlan {
+  id: string;
+  name: string;
+  description: string;
+  feature_set_id: string;
+  feature_set_name: string;
+  is_default: boolean;
+  users_count: number;
+  resources: MockPlanResources;
+  limits: MockPlanLimits;
+  created_at: string;
+  updated_at: string;
+}
+
+export const getInitialPlans = (): MockPlan[] => [
+  {
+    id: "plan_starter",
+    name: "Starter Cloud",
+    description: "Entry-level tier for personal blogs and landing pages",
+    feature_set_id: "fs_basic",
+    feature_set_name: "Basic Web",
+    is_default: false,
+    users_count: 8,
+    resources: {
+      cpu: 1,
+      memory_mb: 1024,
+      disk_mb: 10240,
+      bandwidth_mb: 51200,
+      pids_limit: 100,
+    },
+    limits: {
+      max_domains: 1,
+      max_subdomains: 5,
+      max_databases: 1,
+      max_ftp_accounts: 2,
+      max_email_accounts: 5,
+    },
+    created_at: new Date(Date.now() - 86400 * 1000 * 20).toISOString(),
+    updated_at: new Date(Date.now() - 86400 * 1000 * 5).toISOString(),
+  },
+  {
+    id: "plan_standard",
+    name: "Standard Business",
+    description: "Balanced hosting plan for business sites and eCommerce stores",
+    feature_set_id: "fs_default",
+    feature_set_name: "Default (Full Stack)",
+    is_default: true,
+    users_count: 24,
+    resources: {
+      cpu: 2,
+      memory_mb: 2048,
+      disk_mb: 25600,
+      bandwidth_mb: -1,
+      pids_limit: 256,
+    },
+    limits: {
+      max_domains: 5,
+      max_subdomains: 20,
+      max_databases: 5,
+      max_ftp_accounts: 5,
+      max_email_accounts: 20,
+    },
+    created_at: new Date(Date.now() - 86400 * 1000 * 15).toISOString(),
+    updated_at: new Date(Date.now() - 86400 * 1000 * 2).toISOString(),
+  },
+  {
+    id: "plan_pro",
+    name: "Pro Developer",
+    description: "High-performance compute and database allocation for web agencies",
+    feature_set_id: "fs_default",
+    feature_set_name: "Default (Full Stack)",
+    is_default: false,
+    users_count: 5,
+    resources: {
+      cpu: 4,
+      memory_mb: 4096,
+      disk_mb: 51200,
+      bandwidth_mb: -1,
+      pids_limit: 512,
+    },
+    limits: {
+      max_domains: 20,
+      max_subdomains: 50,
+      max_databases: 20,
+      max_ftp_accounts: 20,
+      max_email_accounts: -1,
+    },
+    created_at: new Date(Date.now() - 86400 * 1000 * 10).toISOString(),
+    updated_at: new Date(Date.now() - 86400 * 1000 * 1).toISOString(),
+  },
+  {
+    id: "plan_enterprise",
+    name: "Enterprise Dedicated",
+    description: "Uncapped resources and unlimited domains for enterprise clients",
+    feature_set_id: "fs_default",
+    feature_set_name: "Default (Full Stack)",
+    is_default: false,
+    users_count: 2,
+    resources: {
+      cpu: -1,
+      memory_mb: -1,
+      disk_mb: -1,
+      bandwidth_mb: -1,
+      pids_limit: -1,
+    },
+    limits: {
+      max_domains: -1,
+      max_subdomains: -1,
+      max_databases: -1,
+      max_ftp_accounts: -1,
+      max_email_accounts: -1,
+    },
+    created_at: new Date(Date.now() - 86400 * 1000 * 5).toISOString(),
+    updated_at: new Date(Date.now() - 86400 * 1000 * 5).toISOString(),
+  },
+];
+
+let plans = getInitialPlans();
+
+export const resetMockPlans = () => {
+  plans = getInitialPlans();
+};
+
 const mockMe = {
   id: "00000000-0000-0000-0000-000000000001",
   username: "admin",
@@ -1389,6 +1528,147 @@ export const handlers = [
     }
 
     featureSets.splice(index, 1);
+    return HttpResponse.json({ success: true });
+  }),
+
+  // Plans: List all hosting plans (GET /api/v1/admin/plans)
+  // TODO(api:T04.03): Replace with real backend plan endpoint
+  http.get(/\/api\/v1\/admin\/plans$/, () => {
+    return HttpResponse.json({
+      items: plans,
+      total: plans.length,
+    });
+  }),
+
+  // Plans: Create hosting plan (POST /api/v1/admin/plans)
+  // TODO(api:T04.03): Replace with real backend plan endpoint
+  http.post(/\/api\/v1\/admin\/plans$/, async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as any;
+    const {
+      name,
+      description = "",
+      feature_set_id = "fs_default",
+      feature_set_name = "Default (Full Stack)",
+      is_default = false,
+      resources = {},
+      limits = {},
+    } = body || {};
+
+    if (!name || typeof name !== "string" || !name.trim()) {
+      return HttpResponse.json(
+        { error: "bad_request", message: "Plan name is required" },
+        { status: 400 }
+      );
+    }
+
+    if (is_default) {
+      plans.forEach((p) => {
+        p.is_default = false;
+      });
+    }
+
+    const newPlan: MockPlan = {
+      id: `plan_${Date.now()}`,
+      name: name.trim(),
+      description: description.trim(),
+      feature_set_id,
+      feature_set_name,
+      is_default: Boolean(is_default),
+      users_count: 0,
+      resources: {
+        cpu: resources.cpu ?? 1,
+        memory_mb: resources.memory_mb ?? 1024,
+        disk_mb: resources.disk_mb ?? 10240,
+        bandwidth_mb: resources.bandwidth_mb ?? -1,
+        pids_limit: resources.pids_limit ?? 100,
+      },
+      limits: {
+        max_domains: limits.max_domains ?? 1,
+        max_subdomains: limits.max_subdomains ?? 5,
+        max_databases: limits.max_databases ?? 1,
+        max_ftp_accounts: limits.max_ftp_accounts ?? 2,
+        max_email_accounts: limits.max_email_accounts ?? 5,
+      },
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    plans.unshift(newPlan);
+    return HttpResponse.json(newPlan, { status: 201 });
+  }),
+
+  // Plans: Update hosting plan (PUT /api/v1/admin/plans/:id)
+  // TODO(api:T04.03): Replace with real backend plan endpoint
+  http.put(/\/api\/v1\/admin\/plans\/([^/]+)$/, async ({ params, request }) => {
+    const id = (params.id || params[0]) as string;
+    const body = (await request.json().catch(() => ({}))) as any;
+    const { name, description, feature_set_id, feature_set_name, is_default, resources, limits } = body || {};
+
+    const index = plans.findIndex((p) => p.id === id);
+    if (index === -1) {
+      return HttpResponse.json(
+        { error: "not_found", message: "Hosting plan not found" },
+        { status: 404 }
+      );
+    }
+
+    if (name !== undefined && (!name || !name.trim())) {
+      return HttpResponse.json(
+        { error: "bad_request", message: "Plan name cannot be empty" },
+        { status: 400 }
+      );
+    }
+
+    if (is_default) {
+      plans.forEach((p) => {
+        p.is_default = false;
+      });
+    }
+
+    const current = plans[index];
+    const updated: MockPlan = {
+      ...current,
+      name: name !== undefined ? name.trim() : current.name,
+      description: description !== undefined ? description.trim() : current.description,
+      feature_set_id: feature_set_id !== undefined ? feature_set_id : current.feature_set_id,
+      feature_set_name: feature_set_name !== undefined ? feature_set_name : current.feature_set_name,
+      is_default: is_default !== undefined ? Boolean(is_default) : current.is_default,
+      resources: resources !== undefined ? { ...current.resources, ...resources } : current.resources,
+      limits: limits !== undefined ? { ...current.limits, ...limits } : current.limits,
+      updated_at: new Date().toISOString(),
+    };
+
+    plans[index] = updated;
+    return HttpResponse.json(updated);
+  }),
+
+  // Plans: Delete hosting plan (DELETE /api/v1/admin/plans/:id)
+  // TODO(api:T04.03): Replace with real backend plan endpoint
+  http.delete(/\/api\/v1\/admin\/plans\/([^/]+)$/, ({ params }) => {
+    const id = (params.id || params[0]) as string;
+    const index = plans.findIndex((p) => p.id === id);
+    if (index === -1) {
+      return HttpResponse.json(
+        { error: "not_found", message: "Hosting plan not found" },
+        { status: 404 }
+      );
+    }
+
+    if (plans[index].is_default) {
+      return HttpResponse.json(
+        { error: "cannot_delete_default", message: "Cannot delete the default hosting plan" },
+        { status: 400 }
+      );
+    }
+
+    if (plans[index].users_count > 0) {
+      return HttpResponse.json(
+        { error: "plan_in_use", message: "Cannot delete plan with active assigned users" },
+        { status: 400 }
+      );
+    }
+
+    plans.splice(index, 1);
     return HttpResponse.json({ success: true });
   }),
 ];

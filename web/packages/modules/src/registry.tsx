@@ -142,6 +142,25 @@ export const registeredFrontendModules: FrontendModule[] = [
   },
   {
     manifest: {
+      name: "plans",
+      title: { en: "Hosting Plans", bn: "হোস্টিং প্ল্যান" },
+      category: "core",
+      core: true,
+      permissions: ["admin.plans.read", "admin.plans.manage"],
+    },
+    adminNav: [
+      {
+        id: "plans",
+        labelKey: "plans.nav",
+        icon: <Boxes className="h-4 w-4" />,
+        href: "/plans",
+        order: 32,
+        permission: "admin.plans.read",
+      },
+    ],
+  },
+  {
+    manifest: {
       name: "audit",
       title: { en: "Audit Logs", bn: "অডিট লগ" },
       category: "core",
