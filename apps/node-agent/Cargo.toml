@@ -8,11 +8,16 @@ license.workspace = true
 publish.workspace = true
 
 [[bin]]
-name = "dhpanel-node-agent"
+# `dhpanel-agent` is the name used in the enrol command shown by the panel.
+name = "dhpanel-agent"
 path = "src/main.rs"
 
 [dependencies]
 dhpanel-common.workspace = true
+# The only network call the agent makes before it has a certificate: one HTTPS
+# POST to enrol. `ureq` is blocking and small; it uses rustls with the `ring`
+# backend (the same one rcgen uses) and the bundled Mozilla root certificates.
+ureq = { version = "3", default-features = false, features = ["rustls", "json"] }
 
 [lints]
 workspace = true
