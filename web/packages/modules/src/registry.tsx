@@ -259,10 +259,21 @@ export const registeredFrontendModules: FrontendModule[] = [
     adminNav: [
       {
         id: "domains",
-        labelKey: "common.domains",
+        labelKey: "domains.nav",
         icon: <Globe className="h-4 w-4" />,
         href: "/domains",
         order: 30,
+        permission: "domains.read",
+        feature: "domains",
+      },
+    ],
+    clientNav: [
+      {
+        id: "domains",
+        labelKey: "domains.nav",
+        icon: <Globe className="h-4 w-4" />,
+        href: "/domains",
+        order: 20,
         permission: "domains.read",
         feature: "domains",
       },
@@ -371,7 +382,8 @@ export function filterNavItems(
 
   for (const mod of modules) {
     // 1. Module Gate: Check if module is core or in active modules
-    const isModuleEnabled = mod.manifest.core || activeModules.includes(mod.manifest.name);
+    const isModuleEnabled =
+      !session.modules || mod.manifest.core || activeModules.includes(mod.manifest.name);
     if (!isModuleEnabled) continue;
 
     // Pick target nav list

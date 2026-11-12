@@ -713,6 +713,77 @@ let mockUsers = getInitialUsers();
 
 export const resetMockUsers = () => {
   mockUsers = getInitialUsers();
+  mockDetailStore = {};
+};
+
+export let mockDetailStore: Record<string, any> = {};
+
+interface MockClientDomain {
+  id: string;
+  name: string;
+  type: "primary" | "addon" | "subdomain" | "alias";
+  docroot: string;
+  is_primary: boolean;
+  ssl_status: "active" | "pending" | "expired" | "self_signed" | "none";
+  ssl_expires_at?: string | null;
+  ssl_issuer?: string | null;
+  dns_status: "active" | "pending" | "proxied" | "error";
+  redirect?: {
+    enabled: boolean;
+    target_url: string;
+    status_code: 301 | 302;
+  } | null;
+  php_version?: string;
+  created_at: string;
+}
+
+const getInitialClientDomains = (): MockClientDomain[] => [
+  {
+    id: "dom_01",
+    name: "alpha-hosting.com",
+    type: "primary",
+    docroot: "/domains/alpha-hosting.com/public_html",
+    is_primary: true,
+    ssl_status: "active",
+    ssl_expires_at: new Date(Date.now() + 86400 * 1000 * 76).toISOString(),
+    ssl_issuer: "Let's Encrypt Authority X3",
+    dns_status: "active",
+    redirect: null,
+    php_version: "PHP 8.3",
+    created_at: new Date(Date.now() - 86400 * 1000 * 14).toISOString(),
+  },
+  {
+    id: "dom_02",
+    name: "blog.alpha-hosting.com",
+    type: "subdomain",
+    docroot: "/domains/blog.alpha-hosting.com/public_html",
+    is_primary: false,
+    ssl_status: "active",
+    ssl_expires_at: new Date(Date.now() + 86400 * 1000 * 60).toISOString(),
+    ssl_issuer: "Let's Encrypt Authority X3",
+    dns_status: "active",
+    redirect: null,
+    php_version: "PHP 8.3",
+    created_at: new Date(Date.now() - 86400 * 1000 * 10).toISOString(),
+  },
+  {
+    id: "dom_03",
+    name: "shop.alpha-hosting.com",
+    type: "subdomain",
+    docroot: "/domains/shop.alpha-hosting.com/public_html",
+    is_primary: false,
+    ssl_status: "pending",
+    dns_status: "pending",
+    redirect: null,
+    php_version: "PHP 8.3",
+    created_at: new Date(Date.now() - 3600 * 1000 * 2).toISOString(),
+  },
+];
+
+let mockClientDomains = getInitialClientDomains();
+
+export const resetMockClientDomains = () => {
+  mockClientDomains = getInitialClientDomains();
 };
 
 const mockMe = {
@@ -724,6 +795,20 @@ const mockMe = {
   mfa_enabled: false,
   permissions: ["*"],
   roles: ["super_admin"],
+  modules: [
+    "dashboard",
+    "security",
+    "users",
+    "nodes",
+    "operations",
+    "feature-sets",
+    "plans",
+    "audit",
+    "domains",
+    "settings",
+    "demo",
+  ],
+  features: ["all"],
   csrf_token: "mock-csrf-token-admin-12345",
 };
 
@@ -1853,12 +1938,19 @@ export const handlers = [
   http.post(/\/api\/v1\/admin\/users\/([^/]+)\/suspend$/, ({ params }) => {
     const id = (params.id || params[0]) as string;
     const user = mockUsers.find((u) => u.id === id);
-    if (!user) {
+    if (!user && !mockDetailStore[id]) {
       return HttpResponse.json({ error: "not_found" }, { status: 404 });
     }
-    user.status = "suspended";
-    user.suspended_at = new Date().toISOString();
-    return HttpResponse.json(user);
+    const suspendedAt = new Date().toISOString();
+    if (user) {
+      user.status = "suspended";
+      user.suspended_at = suspendedAt;
+    }
+    if (mockDetailStore[id]) {
+      mockDetailStore[id].status = "suspended";
+      mockDetailStore[id].suspended_at = suspendedAt;
+    }
+    return HttpResponse.json(user || mockDetailStore[id]);
   }),
 
   // Users: Single unsuspend (POST /api/v1/admin/users/:id/unsuspend)
@@ -1866,12 +1958,18 @@ export const handlers = [
   http.post(/\/api\/v1\/admin\/users\/([^/]+)\/unsuspend$/, ({ params }) => {
     const id = (params.id || params[0]) as string;
     const user = mockUsers.find((u) => u.id === id);
-    if (!user) {
+    if (!user && !mockDetailStore[id]) {
       return HttpResponse.json({ error: "not_found" }, { status: 404 });
     }
-    user.status = "active";
-    user.suspended_at = null;
-    return HttpResponse.json(user);
+    if (user) {
+      user.status = "active";
+      user.suspended_at = null;
+    }
+    if (mockDetailStore[id]) {
+      mockDetailStore[id].status = "active";
+      mockDetailStore[id].suspended_at = null;
+    }
+    return HttpResponse.json(user || mockDetailStore[id]);
   }),
 
   // Users: Impersonate user (POST /api/v1/admin/users/:id/impersonate)
@@ -1959,8 +2057,6 @@ export const handlers = [
   // Users: Get detailed tenant user (GET /api/v1/admin/users/:id)
   // TODO(api:T04.12): Replace with real backend tenant detail endpoint
   ...(() => {
-    const mockDetailStore: Record<string, any> = {};
-
     return [
       http.get(/\/api\/v1\/admin\/users\/([^/]+)$/, ({ params }) => {
         const id = (params.id || params[0]) as string;
@@ -2212,5 +2308,130 @@ export const handlers = [
         },
       ],
     });
+  }),
+
+  // Client: List domains & limits (GET /api/v1/client/domains)
+  // TODO(api:T05.03): Replace with real backend client domains endpoint
+  http.get(/\/api\/v1\/client\/domains$/, () => {
+    return HttpResponse.json({
+      items: mockClientDomains,
+      total: mockClientDomains.length,
+      limits: {
+        max_domains: 5,
+        used_domains: mockClientDomains.length,
+      },
+    });
+  }),
+
+  // Client: Create domain (POST /api/v1/client/domains)
+  // TODO(api:T05.03): Replace with real backend client domain creation endpoint
+  http.post(/\/api\/v1\/client\/domains$/, async ({ request }) => {
+    const body = (await request.json()) as any;
+    if (!body || !body.name) {
+      return HttpResponse.json({ message: "Domain name is required" }, { status: 400 });
+    }
+
+    if (mockClientDomains.length >= 5) {
+      return HttpResponse.json(
+        { message: "Domain limit reached for your plan" },
+        { status: 400 }
+      );
+    }
+
+    const domainName = String(body.name).trim().toLowerCase();
+    const existing = mockClientDomains.find(
+      (d) => d.name.toLowerCase() === domainName
+    );
+    if (existing) {
+      return HttpResponse.json(
+        { message: `Domain ${domainName} is already configured` },
+        { status: 409 }
+      );
+    }
+
+    const newDomain: MockClientDomain = {
+      id: `dom_${Date.now()}`,
+      name: domainName,
+      type: body.type || "addon",
+      docroot: body.docroot || `/domains/${domainName}/public_html`,
+      is_primary: false,
+      ssl_status: body.enable_ssl ? "pending" : "none",
+      ssl_expires_at: null,
+      ssl_issuer: null,
+      dns_status: "pending",
+      redirect: body.redirect?.enabled
+        ? {
+            enabled: true,
+            target_url: body.redirect.target_url,
+            status_code: body.redirect.status_code || 301,
+          }
+        : null,
+      php_version: "PHP 8.3",
+      created_at: new Date().toISOString(),
+    };
+
+    mockClientDomains = [newDomain, ...mockClientDomains];
+    return HttpResponse.json(newDomain, { status: 201 });
+  }),
+
+  // Client: Update docroot (PUT /api/v1/client/domains/:id/docroot)
+  // TODO(api:T05.04): Replace with real backend client update docroot endpoint
+  http.put(/\/api\/v1\/client\/domains\/([^/]+)\/docroot$/, async ({ params, request }) => {
+    const id = params[0] as string;
+    const body = (await request.json()) as any;
+    const domain = mockClientDomains.find((d) => d.id === id);
+    if (!domain) {
+      return HttpResponse.json({ message: "Domain not found" }, { status: 404 });
+    }
+
+    if (!body.docroot || !String(body.docroot).startsWith("/")) {
+      return HttpResponse.json({ message: "Valid document root path is required" }, { status: 400 });
+    }
+
+    domain.docroot = String(body.docroot).trim();
+    return HttpResponse.json(domain);
+  }),
+
+  // Client: Update redirect (PUT /api/v1/client/domains/:id/redirect)
+  // TODO(api:T05.04): Replace with real backend client update redirect endpoint
+  http.put(/\/api\/v1\/client\/domains\/([^/]+)\/redirect$/, async ({ params, request }) => {
+    const id = params[0] as string;
+    const body = (await request.json()) as any;
+    const domain = mockClientDomains.find((d) => d.id === id);
+    if (!domain) {
+      return HttpResponse.json({ message: "Domain not found" }, { status: 404 });
+    }
+
+    if (body.enabled) {
+      domain.redirect = {
+        enabled: true,
+        target_url: body.target_url,
+        status_code: body.status_code || 301,
+      };
+    } else {
+      domain.redirect = null;
+    }
+
+    return HttpResponse.json(domain);
+  }),
+
+  // Client: Delete domain (DELETE /api/v1/client/domains/:id)
+  // TODO(api:T05.03): Replace with real backend client delete domain endpoint
+  http.delete(/\/api\/v1\/client\/domains\/([^/]+)$/, ({ params }) => {
+    const id = params[0] as string;
+    const domain = mockClientDomains.find((d) => d.id === id);
+    if (!domain) {
+      return HttpResponse.json({ message: "Domain not found" }, { status: 404 });
+    }
+
+    if (domain.is_primary) {
+      return HttpResponse.json(
+        { message: "Primary domain cannot be deleted" },
+        { status: 400 }
+      );
+    }
+
+    mockClientDomains = mockClientDomains.filter((d) => d.id !== id);
+    return HttpResponse.json({ status: "deleted", id });
   }),
 ];

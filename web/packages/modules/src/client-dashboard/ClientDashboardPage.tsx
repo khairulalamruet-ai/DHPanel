@@ -33,7 +33,7 @@ import {
 } from "lucide-react";
 import { ClientDashboardData } from "./types";
 
-export function formatBytes(mb: number): string {
+function formatBytes(mb: number): string {
   if (mb === -1) return "∞ Unlimited";
   if (mb < 1024) return `${mb} MB`;
   return `${(mb / 1024).toFixed(1)} GB`;

@@ -40,7 +40,7 @@ import {
 import { UserDetail, UserDetailTab } from "./types";
 import { ResetPasswordDialog } from "./ResetPasswordDialog";
 
-export function formatBytes(mb: number): string {
+function formatBytes(mb: number): string {
   if (mb === -1) return "∞ Unlimited";
   if (mb < 1024) return `${mb} MB`;
   return `${(mb / 1024).toFixed(1)} GB`;

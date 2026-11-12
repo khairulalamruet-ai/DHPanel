@@ -775,5 +775,117 @@
     "toast": {
       "loadError": "Failed to load dashboard data"
     }
+  },
+  "domains": {
+    "nav": "Domains",
+    "title": "Domains",
+    "subtitle": "Manage domains, subdomains, document roots, URL redirections, and SSL certificates.",
+    "addDomain": "Add Domain",
+    "domainName": "Domain",
+    "docroot": "Document Root",
+    "configuredDomains": "Configured Domains",
+    "tableDescription": "Domains served by web server with routing configuration",
+    "searchPlaceholder": "Search domain or docroot...",
+    "openSite": "Open website in new tab",
+    "noResults": "No domains match your search query.",
+    "noDomains": "No domains configured yet.",
+    "cannotDeletePrimary": "Primary domain cannot be deleted",
+    "limitReachedWarning": "You have reached your domain quota limit.",
+    "types": {
+      "primary": "Primary",
+      "addon": "Addon",
+      "subdomain": "Subdomain",
+      "alias": "Alias",
+      "addonHelp": "Separate website with its own files and document root.",
+      "subdomainHelp": "A branch of your existing domain.",
+      "aliasHelp": "Parks this domain on top of an existing website."
+    },
+    "ssl": {
+      "active": "Active",
+      "pending": "Issuing",
+      "expired": "Expired",
+      "selfSigned": "Self-Signed",
+      "none": "No SSL"
+    },
+    "dns": {
+      "resolved": "Connected",
+      "pending": "Pending DNS",
+      "proxied": "Cloudflare CDN",
+      "unresolved": "Not Pointing"
+    },
+    "quota": {
+      "title": "Domain Allocation Usage",
+      "description": "{{used}} of {{max}} domains configured",
+      "limitReachedBadge": "Quota Reached"
+    },
+    "filter": {
+      "allTypes": "All Types"
+    },
+    "table": {
+      "domain": "Domain",
+      "type": "Type",
+      "routing": "Document Root / Redirect",
+      "ssl": "SSL Security",
+      "dns": "DNS Status"
+    },
+    "dialog": {
+      "createTitle": "Add New Domain",
+      "nameLabel": "Domain Name",
+      "namePlaceholder": "e.g. mynewsite.com or blog.mysite.com",
+      "nameHelp": "Enter the fully-qualified domain name (FQDN).",
+      "typeLabel": "Domain Type",
+      "redirectToggle": "Redirect this domain to another URL",
+      "targetUrlLabel": "Redirect Destination (Target URL)",
+      "statusCodeLabel": "Redirect Type",
+      "docrootLabel": "Document Root Path",
+      "docrootHelp": "Directory where website files will be located.",
+      "autoSslTitle": "Free Automatic SSL Included",
+      "autoSslDesc": "Let's Encrypt SSL certificates are issued and renewed automatically once DNS resolves.",
+      "createSubmit": "Add Domain"
+    },
+    "editDocroot": {
+      "title": "Edit Document Root",
+      "help": "Relative to home directory. Files inside this folder are served publicly."
+    },
+    "redirect": {
+      "title": "Manage Redirection",
+      "enable": "Redirect visitors to another URL",
+      "targetUrl": "Target URL",
+      "type": "Redirect Type",
+      "permanent": "Permanent (SEO friendly)",
+      "temporary": "Temporary"
+    },
+    "redirects": {
+      "permanent301": "301 — Permanent (SEO friendly)",
+      "temporary302": "302 — Temporary"
+    },
+    "deleteDialog": {
+      "title": "Delete Domain",
+      "confirm": "Are you sure you want to remove domain {{name}}? Web server virtual host configurations will be removed.",
+      "warning": "Note: Directory files will remain on disk for safety unless manually deleted."
+    },
+    "validation": {
+      "nameRequired": "Domain name is required",
+      "invalidFqdn": "Invalid domain format. Enter a valid fully qualified domain name (e.g. example.com or app.example.com)",
+      "redirectUrlRequired": "Target redirect URL is required when redirection is enabled",
+      "redirectUrlProtocol": "Redirect URL must start with http:// or https://",
+      "redirectUrlInvalid": "Please enter a valid target URL",
+      "redirectUrlSelf": "Cannot redirect a domain to itself",
+      "docrootRequired": "Document root directory is required",
+      "docrootAbsolute": "Document root path must be absolute (start with /)"
+    },
+    "errors": {
+      "loadFailed": "Failed to load domains",
+      "updateDocrootFailed": "Failed to update document root",
+      "updateRedirectFailed": "Failed to update redirection"
+    },
+    "toast": {
+      "createdSuccess": "Domain {{name}} added successfully",
+      "createError": "Failed to create domain",
+      "docrootUpdated": "Document root updated successfully",
+      "redirectUpdated": "Redirection updated successfully",
+      "deletedSuccess": "Domain deleted successfully",
+      "deleteFailed": "Failed to delete domain"
+    }
   }
 }

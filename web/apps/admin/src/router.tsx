@@ -24,6 +24,7 @@ import {
   UserCreateWizardPage,
   UserDetailPage,
   ClientDashboardPage,
+  ClientDomainsPage,
   filterNavItems,
   registeredFrontendModules,
 } from "@dhpanel/modules";
@@ -43,10 +44,18 @@ function AuthenticatedContent() {
     );
   }
 
+  if (!session?.user) {
+    return (
+      <LoginPage
+        title={t("common.adminTitle")}
+        onSuccess={() => router.navigate({ to: "/" })}
+      />
+    );
+  }
+
   return (
     <AppShell
-      appName={t("common.appName")}
-      user={session ? { name: session.user.username } : undefined}
+      title={t("common.adminTitle")}
       navItems={navItems}
     >
       <Outlet />
@@ -180,7 +189,14 @@ const clientRoute = createRoute({
   component: ClientDashboardPage,
 });
 
-// 17. Login route
+// 17. Domains management route (T05.05)
+const domainsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/domains",
+  component: ClientDomainsPage,
+});
+
+// 18. Login route
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/login",
@@ -195,7 +211,7 @@ const loginRoute = createRoute({
   },
 });
 
-// 18. Route Tree
+// 19. Route Tree
 const routeTree = rootRoute.addChildren([
   indexRoute,
   demoRoute,
@@ -212,6 +228,7 @@ const routeTree = rootRoute.addChildren([
   userWizardRoute,
   userDetailRoute,
   clientRoute,
+  domainsRoute,
   loginRoute,
 ]);
 
