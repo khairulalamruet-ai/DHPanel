@@ -786,6 +786,221 @@ export const resetMockClientDomains = () => {
   mockClientDomains = getInitialClientDomains();
 };
 
+interface MockAdminDomain {
+  id: string;
+  name: string;
+  type: "primary" | "addon" | "subdomain" | "alias";
+  tenant_id: string;
+  tenant_username: string;
+  node_id: string;
+  node_name: string;
+  docroot: string;
+  is_primary: boolean;
+  status: "active" | "suspended";
+  suspended_at?: string | null;
+  suspended_reason?: string | null;
+  ssl_status: "active" | "pending" | "expired" | "self_signed" | "none";
+  ssl_expires_at?: string | null;
+  ssl_issuer?: string | null;
+  dns_status: "active" | "pending" | "proxied" | "error";
+  redirect?: {
+    enabled: boolean;
+    target_url: string;
+    status_code: 301 | 302;
+  } | null;
+  php_version?: string;
+  created_at: string;
+}
+
+const getInitialAdminDomains = (): MockAdminDomain[] => {
+  const tenants = [
+    { id: "usr_0001", username: "alpha", node: "node-sgp-01", node_name: "node-sgp-01 (Singapore)" },
+    { id: "usr_0002", username: "beta", node: "node-master-01", node_name: "node-master-01 (US-East)" },
+    { id: "usr_0003", username: "gamma", node: "node-worker-02", node_name: "node-worker-02 (EU-Frankfurt)" },
+    { id: "usr_0004", username: "delta", node: "node-sgp-01", node_name: "node-sgp-01 (Singapore)" },
+  ];
+
+  const items: MockAdminDomain[] = [];
+  tenants.forEach((t, idx) => {
+    items.push({
+      id: `adm_dom_${idx + 1}`,
+      name: `${t.username}-hosting.com`,
+      type: "primary",
+      tenant_id: t.id,
+      tenant_username: t.username,
+      node_id: t.node,
+      node_name: t.node_name,
+      docroot: `/domains/${t.username}-hosting.com/public_html`,
+      is_primary: true,
+      status: "active",
+      ssl_status: "active",
+      ssl_expires_at: new Date(Date.now() + 86400 * 1000 * 75).toISOString(),
+      ssl_issuer: "Let's Encrypt Authority X3",
+      dns_status: "active",
+      redirect: null,
+      php_version: "PHP 8.3",
+      created_at: new Date(Date.now() - 86400 * 1000 * (15 - idx)).toISOString(),
+    });
+  });
+
+  items.push(
+    {
+      id: "adm_dom_05",
+      name: "shop.alpha-hosting.com",
+      type: "subdomain",
+      tenant_id: "usr_0001",
+      tenant_username: "alpha",
+      node_id: "node-sgp-01",
+      node_name: "node-sgp-01 (Singapore)",
+      docroot: "/domains/shop.alpha-hosting.com/public_html",
+      is_primary: false,
+      status: "active",
+      ssl_status: "active",
+      ssl_expires_at: new Date(Date.now() + 86400 * 1000 * 60).toISOString(),
+      ssl_issuer: "Let's Encrypt Authority X3",
+      dns_status: "active",
+      redirect: null,
+      php_version: "PHP 8.3",
+      created_at: new Date(Date.now() - 86400 * 1000 * 10).toISOString(),
+    },
+    {
+      id: "adm_dom_06",
+      name: "blog.beta-hosting.com",
+      type: "subdomain",
+      tenant_id: "usr_0002",
+      tenant_username: "beta",
+      node_id: "node-master-01",
+      node_name: "node-master-01 (US-East)",
+      docroot: "/domains/blog.beta-hosting.com/public_html",
+      is_primary: false,
+      status: "suspended",
+      ssl_status: "expired",
+      dns_status: "active",
+      redirect: null,
+      php_version: "PHP 8.3",
+      created_at: new Date(Date.now() - 86400 * 1000 * 8).toISOString(),
+    },
+    {
+      id: "adm_dom_07",
+      name: "landing.gamma-hosting.com",
+      type: "addon",
+      tenant_id: "usr_0003",
+      tenant_username: "gamma",
+      node_id: "node-worker-02",
+      node_name: "node-worker-02 (EU-Frankfurt)",
+      docroot: "/domains/landing.gamma-hosting.com/public_html",
+      is_primary: false,
+      status: "active",
+      ssl_status: "pending",
+      dns_status: "pending",
+      redirect: null,
+      php_version: "PHP 8.3",
+      created_at: new Date(Date.now() - 86400 * 1000 * 3).toISOString(),
+    }
+  );
+
+  return items;
+};
+
+let mockAdminDomains = getInitialAdminDomains();
+
+export const resetMockAdminDomains = () => {
+  mockAdminDomains = getInitialAdminDomains();
+};
+
+const getInitialOperations = (): any[] => [
+  {
+    id: "00000000-0000-0000-0000-000000000101",
+    idempotency_key: "idemp_ping_001",
+    op_type: "Ping",
+    node_id: "00000000-0000-0000-0000-0000000000aa",
+    node_name: "node-master-01",
+    tenant_id: null,
+    status: "succeeded",
+    retries_count: 0,
+    payload: { echo: "dhpanel-heartbeat", timestamp: new Date(Date.now() - 60000).toISOString() },
+    output: { pong: true, latency_ms: 1.4 },
+    error: null,
+    created_at: new Date(Date.now() - 65000).toISOString(),
+    updated_at: new Date(Date.now() - 60000).toISOString(),
+  },
+  {
+    id: "00000000-0000-0000-0000-000000000102",
+    idempotency_key: "idemp_domain_002",
+    op_type: "AttachDomain",
+    node_id: "00000000-0000-0000-0000-0000000000aa",
+    node_name: "node-master-01",
+    tenant_id: "00000000-0000-0000-0000-000000000001",
+    status: "succeeded",
+    retries_count: 0,
+    payload: { domain: "example.com", docroot: "/var/www/example.com", php: "8.3" },
+    output: { vhost_created: true, caddy_reloaded: true },
+    error: null,
+    created_at: new Date(Date.now() - 120000).toISOString(),
+    updated_at: new Date(Date.now() - 110000).toISOString(),
+  },
+  {
+    id: "00000000-0000-0000-0000-000000000103",
+    idempotency_key: "idemp_pull_003",
+    op_type: "PullImage",
+    node_id: "00000000-0000-0000-0000-0000000000bb",
+    node_name: "node-worker-02",
+    tenant_id: null,
+    status: "failed",
+    retries_count: 2,
+    payload: { image: "redis:7.4-alpine", digest: "sha256:7f9202a061b" },
+    output: null,
+    error: {
+      code: "image_pull_timeout",
+      message: "Network timeout while pulling container image layer 3 from registry",
+      details: { registry: "docker.io", layer: "sha256:4a8bc9...", elapsed_seconds: 45 },
+    },
+    created_at: new Date(Date.now() - 300000).toISOString(),
+    updated_at: new Date(Date.now() - 250000).toISOString(),
+  },
+  {
+    id: "00000000-0000-0000-0000-000000000104",
+    idempotency_key: "idemp_db_004",
+    op_type: "CreateDatabase",
+    node_id: "00000000-0000-0000-0000-0000000000bb",
+    node_name: "node-worker-02",
+    tenant_id: "00000000-0000-0000-0000-000000000001",
+    status: "retryable",
+    retries_count: 1,
+    payload: { name: "demo_db", user: "db_user", charset: "utf8mb4" },
+    output: null,
+    error: {
+      code: "connection_refused",
+      message: "Database socket connection refused: daemon is initializing",
+      details: { socket: "/var/run/mysqld/mysqld.sock" },
+    },
+    created_at: new Date(Date.now() - 400000).toISOString(),
+    updated_at: new Date(Date.now() - 350000).toISOString(),
+  },
+  {
+    id: "00000000-0000-0000-0000-000000000105",
+    idempotency_key: "idemp_reload_005",
+    op_type: "ReloadWebServer",
+    node_id: "00000000-0000-0000-0000-0000000000aa",
+    node_name: "node-master-01",
+    tenant_id: null,
+    status: "dispatched",
+    retries_count: 0,
+    payload: { graceful: true },
+    output: null,
+    error: null,
+    created_at: new Date(Date.now() - 5000).toISOString(),
+    updated_at: new Date(Date.now() - 3000).toISOString(),
+  },
+];
+
+let mockOperations = getInitialOperations();
+
+export const resetMockOperations = () => {
+  mockOperations = getInitialOperations();
+};
+
+
 const mockMe = {
   id: "00000000-0000-0000-0000-000000000001",
   username: "admin",
@@ -1295,152 +1510,71 @@ export const handlers = [
     ];
   })(),
   // Operations Ledger (T02.10, T02.11, T02.17) TODO(api:T02.17)
-  ...(() => {
-    const mockOperations: any[] = [
-      {
-        id: "00000000-0000-0000-0000-000000000101",
-        idempotency_key: "idemp_ping_001",
-        op_type: "Ping",
-        node_id: "00000000-0000-0000-0000-0000000000aa",
-        node_name: "node-master-01",
-        tenant_id: null,
-        status: "succeeded",
-        retries_count: 0,
-        payload: { echo: "dhpanel-heartbeat", timestamp: new Date(Date.now() - 60000).toISOString() },
-        output: { pong: true, latency_ms: 1.4 },
-        error: null,
-        created_at: new Date(Date.now() - 65000).toISOString(),
-        updated_at: new Date(Date.now() - 60000).toISOString(),
-      },
-      {
-        id: "00000000-0000-0000-0000-000000000102",
-        idempotency_key: "idemp_domain_002",
-        op_type: "AttachDomain",
-        node_id: "00000000-0000-0000-0000-0000000000aa",
-        node_name: "node-master-01",
-        tenant_id: "00000000-0000-0000-0000-000000000001",
-        status: "succeeded",
-        retries_count: 0,
-        payload: { domain: "example.com", docroot: "/var/www/example.com", php: "8.3" },
-        output: { vhost_created: true, caddy_reloaded: true },
-        error: null,
-        created_at: new Date(Date.now() - 120000).toISOString(),
-        updated_at: new Date(Date.now() - 110000).toISOString(),
-      },
-      {
-        id: "00000000-0000-0000-0000-000000000103",
-        idempotency_key: "idemp_pull_003",
-        op_type: "PullImage",
-        node_id: "00000000-0000-0000-0000-0000000000bb",
-        node_name: "node-worker-02",
-        tenant_id: null,
-        status: "failed",
-        retries_count: 2,
-        payload: { image: "redis:7.4-alpine", digest: "sha256:7f9202a061b" },
-        output: null,
-        error: {
-          code: "image_pull_timeout",
-          message: "Network timeout while pulling container image layer 3 from registry",
-          details: { registry: "docker.io", layer: "sha256:4a8bc9...", elapsed_seconds: 45 },
-        },
-        created_at: new Date(Date.now() - 300000).toISOString(),
-        updated_at: new Date(Date.now() - 250000).toISOString(),
-      },
-      {
-        id: "00000000-0000-0000-0000-000000000104",
-        idempotency_key: "idemp_db_004",
-        op_type: "CreateDatabase",
-        node_id: "00000000-0000-0000-0000-0000000000bb",
-        node_name: "node-worker-02",
-        tenant_id: "00000000-0000-0000-0000-000000000001",
-        status: "retryable",
-        retries_count: 1,
-        payload: { name: "demo_db", user: "db_user", charset: "utf8mb4" },
-        output: null,
-        error: {
-          code: "connection_refused",
-          message: "Database socket connection refused: daemon is initializing",
-          details: { socket: "/var/run/mysqld/mysqld.sock" },
-        },
-        created_at: new Date(Date.now() - 400000).toISOString(),
-        updated_at: new Date(Date.now() - 350000).toISOString(),
-      },
-      {
-        id: "00000000-0000-0000-0000-000000000105",
-        idempotency_key: "idemp_reload_005",
-        op_type: "ReloadWebServer",
-        node_id: "00000000-0000-0000-0000-0000000000aa",
-        node_name: "node-master-01",
-        tenant_id: null,
-        status: "dispatched",
-        retries_count: 0,
-        payload: { graceful: true },
-        output: null,
-        error: null,
-        created_at: new Date(Date.now() - 5000).toISOString(),
-        updated_at: new Date(Date.now() - 3000).toISOString(),
-      },
-    ];
+  // List operations (GET /api/v1/admin/operations)
+  http.get(/\/api\/v1\/admin\/operations$/, ({ request }) => {
+    const url = new URL(request.url);
+    const status = url.searchParams.get("status");
+    const opType = url.searchParams.get("op_type");
+    const nodeId = url.searchParams.get("node_id");
 
-    return [
-      // List operations (GET /api/v1/admin/operations)
-      http.get(/\/api\/v1\/admin\/operations$/, ({ request }) => {
-        const url = new URL(request.url);
-        const status = url.searchParams.get("status");
-        const opType = url.searchParams.get("op_type");
-        const nodeId = url.searchParams.get("node_id");
+    let items = [...mockOperations];
+    if (status && status !== "all") {
+      items = items.filter((op) => op.status === status);
+    }
+    if (opType) {
+      items = items.filter((op) => op.op_type.toLowerCase().includes(opType.toLowerCase()));
+    }
+    if (nodeId) {
+      items = items.filter((op) => op.node_id === nodeId || op.node_name === nodeId);
+    }
 
-        let items = [...mockOperations];
-        if (status && status !== "all") {
-          items = items.filter((op) => op.status === status);
-        }
-        if (opType) {
-          items = items.filter((op) => op.op_type.toLowerCase().includes(opType.toLowerCase()));
-        }
-        if (nodeId) {
-          items = items.filter((op) => op.node_id === nodeId || op.node_name === nodeId);
-        }
+    return HttpResponse.json({
+      items,
+      total: items.length,
+    });
+  }),
 
-        return HttpResponse.json({
-          items,
-          total: items.length,
-        });
-      }),
+  // Get single operation (GET /api/v1/admin/operations/:id)
+  http.get(/\/api\/v1\/admin\/operations\/([^/]+)$/, ({ params }) => {
+    const id = (params.id || (params as any)[0] || (params as any)["0"]) as string;
+    const op = mockOperations.find((o) => o.id === id);
+    if (op) {
+      return HttpResponse.json(op);
+    }
+    // Fallback for mock tenant creation or other generic mock operations
+    return HttpResponse.json({
+      id,
+      status: "succeeded",
+      op_type: "GenericOperation",
+      action: "tenant.create",
+      progress_pct: 100,
+      container_status: "running",
+      completed_at: new Date().toISOString(),
+    });
+  }),
 
-      // Get single operation (GET /api/v1/admin/operations/:id)
-      http.get(/\/api\/v1\/admin\/operations\/([^/]+)$/, ({ params }) => {
-        const { 0: id } = params as any;
-        const op = mockOperations.find((o) => o.id === id);
-        if (!op) {
-          return HttpResponse.json({ error: "not_found", message: "Operation not found" }, { status: 404 });
-        }
-        return HttpResponse.json(op);
-      }),
+  // Retry operation (POST /api/v1/admin/operations/:id/retry)
+  http.post(/\/api\/v1\/admin\/operations\/([^/]+)\/retry$/, ({ params }) => {
+    const { 0: id } = params as any;
+    const opIndex = mockOperations.findIndex((o) => o.id === id);
+    if (opIndex === -1) {
+      return HttpResponse.json({ error: "not_found", message: "Operation not found" }, { status: 404 });
+    }
 
-      // Retry operation (POST /api/v1/admin/operations/:id/retry)
-      http.post(/\/api\/v1\/admin\/operations\/([^/]+)\/retry$/, ({ params }) => {
-        const { 0: id } = params as any;
-        const opIndex = mockOperations.findIndex((o) => o.id === id);
-        if (opIndex === -1) {
-          return HttpResponse.json({ error: "not_found", message: "Operation not found" }, { status: 404 });
-        }
+    const updated = {
+      ...mockOperations[opIndex],
+      status: "pending",
+      retries_count: mockOperations[opIndex].retries_count + 1,
+      error: null,
+      updated_at: new Date().toISOString(),
+    };
+    mockOperations[opIndex] = updated;
 
-        const updated = {
-          ...mockOperations[opIndex],
-          status: "pending",
-          retries_count: mockOperations[opIndex].retries_count + 1,
-          error: null,
-          updated_at: new Date().toISOString(),
-        };
-        mockOperations[opIndex] = updated;
-
-        return HttpResponse.json({
-          success: true,
-          operation: updated,
-        });
-      }),
-    ];
-  })(),
+    return HttpResponse.json({
+      success: true,
+      operation: updated,
+    });
+  }),
 
   // Modules: List all modules (GET /api/v1/admin/modules)
   // TODO(api:T03.03): Replace with real backend endpoint
@@ -2040,19 +2174,6 @@ export const handlers = [
     );
   }),
 
-  // Operations: Get operation status (GET /api/v1/admin/operations/:id)
-  // TODO(api:T02.17): Replace with real ledger endpoint
-  http.get(/\/api\/v1\/admin\/operations\/([^/]+)$/, ({ params }) => {
-    const id = (params.id || params[0]) as string;
-    return HttpResponse.json({
-      id,
-      status: "succeeded",
-      action: "tenant.create",
-      progress_pct: 100,
-      container_status: "running",
-      completed_at: new Date().toISOString(),
-    });
-  }),
 
   // Users: Get detailed tenant user (GET /api/v1/admin/users/:id)
   // TODO(api:T04.12): Replace with real backend tenant detail endpoint
@@ -2432,6 +2553,166 @@ export const handlers = [
     }
 
     mockClientDomains = mockClientDomains.filter((d) => d.id !== id);
+    return HttpResponse.json({ status: "deleted", id });
+  }),
+
+  // Admin: List all domains with filters (GET /api/v1/admin/domains)
+  // TODO(api:T05.03): Replace with real backend admin domains endpoint
+  http.get(/\/api\/v1\/admin\/domains$/, ({ request }) => {
+    const url = new URL(request.url);
+    const q = (url.searchParams.get("q") || "").toLowerCase().trim();
+    const status = url.searchParams.get("status") || "all";
+    const type = url.searchParams.get("type") || "all";
+    const node = url.searchParams.get("node") || "all";
+    const page = Math.max(1, parseInt(url.searchParams.get("page") || "1", 10));
+    const perPage = Math.max(1, parseInt(url.searchParams.get("per_page") || "10", 10));
+
+    const filtered = mockAdminDomains.filter((d) => {
+      const matchSearch =
+        !q ||
+        d.name.toLowerCase().includes(q) ||
+        d.tenant_username.toLowerCase().includes(q);
+      const matchStatus = status === "all" || d.status === status;
+      const matchType = type === "all" || d.type === type;
+      const matchNode = node === "all" || d.node_id === node || d.node_name.includes(node);
+      return matchSearch && matchStatus && matchType && matchNode;
+    });
+
+    const total = filtered.length;
+    const totalPages = Math.max(1, Math.ceil(total / perPage));
+    const start = (page - 1) * perPage;
+    const paginated = filtered.slice(start, start + perPage);
+
+    return HttpResponse.json({
+      items: paginated,
+      total,
+      page,
+      per_page: perPage,
+      total_pages: totalPages,
+      stats: {
+        total_domains: mockAdminDomains.length,
+        active_domains: mockAdminDomains.filter((d) => d.status === "active").length,
+        suspended_domains: mockAdminDomains.filter((d) => d.status === "suspended").length,
+        ssl_active_count: mockAdminDomains.filter((d) => d.ssl_status === "active").length,
+      },
+    });
+  }),
+
+  // Admin: Bulk add domains into operation queue (POST /api/v1/admin/domains/bulk-create)
+  // TODO(api:T05.03): Replace with real backend bulk create endpoint
+  http.post(/\/api\/v1\/admin\/domains\/bulk-create$/, async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as any;
+    const { tenant_id = "usr_0001", node_id = "node-sgp-01", domains = [], enable_ssl = true } = body || {};
+
+    const opId = `op_bulk_dom_${Date.now()}`;
+    const tenantUsername = tenant_id === "usr_0001" ? "alpha" : "tenant";
+    const nodeName = `${node_id} (Cluster)`;
+
+    // Add domains to mockAdminDomains
+    const newItems: MockAdminDomain[] = domains.map((domainName: string, idx: number) => ({
+      id: `adm_bulk_${Date.now()}_${idx}`,
+      name: String(domainName).toLowerCase(),
+      type: "addon" as const,
+      tenant_id,
+      tenant_username: tenantUsername,
+      node_id,
+      node_name: nodeName,
+      docroot: `/domains/${String(domainName).toLowerCase()}/public_html`,
+      is_primary: false,
+      status: "active" as const,
+      ssl_status: enable_ssl ? ("pending" as const) : ("none" as const),
+      dns_status: "pending" as const,
+      redirect: null,
+      php_version: "PHP 8.3",
+      created_at: new Date().toISOString(),
+    }));
+
+    mockAdminDomains = [...newItems, ...mockAdminDomains];
+
+    // Register successful background operation in mock store
+    mockOperations.unshift({
+      id: opId,
+      idempotency_key: `idemp_${opId}`,
+      op_type: "AttachDomain",
+      node_id,
+      tenant_id,
+      status: "succeeded",
+      retries_count: 0,
+      payload: { count: domains.length, tenant_id, node_id },
+      output: { message: `Successfully attached ${domains.length} domains`, count: domains.length },
+      error: null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+
+    return HttpResponse.json({
+      operation_id: opId,
+      total_requested: domains.length,
+      enqueued_count: domains.length,
+      skipped_count: 0,
+      status: "queued",
+    });
+  }),
+
+  // Admin: Suspend domain (POST /api/v1/admin/domains/:id/suspend)
+  http.post(/\/api\/v1\/admin\/domains\/([^/]+)\/suspend$/, ({ params }) => {
+    const id = params[0] as string;
+    const domain = mockAdminDomains.find((d) => d.id === id);
+    if (!domain) {
+      return HttpResponse.json({ message: "Domain not found" }, { status: 404 });
+    }
+    domain.status = "suspended";
+    domain.suspended_at = new Date().toISOString();
+    return HttpResponse.json(domain);
+  }),
+
+  // Admin: Unsuspend domain (POST /api/v1/admin/domains/:id/unsuspend)
+  http.post(/\/api\/v1\/admin\/domains\/([^/]+)\/unsuspend$/, ({ params }) => {
+    const id = params[0] as string;
+    const domain = mockAdminDomains.find((d) => d.id === id);
+    if (!domain) {
+      return HttpResponse.json({ message: "Domain not found" }, { status: 404 });
+    }
+    domain.status = "active";
+    domain.suspended_at = null;
+    return HttpResponse.json(domain);
+  }),
+
+  // Admin: Bulk suspend (POST /api/v1/admin/domains/bulk-suspend)
+  http.post(/\/api\/v1\/admin\/domains\/bulk-suspend$/, async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as any;
+    const ids: string[] = body?.ids || [];
+    const now = new Date().toISOString();
+    mockAdminDomains.forEach((d) => {
+      if (ids.includes(d.id)) {
+        d.status = "suspended";
+        d.suspended_at = now;
+      }
+    });
+    return HttpResponse.json({ success: true, count: ids.length });
+  }),
+
+  // Admin: Bulk unsuspend (POST /api/v1/admin/domains/bulk-unsuspend)
+  http.post(/\/api\/v1\/admin\/domains\/bulk-unsuspend$/, async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as any;
+    const ids: string[] = body?.ids || [];
+    mockAdminDomains.forEach((d) => {
+      if (ids.includes(d.id)) {
+        d.status = "active";
+        d.suspended_at = null;
+      }
+    });
+    return HttpResponse.json({ success: true, count: ids.length });
+  }),
+
+  // Admin: Delete domain (DELETE /api/v1/admin/domains/:id)
+  http.delete(/\/api\/v1\/admin\/domains\/([^/]+)$/, ({ params }) => {
+    const id = params[0] as string;
+    const domain = mockAdminDomains.find((d) => d.id === id);
+    if (!domain) {
+      return HttpResponse.json({ message: "Domain not found" }, { status: 404 });
+    }
+    mockAdminDomains = mockAdminDomains.filter((d) => d.id !== id);
     return HttpResponse.json({ status: "deleted", id });
   }),
 ];

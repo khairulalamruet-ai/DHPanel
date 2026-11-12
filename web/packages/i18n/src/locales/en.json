@@ -887,5 +887,68 @@
       "deletedSuccess": "Domain deleted successfully",
       "deleteFailed": "Failed to delete domain"
     }
+  },
+  "adminDomains": {
+    "title": "All Domains",
+    "subtitle": "Manage virtual hosts, tenant owners, cluster nodes, and SSL certificates across all tenants.",
+    "bulkAdd": "Bulk Add (Queue)",
+    "searchPlaceholder": "Search domain or tenant username...",
+    "owner": "Target Tenant / Owner",
+    "node": "Cluster Node",
+    "tableTitle": "Cluster Web Domains",
+    "tableSubtitle": "Live overview of host routing, owner mappings, and node distributions",
+    "table": {
+      "owner": "Owner (Tenant)",
+      "node": "Cluster Node"
+    },
+    "metrics": {
+      "total": "Total Domains",
+      "active": "Active",
+      "suspended": "Suspended",
+      "sslActive": "Active SSL"
+    },
+    "filters": {
+      "allStatuses": "All Statuses",
+      "active": "Active",
+      "suspended": "Suspended",
+      "allTypes": "All Types",
+      "allNodes": "All Nodes"
+    },
+    "status": {
+      "active": "Active",
+      "suspended": "Suspended"
+    },
+    "actions": {
+      "suspend": "Suspend",
+      "unsuspend": "Unsuspend"
+    },
+    "bulk": {
+      "title": "Bulk Add Domains (Queue)",
+      "selectedCount": "{{count}} domains selected",
+      "suspendSelected": "Suspend Selected",
+      "unsuspendSelected": "Unsuspend Selected",
+      "noValidDomains": "Please enter at least one valid fully qualified domain name.",
+      "maxLimitError": "Maximum 100 domains can be queued in a single bulk operation.",
+      "enqueueError": "Failed to enqueue bulk domain creation operation",
+      "provisioningCount": "Provisioning {{count}} domains via operation queue...",
+      "successNotice": "Successfully registered {{count}} domains across virtual hosts and DNS zone templates.",
+      "domainsListLabel": "Domain Names (1 per line, max 100)",
+      "sample100": "Sample 100 domains",
+      "validCount": "Valid FQDNs:",
+      "invalidSyntax": "invalid format",
+      "autoSsl": "Issue automatic Let's Encrypt SSL certificates",
+      "submitBtn": "Add {{count}} Domains to Queue"
+    },
+    "toast": {
+      "suspended": "Domain '{{name}}' has been suspended",
+      "unsuspended": "Domain '{{name}}' has been unsuspended",
+      "deleted": "Domain '{{name}}' deleted successfully",
+      "bulkUpdated": "Updated {{count}} domains"
+    },
+    "errors": {
+      "loadFailed": "Failed to load admin domains",
+      "statusFailed": "Failed to update domain status",
+      "deleteFailed": "Failed to delete domain"
+    }
   }
 }

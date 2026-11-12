@@ -2,8 +2,8 @@ import { test, expect } from "@playwright/test";
 
 test.describe("Client Domains Management UI (T05.05)", () => {
   test.beforeEach(async ({ page }) => {
-    // Navigate directly to the domains page
-    await page.goto("/domains");
+    // Navigate directly to the client domains page
+    await page.goto("/client/domains");
   });
 
   test("loads domains page with quota banner and configured domains", async ({ page }) => {
@@ -12,7 +12,7 @@ test.describe("Client Domains Management UI (T05.05)", () => {
 
     // Primary domain row
     await expect(page.getByText("alpha-hosting.com", { exact: true })).toBeVisible();
-    await expect(page.getByText(/Primary|প্রাথমিক/i)).toBeVisible();
+    await expect(page.getByText(/Primary|প্রাথমিক/i).first()).toBeVisible();
     await expect(page.getByText(/Active|সক্রিয়/i).first()).toBeVisible();
 
     // Quota banner

@@ -12,6 +12,11 @@ export interface UseOperationOptions {
 export function useOperation(opId: string | null | undefined, options: UseOperationOptions = {}) {
   const { enabled = true, pollInterval = 2000, onSuccess, onError } = options;
 
+  const onSuccessRef = useRef(onSuccess);
+  onSuccessRef.current = onSuccess;
+  const onErrorRef = useRef(onError);
+  onErrorRef.current = onError;
+
   const [operation, setOperation] = useState<OperationItem | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isPolling, setIsPolling] = useState<boolean>(false);
@@ -28,10 +33,10 @@ export function useOperation(opId: string | null | undefined, options: UseOperat
     } catch (err) {
       const e = err instanceof Error ? err : new Error(String(err));
       setError(e);
-      onError?.(e);
+      onErrorRef.current?.(e);
       return null;
     }
-  }, [opId, onError]);
+  }, [opId]);
 
   const retry = useCallback(async () => {
     if (!opId) return null;
@@ -80,7 +85,7 @@ export function useOperation(opId: string | null | undefined, options: UseOperat
         } else {
           setIsPolling(false);
           if (data.status === "succeeded") {
-            onSuccess?.(data);
+            onSuccessRef.current?.(data);
           }
         }
       } else {
@@ -94,7 +99,7 @@ export function useOperation(opId: string | null | undefined, options: UseOperat
       isMounted = false;
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [opId, enabled, pollInterval, fetchOperation, onSuccess]);
+  }, [opId, enabled, pollInterval, fetchOperation]);
 
   return {
     operation,
