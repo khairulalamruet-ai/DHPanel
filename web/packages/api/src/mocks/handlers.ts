@@ -1556,6 +1556,63 @@ export const resetMockPhp = () => {
   mockClientPhpConfig = getInitialPhpConfig();
 };
 
+interface MockService {
+  id: string;
+  name: "nginx" | "php-fpm";
+  display_name: string;
+  description: string;
+  status: "running" | "stopped" | "restarting" | "degraded";
+  uptime_seconds: number;
+  memory_usage_mb: number;
+  cpu_percent: number;
+  workers_count: number;
+  last_restarted_at: string;
+  restarts_limit_per_minute: number;
+}
+
+const getInitialServices = (): MockService[] => [
+  {
+    id: "srv_nginx",
+    name: "nginx",
+    display_name: "Nginx Web Server",
+    description: "Reverse proxy, static asset delivery, and TLS termination engine",
+    status: "running",
+    uptime_seconds: 84600,
+    memory_usage_mb: 48,
+    cpu_percent: 0.8,
+    workers_count: 4,
+    last_restarted_at: new Date(Date.now() - 86400 * 1000).toISOString(),
+    restarts_limit_per_minute: 3,
+  },
+  {
+    id: "srv_php_fpm",
+    name: "php-fpm",
+    display_name: "PHP-FPM Process Manager",
+    description: "FastCGI process pool serving dynamic tenant PHP applications",
+    status: "running",
+    uptime_seconds: 43200,
+    memory_usage_mb: 136,
+    cpu_percent: 1.4,
+    workers_count: 6,
+    last_restarted_at: new Date(Date.now() - 43200 * 1000).toISOString(),
+    restarts_limit_per_minute: 3,
+  },
+];
+
+let mockServices = getInitialServices();
+let mockServiceRestartsLog: Record<string, number[]> = {
+  nginx: [],
+  "php-fpm": [],
+};
+
+export const resetMockServices = () => {
+  mockServices = getInitialServices();
+  mockServiceRestartsLog = {
+    nginx: [],
+    "php-fpm": [],
+  };
+};
+
 
 const mockMe = {
   id: "00000000-0000-0000-0000-000000000001",
@@ -3967,6 +4024,64 @@ export const handlers = [
       success: true,
       message: "php.ini directives reset to hosting plan defaults.",
       ini_settings: mockClientPhpConfig.ini_settings,
+    });
+  }),
+
+  // Services: List web services (GET /api/v1/client/services)
+  // TODO(api:T06.12): Replace with real backend client services endpoint
+  http.get(/\/api\/v1\/client\/services$/, () => {
+    const now = Date.now();
+    const items = mockServices.map((srv) => {
+      const recent = (mockServiceRestartsLog[srv.name] || []).filter((t) => now - t < 60000);
+      return {
+        ...srv,
+        restarts_count_this_minute: recent.length,
+      };
+    });
+    return HttpResponse.json({
+      items,
+      total: items.length,
+    });
+  }),
+
+  // Services: Restart service (POST /api/v1/client/services/:serviceName/restart)
+  // TODO(api:T06.12): Replace with real backend service restart endpoint
+  http.post(/\/api\/v1\/client\/services\/([^/]+)\/restart$/, ({ params }) => {
+    const serviceName = (params.serviceName || params[0]) as "nginx" | "php-fpm";
+    const srv = mockServices.find((s) => s.name === serviceName);
+    if (!srv) {
+      return HttpResponse.json({ message: `Service ${serviceName} not found` }, { status: 404 });
+    }
+
+    const now = Date.now();
+    const recent = (mockServiceRestartsLog[serviceName] || []).filter((t) => now - t < 60000);
+
+    // T06.12 DoD: Rate limit 3 restarts per minute -> 429
+    if (recent.length >= 3) {
+      const oldest = recent[0];
+      const retryAfter = Math.max(1, Math.ceil((oldest + 60000 - now) / 1000));
+      return HttpResponse.json(
+        {
+          error: "rate_limit_exceeded",
+          message: "Rate limit exceeded: You can restart this service at most 3 times per minute.",
+          retry_after_seconds: retryAfter,
+        },
+        { status: 429 }
+      );
+    }
+
+    recent.push(now);
+    mockServiceRestartsLog[serviceName] = recent;
+    srv.last_restarted_at = new Date().toISOString();
+    srv.uptime_seconds = 0;
+
+    return HttpResponse.json({
+      success: true,
+      message: `${srv.display_name} restarted successfully.`,
+      service: {
+        ...srv,
+        restarts_count_this_minute: recent.length,
+      },
     });
   }),
 ];

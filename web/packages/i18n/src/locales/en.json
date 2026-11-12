@@ -1167,5 +1167,20 @@
       "versionUpdateFailed": "Failed to update PHP version",
       "iniSaveFailed": "Failed to update php.ini directives"
     }
+  },
+  "services": {
+    "title": "Web Services Management",
+    "subtitle": "Monitor daemon process health, inspect runtime metrics, and safely trigger zero-downtime restarts.",
+    "nav": "Web Services",
+    "rateLimitTitle": "Service Restart Rate Limit Policy",
+    "rateLimitDesc": "Each web service (Nginx, PHP-FPM) can be restarted at most 3 times per minute. Further attempts will be blocked with HTTP 429 Too Many Requests until the cooldown period elapses.",
+    "actions": {
+      "restart": "Restart Service"
+    },
+    "errors": {
+      "fetchFailed": "Failed to load web services status",
+      "restartFailed": "Failed to restart service",
+      "rateLimited": "Too many restart requests. You can restart this service at most 3 times per minute."
+    }
   }
 }

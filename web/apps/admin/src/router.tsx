@@ -30,6 +30,7 @@ import {
   SslPage,
   VhostTemplatesPage,
   PhpManagementPage,
+  ServicesPage,
   filterNavItems,
   registeredFrontendModules,
 } from "@dhpanel/modules";
@@ -236,6 +237,13 @@ const phpRoute = createRoute({
   component: PhpManagementPage,
 });
 
+// 23. Web Services Management route (T06.12)
+const servicesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/services",
+  component: ServicesPage,
+});
+
 // 18. Login route
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -274,6 +282,7 @@ const routeTree = rootRoute.addChildren([
   sslRoute,
   vhostRoute,
   phpRoute,
+  servicesRoute,
   loginRoute,
 ]);
 

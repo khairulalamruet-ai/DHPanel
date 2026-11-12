@@ -395,6 +395,37 @@ export const registeredFrontendModules: FrontendModule[] = [
   },
   {
     manifest: {
+      name: "services",
+      title: { en: "Web Services", bn: "ওয়েব সার্ভিস" },
+      category: "webserver",
+      core: true,
+      permissions: ["services.read", "services.restart"],
+      features: ["services"],
+    },
+    adminNav: [
+      {
+        id: "services",
+        labelKey: "services.nav",
+        icon: <Activity className="h-4 w-4" />,
+        href: "/services",
+        order: 39,
+        permission: "services.read",
+      },
+    ],
+    clientNav: [
+      {
+        id: "services",
+        labelKey: "services.nav",
+        icon: <Activity className="h-4 w-4" />,
+        href: "/services",
+        order: 28,
+        permission: "services.read",
+        feature: "services",
+      },
+    ],
+  },
+  {
+    manifest: {
       name: "users",
       title: { en: "Users", bn: "ব্যবহারকারী" },
       category: "core",

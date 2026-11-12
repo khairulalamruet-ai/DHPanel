@@ -9,7 +9,7 @@ import { ThemeProvider, ToastProvider } from "@dhpanel/ui";
 import { SessionProvider, useSession, LoginPage, AccountSecurityPage } from "@dhpanel/auth";
 import { queryClient, QueryClientProvider } from "@dhpanel/api";
 import { AppShell, NotFoundPage, RouteErrorFallback } from "@dhpanel/shell";
-import { ClientDashboardPage, ClientDomainsPage, DnsEditorPage, SslPage, PhpManagementPage } from "@dhpanel/modules";
+import { ClientDashboardPage, ClientDomainsPage, DnsEditorPage, SslPage, PhpManagementPage, ServicesPage } from "@dhpanel/modules";
 import { useTranslation } from "@dhpanel/i18n";
 import { LayoutDashboard, ShieldCheck, Globe, Lock } from "lucide-react";
 
@@ -124,6 +124,12 @@ const phpRoute = createRoute({
   component: PhpManagementPage,
 });
 
+const servicesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/services",
+  component: ServicesPage,
+});
+
 const securityRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/security",
@@ -144,7 +150,7 @@ const loginRoute = createRoute({
   },
 });
 
-const routeTree = rootRoute.addChildren([indexRoute, domainsRoute, dnsRoute, sslRoute, phpRoute, securityRoute, loginRoute]);
+const routeTree = rootRoute.addChildren([indexRoute, domainsRoute, dnsRoute, sslRoute, phpRoute, servicesRoute, securityRoute, loginRoute]);
 
 export const router = createRouter({
   routeTree,
