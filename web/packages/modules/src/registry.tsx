@@ -1,5 +1,5 @@
 import React from "react";
-import { LayoutDashboard, ShieldCheck, Sparkles, Puzzle, Globe, Users, Settings, FileText, Boxes, Server, Activity, Layers, Lock, FileCode2 } from "lucide-react";
+import { LayoutDashboard, ShieldCheck, Sparkles, Puzzle, Globe, Users, Settings, FileText, Boxes, Server, Activity, Layers, Lock, FileCode2, Cpu } from "lucide-react";
 
 export interface ModuleManifest {
   name: string;
@@ -359,6 +359,37 @@ export const registeredFrontendModules: FrontendModule[] = [
         href: "/vhost-templates",
         order: 36,
         permission: "admin.vhost.manage",
+      },
+    ],
+  },
+  {
+    manifest: {
+      name: "php",
+      title: { en: "PHP Runtime", bn: "পিএইচপি রানটাইম" },
+      category: "webserver",
+      core: true,
+      permissions: ["php.read", "php.manage"],
+      features: ["php_version", "php_ini"],
+    },
+    adminNav: [
+      {
+        id: "php",
+        labelKey: "php.nav",
+        icon: <Cpu className="h-4 w-4" />,
+        href: "/php",
+        order: 38,
+        permission: "php.read",
+      },
+    ],
+    clientNav: [
+      {
+        id: "php",
+        labelKey: "php.nav",
+        icon: <Cpu className="h-4 w-4" />,
+        href: "/php",
+        order: 26,
+        permission: "php.read",
+        feature: "php_version",
       },
     ],
   },

@@ -1514,6 +1514,48 @@ export const resetMockVhost = () => {
   mockVhostVersions = getInitialVhostVersions();
 };
 
+const defaultPlanIni = {
+  memory_limit: "256M",
+  upload_max_filesize: "64M",
+  post_max_size: "64M",
+  max_execution_time: 60,
+  max_input_time: 60,
+  display_errors: false,
+  opcache_enable: true,
+  date_timezone: "UTC",
+};
+
+const getInitialPhpConfig = () => ({
+  default_version: "8.3",
+  supported_versions: [
+    { version: "8.4", status: "active" as const, is_default: false, socket_path: "/run/php/php8.4-fpm.sock" },
+    { version: "8.3", status: "active" as const, is_default: true, socket_path: "/run/php/php8.3-fpm.sock" },
+    { version: "8.2", status: "active" as const, is_default: false, socket_path: "/run/php/php8.2-fpm.sock" },
+    { version: "8.1", status: "deprecated" as const, is_default: false, socket_path: "/run/php/php8.1-fpm.sock" },
+  ],
+  domain_configs: [
+    { domain_id: "dom_01", domain_name: "alpha-hosting.com", php_version: "8.3", is_custom: false },
+    { domain_id: "dom_02", domain_name: "blog.alpha-hosting.com", php_version: "8.2", is_custom: true },
+  ],
+  ini_settings: { ...defaultPlanIni },
+  plan_defaults: { ...defaultPlanIni },
+  plan_limits: {
+    max_memory_limit: "512M",
+    max_execution_time: 300,
+    max_upload_filesize: "128M",
+  },
+  installed_extensions: [
+    "bcmath", "curl", "fileinfo", "gd", "intl", "json", "mbstring", "mysqli",
+    "opcache", "pdo", "pdo_mysql", "pdo_sqlite", "redis", "sodium", "xml", "zip"
+  ],
+});
+
+let mockClientPhpConfig = getInitialPhpConfig();
+
+export const resetMockPhp = () => {
+  mockClientPhpConfig = getInitialPhpConfig();
+};
+
 
 const mockMe = {
   id: "00000000-0000-0000-0000-000000000001",
@@ -3846,6 +3888,85 @@ export const handlers = [
       operation_id: opId,
       target_count: targetCount,
       message: `VHost template '${tpl.name}' deployed across all ${targetCount} domains.`,
+    });
+  }),
+
+  // PHP: Get Client PHP Configuration (GET /api/v1/client/php/config)
+  // TODO(api:T06.08): Replace with real backend client PHP config endpoint
+  http.get(/\/api\/v1\/client\/php\/config$/, () => {
+    return HttpResponse.json(mockClientPhpConfig);
+  }),
+
+  // PHP: Update PHP Version (PUT /api/v1/client/php/version)
+  // TODO(api:T06.09): Replace with real backend set php version endpoint
+  http.put(/\/api\/v1\/client\/php\/version$/, async ({ request }) => {
+    const body = (await request.json()) as { version: string; domain_id?: string };
+    const ver = mockClientPhpConfig.supported_versions.find((v) => v.version === body.version);
+    if (!ver) {
+      return HttpResponse.json({ message: `Unsupported PHP version: ${body.version}` }, { status: 400 });
+    }
+
+    if (body.domain_id) {
+      const dom = mockClientPhpConfig.domain_configs.find((d) => d.domain_id === body.domain_id);
+      if (dom) {
+        dom.php_version = body.version;
+        dom.is_custom = body.version !== mockClientPhpConfig.default_version;
+      }
+    } else {
+      mockClientPhpConfig.default_version = body.version;
+      mockClientPhpConfig.supported_versions.forEach((v) => {
+        v.is_default = v.version === body.version;
+      });
+    }
+
+    return HttpResponse.json({
+      success: true,
+      message: `PHP version set to ${body.version} successfully.`,
+      config: mockClientPhpConfig,
+    });
+  }),
+
+  // PHP: Update php.ini options (PUT /api/v1/client/php/ini)
+  // TODO(api:T06.10): Replace with real backend php.ini update endpoint
+  http.put(/\/api\/v1\/client\/php\/ini$/, async ({ request }) => {
+    const body = (await request.json()) as Record<string, any>;
+
+    // T06.10: Validate against plan limits (e.g. max_memory_limit 512M, max_execution_time 300)
+    if (body.max_execution_time !== undefined && Number(body.max_execution_time) > mockClientPhpConfig.plan_limits.max_execution_time) {
+      return HttpResponse.json(
+        { message: `max_execution_time exceeds plan limit of ${mockClientPhpConfig.plan_limits.max_execution_time}s`, code: "plan_limit_exceeded" },
+        { status: 422 }
+      );
+    }
+
+    const parseM = (s: string) => parseInt(s.replace(/[^0-9]/g, ""), 10) || 0;
+    if (body.memory_limit && parseM(body.memory_limit) > parseM(mockClientPhpConfig.plan_limits.max_memory_limit)) {
+      return HttpResponse.json(
+        { message: `memory_limit exceeds plan limit of ${mockClientPhpConfig.plan_limits.max_memory_limit}`, code: "plan_limit_exceeded" },
+        { status: 422 }
+      );
+    }
+
+    mockClientPhpConfig.ini_settings = {
+      ...mockClientPhpConfig.ini_settings,
+      ...body,
+    };
+
+    return HttpResponse.json({
+      success: true,
+      message: "php.ini directives updated successfully.",
+      ini_settings: mockClientPhpConfig.ini_settings,
+    });
+  }),
+
+  // PHP: Reset php.ini options to Plan Defaults (POST /api/v1/client/php/ini/reset)
+  // TODO(api:T06.10): Replace with real backend php.ini reset endpoint
+  http.post(/\/api\/v1\/client\/php\/ini\/reset$/, () => {
+    mockClientPhpConfig.ini_settings = { ...mockClientPhpConfig.plan_defaults };
+    return HttpResponse.json({
+      success: true,
+      message: "php.ini directives reset to hosting plan defaults.",
+      ini_settings: mockClientPhpConfig.ini_settings,
     });
   }),
 ];

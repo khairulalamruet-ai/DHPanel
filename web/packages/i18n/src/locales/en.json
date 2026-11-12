@@ -1118,5 +1118,54 @@
       "fetchFailed": "Failed to load vhost templates",
       "saveFailed": "Failed to save vhost template"
     }
+  },
+  "php": {
+    "title": "PHP Configuration & Runtime",
+    "subtitle": "Manage PHP runtime versions per domain, tune php.ini directives, and inspect installed extensions.",
+    "nav": "PHP Configuration",
+    "defaultVersionTitle": "Tenant Default PHP Version",
+    "defaultVersionDesc": "Standard PHP-FPM runtime applied to all domains unless explicitly customized below.",
+    "activeVersion": "PHP Version:",
+    "domainOverridesTitle": "Domain-Specific PHP Versions",
+    "domainOverridesDesc": "Override PHP versions per website to run legacy or modern PHP applications side-by-side.",
+    "iniFormTitle": "PHP Directives Configuration (php.ini)",
+    "iniFormDesc": "Adjust runtime limits and script behavior within your hosting plan quota.",
+    "fields": {
+      "domain": "Domain",
+      "mode": "Inheritance",
+      "version": "Assigned Version"
+    },
+    "actions": {
+      "applyDefault": "Apply Default",
+      "resetDefaults": "Reset to Defaults",
+      "saveIni": "Save php.ini Settings"
+    },
+    "metrics": {
+      "defaultVersion": "Default Runtime",
+      "domainsConfigured": "Configured Domains",
+      "memoryLimit": "Memory Limit",
+      "opcache": "OPcache Bytecode"
+    },
+    "tabs": {
+      "versions": "PHP Versions",
+      "ini": "php.ini Directives",
+      "extensions": "Extensions"
+    },
+    "sections": {
+      "resourceLimits": "Resource Limits",
+      "uploads": "Uploads & POST Size",
+      "engine": "Engine & Caching"
+    },
+    "toast": {
+      "versionUpdated": "Default PHP version updated to {{version}}",
+      "domainVersionUpdated": "Domain PHP version updated to {{version}}",
+      "iniSaved": "php.ini directives updated successfully",
+      "iniReset": "php.ini configuration reverted to hosting plan defaults"
+    },
+    "errors": {
+      "fetchFailed": "Failed to load PHP runtime configuration",
+      "versionUpdateFailed": "Failed to update PHP version",
+      "iniSaveFailed": "Failed to update php.ini directives"
+    }
   }
 }

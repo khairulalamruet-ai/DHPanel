@@ -29,6 +29,7 @@ import {
   DnsEditorPage,
   SslPage,
   VhostTemplatesPage,
+  PhpManagementPage,
   filterNavItems,
   registeredFrontendModules,
 } from "@dhpanel/modules";
@@ -228,6 +229,13 @@ const vhostRoute = createRoute({
   component: VhostTemplatesPage,
 });
 
+// 22. PHP Runtime Management route (T06.11)
+const phpRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/php",
+  component: PhpManagementPage,
+});
+
 // 18. Login route
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -265,6 +273,7 @@ const routeTree = rootRoute.addChildren([
   dnsRoute,
   sslRoute,
   vhostRoute,
+  phpRoute,
   loginRoute,
 ]);
 
