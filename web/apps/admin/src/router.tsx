@@ -23,6 +23,7 @@ import {
   UsersPage,
   UserCreateWizardPage,
   UserDetailPage,
+  ClientDashboardPage,
   filterNavItems,
   registeredFrontendModules,
 } from "@dhpanel/modules";
@@ -172,7 +173,14 @@ const userDetailRoute = createRoute({
   component: UserDetailPage,
 });
 
-// 16. Login route
+// 16. Client dashboard route (T04.18)
+const clientRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/client",
+  component: ClientDashboardPage,
+});
+
+// 17. Login route
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/login",
@@ -187,7 +195,7 @@ const loginRoute = createRoute({
   },
 });
 
-// 17. Route Tree
+// 18. Route Tree
 const routeTree = rootRoute.addChildren([
   indexRoute,
   demoRoute,
@@ -203,6 +211,7 @@ const routeTree = rootRoute.addChildren([
   usersRoute,
   userWizardRoute,
   userDetailRoute,
+  clientRoute,
   loginRoute,
 ]);
 

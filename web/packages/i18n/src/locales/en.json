@@ -742,5 +742,38 @@
       "deleteSuccess": "Tenant '{{username}}' deleted successfully",
       "deleteError": "Failed to delete tenant"
     }
+  },
+  "clientDashboard": {
+    "welcome": "Welcome back, {{username}}!",
+    "status": {
+      "active": "Active",
+      "suspended": "Suspended",
+      "pending": "Pending"
+    },
+    "accountSecurity": "Account Security",
+    "viewWebsite": "View Website",
+    "resources": {
+      "title": "Hardware & Quota Allocation",
+      "desc": "Enforced cgroups and filesystem limits allocated to your hosting container",
+      "disk": "Storage Quota",
+      "bandwidth": "Monthly Traffic",
+      "memory": "Memory (RAM)",
+      "cpu": "CPU Cores"
+    },
+    "shortcuts": {
+      "title": "Quick Tools & Shortcuts",
+      "desc": "Frequently used management tools and environment configurations"
+    },
+    "primaryDomain": {
+      "title": "Primary Web Stack",
+      "desc": "Web host details, web server document root, and SSL encryption status"
+    },
+    "activity": {
+      "title": "Recent Stack Events",
+      "desc": "Audit records and automated container health maintenance events"
+    },
+    "toast": {
+      "loadError": "Failed to load dashboard data"
+    }
   }
 }

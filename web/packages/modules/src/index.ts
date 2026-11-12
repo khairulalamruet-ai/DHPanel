@@ -15,3 +15,4 @@ export * from "./plans";
 export * from "./users";
 export * from "./user-wizard";
 export * from "./user-detail";
+export * from "./client-dashboard";

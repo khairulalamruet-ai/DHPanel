@@ -2127,4 +2127,90 @@ export const handlers = [
       }),
     ];
   })(),
+
+  // Client: Dashboard overview & resource quotas (GET /api/v1/client/dashboard)
+  // TODO(api:T04.18): Replace with real backend client dashboard endpoint
+  http.get(/\/api\/v1\/client\/dashboard$/, () => {
+    return HttpResponse.json({
+      tenant: {
+        id: "usr_tenant_01",
+        username: "client_alpha",
+        email: "alpha@example.com",
+        primary_domain: "alpha-hosting.com",
+        plan_name: "Standard Business Plan",
+        node_name: "node-sgp-01 (Singapore)",
+        server_ip: "167.104.101.81",
+        nameservers: ["ns1.dhpanel.net", "ns2.dhpanel.net"],
+        created_at: new Date(Date.now() - 86400 * 1000 * 14).toISOString(),
+        status: "active",
+      },
+      container: {
+        status: "running",
+        name: "dh-tenant-alpha",
+        image: "dhpanel/stack-php83-nginx:latest",
+        php_version: "8.3.12",
+        uptime: "Up 14 days, 6 hours",
+        ip_address: "172.28.0.5",
+      },
+      resources: {
+        disk_limit_mb: 25600,
+        disk_used_mb: 1280,
+        bandwidth_limit_mb: -1,
+        bandwidth_used_mb: 4800,
+        memory_limit_mb: 2048,
+        memory_used_mb: 850,
+        cpu_cores: 2,
+        cpu_used_pct: 28,
+        inodes_limit: 250000,
+        inodes_used: 12450,
+        databases_limit: 10,
+        databases_used: 2,
+        domains_limit: 5,
+        domains_used: 2,
+        emails_limit: 10,
+        emails_used: 1,
+      },
+      primary_domain: {
+        domain: "alpha-hosting.com",
+        docroot: "/srv/tenants/client_alpha/domains/alpha-hosting.com/public_html",
+        ssl_status: "active",
+        ssl_issuer: "Let's Encrypt Authority X3",
+        ssl_expires_in_days: 76,
+        php_version: "PHP 8.3",
+      },
+      shortcuts: [
+        { id: "files", title: "File Manager", icon: "Folder", href: "/files", phase: 5 },
+        { id: "domains", title: "Domain Names", icon: "Globe", href: "/domains", phase: 6 },
+        { id: "databases", title: "Databases", icon: "Database", href: "/databases", phase: 7 },
+        { id: "ssl", title: "SSL / TLS", icon: "Lock", href: "/ssl", phase: 6 },
+        { id: "cron", title: "Cron Jobs", icon: "Clock", href: "/cron", phase: 5 },
+        { id: "php", title: "PHP Configuration", icon: "Code", href: "/php", phase: 6 },
+        { id: "backups", title: "Backup & Restore", icon: "Archive", href: "/backups", phase: 8 },
+        { id: "security", title: "Account Security", icon: "ShieldCheck", href: "/security", phase: 1 },
+      ],
+      recent_events: [
+        {
+          id: "ev_01",
+          action: "user.login",
+          timestamp: new Date(Date.now() - 600 * 1000).toISOString(),
+          ip_address: "192.168.1.105",
+          description: "Client portal session active",
+        },
+        {
+          id: "ev_02",
+          action: "ssl.renewed",
+          timestamp: new Date(Date.now() - 86400 * 1000 * 2).toISOString(),
+          ip_address: "system",
+          description: "SSL Certificate auto-renewed for alpha-hosting.com",
+        },
+        {
+          id: "ev_03",
+          action: "container.start",
+          timestamp: new Date(Date.now() - 86400 * 1000 * 14).toISOString(),
+          ip_address: "node-sgp-01",
+          description: "Container stack started and healthy",
+        },
+      ],
+    });
+  }),
 ];
