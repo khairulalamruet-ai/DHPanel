@@ -1,5 +1,5 @@
 import React from "react";
-import { LayoutDashboard, ShieldCheck, Sparkles, Puzzle, Globe, Users, Settings, FileText, Boxes, Server, Activity, Layers, Lock } from "lucide-react";
+import { LayoutDashboard, ShieldCheck, Sparkles, Puzzle, Globe, Users, Settings, FileText, Boxes, Server, Activity, Layers, Lock, FileCode2 } from "lucide-react";
 
 export interface ModuleManifest {
   name: string;
@@ -340,6 +340,25 @@ export const registeredFrontendModules: FrontendModule[] = [
         order: 24,
         permission: "ssl.read",
         feature: "ssl",
+      },
+    ],
+  },
+  {
+    manifest: {
+      name: "vhost",
+      title: { en: "VHost Templates", bn: "ভিহোস্ট টেমপ্লেট" },
+      category: "webserver",
+      core: true,
+      permissions: ["admin.vhost.manage"],
+    },
+    adminNav: [
+      {
+        id: "vhost",
+        labelKey: "vhost.nav",
+        icon: <FileCode2 className="h-4 w-4" />,
+        href: "/vhost-templates",
+        order: 36,
+        permission: "admin.vhost.manage",
       },
     ],
   },

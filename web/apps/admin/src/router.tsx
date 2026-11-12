@@ -28,6 +28,7 @@ import {
   AdminDomainsPage,
   DnsEditorPage,
   SslPage,
+  VhostTemplatesPage,
   filterNavItems,
   registeredFrontendModules,
 } from "@dhpanel/modules";
@@ -220,6 +221,13 @@ const sslRoute = createRoute({
   component: SslPage,
 });
 
+// 21. VHost Template Management route (T06.07)
+const vhostRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/vhost-templates",
+  component: VhostTemplatesPage,
+});
+
 // 18. Login route
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -256,6 +264,7 @@ const routeTree = rootRoute.addChildren([
   domainsRoute,
   dnsRoute,
   sslRoute,
+  vhostRoute,
   loginRoute,
 ]);
 

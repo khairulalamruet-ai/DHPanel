@@ -1104,5 +1104,19 @@
       "uploadFailed": "Failed to install custom SSL certificate",
       "updateSettingsFailed": "Failed to update security settings"
     }
+  },
+  "vhost": {
+    "title": "VHost Templates & Directives",
+    "subtitle": "Manage Nginx and Caddy server block templates, validate configuration directives, and deploy across domains.",
+    "nav": "VHost Templates",
+    "templatesList": "Available Templates",
+    "toast": {
+      "saved": "Virtual host template saved successfully (revision v{{version}} created).",
+      "reverted": "Template restored to revision v{{version}}."
+    },
+    "errors": {
+      "fetchFailed": "Failed to load vhost templates",
+      "saveFailed": "Failed to save vhost template"
+    }
   }
 }

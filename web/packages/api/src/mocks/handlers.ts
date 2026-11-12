@@ -1311,6 +1311,209 @@ export const resetMockSsl = () => {
   mockSslCertificates = getInitialSslCertificates();
 };
 
+export interface MockVhostTemplate {
+  id: string;
+  name: string;
+  slug: string;
+  server_type: "nginx" | "caddy";
+  content: string;
+  variables: string[];
+  version: number;
+  is_default: boolean;
+  domain_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MockVhostVersion {
+  id: string;
+  template_id: string;
+  version: number;
+  content: string;
+  changelog: string;
+  created_by: string;
+  created_at: string;
+}
+
+const getInitialVhostTemplates = (): MockVhostTemplate[] => [
+  {
+    id: "tpl_01",
+    name: "Nginx PHP-FPM Standard",
+    slug: "nginx-php-fpm",
+    server_type: "nginx",
+    content: `server {
+    listen 80;
+    listen [::]:80;
+    server_name {{domain}} www.{{domain}};
+    root {{docroot}};
+    index index.php index.html index.htm;
+
+    access_log /var/log/nginx/{{domain}}.access.log;
+    error_log /var/log/nginx/{{domain}}.error.log;
+
+    location / {
+        try_files $uri $uri/ /index.php?$query_string;
+    }
+
+    location ~ \\.php$ {
+        fastcgi_pass unix:{{php_socket}};
+        fastcgi_index index.php;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        include fastcgi_params;
+    }
+
+    location ~ /\\.(?!well-known).* {
+        deny all;
+    }
+}`,
+    variables: ["domain", "docroot", "php_socket"],
+    version: 3,
+    is_default: true,
+    domain_count: 3,
+    created_at: new Date(Date.now() - 30 * 86400 * 1000).toISOString(),
+    updated_at: new Date(Date.now() - 2 * 86400 * 1000).toISOString(),
+  },
+  {
+    id: "tpl_02",
+    name: "Nginx Static Site",
+    slug: "nginx-static",
+    server_type: "nginx",
+    content: `server {
+    listen 80;
+    listen [::]:80;
+    server_name {{domain}} www.{{domain}};
+    root {{docroot}};
+    index index.html index.htm;
+
+    access_log /var/log/nginx/{{domain}}.access.log;
+    error_log /var/log/nginx/{{domain}}.error.log;
+
+    location / {
+        try_files $uri $uri/ =404;
+    }
+
+    location ~* \\.(jpg|jpeg|png|gif|ico|css|js)$ {
+        expires 30d;
+        add_header Cache-Control "public, no-transform";
+    }
+}`,
+    variables: ["domain", "docroot"],
+    version: 1,
+    is_default: false,
+    domain_count: 1,
+    created_at: new Date(Date.now() - 40 * 86400 * 1000).toISOString(),
+    updated_at: new Date(Date.now() - 40 * 86400 * 1000).toISOString(),
+  },
+  {
+    id: "tpl_03",
+    name: "Caddy Reverse Proxy",
+    slug: "caddy-reverse-proxy",
+    server_type: "caddy",
+    content: `{{domain}}, www.{{domain}} {
+    encode gzip zstd
+    log {
+        output file /var/log/caddy/{{domain}}.log
+    }
+
+    reverse_proxy 127.0.0.1:{{port}} {
+        header_up Host {host}
+        header_up X-Real-IP {remote}
+    }
+}`,
+    variables: ["domain", "port"],
+    version: 2,
+    is_default: false,
+    domain_count: 0,
+    created_at: new Date(Date.now() - 20 * 86400 * 1000).toISOString(),
+    updated_at: new Date(Date.now() - 5 * 86400 * 1000).toISOString(),
+  },
+];
+
+const getInitialVhostVersions = (): MockVhostVersion[] => [
+  {
+    id: "ver_03",
+    template_id: "tpl_01",
+    version: 3,
+    content: `server {
+    listen 80;
+    listen [::]:80;
+    server_name {{domain}} www.{{domain}};
+    root {{docroot}};
+    index index.php index.html index.htm;
+
+    access_log /var/log/nginx/{{domain}}.access.log;
+    error_log /var/log/nginx/{{domain}}.error.log;
+
+    location / {
+        try_files $uri $uri/ /index.php?$query_string;
+    }
+
+    location ~ \\.php$ {
+        fastcgi_pass unix:{{php_socket}};
+        fastcgi_index index.php;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        include fastcgi_params;
+    }
+
+    location ~ /\\.(?!well-known).* {
+        deny all;
+    }
+}`,
+    changelog: "Add hidden files protection except for well-known ACME challenges",
+    created_by: "admin",
+    created_at: new Date(Date.now() - 2 * 86400 * 1000).toISOString(),
+  },
+  {
+    id: "ver_02",
+    template_id: "tpl_01",
+    version: 2,
+    content: `server {
+    listen 80;
+    server_name {{domain}} www.{{domain}};
+    root {{docroot}};
+    index index.php index.html;
+
+    location / {
+        try_files $uri $uri/ /index.php?$query_string;
+    }
+
+    location ~ \\.php$ {
+        fastcgi_pass unix:{{php_socket}};
+        include fastcgi_params;
+    }
+}`,
+    changelog: "Support front-controller routing with try_files query parameter pass-through",
+    created_by: "admin",
+    created_at: new Date(Date.now() - 15 * 86400 * 1000).toISOString(),
+  },
+  {
+    id: "ver_01",
+    template_id: "tpl_01",
+    version: 1,
+    content: `server {
+    listen 80;
+    server_name {{domain}};
+    root {{docroot}};
+    index index.php index.html;
+
+    location ~ \\.php$ {
+        fastcgi_pass unix:{{php_socket}};
+    }
+}`,
+    changelog: "Initial basic PHP vhost configuration",
+    created_by: "admin",
+    created_at: new Date(Date.now() - 30 * 86400 * 1000).toISOString(),
+  },
+];
+
+let mockVhostTemplates = getInitialVhostTemplates();
+let mockVhostVersions = getInitialVhostVersions();
+
+export const resetMockVhost = () => {
+  mockVhostTemplates = getInitialVhostTemplates();
+  mockVhostVersions = getInitialVhostVersions();
+};
+
 
 const mockMe = {
   id: "00000000-0000-0000-0000-000000000001",
@@ -3459,6 +3662,190 @@ export const handlers = [
       status: "revoked",
       id: cert.id,
       certificate: cert,
+    });
+  }),
+
+  // VHost Templates: List all (GET /api/v1/admin/vhost-templates)
+  // TODO(api:T06.07): Replace with real backend vhost templates list endpoint
+  http.get(/\/api\/v1\/admin\/vhost-templates$/, () => {
+    return HttpResponse.json({
+      items: mockVhostTemplates,
+      total: mockVhostTemplates.length,
+    });
+  }),
+
+  // VHost Templates: Get by ID (GET /api/v1/admin/vhost-templates/:id)
+  // TODO(api:T06.07): Replace with real backend vhost template detail endpoint
+  http.get(/\/api\/v1\/admin\/vhost-templates\/([^/]+)$/, ({ params }) => {
+    const key = (params.id || params[0]) as string;
+    const tpl = mockVhostTemplates.find((t) => t.id === key || t.slug === key);
+    if (!tpl) {
+      return HttpResponse.json({ message: "VHost template not found" }, { status: 404 });
+    }
+    return HttpResponse.json(tpl);
+  }),
+
+  // VHost Templates: Update template content (PUT /api/v1/admin/vhost-templates/:id)
+  // TODO(api:T06.07): Replace with real backend vhost template update endpoint
+  http.put(/\/api\/v1\/admin\/vhost-templates\/([^/]+)$/, async ({ params, request }) => {
+    const key = (params.id || params[0]) as string;
+    const tpl = mockVhostTemplates.find((t) => t.id === key || t.slug === key);
+    if (!tpl) {
+      return HttpResponse.json({ message: "VHost template not found" }, { status: 404 });
+    }
+
+    const body = (await request.json()) as { content?: string; changelog?: string; name?: string };
+
+    // Check for forbidden directives (T06.06 security rule)
+    if (body.content) {
+      const forbiddenRules = [
+        { pattern: /include\s+\//i, msg: "Forbidden directive: 'include /' is restricted" },
+        { pattern: /alias\s+\/etc/i, msg: "Forbidden directive: 'alias /etc' is restricted" },
+      ];
+      for (const rule of forbiddenRules) {
+        if (rule.pattern.test(body.content)) {
+          return HttpResponse.json(
+            { message: rule.msg, code: "forbidden_directive" },
+            { status: 422 }
+          );
+        }
+      }
+    }
+
+    if (body.name) tpl.name = body.name;
+    if (body.content !== undefined) {
+      tpl.content = body.content;
+      tpl.version += 1;
+      tpl.updated_at = new Date().toISOString();
+
+      // Add to version history
+      mockVhostVersions.unshift({
+        id: `ver_${Date.now()}`,
+        template_id: tpl.id,
+        version: tpl.version,
+        content: tpl.content,
+        changelog: body.changelog || `Updated template to version ${tpl.version}`,
+        created_by: "admin",
+        created_at: new Date().toISOString(),
+      });
+    }
+
+    return HttpResponse.json(tpl);
+  }),
+
+  // VHost Templates: Get Version History (GET /api/v1/admin/vhost-templates/:id/versions)
+  // TODO(api:T06.07): Replace with real backend vhost versions list endpoint
+  http.get(/\/api\/v1\/admin\/vhost-templates\/([^/]+)\/versions$/, ({ params }) => {
+    const key = (params.id || params[0]) as string;
+    const versions = mockVhostVersions.filter((v) => v.template_id === key);
+    return HttpResponse.json({
+      items: versions,
+      total: versions.length,
+    });
+  }),
+
+  // VHost Templates: Revert to Version (POST /api/v1/admin/vhost-templates/:id/versions/:verId/revert)
+  // TODO(api:T06.07): Replace with real backend vhost revert endpoint
+  http.post(/\/api\/v1\/admin\/vhost-templates\/([^/]+)\/versions\/([^/]+)\/revert$/, ({ params }) => {
+    const tplKey = (params.id || params[0]) as string;
+    const verKey = (params.verId || params[1]) as string;
+
+    const tpl = mockVhostTemplates.find((t) => t.id === tplKey || t.slug === tplKey);
+    if (!tpl) {
+      return HttpResponse.json({ message: "VHost template not found" }, { status: 404 });
+    }
+
+    const targetVer = mockVhostVersions.find((v) => v.id === verKey || String(v.version) === verKey);
+    if (!targetVer) {
+      return HttpResponse.json({ message: "Template version not found" }, { status: 404 });
+    }
+
+    tpl.content = targetVer.content;
+    tpl.version += 1;
+    tpl.updated_at = new Date().toISOString();
+
+    mockVhostVersions.unshift({
+      id: `ver_${Date.now()}`,
+      template_id: tpl.id,
+      version: tpl.version,
+      content: tpl.content,
+      changelog: `Reverted to revision v${targetVer.version}`,
+      created_by: "admin",
+      created_at: new Date().toISOString(),
+    });
+
+    return HttpResponse.json({
+      success: true,
+      message: `Template reverted to v${targetVer.version}`,
+      template: tpl,
+    });
+  }),
+
+  // VHost Templates: Live Preview & Validation (POST /api/v1/admin/vhost-templates/:id/preview)
+  // TODO(api:T06.07): Replace with real backend vhost preview endpoint
+  http.post(/\/api\/v1\/admin\/vhost-templates\/([^/]+)\/preview$/, async ({ request }) => {
+    const body = (await request.json()) as {
+      content: string;
+      sample_variables?: Record<string, string>;
+    };
+
+    const vars: Record<string, string> = {
+      domain: "example.com",
+      docroot: "/home/demo/public_html",
+      php_socket: "/run/php/php8.3-fpm-demo.sock",
+      ssl_cert: "/etc/ssl/certs/example.com.crt",
+      ssl_key: "/etc/ssl/private/example.com.key",
+      port: "80",
+      ...(body.sample_variables || {}),
+    };
+
+    let rendered = body.content || "";
+    for (const [k, v] of Object.entries(vars)) {
+      const reg = new RegExp(`\\{\\{\\s*${k}\\s*\\}\\}`, "g");
+      rendered = rendered.replace(reg, v);
+    }
+
+    return HttpResponse.json({
+      rendered,
+      valid: true,
+      errors: [],
+    });
+  }),
+
+  // VHost Templates: Apply to All Domains (POST /api/v1/admin/vhost-templates/:id/apply-all)
+  // TODO(api:T06.07): Replace with real backend vhost apply-all endpoint
+  http.post(/\/api\/v1\/admin\/vhost-templates\/([^/]+)\/apply-all$/, ({ params }) => {
+    const key = (params.id || params[0]) as string;
+    const tpl = mockVhostTemplates.find((t) => t.id === key || t.slug === key);
+    if (!tpl) {
+      return HttpResponse.json({ message: "VHost template not found" }, { status: 404 });
+    }
+
+    const opId = `op_vhost_apply_${Date.now()}`;
+    const targetCount = tpl.domain_count || 4;
+
+    const op: any = {
+      id: opId,
+      idempotency_key: `idemp_${opId}`,
+      op_type: "ApplyVhostTemplateAll",
+      node_id: "node_01",
+      node_name: "node-primary-01",
+      tenant_id: null,
+      status: "succeeded",
+      retries_count: 0,
+      payload: { template_id: tpl.id, target_count: targetCount },
+      output: { applied_domains: targetCount, reloaded_server: tpl.server_type },
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    mockOperations.unshift(op);
+
+    return HttpResponse.json({
+      success: true,
+      operation_id: opId,
+      target_count: targetCount,
+      message: `VHost template '${tpl.name}' deployed across all ${targetCount} domains.`,
     });
   }),
 ];
