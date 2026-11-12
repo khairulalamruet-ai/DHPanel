@@ -1900,4 +1900,59 @@ export const handlers = [
     mockUsers.splice(index, 1);
     return new HttpResponse(null, { status: 204 });
   }),
+
+  // Users: Create tenant user with operation & container provisioning (POST /api/v1/admin/users)
+  // TODO(api:T04.12): Replace with real backend tenant creation endpoint
+  http.post(/\/api\/v1\/admin\/users$/, async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as any;
+    const { username, email, plan_id = "plan_standard", node_id = "node-sgp-01", primary_domain } = body || {};
+
+    if (!username || !email) {
+      return HttpResponse.json(
+        { title: "Validation Error", detail: "Username and email are required" },
+        { status: 400 }
+      );
+    }
+
+    const opId = `op_prov_${Date.now()}`;
+    const containerName = `dh-tenant-${username}`;
+
+    return HttpResponse.json(
+      {
+        user: {
+          id: `usr_${Date.now()}`,
+          username,
+          email,
+          status: "active",
+          plan_id,
+          node_id,
+          primary_domain,
+        },
+        operation_id: opId,
+        container: {
+          id: `cnt_${username}_${Date.now()}`,
+          name: containerName,
+          status: "running",
+          image: "dhpanel/stack-php83-nginx:latest",
+          ip_address: "172.28.0.12",
+          created_at: new Date().toISOString(),
+        },
+      },
+      { status: 201 }
+    );
+  }),
+
+  // Operations: Get operation status (GET /api/v1/admin/operations/:id)
+  // TODO(api:T02.17): Replace with real ledger endpoint
+  http.get(/\/api\/v1\/admin\/operations\/([^/]+)$/, ({ params }) => {
+    const id = (params.id || params[0]) as string;
+    return HttpResponse.json({
+      id,
+      status: "succeeded",
+      action: "tenant.create",
+      progress_pct: 100,
+      container_status: "running",
+      completed_at: new Date().toISOString(),
+    });
+  }),
 ];

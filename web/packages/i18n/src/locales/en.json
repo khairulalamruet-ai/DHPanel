@@ -34,7 +34,9 @@
     "reload": "Reload page",
     "cancel": "Cancel",
     "saving": "Saving...",
-    "processing": "Processing..."
+    "processing": "Processing...",
+    "next": "Next Step",
+    "back": "Back"
   },
   "auth": {
     "login": "Sign In",
@@ -597,6 +599,78 @@
       "deleteSuccess": "User '{{username}}' has been deleted",
       "deleteError": "Failed to delete user"
     }
-  }
+  },
+  "userWizard": {
+    "nav": "New User",
+    "title": "Create Tenant Account",
+    "desc": "Provision a new tenant user account, allocate resources, and launch a hardened container stack",
+    "steps": {
+      "account": "Account",
+      "plan": "Hosting Plan",
+      "node": "Node",
+      "domain": "Domain",
+      "confirm": "Confirm & Launch"
+    },
+    "step1": {
+      "title": "Account Credentials",
+      "desc": "Define tenant username, login email, and secure password",
+      "usernameLabel": "Username",
+      "usernamePlaceholder": "e.g. johndoe",
+      "usernameHelp": "Must be 3-32 characters, lowercase letters, numbers, hyphens or underscores. Reserved system names are prohibited.",
+      "emailLabel": "Contact / Login Email",
+      "passwordLabel": "Initial Password",
+      "generatePassword": "Generate Strong Password"
+    },
+    "step2": {
+      "title": "Select Hosting Plan",
+      "desc": "Choose resource allocations and module quota limits for this tenant"
+    },
+    "step3": {
+      "title": "Cluster Node Assignment",
+      "desc": "Select where the rootless container stack will be scheduled",
+      "autoLabel": "Auto-Select (Recommended)",
+      "autoDesc": "The control plane will automatically place the container on the node with lowest memory and CPU pressure",
+      "orSelectManual": "Or Manually Select Target Node"
+    },
+    "step4": {
+      "title": "Primary Domain (Optional)",
+      "desc": "Associate an initial domain and configure document root",
+      "domainLabel": "Primary Domain Name",
+      "domainHelp": "Optional. You can attach domains or subdomains later at any time.",
+      "vhostLabel": "Initialize default website and document root",
+      "vhostDesc": "Creates public_html and seeds default placeholder page"
+    },
+    "step5": {
+      "title": "Review & Confirm Provisioning",
+      "desc": "Review configuration details before initiating the provisioning ledger operation",
+      "summaryHeader": "Provisioning Configuration Summary",
+      "confirmButton": "Create User & Launch Container"
+    },
+    "validation": {
+      "usernameRequired": "Username is required",
+      "usernameLength": "Username must be between 3 and 32 characters",
+      "usernameFormat": "Username must start with a letter or digit and contain only lowercase a-z, 0-9, _, -",
+      "usernameReserved": "This username is reserved by the system",
+      "emailRequired": "Email address is required",
+      "emailInvalid": "Please enter a valid email address",
+      "passwordRequired": "Password is required",
+      "passwordMin": "Password must be at least 8 characters",
+      "domainInvalid": "Please enter a valid domain name (e.g. example.com)"
+    },
+    "progress": {
+      "inProgressTitle": "Provisioning Stack for {{username}}...",
+      "inProgressDesc": "Executing automated container provisioning ledger across cluster node",
+      "completedTitle": "Tenant Created & Container Running!",
+      "completedDesc": "Account, rootless container stack, and filesystem quota have been configured successfully.",
+      "containerTitle": "Container Stack Status",
+      "containerRunning": "container running",
+      "loginAsUser": "Login as User (Impersonate)",
+      "viewUsersList": "View All Users",
+      "createAnother": "Create Another User"
+    },
+    "toast": {
+      "success": "Tenant user '{{username}}' created and container is running",
+      "error": "Failed to provision tenant stack"
+    }
   }
 }
