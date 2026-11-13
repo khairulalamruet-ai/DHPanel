@@ -90,6 +90,10 @@ pub fn ask_helper(socket: &Path, action: Action) -> Result<(), AgentError> {
             ErrorCode::Internal,
             "the privileged helper does not accept this agent (check its --agent-user)",
         ),
+        Some(HelperCode::Unsupported) => AgentError::new(
+            ErrorCode::UnsupportedOperation,
+            "this node's filesystem cannot enforce storage limits (it needs XFS with project quotas)",
+        ),
         // The helper tried and failed: another try may succeed once the cause is fixed.
         _ => AgentError::new(
             ErrorCode::Internal,
@@ -111,6 +115,51 @@ fn docker_error(err: &DockerError) -> AgentError {
         }
         _ => AgentError::new(ErrorCode::Internal, message),
     }
+}
+
+/// `set_storage_quota`.
+///
+/// # Errors
+/// [`AgentError`]: bad arguments, `unsupported_operation` when the node cannot
+/// enforce quotas, or the helper being unavailable (retryable).
+pub async fn set_storage_quota(
+    context: Arc<TenantContext>,
+    op: Operation,
+) -> Result<Output, AgentError> {
+    let Operation::SetStorageQuota {
+        tenant_id,
+        uid,
+        disk_bytes,
+        inodes,
+    } = op
+    else {
+        return Err(super::wrong_operation());
+    };
+    if !UidRange::DEFAULT.contains(uid) {
+        return Err(AgentError::new(
+            ErrorCode::InvalidArguments,
+            "the user id is outside the tenant range",
+        ));
+    }
+    let socket = context.helper_socket.clone();
+    tokio::task::spawn_blocking(move || {
+        ask_helper(
+            &socket,
+            Action::SetStorageQuota {
+                tenant_id: tenant_id.to_string(),
+                uid,
+                disk_bytes,
+                inodes,
+            },
+        )
+    })
+    .await
+    .map_err(|_| {
+        AgentError::new(ErrorCode::Internal, "the helper call was cancelled").retryable()
+    })??;
+    Ok(Output::StorageQuotaSet {
+        backend: "xfs".to_owned(),
+    })
 }
 
 /// `create_tenant`.

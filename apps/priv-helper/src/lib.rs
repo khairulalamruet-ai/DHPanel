@@ -19,6 +19,7 @@
 //! One request, one answer, then the connection is closed.
 
 pub mod protocol;
+pub mod quota;
 pub mod server;
 pub mod tenant;
 

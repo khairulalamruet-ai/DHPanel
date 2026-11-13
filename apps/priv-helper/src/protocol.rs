@@ -20,6 +20,18 @@ pub enum Action {
         /// The tenant's numeric id inside the user namespace (10000..59999).
         uid: u32,
     },
+    /// Sets the disk and file-count limits of a tenant (see [`crate::quota`]).
+    /// `None` means unlimited.
+    SetStorageQuota {
+        /// The tenant's id (a lower-case UUID).
+        tenant_id: String,
+        /// The tenant's numeric id (also its quota project id).
+        uid: u32,
+        /// Most bytes the tenant's directory may hold.
+        disk_bytes: Option<u64>,
+        /// Most files and directories.
+        inodes: Option<u64>,
+    },
 }
 
 impl Action {
@@ -29,6 +41,7 @@ impl Action {
         match self {
             Self::Noop => "noop",
             Self::PrepareTenant { .. } => "prepare_tenant",
+            Self::SetStorageQuota { .. } => "set_storage_quota",
         }
     }
 }
@@ -58,6 +71,8 @@ pub enum ErrorCode {
     Forbidden,
     /// The action was attempted and failed.
     Failed,
+    /// This machine cannot do it (for example: no project quotas on its filesystem).
+    Unsupported,
 }
 
 /// The helper's answer.
@@ -119,6 +134,7 @@ fn allowed_fields(action: &str) -> Option<&'static [&'static str]> {
     match action {
         "noop" => Some(&["type"]),
         "prepare_tenant" => Some(&["type", "tenant_id", "uid"]),
+        "set_storage_quota" => Some(&["type", "tenant_id", "uid", "disk_bytes", "inodes"]),
         _ => None,
     }
 }

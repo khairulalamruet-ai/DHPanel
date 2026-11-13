@@ -31,6 +31,8 @@ pub struct Sources {
     pub sys_dir: std::path::PathBuf,
     /// The Docker daemon's Unix socket, if one is configured.
     pub docker_socket: Option<std::path::PathBuf>,
+    /// Where tenant directories live; quota support is looked up for it.
+    pub tenants_root: Option<std::path::PathBuf>,
 }
 
 impl Sources {
@@ -46,6 +48,10 @@ impl Sources {
             docker_socket: std::env::var("DOCKER_HOST")
                 .ok()
                 .and_then(|host| host.strip_prefix("unix://").map(Into::into)),
+            tenants_root: Some(
+                std::env::var_os("DHPANEL_AGENT_TENANTS_ROOT")
+                    .map_or_else(|| "/srv/tenants".into(), Into::into),
+            ),
         }
     }
 }
@@ -225,6 +231,10 @@ pub async fn collect(sources: &Sources) -> Result<Capabilities, AgentError> {
         apparmor: flag(&sources.sys_dir.join("module/apparmor/parameters/enabled"))
             .is_some_and(|v| v == "Y"),
         user_namespaces: userns_limit && userns_switch,
+        storage_quota: sources.tenants_root.as_deref().and_then(|root| {
+            let mountinfo = read(&sources.proc_dir.join("self/mountinfo"))?;
+            dhpanel_priv_helper::quota::detect(&mountinfo, root).map(|b| b.name().to_owned())
+        }),
     })
 }
 
@@ -312,6 +322,7 @@ mod tests {
             proc_dir: root.join("proc"),
             sys_dir: root.join("sys"),
             docker_socket: Some(root.join("no-docker.sock")),
+            tenants_root: Some("/srv/tenants".into()),
         };
         let caps = collect(&sources).await.unwrap();
         assert_eq!(caps.memory_bytes, 4_000_000 * 1024);
@@ -335,11 +346,45 @@ mod tests {
             proc_dir: bare.join("proc"),
             sys_dir: bare.join("sys"),
             docker_socket: None,
+            tenants_root: None,
         })
         .await
         .unwrap();
         assert!(!caps.cgroup_v2 && !caps.seccomp && !caps.apparmor && !caps.user_namespaces);
         assert_eq!(caps.kernel, "");
+
+        // Storage quotas: only on XFS mounted with project quotas, below the tenants directory.
+        let quota_root = fixture(&[
+            ("proc/meminfo", "MemTotal: 1 kB\n"),
+            (
+                "proc/self/mountinfo",
+                "22 1 252:1 / / rw - ext4 /dev/vda1 rw\n40 22 7:0 / /srv/tenants rw,relatime - xfs /dev/loop0 rw,prjquota\n",
+            ),
+        ]);
+        let with = |tenants: &str| Sources {
+            data_dir: quota_root.clone(),
+            proc_dir: quota_root.join("proc"),
+            sys_dir: quota_root.join("sys"),
+            docker_socket: None,
+            tenants_root: Some(tenants.into()),
+        };
+        assert_eq!(
+            collect(&with("/srv/tenants"))
+                .await
+                .unwrap()
+                .storage_quota
+                .as_deref(),
+            Some("xfs")
+        );
+        assert_eq!(
+            collect(&with("/srv/other")).await.unwrap().storage_quota,
+            None,
+            "that is the ext4 root"
+        );
+        let mut no_root = with("/srv/tenants");
+        no_root.tenants_root = None;
+        assert_eq!(collect(&no_root).await.unwrap().storage_quota, None);
+        let _ = std::fs::remove_dir_all(&quota_root);
 
         // Nothing readable at all is a retryable error.
         let empty = fixture(&[("proc/placeholder", "")]);
@@ -348,6 +393,7 @@ mod tests {
             proc_dir: empty.join("proc"),
             sys_dir: empty.join("sys"),
             docker_socket: None,
+            tenants_root: None,
         })
         .await
         .unwrap_err();

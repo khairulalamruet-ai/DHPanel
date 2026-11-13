@@ -18,7 +18,7 @@ use std::{
     path::PathBuf,
 };
 
-use crate::protocol::ErrorCode;
+use crate::{protocol::ErrorCode, quota};
 
 /// First and one-past-last tenant id (kept in step with `dhpanel_domain::UidRange::DEFAULT`).
 pub const UID_START: u32 = 10_000;
@@ -36,6 +36,8 @@ pub struct TenantEnv {
     pub subuid_file: PathBuf,
     /// The group tenant directories get (the agent's).
     pub agent_gid: u32,
+    /// `/proc/self/mountinfo`: where quotas are looked for.
+    pub mountinfo: PathBuf,
 }
 
 /// What is wrong, in a form that goes back to the agent and into the log.
@@ -106,7 +108,67 @@ pub fn prepare(env: &TenantEnv, tenant_id: &str, uid: u32) -> Result<(), Failure
     let range = subuid_range(&subuid, &env.agent_name)
         .ok_or((ErrorCode::Failed, "the agent has no subordinate id range"))?;
     let owner = host_uid(range, uid)?;
-    prepare_as(env, tenant_id, owner)
+    // When the tenants live on a filesystem with project quotas, the directory
+    // joins the quota project of its id before it is handed over.
+    let project = fs::read_to_string(&env.mountinfo)
+        .ok()
+        .and_then(|text| quota::detect(&text, &env.root.join(tenant_id)))
+        .map(|backend| (backend, uid));
+    prepare_as(
+        env,
+        tenant_id,
+        owner,
+        project.as_ref().map(|(b, u)| (b, *u)),
+    )
+}
+
+/// Sets the limits of a tenant that was prepared on a quota-capable filesystem.
+///
+/// # Errors
+/// [`Failure`]: bad arguments, [`ErrorCode::Unsupported`] on a filesystem
+/// without project quotas, or a failure to apply them.
+pub fn set_storage_quota(
+    env: &TenantEnv,
+    tenant_id: &str,
+    uid: u32,
+    disk_bytes: Option<u64>,
+    inodes: Option<u64>,
+) -> Result<(), Failure> {
+    if !valid_tenant_id(tenant_id) {
+        return Err((ErrorCode::InvalidArguments, "the tenant id is not a UUID"));
+    }
+    if !(UID_START..UID_END).contains(&uid) {
+        return Err((
+            ErrorCode::InvalidArguments,
+            "the user id is outside the tenant range",
+        ));
+    }
+    quota::check_limits(disk_bytes, inodes)?;
+    let dir = env.root.join(tenant_id);
+    let mountinfo = fs::read_to_string(&env.mountinfo)
+        .map_err(|_| (ErrorCode::Failed, "cannot read the mount table"))?;
+    let backend = quota::detect(&mountinfo, &dir).ok_or((
+        ErrorCode::Unsupported,
+        "this node's filesystem has no project quotas",
+    ))?;
+    // The directory must exist and belong to this tenant's id: a limit for a
+    // tenant that was never prepared would otherwise be set on nothing.
+    let subuid = fs::read_to_string(&env.subuid_file)
+        .map_err(|_| (ErrorCode::Failed, "cannot read the subordinate id file"))?;
+    let range = subuid_range(&subuid, &env.agent_name)
+        .ok_or((ErrorCode::Failed, "the agent has no subordinate id range"))?;
+    let owner = host_uid(range, uid)?;
+    match fs::symlink_metadata(&dir) {
+        Ok(meta) if meta.file_type().is_dir() && meta.uid() == owner => {}
+        _ => {
+            return Err((
+                ErrorCode::Failed,
+                "the tenant has not been prepared on this node",
+            ));
+        }
+    }
+    quota::run(&quota::set_limits(&backend, uid, disk_bytes, inodes))
+        .map_err(|_| (ErrorCode::Failed, "applying the quota failed"))
 }
 
 /// The filesystem part, with the owner already worked out.
@@ -120,7 +182,12 @@ pub fn prepare(env: &TenantEnv, tenant_id: &str, uid: u32) -> Result<(), Failure
 ///
 /// # Errors
 /// [`Failure`].
-pub fn prepare_as(env: &TenantEnv, tenant_id: &str, owner: u32) -> Result<(), Failure> {
+pub fn prepare_as(
+    env: &TenantEnv,
+    tenant_id: &str,
+    owner: u32,
+    project: Option<(&quota::Backend, u32)>,
+) -> Result<(), Failure> {
     let failed = |_: io::Error| (ErrorCode::Failed, "cannot create the tenant directory");
     let clash = (
         ErrorCode::Failed,
@@ -166,6 +233,17 @@ pub fn prepare_as(env: &TenantEnv, tenant_id: &str, owner: u32) -> Result<(), Fa
     }
     for dir in [&www, &tenant] {
         fs::set_permissions(dir, fs::Permissions::from_mode(0o750)).map_err(failed)?;
+    }
+    // Quota project: while the tree is empty and ours, everything created in it
+    // later joins the project.
+    if let Some((backend, id)) = project {
+        quota::ensure_state_dir().map_err(failed)?;
+        quota::run(&quota::project_setup(backend, &tenant, id)).map_err(|_| {
+            (
+                ErrorCode::Failed,
+                "cannot set up the tenant's quota project",
+            )
+        })?;
     }
     // Hand over: inner first, outer last (the outer one is the "finished" mark).
     for dir in [&www, &tenant] {
@@ -252,8 +330,9 @@ mod tests {
             agent_name: "agent".into(),
             subuid_file: "/nonexistent".into(),
             agent_gid: gid,
+            mountinfo: "/nonexistent".into(),
         };
-        prepare_as(&env, ID, uid).unwrap();
+        prepare_as(&env, ID, uid, None).unwrap();
         for path in [root.join(ID), root.join(ID).join("www")] {
             let meta = fs::symlink_metadata(&path).unwrap();
             assert!(meta.is_dir());
@@ -264,7 +343,7 @@ mod tests {
             fs::metadata(&root).unwrap().permissions().mode() & 0o777,
             0o755
         );
-        prepare_as(&env, ID, uid).unwrap(); // again: nothing to do
+        prepare_as(&env, ID, uid, None).unwrap(); // again: nothing to do
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -277,13 +356,14 @@ mod tests {
             agent_name: "agent".into(),
             subuid_file: "/nonexistent".into(),
             agent_gid: gid,
+            mountinfo: "/nonexistent".into(),
         };
         fs::create_dir_all(&root).unwrap();
         // A symlink where the tenant directory should be: never followed.
         let target = scratch("elsewhere");
         fs::create_dir_all(&target).unwrap();
         std::os::unix::fs::symlink(&target, root.join(ID)).unwrap();
-        let err = prepare_as(&env, ID, uid).unwrap_err();
+        let err = prepare_as(&env, ID, uid, None).unwrap_err();
         assert_eq!(err.0, ErrorCode::Failed);
         assert!(
             fs::read_dir(&target).unwrap().next().is_none(),
@@ -292,13 +372,16 @@ mod tests {
         fs::remove_file(root.join(ID)).unwrap();
         // A plain file.
         fs::write(root.join(ID), b"x").unwrap();
-        assert_eq!(prepare_as(&env, ID, uid).unwrap_err().0, ErrorCode::Failed);
+        assert_eq!(
+            prepare_as(&env, ID, uid, None).unwrap_err().0,
+            ErrorCode::Failed
+        );
         fs::remove_file(root.join(ID)).unwrap();
         // The right directory but owned by someone else (when we are not that someone).
-        prepare_as(&env, ID, uid).unwrap();
+        prepare_as(&env, ID, uid, None).unwrap();
         let other = if uid == 0 { 1 } else { uid.wrapping_add(1) };
         assert!(
-            prepare_as(&env, ID, other).is_err(),
+            prepare_as(&env, ID, other, None).is_err(),
             "a directory owned by another id is not accepted"
         );
         let _ = fs::remove_dir_all(&root);
@@ -313,6 +396,7 @@ mod tests {
             agent_name: "dhpanel-agent".into(),
             subuid_file: "/nonexistent".into(),
             agent_gid: 0,
+            mountinfo: "/nonexistent".into(),
         };
         assert_eq!(
             prepare(&env, "../../etc", 10_000).unwrap_err().0,
@@ -326,5 +410,69 @@ mod tests {
         // A good request that cannot read the subuid file fails clearly.
         assert_eq!(prepare(&env, ID, 10_000).unwrap_err().0, ErrorCode::Failed);
         assert!(!root.exists());
+    }
+
+    #[test]
+    fn storage_quota_requests_are_checked_and_unsupported_filesystems_say_so() {
+        let root = scratch("quota");
+        let (_, gid) = me();
+        let env = TenantEnv {
+            root: root.clone(),
+            agent_name: "dhpanel-agent".into(),
+            subuid_file: "/nonexistent".into(),
+            agent_gid: gid,
+            mountinfo: "/proc/self/mountinfo".into(),
+        };
+        let code = |r: Result<(), Failure>| r.unwrap_err().0;
+        let ok_limits = (Some(5 << 20), Some(2_000));
+        assert_eq!(
+            code(set_storage_quota(
+                &env,
+                "../x",
+                10_000,
+                ok_limits.0,
+                ok_limits.1
+            )),
+            ErrorCode::InvalidArguments
+        );
+        assert_eq!(
+            code(set_storage_quota(&env, ID, 9_999, ok_limits.0, ok_limits.1)),
+            ErrorCode::InvalidArguments
+        );
+        assert_eq!(
+            code(set_storage_quota(&env, ID, 10_000, Some(5), None)),
+            ErrorCode::InvalidArguments
+        );
+        assert_eq!(
+            code(set_storage_quota(&env, ID, 10_000, None, Some(1))),
+            ErrorCode::InvalidArguments
+        );
+        // Valid, on a filesystem without project quotas (a temp directory).
+        assert_eq!(
+            code(set_storage_quota(
+                &env,
+                ID,
+                10_000,
+                ok_limits.0,
+                ok_limits.1
+            )),
+            ErrorCode::Unsupported
+        );
+        // And when the mount table cannot be read at all.
+        let unreadable = TenantEnv {
+            mountinfo: "/nonexistent".into(),
+            ..env
+        };
+        assert_eq!(
+            code(set_storage_quota(
+                &unreadable,
+                ID,
+                10_000,
+                ok_limits.0,
+                ok_limits.1
+            )),
+            ErrorCode::Failed
+        );
+        assert!(!root.exists(), "nothing was created");
     }
 }

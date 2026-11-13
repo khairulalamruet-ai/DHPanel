@@ -74,6 +74,7 @@ fn main() -> ExitCode {
             agent_name: user.clone(),
             subuid_file: "/etc/subuid".into(),
             agent_gid,
+            mountinfo: "/proc/self/mountinfo".into(),
         },
     };
     let listener = match bind(&config) {

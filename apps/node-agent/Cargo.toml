@@ -44,7 +44,7 @@ tokio = { version = "1", features = ["rt", "macros", "signal", "time", "net", "s
 # POST to enrol. `ureq` is blocking and small; it uses rustls with the `ring`
 # backend (the same one rcgen uses) and the bundled Mozilla root certificates.
 ureq = { version = "3", default-features = false, features = ["rustls", "json"] }
-uuid = { version = "1", features = ["serde"] }
+uuid = { version = "1", features = ["serde", "v7"] }
 # Remembers the result of every operation on disk, so an operation that is sent
 # again (lost answer, control plane restart) is answered, not run twice (T02.12).
 # Embedded, pure Rust, crash-safe; chosen in ADR 0004.

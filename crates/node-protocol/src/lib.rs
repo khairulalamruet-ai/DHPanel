@@ -131,12 +131,29 @@ pub enum Operation {
         /// The tenant's numeric user id (10000..59999) on this node.
         uid: u32,
     },
+    /// Limit what a tenant may store: bytes and number of files. `None` is
+    /// unlimited. The node must support project quotas
+    /// ([`Capabilities::storage_quota`]), else the operation fails as unsupported.
+    SetStorageQuota {
+        /// The tenant's id.
+        tenant_id: Uuid,
+        /// The tenant's numeric user id.
+        uid: u32,
+        /// Most bytes.
+        disk_bytes: Option<u64>,
+        /// Most files and directories.
+        inodes: Option<u64>,
+    },
 }
 
 impl Operation {
     /// Wire names of every operation this build knows, in declaration order.
-    pub const TYPE_NAMES: &'static [&'static str] =
-        &["ping", "report_capabilities", "create_tenant"];
+    pub const TYPE_NAMES: &'static [&'static str] = &[
+        "ping",
+        "report_capabilities",
+        "create_tenant",
+        "set_storage_quota",
+    ];
 
     /// The operation's wire name.
     #[must_use]
@@ -145,6 +162,7 @@ impl Operation {
             Self::Ping { .. } => "ping",
             Self::ReportCapabilities => "report_capabilities",
             Self::CreateTenant { .. } => "create_tenant",
+            Self::SetStorageQuota { .. } => "set_storage_quota",
         }
     }
 }
@@ -244,6 +262,10 @@ pub struct Capabilities {
     /// Unprivileged user namespaces work.
     #[serde(default)]
     pub user_namespaces: bool,
+    /// How tenant storage limits are enforced on this node (`xfs`), or absent
+    /// when the filesystem under the tenants directory cannot enforce them.
+    #[serde(default)]
+    pub storage_quota: Option<String>,
 }
 
 /// How the agent reaches Docker (ADR 0004).
@@ -268,6 +290,11 @@ pub enum Output {
     },
     /// Answer to [`Operation::ReportCapabilities`].
     Capabilities(Capabilities),
+    /// Answer to [`Operation::SetStorageQuota`].
+    StorageQuotaSet {
+        /// How the node enforces it (`xfs`).
+        backend: String,
+    },
     /// Answer to [`Operation::CreateTenant`].
     TenantCreated {
         /// The tenant's directory on the node.
@@ -641,6 +668,7 @@ mod tests {
             seccomp: true,
             apparmor: true,
             user_namespaces: true,
+            storage_quota: Some("xfs".into()),
         }
     }
 
@@ -957,6 +985,12 @@ mod tests {
                 username: "alice".into(),
                 uid: 10_000,
             },
+            Operation::SetStorageQuota {
+                tenant_id: id(),
+                uid: 10_000,
+                disk_bytes: Some(1 << 30),
+                inodes: None,
+            },
         ] {
             let wire = serde_json::to_value(&op).unwrap();
             assert_eq!(wire["type"], op.type_name());
@@ -964,7 +998,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            3,
+            4,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }

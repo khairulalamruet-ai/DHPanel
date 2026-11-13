@@ -81,9 +81,12 @@ impl Registry {
         let mut registry = Self::new();
         if let Some(context) = tenants {
             let context = Arc::new(context);
-            registry.register("create_tenant", move |op| {
+            registry.register("create_tenant", {
                 let context = context.clone();
-                tenant::create_tenant(context, op)
+                move |op| tenant::create_tenant(context.clone(), op)
+            });
+            registry.register("set_storage_quota", move |op| {
+                tenant::set_storage_quota(context.clone(), op)
             });
         }
         let sources = capabilities::Sources::system(data_dir);

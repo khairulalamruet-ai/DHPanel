@@ -189,6 +189,12 @@ fn execute(action: &Action, config: &Config) -> Result<(), (ErrorCode, &'static 
         Action::PrepareTenant { tenant_id, uid } => {
             tenant::prepare(&config.tenants, tenant_id, *uid)
         }
+        Action::SetStorageQuota {
+            tenant_id,
+            uid,
+            disk_bytes,
+            inodes,
+        } => tenant::set_storage_quota(&config.tenants, tenant_id, *uid, *disk_bytes, *inodes),
     }
 }
 
@@ -245,6 +251,7 @@ mod tests {
             agent_name: "dhpanel-agent".into(),
             subuid_file: "/nonexistent".into(),
             agent_gid: gid,
+            mountinfo: "/nonexistent".into(),
         }
     }
 
