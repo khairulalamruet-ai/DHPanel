@@ -24,7 +24,7 @@ use std::{collections::HashMap, path::Path, time::Duration};
 use bollard::{
     Docker,
     errors::Error as BollardError,
-    models::{NetworkCreateRequest, VolumeCreateRequest},
+    models::{ContainerUpdateBody, NetworkCreateRequest, VolumeCreateRequest},
     query_parameters::{
         CreateContainerOptionsBuilder, CreateImageOptionsBuilder, ListContainersOptionsBuilder,
         RemoveContainerOptionsBuilder, StatsOptionsBuilder, StopContainerOptionsBuilder,
@@ -33,8 +33,8 @@ use bollard::{
 use futures_util::StreamExt as _;
 
 pub use crate::spec::{
-    Capability, ContainerSpec, ImageRef, MANAGED_LABEL, Name, Network, PublishedPort, ROLE_LABEL,
-    Restart, SpecError, TENANT_LABEL, Tmpfs, VolumeMount,
+    Capability, ContainerSpec, ImageRef, Limits, MANAGED_LABEL, Name, Network, PublishedPort,
+    ROLE_LABEL, Restart, SpecError, TENANT_LABEL, Tmpfs, VolumeMount,
 };
 
 /// Longest a single API call may take (pulls have their own, longer limit).
@@ -117,6 +117,8 @@ pub struct ContainerInfo {
     pub exit_code: Option<i64>,
     /// Labels.
     pub labels: HashMap<String, String>,
+    /// The limits in force (zeros if Docker reports none).
+    pub limits: Limits,
 }
 
 /// A point-in-time reading of a container's resource usage.
@@ -289,6 +291,32 @@ impl DockerManager {
                 .unwrap_or(0),
             pids: stats.pids_stats.and_then(|p| p.current).unwrap_or(0),
         })
+    }
+
+    /// Changes the limits of a container we created, running or not, without
+    /// restarting it. Memory and swap are set to the same value, so a container
+    /// never gets swap.
+    ///
+    /// # Errors
+    /// [`DockerError::Invalid`] for numbers out of range, [`DockerError::NotFound`],
+    /// [`DockerError::NotManaged`], [`DockerError::Api`] (for example when the new
+    /// memory limit is below what the container already uses).
+    pub async fn update_limits(&self, name: &Name, limits: &Limits) -> Result<(), DockerError> {
+        limits.validate()?;
+        self.require_managed_container(name).await?;
+        // Validated above: at most 1 TiB, so this always fits.
+        let memory = i64::try_from(limits.memory_bytes).unwrap_or(i64::MAX);
+        let body = ContainerUpdateBody {
+            memory: Some(memory),
+            memory_swap: Some(memory),
+            nano_cpus: Some(i64::from(limits.cpu_millis) * 1_000_000),
+            pids_limit: Some(i64::from(limits.pids_limit)),
+            ..Default::default()
+        };
+        self.docker
+            .update_container(name.as_str(), body)
+            .await
+            .map_err(map_error)
     }
 
     /// Names of all containers we created (running or not), sorted.
@@ -525,6 +553,20 @@ impl DockerManager {
             running,
             exit_code: (!running).then_some(state.exit_code).flatten(),
             labels,
+            limits: {
+                let host = c.host_config.unwrap_or_default();
+                Limits {
+                    memory_bytes: host.memory.and_then(|m| u64::try_from(m).ok()).unwrap_or(0),
+                    cpu_millis: host
+                        .nano_cpus
+                        .and_then(|n| u32::try_from(n / 1_000_000).ok())
+                        .unwrap_or(0),
+                    pids_limit: host
+                        .pids_limit
+                        .and_then(|p| u32::try_from(p).ok())
+                        .unwrap_or(0),
+                }
+            },
         })
     }
 }

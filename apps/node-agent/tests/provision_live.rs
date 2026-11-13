@@ -157,3 +157,117 @@ async fn the_stack_runs_as_the_tenant_not_as_root_and_provisioning_can_be_repeat
         .remove_network(&Name::parse(&format!("dh-{username}-net")).unwrap())
         .await;
 }
+
+#[tokio::test]
+#[ignore = "needs the privileged helper running as root, Docker and registry access"]
+async fn changing_the_plan_changes_the_limits_of_the_running_stack() {
+    use dhpanel_node_agent::ops::tenant::set_resource_limits;
+    let (Some(helper_socket), Some(tenants_root)) = (
+        std::env::var_os("DHPANEL_TEST_HELPER_SOCKET"),
+        std::env::var_os("DHPANEL_TEST_TENANTS_ROOT"),
+    ) else {
+        eprintln!("skipped: no helper (see the live script)");
+        return;
+    };
+    let docker = DockerManager::connect(&docker_socket()).unwrap();
+    let context = Arc::new(TenantContext {
+        helper_socket: PathBuf::from(helper_socket),
+        tenants_root: PathBuf::from(tenants_root),
+        docker: docker.clone(),
+    });
+    let username = format!("l{}x", std::process::id());
+    let limits_op = |memory_bytes, pids| Operation::SetResourceLimits {
+        username: username.clone(),
+        cpu_millis: Some(2000),
+        memory_bytes: Some(memory_bytes),
+        pids: Some(pids),
+    };
+
+    // Nothing provisioned yet: refused, not retryable.
+    let err = set_resource_limits(context.clone(), limits_op(512 << 20, 200))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, ErrorCode::InvalidArguments);
+    assert!(!err.retryable);
+
+    let tenant_id = Uuid::now_v7();
+    let uid = 10_078;
+    create_tenant(
+        context.clone(),
+        Operation::CreateTenant {
+            tenant_id,
+            username: username.clone(),
+            uid,
+        },
+    )
+    .await
+    .unwrap();
+    provision_tenant_stack(
+        context.clone(),
+        Operation::ProvisionTenantStack {
+            tenant_id,
+            username: username.clone(),
+            uid,
+            cpu_millis: Some(1000),
+            memory_bytes: Some(256 << 20),
+            pids: Some(100),
+        },
+    )
+    .await
+    .expect("stack provisioned");
+
+    let php = Name::parse(&format!("dh-{username}-php")).unwrap();
+    let web = Name::parse(&format!("dh-{username}-web")).unwrap();
+    let before = docker.inspect(&php).await.unwrap();
+    assert_eq!(before.limits.memory_bytes, 192 << 20, "75% of 256 MiB");
+
+    // A bigger plan: the running containers get bigger limits, no restart.
+    let started = docker.inspect(&php).await.unwrap().id;
+    let output = set_resource_limits(context.clone(), limits_op(1024 << 20, 400))
+        .await
+        .expect("limits changed");
+    assert_eq!(
+        output,
+        Output::ResourceLimitsSet {
+            containers: vec![php.as_str().to_owned(), web.as_str().to_owned()]
+        }
+    );
+    let after = docker.inspect(&php).await.unwrap();
+    assert!(after.running, "no restart needed");
+    assert_eq!(after.id, started);
+    assert_eq!(after.limits.memory_bytes, 768 << 20);
+    assert_eq!(after.limits.cpu_millis, 1500);
+    assert_eq!(after.limits.pids_limit, 300);
+    let web_after = docker.inspect(&web).await.unwrap();
+    assert_eq!(web_after.limits.memory_bytes, 256 << 20);
+    assert_eq!(web_after.limits.cpu_millis, 500);
+    assert_eq!(web_after.limits.pids_limit, 100);
+
+    // A smaller plan lowers them again; one that is too small is refused untouched.
+    set_resource_limits(context.clone(), limits_op(300 << 20, 150))
+        .await
+        .unwrap();
+    assert_eq!(
+        docker.inspect(&php).await.unwrap().limits.memory_bytes,
+        225 << 20
+    );
+    let err = set_resource_limits(context.clone(), limits_op(8 << 20, 150))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, ErrorCode::InvalidArguments);
+    assert_eq!(
+        docker.inspect(&php).await.unwrap().limits.memory_bytes,
+        225 << 20,
+        "a refused plan changes nothing"
+    );
+
+    for name in [&php, &web] {
+        let _ = docker.remove(name, true).await;
+    }
+    let _ = docker
+        .remove_volume(&Name::parse(&format!("dh-{username}-www")).unwrap())
+        .await;
+    let _ = docker
+        .remove_network(&Name::parse(&format!("dh-{username}-net")).unwrap())
+        .await;
+}

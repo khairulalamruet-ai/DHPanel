@@ -19,7 +19,8 @@
 use std::{collections::BTreeMap, fmt};
 
 use dhpanel_docker_manager::{
-    Capability, ContainerSpec, ImageRef, Name, Network, Restart, SpecError, Tmpfs, VolumeMount,
+    Capability, ContainerSpec, ImageRef, Limits, Name, Network, Restart, SpecError, Tmpfs,
+    VolumeMount,
 };
 use dhpanel_domain::{TenantUsername, Uid};
 use serde::Deserialize;
@@ -269,19 +270,60 @@ pub fn files_volume_name(tenant: &TenantUsername) -> Result<Name, SpecError> {
     name(tenant, "www")
 }
 
+/// A service's share of the plan, or why the plan is too small for it.
+fn service_limits(
+    template: &ServiceTemplate,
+    resources: &PlanResources,
+) -> Result<Limits, StackError> {
+    let cpu = resources.cpu_millis.unwrap_or(UNLIMITED_CPU_MILLIS);
+    let memory = resources.memory_bytes.unwrap_or(UNLIMITED_MEMORY_BYTES);
+    let pids = resources.pids.unwrap_or(UNLIMITED_PIDS);
+    let share = u64::from(template.share);
+    let limits = Limits {
+        memory_bytes: memory * share / 100,
+        pids_limit: u32::try_from(u64::from(pids) * share / 100).unwrap_or(u32::MAX),
+        cpu_millis: u32::try_from(u64::from(cpu) * share / 100).unwrap_or(u32::MAX),
+    };
+    if limits.memory_bytes < template.min_memory_bytes {
+        return Err(StackError::PlanTooSmall("memory"));
+    }
+    if limits.pids_limit < template.min_pids {
+        return Err(StackError::PlanTooSmall("process limit"));
+    }
+    if limits.cpu_millis < 10 {
+        return Err(StackError::PlanTooSmall("CPU"));
+    }
+    Ok(limits)
+}
+
+/// The limits each container of a tenant's stack gets from a plan, by container
+/// name, in start order. What [`render`] puts in the specifications, for
+/// changing a running stack when the plan changes.
+///
+/// # Errors
+/// [`StackError`]: the plan is too small to run the stack.
+pub fn plan_limits(
+    username: &TenantUsername,
+    resources: &PlanResources,
+) -> Result<Vec<(Name, Limits)>, StackError> {
+    WEB_PHP
+        .iter()
+        .rev()
+        .map(|template| {
+            Ok((
+                name(username, template.role.as_str())?,
+                service_limits(template, resources)?,
+            ))
+        })
+        .collect()
+}
+
 /// Renders the web + PHP stack for a tenant from the allow-list.
 ///
 /// # Errors
 /// [`StackError`]: no image for a role, a plan too small to run the stack, or a
 /// specification the docker-manager crate refuses.
 pub fn render(tenant: &Tenant<'_>, allowlist: &Allowlist) -> Result<Stack, StackError> {
-    let cpu = tenant.resources.cpu_millis.unwrap_or(UNLIMITED_CPU_MILLIS);
-    let memory = tenant
-        .resources
-        .memory_bytes
-        .unwrap_or(UNLIMITED_MEMORY_BYTES);
-    let pids = tenant.resources.pids.unwrap_or(UNLIMITED_PIDS);
-
     let network = network_name(tenant.username)?;
     let files = files_volume_name(tenant.username)?;
     let user = Some((tenant.uid.get(), tenant.uid.get()));
@@ -292,25 +334,13 @@ pub fn render(tenant: &Tenant<'_>, allowlist: &Allowlist) -> Result<Stack, Stack
         if !allowlist.allows(template.role, &image) {
             return Err(StackError::ImageNotAllowed(template.role));
         }
-        let share = u64::from(template.share);
-        let memory_bytes = memory * share / 100;
-        let pids_limit = u32::try_from(u64::from(pids) * share / 100).unwrap_or(u32::MAX);
-        let cpu_millis = u32::try_from(u64::from(cpu) * share / 100).unwrap_or(u32::MAX);
-        if memory_bytes < template.min_memory_bytes {
-            return Err(StackError::PlanTooSmall("memory"));
-        }
-        if pids_limit < template.min_pids {
-            return Err(StackError::PlanTooSmall("process limit"));
-        }
-        if cpu_millis < 10 {
-            return Err(StackError::PlanTooSmall("CPU"));
-        }
+        let limits = service_limits(template, &tenant.resources)?;
         let mut spec = ContainerSpec::new(name(tenant.username, template.role.as_str())?, image);
         spec.command = template.command.iter().map(|a| (*a).to_owned()).collect();
         spec.user = user;
-        spec.memory_bytes = memory_bytes;
-        spec.cpu_millis = cpu_millis;
-        spec.pids_limit = pids_limit;
+        spec.memory_bytes = limits.memory_bytes;
+        spec.cpu_millis = limits.cpu_millis;
+        spec.pids_limit = limits.pids_limit;
         spec.tmpfs = template
             .tmpfs
             .iter()
@@ -373,6 +403,36 @@ mod tests {
         memory_bytes: Some(512 * MIB),
         pids: Some(128),
     };
+
+    #[test]
+    fn plan_limits_are_exactly_what_a_new_stack_gets() {
+        for resources in [
+            BASIC,
+            PlanResources {
+                cpu_millis: None,
+                memory_bytes: None,
+                pids: None,
+            },
+        ] {
+            let stack = render_for("alice", 1, resources).unwrap();
+            let username = TenantUsername::parse("alice").unwrap();
+            let limits = plan_limits(&username, &resources).unwrap();
+            assert_eq!(limits.len(), stack.services.len());
+            for ((name, limit), spec) in limits.iter().zip(&stack.services) {
+                assert_eq!(name, &spec.name, "same order: PHP first");
+                assert_eq!(*limit, spec.limits());
+            }
+        }
+        let tiny = PlanResources {
+            memory_bytes: Some(8 * MIB),
+            ..BASIC
+        };
+        let username = TenantUsername::parse("alice").unwrap();
+        assert!(matches!(
+            plan_limits(&username, &tiny),
+            Err(StackError::PlanTooSmall("memory"))
+        ));
+    }
 
     #[test]
     fn the_shipped_allowlist_is_valid_and_pinned() {

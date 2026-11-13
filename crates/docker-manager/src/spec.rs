@@ -8,6 +8,36 @@ use bollard::models::{
     PortBinding, RestartPolicy as DockerRestartPolicy, RestartPolicyNameEnum,
 };
 
+/// What a container may use. Applied at creation and changed later in place.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Limits {
+    /// Memory in bytes (swap is set to the same, so there is none).
+    pub memory_bytes: u64,
+    /// CPU in thousandths of a core.
+    pub cpu_millis: u32,
+    /// Processes.
+    pub pids_limit: u32,
+}
+
+impl Limits {
+    /// Checks the three numbers.
+    ///
+    /// # Errors
+    /// The first one out of range.
+    pub fn validate(&self) -> Result<(), SpecError> {
+        if !(MIN_MEMORY_BYTES..=MAX_MEMORY_BYTES).contains(&self.memory_bytes) {
+            return Err(invalid("memory_bytes", "must be between 6 MiB and 1 TiB"));
+        }
+        if !(10..=256_000).contains(&self.cpu_millis) {
+            return Err(invalid("cpu_millis", "must be between 10 and 256000"));
+        }
+        if !(1..=MAX_PIDS).contains(&self.pids_limit) {
+            return Err(invalid("pids_limit", "must be between 1 and 32768"));
+        }
+        Ok(())
+    }
+}
+
 /// Label every object this crate creates carries. Actions refuse objects
 /// without it, so the agent can never touch a container it did not make.
 pub const MANAGED_LABEL: &str = "dhpanel.managed";
@@ -275,20 +305,22 @@ impl ContainerSpec {
         }
     }
 
+    /// The container's limits as a [`Limits`] value.
+    #[must_use]
+    pub fn limits(&self) -> Limits {
+        Limits {
+            memory_bytes: self.memory_bytes,
+            cpu_millis: self.cpu_millis,
+            pids_limit: self.pids_limit,
+        }
+    }
+
     /// Checks every field.
     ///
     /// # Errors
     /// The first problem found.
     pub fn validate(&self) -> Result<(), SpecError> {
-        if !(MIN_MEMORY_BYTES..=MAX_MEMORY_BYTES).contains(&self.memory_bytes) {
-            return Err(invalid("memory_bytes", "must be between 6 MiB and 1 TiB"));
-        }
-        if !(10..=256_000).contains(&self.cpu_millis) {
-            return Err(invalid("cpu_millis", "must be between 10 and 256000"));
-        }
-        if !(1..=MAX_PIDS).contains(&self.pids_limit) {
-            return Err(invalid("pids_limit", "must be between 1 and 32768"));
-        }
+        self.limits().validate()?;
         if self.command.len() > 64
             || self
                 .command

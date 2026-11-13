@@ -162,6 +162,18 @@ pub enum Operation {
         /// Processes the plan gives the stack (`None` = unlimited).
         pids: Option<u32>,
     },
+    /// Change the limits of a tenant's running containers to a plan's, without
+    /// restarting them. Answered with [`Output::ResourceLimitsSet`].
+    SetResourceLimits {
+        /// The tenant's system name.
+        username: String,
+        /// CPU in thousandths of a core (`None` = unlimited).
+        cpu_millis: Option<u32>,
+        /// Memory in bytes (`None` = unlimited).
+        memory_bytes: Option<u64>,
+        /// Processes (`None` = unlimited).
+        pids: Option<u32>,
+    },
 }
 
 impl Operation {
@@ -172,6 +184,7 @@ impl Operation {
         "create_tenant",
         "set_storage_quota",
         "provision_tenant_stack",
+        "set_resource_limits",
     ];
 
     /// The operation's wire name.
@@ -183,6 +196,7 @@ impl Operation {
             Self::CreateTenant { .. } => "create_tenant",
             Self::SetStorageQuota { .. } => "set_storage_quota",
             Self::ProvisionTenantStack { .. } => "provision_tenant_stack",
+            Self::SetResourceLimits { .. } => "set_resource_limits",
         }
     }
 }
@@ -314,6 +328,11 @@ pub enum Output {
     StorageQuotaSet {
         /// How the node enforces it (`xfs`).
         backend: String,
+    },
+    /// Answer to [`Operation::SetResourceLimits`].
+    ResourceLimitsSet {
+        /// Names of the containers that were updated.
+        containers: Vec<String>,
     },
     /// Answer to [`Operation::ProvisionTenantStack`].
     StackProvisioned {
@@ -1024,6 +1043,12 @@ mod tests {
                 memory_bytes: Some(512 << 20),
                 pids: None,
             },
+            Operation::SetResourceLimits {
+                username: "alice".into(),
+                cpu_millis: None,
+                memory_bytes: Some(1 << 30),
+                pids: Some(300),
+            },
         ] {
             let wire = serde_json::to_value(&op).unwrap();
             assert_eq!(wire["type"], op.type_name());
@@ -1031,7 +1056,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            5,
+            6,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }

@@ -25,7 +25,7 @@ use dhpanel_domain::{TenantUsername, UidRange};
 use dhpanel_node_protocol::{AgentError, ErrorCode, Operation, Output};
 use dhpanel_priv_helper::protocol::{Action, ErrorCode as HelperCode, Request, Response};
 use dhpanel_tenant_stack::{
-    Allowlist, PlanResources, Tenant, files_volume_name, network_name, render,
+    Allowlist, PlanResources, Tenant, files_volume_name, network_name, plan_limits, render,
 };
 use uuid::Uuid;
 
@@ -282,6 +282,61 @@ pub async fn provision_tenant_stack(
     }
     Ok(Output::StackProvisioned {
         containers: started,
+    })
+}
+
+/// `set_resource_limits`.
+///
+/// # Errors
+/// [`AgentError`]: bad arguments, a plan too small to run the stack, or a stack
+/// that was never provisioned here (none retryable); Docker unavailable
+/// (retryable).
+pub async fn set_resource_limits(
+    context: Arc<TenantContext>,
+    op: Operation,
+) -> Result<Output, AgentError> {
+    let Operation::SetResourceLimits {
+        username,
+        cpu_millis,
+        memory_bytes,
+        pids,
+    } = op
+    else {
+        return Err(super::wrong_operation());
+    };
+    let invalid = |m: &str| AgentError::new(ErrorCode::InvalidArguments, m.to_owned());
+    let username = TenantUsername::parse(&username).map_err(|e| invalid(&e.to_string()))?;
+    let wanted = plan_limits(
+        &username,
+        &PlanResources {
+            cpu_millis,
+            memory_bytes,
+            pids,
+        },
+    )
+    .map_err(|e| invalid(&e.to_string()))?;
+    // All containers must be there before any is changed: a half-updated stack
+    // is worse than a refused request.
+    for (name, _) in &wanted {
+        match context.docker.inspect(name).await {
+            Ok(_) => {}
+            Err(DockerError::NotFound) => {
+                return Err(invalid("the tenant's stack has not been provisioned here"));
+            }
+            Err(e) => return Err(docker_error(&e)),
+        }
+    }
+    let mut updated = Vec::new();
+    for (name, limits) in &wanted {
+        context
+            .docker
+            .update_limits(name, limits)
+            .await
+            .map_err(|e| docker_error(&e))?;
+        updated.push(name.as_str().to_owned());
+    }
+    Ok(Output::ResourceLimitsSet {
+        containers: updated,
     })
 }
 
