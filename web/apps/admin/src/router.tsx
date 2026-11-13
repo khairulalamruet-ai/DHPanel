@@ -49,6 +49,8 @@ import {
   AdminServerToolsPage,
   ClientWafPage,
   AdminWafPage,
+  ClientFirewallPage,
+  AdminFirewallPage,
   filterNavItems,
   registeredFrontendModules,
 } from "@dhpanel/modules";
@@ -445,6 +447,19 @@ const adminWafRoute = createRoute({
   component: AdminWafPage,
 });
 
+// 39. Firewall routes (T11.08)
+const clientFirewallRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/firewall",
+  component: ClientFirewallPage,
+});
+
+const adminFirewallRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/firewall",
+  component: AdminFirewallPage,
+});
+
 // 18. Login route
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -512,6 +527,8 @@ const routeTree = rootRoute.addChildren([
   adminServerToolsRoute,
   clientWafRoute,
   adminWafRoute,
+  clientFirewallRoute,
+  adminFirewallRoute,
   loginRoute,
 ]);
 

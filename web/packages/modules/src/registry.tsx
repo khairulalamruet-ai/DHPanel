@@ -1,5 +1,5 @@
 import React from "react";
-import { LayoutDashboard, ShieldCheck, ShieldAlert, Sparkles, Puzzle, Globe, Users, Settings, FileText, Boxes, Server, Activity, Layers, Lock, FileCode2, Cpu, Database, Folder, Archive, Clock, Terminal, Wrench } from "lucide-react";
+import { LayoutDashboard, ShieldCheck, ShieldAlert, Sparkles, Puzzle, Globe, Users, Settings, FileText, Boxes, Server, Activity, Layers, Lock, FileCode2, Cpu, Database, Folder, Archive, Clock, Terminal, Wrench, Flame } from "lucide-react";
 
 export interface ModuleManifest {
   name: string;
@@ -709,6 +709,37 @@ export const registeredFrontendModules: FrontendModule[] = [
         href: "/admin/waf",
         order: 63,
         permission: "admin.waf.manage",
+      },
+    ],
+  },
+  {
+    manifest: {
+      name: "firewall",
+      title: { en: "Firewall & IP Block", bn: "ফায়ারওয়াল ও আইপি ব্লক" },
+      category: "security",
+      core: true,
+      permissions: ["firewall.read", "firewall.manage", "admin.firewall.manage"],
+      features: ["firewall"],
+    },
+    clientNav: [
+      {
+        id: "firewall",
+        labelKey: "firewall.nav",
+        icon: <Flame className="h-4 w-4" />,
+        href: "/firewall",
+        order: 38,
+        permission: "firewall.read",
+        feature: "firewall",
+      },
+    ],
+    adminNav: [
+      {
+        id: "admin-firewall",
+        labelKey: "firewall.nav",
+        icon: <Flame className="h-4 w-4" />,
+        href: "/admin/firewall",
+        order: 65,
+        permission: "admin.firewall.manage",
       },
     ],
   },

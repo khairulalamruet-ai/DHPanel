@@ -7060,7 +7060,6 @@ export const handlers = [
                                                 mockWafPolicies[domain].updated_at = new Date().toISOString();
                                                 return HttpResponse.json({ success: true, policy: mockWafPolicies[domain] });
                                               }),
-
                                               // GET /api/v1/admin/waf/events (TODO(api:T11.04))
                                               http.get(/\/api\/v1\/admin\/waf\/events$/, ({ request }) => {
                                                 const url = new URL(request.url);
@@ -7131,6 +7130,183 @@ export const handlers = [
                                                 mockWafPolicies[domain].mode = body.mode || "block";
                                                 return HttpResponse.json({ success: true, policy: mockWafPolicies[domain] });
                                               }),
+
+                                              ...(() => {
+                                                const mockClientIpRules: Array<{
+                                                  id: string;
+                                                  domain: string;
+                                                  ip_cidr: string;
+                                                  action: "block" | "allow";
+                                                  notes?: string;
+                                                  created_at: string;
+                                                }> = [
+                                                  {
+                                                    id: "ip-rule-1",
+                                                    domain: "example.com",
+                                                    ip_cidr: "198.51.100.42",
+                                                    action: "block",
+                                                    notes: "Aggressive scraper / brute force",
+                                                    created_at: "2026-11-12 14:00:00",
+                                                  },
+                                                  {
+                                                    id: "ip-rule-2",
+                                                    domain: "example.com",
+                                                    ip_cidr: "203.0.113.0/24",
+                                                    action: "block",
+                                                    notes: "Suspicious hosting subnet",
+                                                    created_at: "2026-11-12 16:30:00",
+                                                  },
+                                                  {
+                                                    id: "ip-rule-3",
+                                                    domain: "example.com",
+                                                    ip_cidr: "192.0.2.10",
+                                                    action: "allow",
+                                                    notes: "Office static IP",
+                                                    created_at: "2026-11-10 10:00:00",
+                                                  },
+                                                ];
+
+                                                const mockAdminFirewallOverview: {
+                                                  node_id: string;
+                                                  status: "active" | "inactive";
+                                                  nftables_version: string;
+                                                  active_ports: Array<{ id: string; port: number; protocol: "tcp" | "udp"; service_name: string; is_system_protected: boolean; status: "open" | "closed" }>;
+                                                  active_bans: Array<{ id: string; ip: string; reason: string; source: "bruteforce_auto" | "admin_manual"; service: string; banned_at: string; expires_at: string | null }>;
+                                                  rate_limit_enabled: boolean;
+                                                  rate_limit_rps: number;
+                                                } = {
+                                                  node_id: "node-1",
+                                                  status: "active" as const,
+                                                  nftables_version: "nftables v1.0.9 (Kernel Packet Filter)",
+                                                  active_ports: [
+                                                    { id: "port-1", port: 22, protocol: "tcp" as const, service_name: "SSH Management", is_system_protected: true, status: "open" as const },
+                                                    { id: "port-2", port: 80, protocol: "tcp" as const, service_name: "HTTP Web Traffic", is_system_protected: true, status: "open" as const },
+                                                    { id: "port-3", port: 443, protocol: "tcp" as const, service_name: "HTTPS TLS Traffic", is_system_protected: true, status: "open" as const },
+                                                    { id: "port-4", port: 21, protocol: "tcp" as const, service_name: "FTP Control", is_system_protected: false, status: "open" as const },
+                                                    { id: "port-5", port: 8080, protocol: "tcp" as const, service_name: "Dev Webhook Port", is_system_protected: false, status: "open" as const },
+                                                  ],
+                                                  active_bans: [
+                                                    {
+                                                      id: "ban-1",
+                                                      ip: "198.51.100.22",
+                                                      reason: "Exceeded 10 failed panel login attempts",
+                                                      source: "bruteforce_auto" as const,
+                                                      service: "panel_login" as const,
+                                                      banned_at: "2026-11-13 10:15:00",
+                                                      expires_at: "2026-11-13 11:15:00",
+                                                    },
+                                                    {
+                                                      id: "ban-2",
+                                                      ip: "203.0.113.99",
+                                                      reason: "Repeated SFTP dictionary attacks",
+                                                      source: "bruteforce_auto" as const,
+                                                      service: "sftp" as const,
+                                                      banned_at: "2026-11-13 10:45:00",
+                                                      expires_at: "2026-11-13 11:45:00",
+                                                    },
+                                                  ],
+                                                  rate_limit_enabled: true,
+                                                  rate_limit_rps: 50,
+                                                };
+
+                                                return [
+                                                  // GET /api/v1/client/firewall/rules (TODO(api:T11.08))
+                                                  http.get(/\/api\/v1\/client\/firewall\/rules$/, ({ request }) => {
+                                                    const url = new URL(request.url);
+                                                    const domain = url.searchParams.get("domain") || "example.com";
+                                                    return HttpResponse.json(mockClientIpRules.filter((r) => r.domain === domain));
+                                                  }),
+
+                                                  // POST /api/v1/client/firewall/rules (TODO(api:T11.08))
+                                                  http.post(/\/api\/v1\/client\/firewall\/rules$/, async ({ request }) => {
+                                                    const body = (await request.json().catch(() => ({}))) as any;
+                                                    const newRule = {
+                                                      id: `ip-rule-${Date.now()}`,
+                                                      domain: body.domain || "example.com",
+                                                      ip_cidr: body.ip_cidr,
+                                                      action: body.action || "block",
+                                                      notes: body.notes || "",
+                                                      created_at: new Date().toISOString().slice(0, 19).replace("T", " "),
+                                                    };
+                                                    mockClientIpRules.unshift(newRule);
+                                                    return HttpResponse.json({ success: true, rule: newRule });
+                                                  }),
+
+                                                  // DELETE /api/v1/client/firewall/rules/:id (TODO(api:T11.08))
+                                                  http.delete(/\/api\/v1\/client\/firewall\/rules\/([^/]+)$/, ({ params }) => {
+                                                    const id = String(params[0] || params.id);
+                                                    const idx = mockClientIpRules.findIndex((r) => r.id === id);
+                                                    if (idx !== -1) {
+                                                      mockClientIpRules.splice(idx, 1);
+                                                    }
+                                                    return HttpResponse.json({ success: true, id });
+                                                  }),
+
+                                                  // GET /api/v1/admin/firewall/overview (TODO(api:T11.08))
+                                                  http.get(/\/api\/v1\/admin\/firewall\/overview$/, () => {
+                                                    return HttpResponse.json(mockAdminFirewallOverview);
+                                                  }),
+
+                                                  // POST /api/v1/admin/firewall/ports (TODO(api:T11.08))
+                                                  http.post(/\/api\/v1\/admin\/firewall\/ports$/, async ({ request }) => {
+                                                    const body = (await request.json().catch(() => ({}))) as any;
+                                                    const newPort = {
+                                                      id: `port-${Date.now()}`,
+                                                      port: Number(body.port),
+                                                      protocol: body.protocol || "tcp",
+                                                      service_name: body.service_name || "Custom Port",
+                                                      is_system_protected: false,
+                                                      status: "open" as const,
+                                                    };
+                                                    mockAdminFirewallOverview.active_ports.push(newPort);
+                                                    return HttpResponse.json({ success: true, port: newPort });
+                                                  }),
+
+                                                  // DELETE /api/v1/admin/firewall/ports/:id (TODO(api:T11.08))
+                                                  http.delete(/\/api\/v1\/admin\/firewall\/ports\/([^/]+)$/, ({ params }) => {
+                                                    const id = String(params[0] || params.id);
+                                                    const idx = mockAdminFirewallOverview.active_ports.findIndex((p) => p.id === id);
+                                                    if (idx !== -1) {
+                                                      mockAdminFirewallOverview.active_ports.splice(idx, 1);
+                                                    }
+                                                    return HttpResponse.json({ success: true, id });
+                                                  }),
+
+                                                  // POST /api/v1/admin/firewall/bans (TODO(api:T11.08))
+                                                  http.post(/\/api\/v1\/admin\/firewall\/bans$/, async ({ request }) => {
+                                                    const body = (await request.json().catch(() => ({}))) as any;
+                                                    const newBan = {
+                                                      id: `ban-${Date.now()}`,
+                                                      ip: body.ip,
+                                                      reason: body.reason || "Manual admin ban",
+                                                      source: "admin_manual" as const,
+                                                      service: "manual" as const,
+                                                      banned_at: new Date().toISOString().slice(0, 19).replace("T", " "),
+                                                      expires_at: body.duration_hours > 0 ? `${body.duration_hours} hours from now` : "Permanent",
+                                                    };
+                                                    mockAdminFirewallOverview.active_bans.unshift(newBan);
+                                                    return HttpResponse.json({ success: true, ban: newBan });
+                                                  }),
+
+                                                  // DELETE /api/v1/admin/firewall/bans/:id (TODO(api:T11.08))
+                                                  http.delete(/\/api\/v1\/admin\/firewall\/bans\/([^/]+)$/, ({ params }) => {
+                                                    const id = String(params[0] || params.id);
+                                                    const idx = mockAdminFirewallOverview.active_bans.findIndex((b) => b.id === id);
+                                                    if (idx !== -1) {
+                                                      mockAdminFirewallOverview.active_bans.splice(idx, 1);
+                                                    }
+                                                    return HttpResponse.json({ success: true, id });
+                                                  }),
+
+                                                  // POST /api/v1/admin/firewall/rate-limit (TODO(api:T11.08))
+                                                  http.post(/\/api\/v1\/admin\/firewall\/rate-limit$/, async ({ request }) => {
+                                                    const body = (await request.json().catch(() => ({}))) as any;
+                                                    mockAdminFirewallOverview.rate_limit_enabled = Boolean(body.enabled);
+                                                    mockAdminFirewallOverview.rate_limit_rps = Number(body.rate_limit_rps || 50);
+                                                    return HttpResponse.json({ success: true, enabled: mockAdminFirewallOverview.rate_limit_enabled, rate_limit_rps: mockAdminFirewallOverview.rate_limit_rps });
+                                                  }),
+                                                ];
+                                              })(),
                                             ];
                                           })(),
                                         ];
