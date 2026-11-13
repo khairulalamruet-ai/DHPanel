@@ -993,6 +993,7 @@ dependencies = [
  "dhpanel-cache",
  "dhpanel-database",
  "dhpanel-http-kit",
+ "dhpanel-node-gateway",
  "dhpanel-node-protocol",
  "dhpanel-pki",
  "dhpanel-rbac",

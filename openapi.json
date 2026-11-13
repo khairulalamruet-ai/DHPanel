@@ -1030,6 +1030,83 @@
         ]
       }
     },
+    "/api/v1/admin/nodes/{id}/revoke": {
+      "post": {
+        "tags": [
+          "nodes"
+        ],
+        "summary": "Revoke a node: its certificates stop working and its connection is closed.\nFinal; the server has to be enrolled again with a new token.",
+        "operationId": "revokeNode",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Node id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Revoked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevokedNode"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied` (needs admin.nodes.manage), `reauth_required` or `csrf_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such node",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`node_already_revoked`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/auth/logout": {
       "post": {
         "tags": [
@@ -2762,6 +2839,32 @@
             "format": "int64",
             "description": "Number of sessions ended.",
             "minimum": 0
+          }
+        }
+      },
+      "RevokedNode": {
+        "type": "object",
+        "description": "What revoking a node did.",
+        "required": [
+          "node_id",
+          "certificates_revoked",
+          "session_closed"
+        ],
+        "properties": {
+          "certificates_revoked": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Certificates revoked with it.",
+            "minimum": 0
+          },
+          "node_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The node."
+          },
+          "session_closed": {
+            "type": "boolean",
+            "description": "Whether an open connection was closed."
           }
         }
       },

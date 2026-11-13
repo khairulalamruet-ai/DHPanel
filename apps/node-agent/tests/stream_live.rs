@@ -560,3 +560,48 @@ async fn nodes_left_online_by_a_stopped_control_plane_are_swept_and_listed_as_of
         "online"
     );
 }
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs PostgreSQL"]
+async fn a_revoked_node_loses_its_connection_and_cannot_come_back(pool: PgPool) {
+    let p = plane(&pool).await;
+    let node = make_node(&p.ca, &pool, "eta", true).await;
+
+    // A raw session, to read the reason it is closed with.
+    let mut ws = raw_connect(&node, p.addr, PROTOCOL_VERSION).await.unwrap();
+    read_welcome(&mut ws).await.unwrap();
+    assert!(wait_for_status(&pool, node.id, "online", Duration::from_secs(3)).await);
+
+    // Revoke exactly like the admin endpoint does: database first, then the open connection.
+    let mut tx = pool.begin().await.unwrap();
+    assert_eq!(
+        nodes::revoke_node(&mut tx, node.id).await.unwrap(),
+        nodes::RevokeNodeOutcome::Revoked { certificates: 1 }
+    );
+    tx.commit().await.unwrap();
+    assert!(p.gateway.disconnect_revoked(node.id));
+    let mut reason = None;
+    for _ in 0..20 {
+        match tokio::time::timeout(Duration::from_millis(500), ws.next()).await {
+            Ok(Some(Ok(Message::Close(Some(frame))))) => {
+                reason = Some(frame.reason.to_string());
+                break;
+            }
+            Ok(None | Some(Err(_))) => break,
+            _ => {}
+        }
+    }
+    assert_eq!(reason.as_deref(), Some("node revoked"));
+    assert!(!p.gateway.disconnect_revoked(node.id), "no session left");
+    // The status stays revoked: the goodbye must not turn it into plain offline.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(status(&pool, node.id).await, "revoked");
+
+    // The real agent keeps trying and is never let in.
+    let (stop, task) = start_agent(node.params(p.addr));
+    tokio::time::sleep(Duration::from_millis(2500)).await;
+    assert_eq!(status(&pool, node.id).await, "revoked");
+    assert!(!p.gateway.is_connected(node.id));
+    stop.send(true).unwrap();
+    task.await.unwrap();
+}

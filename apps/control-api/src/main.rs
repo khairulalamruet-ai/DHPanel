@@ -223,6 +223,7 @@ async fn main() -> ExitCode {
         ),
         ca,
         limiter: dhpanel_mod_nodes::enrollment_limiter(redis.clone()),
+        gateway: gateway.as_ref().map(|(gateway, _)| gateway.clone()),
         audit: dhpanel_audit::AuditWriter::new(db.clone()),
     };
     let admin = dhpanel_mod_admin::AdminState {

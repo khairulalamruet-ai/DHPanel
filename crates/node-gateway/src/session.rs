@@ -130,7 +130,7 @@ async fn serve(
         .map_err(|e| e.to_string())?;
 
     // The node is now online: this process owns its session.
-    let (session, replaced) = inner.registry.register(node.id);
+    let (session, stop) = inner.registry.register(node.id);
     let ip = peer.ip().to_string();
     if let Err(err) = nodes::mark_online(&inner.db, node.id, &hello.agent_version, Some(&ip)).await
     {
@@ -140,7 +140,7 @@ async fn serve(
     }
     tracing::info!(node = %node.name, node_id = %node.id, agent = %hello.agent_version, protocol = version, "node online");
 
-    let outcome = pump(inner, &mut ws, node.id, &replaced, &mut shutdown).await;
+    let outcome = pump(inner, &mut ws, node.id, &stop, &mut shutdown).await;
 
     if inner.registry.release(node.id, session)
         && let Err(err) = nodes::mark_offline(&inner.db, node.id).await
@@ -156,7 +156,7 @@ async fn pump(
     inner: &Arc<Inner>,
     ws: &mut Ws,
     node: uuid::Uuid,
-    replaced: &tokio::sync::Notify,
+    stop: &crate::registry::Stop,
     shutdown: &mut watch::Receiver<bool>,
 ) -> &'static str {
     let settings = &inner.settings;
@@ -169,7 +169,11 @@ async fn pump(
                 close(ws, CloseCode::Away, "control plane is stopping").await;
                 return "control plane stopping";
             }
-            () = replaced.notified() => {
+            () = stop.requested() => {
+                if stop.was_revoked() {
+                    close(ws, CloseCode::Policy, "node revoked").await;
+                    return "node revoked";
+                }
                 close(ws, CloseCode::Policy, "replaced by a newer connection").await;
                 return "replaced by a newer connection";
             }

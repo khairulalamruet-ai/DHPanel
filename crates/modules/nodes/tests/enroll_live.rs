@@ -74,6 +74,7 @@ fn env(pool: &PgPool, with_ca: bool) -> Env {
             token_ttl: Duration::from_secs(900),
             ca: ca.clone(),
             limiter,
+            gateway: None,
             audit: dhpanel_audit::AuditWriter::new(pool.clone()),
         })
         .layer(axum::middleware::from_fn_with_state(

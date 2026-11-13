@@ -4,16 +4,35 @@ use std::{
     collections::HashMap,
     sync::{
         Arc, Mutex, PoisonError,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
 };
 
 use tokio::sync::Notify;
 use uuid::Uuid;
 
+/// "Close this session now", with the reason.
+#[derive(Default)]
+pub(crate) struct Stop {
+    notify: Notify,
+    revoked: AtomicBool,
+}
+
+impl Stop {
+    /// Waits for the signal.
+    pub(crate) async fn requested(&self) {
+        self.notify.notified().await;
+    }
+
+    /// Whether the node was revoked (otherwise the session was replaced).
+    pub(crate) fn was_revoked(&self) -> bool {
+        self.revoked.load(Ordering::Acquire)
+    }
+}
+
 struct Entry {
     session: u64,
-    replaced: Arc<Notify>,
+    stop: Arc<Stop>,
 }
 
 /// One session per node. A newer connection replaces the older one, because the
@@ -27,9 +46,9 @@ pub(crate) struct Registry {
 impl Registry {
     /// Registers a session and tells the previous one (if any) to close.
     /// Returns the session number and the signal that says "you were replaced".
-    pub(crate) fn register(&self, node: Uuid) -> (u64, Arc<Notify>) {
+    pub(crate) fn register(&self, node: Uuid) -> (u64, Arc<Stop>) {
         let session = self.next.fetch_add(1, Ordering::Relaxed);
-        let replaced = Arc::new(Notify::new());
+        let stop = Arc::new(Stop::default());
         let previous = self
             .sessions
             .lock()
@@ -38,13 +57,24 @@ impl Registry {
                 node,
                 Entry {
                     session,
-                    replaced: replaced.clone(),
+                    stop: stop.clone(),
                 },
             );
         if let Some(previous) = previous {
-            previous.replaced.notify_one();
+            previous.stop.notify.notify_one();
         }
-        (session, replaced)
+        (session, stop)
+    }
+
+    /// Tells the node's live session, if any, to close because the node was
+    /// revoked. Returns whether there was one.
+    pub(crate) fn revoke(&self, node: Uuid) -> bool {
+        let sessions = self.sessions.lock().unwrap_or_else(PoisonError::into_inner);
+        sessions.get(&node).is_some_and(|entry| {
+            entry.stop.revoked.store(true, Ordering::Release);
+            entry.stop.notify.notify_one();
+            true
+        })
     }
 
     /// Removes the session if it is still the current one. `true` means the
@@ -80,7 +110,7 @@ mod tests {
         let (second, _) = registry.register(node);
         assert_ne!(first, second);
         // The first session was told to close (the permit is stored, so this returns at once).
-        tokio::time::timeout(std::time::Duration::from_secs(1), first_signal.notified())
+        tokio::time::timeout(std::time::Duration::from_secs(1), first_signal.requested())
             .await
             .expect("replaced signal");
         assert!(
@@ -88,6 +118,9 @@ mod tests {
             "stale session must not clear the node"
         );
         assert!(registry.contains(node));
+        assert!(!first_signal.was_revoked());
+        assert!(registry.revoke(node));
+        assert!(!registry.revoke(Uuid::now_v7()));
         assert!(registry.release(node, second));
         assert!(!registry.contains(node));
     }

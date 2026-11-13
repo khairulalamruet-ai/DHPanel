@@ -98,6 +98,13 @@ impl Gateway {
         self.inner.registry.contains(node)
     }
 
+    /// Closes the node's live session because the node was revoked. Returns
+    /// whether it had one. (The database already refuses its certificates; this
+    /// ends the connection that is open right now.)
+    pub fn disconnect_revoked(&self, node: Uuid) -> bool {
+        self.inner.registry.revoke(node)
+    }
+
     /// Accepts connections until `shutdown` turns `true`, then closes every
     /// session. Also runs the sweep that marks silent nodes offline.
     pub async fn serve(self, listener: TcpListener, mut shutdown: watch::Receiver<bool>) {

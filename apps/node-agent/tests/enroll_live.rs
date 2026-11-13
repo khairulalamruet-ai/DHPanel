@@ -71,6 +71,7 @@ async fn control_plane(pool: &PgPool) -> Control {
                 lockout: Duration::from_secs(900),
             },
         ),
+        gateway: None,
         audit: dhpanel_audit::AuditWriter::new(pool.clone()),
     };
     let app = router()

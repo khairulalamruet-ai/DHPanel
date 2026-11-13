@@ -3,6 +3,7 @@
 //! | Method | Path | Needs |
 //! |---|---|---|
 //! | GET    | `/api/v1/admin/nodes` | `admin.nodes.read` |
+//! | POST   | `/api/v1/admin/nodes/{id}/revoke` | `admin.nodes.manage`, sudo mode |
 //! | POST   | `/api/v1/admin/nodes` | `admin.nodes.manage`, sudo mode |
 //! | GET    | `/api/v1/admin/nodes/enrollments` | `admin.nodes.read` |
 //! | DELETE | `/api/v1/admin/nodes/enrollments/{id}` | `admin.nodes.manage`, sudo mode |
@@ -38,7 +39,7 @@ use dhpanel_cache::{
 };
 use dhpanel_database::{
     node_enrollments::{self, EnrollmentToken, RevokeOutcome},
-    nodes::{self, NodeSummary},
+    nodes::{self, NodeSummary, RevokeNodeOutcome},
     sqlx::PgPool,
 };
 use dhpanel_http_kit::{AppError, FieldError, ProblemDetails};
@@ -75,6 +76,9 @@ pub struct NodesState {
     pub ca: Option<Arc<CertificateAuthority>>,
     /// Counts failed enrollment attempts per client address.
     pub limiter: FailureLimiter,
+    /// The agent port, to close the connection of a node that is revoked.
+    /// `None` while the agent port is off.
+    pub gateway: Option<dhpanel_node_gateway::Gateway>,
     /// Audit log for outcomes that have no transaction of their own.
     pub audit: AuditWriter,
 }
@@ -119,6 +123,10 @@ pub fn router() -> Router<NodesState> {
         .route(
             "/api/v1/admin/nodes",
             get(list_nodes).post(create_enrollment),
+        )
+        .route(
+            "/api/v1/admin/nodes/{id}/revoke",
+            axum::routing::post(revoke_node),
         )
         .route("/api/v1/admin/nodes/enrollments", get(list_enrollments))
         .route(
@@ -454,12 +462,82 @@ pub async fn revoke_enrollment(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// What revoking a node did.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct RevokedNode {
+    /// The node.
+    pub node_id: Uuid,
+    /// Certificates revoked with it.
+    pub certificates_revoked: u64,
+    /// Whether an open connection was closed.
+    pub session_closed: bool,
+}
+
+/// Revoke a node: its certificates stop working and its connection is closed.
+/// Final; the server has to be enrolled again with a new token.
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/nodes/{id}/revoke",
+    tag = "nodes",
+    operation_id = "revokeNode",
+    security(("session" = [])),
+    params(
+        ("id" = Uuid, Path, description = "Node id"),
+        ("X-CSRF-Token" = String, Header, description = "The session's csrf_token")
+    ),
+    responses(
+        (status = 200, description = "Revoked", body = RevokedNode),
+        (status = 403, description = "`permission_denied` (needs admin.nodes.manage), `reauth_required` or `csrf_failed`", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 404, description = "No such node", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "`node_already_revoked`", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+pub async fn revoke_node(
+    State(state): State<NodesState>,
+    RequireRecent(who, _): RequireRecent<NodesManage>,
+    Path(id): Path<String>,
+) -> Result<Json<RevokedNode>, AppError> {
+    let id: Uuid = id.parse().map_err(|_| AppError::not_found("node"))?;
+    let mut tx = state.db.begin().await.map_err(internal)?;
+    let certificates = match nodes::revoke_node(&mut tx, id).await.map_err(internal)? {
+        RevokeNodeOutcome::Unknown => return Err(AppError::not_found("node")),
+        RevokeNodeOutcome::AlreadyRevoked => {
+            return Err(AppError::conflict(
+                "node_already_revoked",
+                "This node was revoked before.",
+            ));
+        }
+        RevokeNodeOutcome::Revoked { certificates } => certificates,
+    };
+    dhpanel_audit::insert(
+        &mut *tx,
+        &AuditEntry::new("admin.node_revoked", Outcome::Success)
+            .actor(who.account_id())
+            .target("node", id)
+            .node(id)
+            .metadata(serde_json::json!({ "certificates_revoked": certificates })),
+    )
+    .await
+    .map_err(internal)?;
+    tx.commit().await.map_err(internal)?;
+    // After the commit: from here on a reconnect is refused by the database too.
+    let session_closed = state
+        .gateway
+        .as_ref()
+        .is_some_and(|gateway| gateway.disconnect_revoked(id));
+    Ok(Json(RevokedNode {
+        node_id: id,
+        certificates_revoked: certificates,
+        session_closed,
+    }))
+}
+
 /// OpenAPI fragment (full paths; merge into the root document).
 #[derive(OpenApi)]
 #[openapi(
-    paths(list_nodes, create_enrollment, list_enrollments, revoke_enrollment, enroll::enroll_node),
+    paths(list_nodes, create_enrollment, list_enrollments, revoke_enrollment, revoke_node, enroll::enroll_node),
     components(schemas(
-        CreateEnrollment, CreatedEnrollment, EnrollmentView, EnrollmentList, NodeView, NodeList,
+        CreateEnrollment, CreatedEnrollment, EnrollmentView, EnrollmentList, NodeView, NodeList, RevokedNode,
         enroll::EnrollRequest, enroll::EnrollResponse
     )),
     tags((name = "nodes", description = "Add and manage servers (nodes)"))

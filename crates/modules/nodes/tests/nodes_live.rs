@@ -56,6 +56,7 @@ fn env(pool: &PgPool, public_url: Option<&str>, sudo_secs: u64) -> Env {
             token_ttl: Duration::from_secs(900),
             ca: None,
             limiter: dhpanel_mod_nodes::enrollment_limiter(redis_for_limiter),
+            gateway: None,
             audit: dhpanel_audit::AuditWriter::new(pool.clone()),
         })
         .layer(MockConnectInfo(std::net::SocketAddr::from((
@@ -537,4 +538,103 @@ async fn the_node_list_shows_live_status_to_readers_only(pool: PgPool) {
     // Nothing secret about a node is listed.
     let text = body.to_string();
     assert!(!text.contains("capabilities") && !text.contains("fingerprint"));
+}
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn revoking_a_node_kills_its_certificates_and_is_audited(pool: PgPool) {
+    let e = env(&pool, None, 600);
+    let root = account(&pool, "rootuser", &["super_admin"]).await;
+    let plain = account(&pool, "plainadmin", &["admin"]).await;
+    let node: Uuid = sqlx::query_scalar(
+        "INSERT INTO nodes (name, status, last_seen_at) VALUES ('doomed', 'online', now()) RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    for (serial, fp) in [("a", "1"), ("b", "2")] {
+        sqlx::query(
+            "INSERT INTO node_certificates (node_id, serial, fingerprint_sha256, not_before, not_after)
+             VALUES ($1, repeat($2, 32), repeat($3, 64), now() - interval '1 day', now() + interval '60 days')",
+        )
+        .bind(node)
+        .bind(serial)
+        .bind(fp)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    let path = format!("{BASE}/{node}/revoke");
+
+    // Not signed in, and not allowed: nothing changes.
+    let (status, _, _) = e.call(None, "POST", &path, None, true).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let p = e.sign_in(plain).await;
+    let (status, body) = e.send(&p, "POST", &path, None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::FORBIDDEN, "permission_denied")
+    );
+    // Without the CSRF header even a super admin is refused.
+    let r = e.sign_in(root).await;
+    let (status, _, _) = e.call(Some(&r), "POST", &path, None, false).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let still: String = sqlx::query_scalar("SELECT status FROM nodes WHERE id = $1")
+        .bind(node)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(still, "online");
+
+    let (status, body) = e.send(&r, "POST", &path, None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["certificates_revoked"], 2);
+    assert_eq!(body["session_closed"], false, "no agent port in this test");
+    let open: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM node_certificates WHERE node_id = $1 AND revoked_at IS NULL",
+    )
+    .bind(node)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(open, 0);
+    let reason: String = sqlx::query_scalar(
+        "SELECT DISTINCT revoke_reason FROM node_certificates WHERE node_id = $1",
+    )
+    .bind(node)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(reason, "node_revoked");
+    let listed = e.call(Some(&r), "GET", BASE, None, false).await.1;
+    assert_eq!(listed["items"][0]["status"], "revoked");
+
+    // Final: a second revoke and an unknown id say so.
+    let (status, body) = e.send(&r, "POST", &path, None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "node_already_revoked")
+    );
+    let (status, _) = e
+        .send(
+            &r,
+            "POST",
+            &format!("{BASE}/{}/revoke", Uuid::now_v7()),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = e
+        .send(&r, "POST", &format!("{BASE}/not-a-uuid/revoke"), None)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    let rows = audit(&pool).await;
+    assert_eq!(
+        rows.len(),
+        1,
+        "only the successful revoke is audited: {rows:?}"
+    );
+    assert_eq!(rows[0].0, "admin.node_revoked");
+    assert_eq!(rows[0].1, json!({"certificates_revoked": 2}));
 }

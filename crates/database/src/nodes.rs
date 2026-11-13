@@ -276,3 +276,52 @@ pub async fn list_nodes(
         })
         .collect())
 }
+
+// ---------------------------------------------------------------- revocation
+
+/// Outcome of [`revoke_node`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RevokeNodeOutcome {
+    /// The node is now revoked, together with this many of its certificates.
+    Revoked {
+        /// Certificates that were still valid and are now revoked.
+        certificates: u64,
+    },
+    /// The node was revoked before.
+    AlreadyRevoked,
+    /// No such node.
+    Unknown,
+}
+
+/// Revokes a node and every certificate of it that is not revoked yet. Final:
+/// a revoked node never connects again; it has to be enrolled afresh. Call it
+/// inside a transaction together with the audit entry.
+///
+/// # Errors
+/// Database errors.
+pub async fn revoke_node(
+    conn: &mut PgConnection,
+    id: Uuid,
+) -> Result<RevokeNodeOutcome, sqlx::Error> {
+    let current = sqlx::query_scalar!("SELECT status FROM nodes WHERE id = $1 FOR UPDATE", id)
+        .fetch_optional(&mut *conn)
+        .await?;
+    match current.as_deref() {
+        None => return Ok(RevokeNodeOutcome::Unknown),
+        Some("revoked") => return Ok(RevokeNodeOutcome::AlreadyRevoked),
+        Some(_) => {}
+    }
+    sqlx::query!("UPDATE nodes SET status = 'revoked' WHERE id = $1", id)
+        .execute(&mut *conn)
+        .await?;
+    let done = sqlx::query!(
+        "UPDATE node_certificates SET revoked_at = now(), revoke_reason = 'node_revoked'
+         WHERE node_id = $1 AND revoked_at IS NULL",
+        id,
+    )
+    .execute(&mut *conn)
+    .await?;
+    Ok(RevokeNodeOutcome::Revoked {
+        certificates: done.rows_affected(),
+    })
+}
