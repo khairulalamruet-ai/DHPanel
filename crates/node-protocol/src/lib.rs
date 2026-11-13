@@ -67,6 +67,10 @@ pub enum ErrorCode {
     Expired,
     /// The envelope's protocol version is not supported.
     UnsupportedVersion,
+    /// The agent is running as many operations as it allows; try again shortly.
+    Busy,
+    /// The operation did not finish in the time it had.
+    Timeout,
     /// Something went wrong inside the agent; see the message.
     Internal,
 }

@@ -7,7 +7,10 @@ use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use dhpanel_database::nodes::{self, NewNode, NewNodeCertificate};
 use dhpanel_dispatcher::{Dispatcher, Settings};
-use dhpanel_node_agent::stream::{self, Params};
+use dhpanel_node_agent::{
+    ops::{Executor, Registry, cache::ResultCache},
+    stream::{self, Params},
+};
 use dhpanel_node_gateway::{Gateway, NodeResult, Settings as GatewaySettings, tls};
 use dhpanel_node_protocol::{
     AgentError, ErrorCode, Operation, OperationResult, Output, ResultStatus,
@@ -107,6 +110,8 @@ struct TestNode {
     ca_pem: String,
     cert_pem: String,
     key_pem: String,
+    /// The agent's operation handlers and memory; kept across agent restarts.
+    executor: Arc<Executor>,
 }
 
 impl TestNode {
@@ -122,12 +127,18 @@ impl TestNode {
     fn start_agent(&self, addr: SocketAddr) -> (watch::Sender<bool>, tokio::task::JoinHandle<()>) {
         let (stop, stopped) = watch::channel(false);
         let params = self.params(addr);
-        let task = tokio::spawn(async move { stream::run(params, stopped).await.unwrap() });
+        let executor = self.executor.clone();
+        let task =
+            tokio::spawn(async move { stream::run(params, executor, stopped).await.unwrap() });
         (stop, task)
     }
 }
 
 async fn make_node(p: &Plane, pool: &PgPool, name: &str) -> TestNode {
+    make_node_with(p, pool, name, Registry::builtin()).await
+}
+
+async fn make_node_with(p: &Plane, pool: &PgPool, name: &str, registry: Registry) -> TestNode {
     let id = Uuid::now_v7();
     let key = KeyPair::generate().unwrap();
     let csr = CertificateParams::new(Vec::<String>::new())
@@ -173,6 +184,7 @@ async fn make_node(p: &Plane, pool: &PgPool, name: &str) -> TestNode {
         ca_pem: p.ca.certificate_pem().to_owned(),
         cert_pem: issued.cert_pem,
         key_pem: key.serialize_pem(),
+        executor: Executor::new(registry, ResultCache::in_memory().unwrap(), 8),
     }
 }
 
@@ -468,4 +480,55 @@ async fn an_operation_a_node_never_answers_is_retried_and_then_fails_with_a_time
     assert_eq!(row.attempts, 2, "tried twice, never answered");
     assert_eq!(row.error.unwrap()["code"], "timeout");
     drop(ws);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs PostgreSQL"]
+async fn a_slow_operation_that_is_sent_again_still_runs_only_once(pool: PgPool) {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let p = plane(&pool).await;
+    p.start_dispatcher();
+    // A handler slower than the dispatcher's patience (1 s in these tests).
+    let runs = Arc::new(AtomicUsize::new(0));
+    let mut registry = Registry::new();
+    let counter = runs.clone();
+    registry.register("ping", move |op| {
+        let counter = counter.clone();
+        async move {
+            counter.fetch_add(1, Ordering::SeqCst);
+            tokio::time::sleep(Duration::from_millis(2500)).await;
+            match op {
+                Operation::Ping { nonce } => Ok(Output::Pong { nonce }),
+                _ => Err(dhpanel_node_agent::ops::wrong_operation()),
+            }
+        }
+    });
+    let node = make_node_with(&p, &pool, "slow", registry).await;
+    let (agent_stop, agent) = node.start_agent(p.addr);
+    wait_connected(&p, node.id).await;
+
+    let id = p
+        .ops
+        .enqueue(&Request::new(
+            node.id,
+            Operation::Ping { nonce: 77 },
+            "slow-ping",
+        ))
+        .await
+        .unwrap()
+        .operation()
+        .id;
+    // The control plane gives up waiting, sends it again, and the first run's
+    // answer then completes the operation.
+    let row = wait_status(&p.ops, id, Status::Succeeded, Duration::from_secs(10)).await;
+    assert!(row.attempts >= 2, "it was sent again: {row:?}");
+    assert_eq!(
+        row.output,
+        Some(serde_json::json!({"type": "pong", "nonce": 77}))
+    );
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(runs.load(Ordering::SeqCst), 1, "sent twice, run once");
+
+    agent_stop.send(true).unwrap();
+    agent.await.unwrap();
 }

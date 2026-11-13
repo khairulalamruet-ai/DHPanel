@@ -60,7 +60,7 @@ dhpanel-pki.workspace = true
 dhpanel-session.workspace = true
 axum = "0.8"
 sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "postgres", "macros", "uuid", "migrate"] }
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "time"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "time", "test-util"] }
 uuid = { version = "1", features = ["serde", "v7"] }
 
 [lints]

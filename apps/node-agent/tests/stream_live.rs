@@ -196,11 +196,16 @@ async fn wait_for_status(pool: &PgPool, id: Uuid, wanted: &str, within: Duration
     }
 }
 
+fn test_executor() -> Arc<dhpanel_node_agent::ops::Executor> {
+    use dhpanel_node_agent::ops::{Executor, Registry, cache::ResultCache};
+    Executor::new(Registry::builtin(), ResultCache::in_memory().unwrap(), 8)
+}
+
 /// Starts the real agent loop; the returned sender stops it.
 fn start_agent(params: Params) -> (watch::Sender<bool>, tokio::task::JoinHandle<()>) {
     let (stop, stopped) = watch::channel(false);
     let task = tokio::spawn(async move {
-        stream::run(params, stopped).await.unwrap();
+        stream::run(params, test_executor(), stopped).await.unwrap();
     });
     (stop, task)
 }

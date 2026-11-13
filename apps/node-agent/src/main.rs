@@ -18,6 +18,10 @@ use dhpanel_node_agent::{
     AGENT_VERSION,
     enroll::{self, EnrollError, Options},
     identity::{DEFAULT_STATE_DIR, StateDir, StateError},
+    ops::{
+        DEFAULT_MAX_PARALLEL, Executor, Registry,
+        cache::{CACHE_FILE, ResultCache},
+    },
     stream,
     verify::VerifyError,
 };
@@ -307,6 +311,20 @@ fn run_command(state_dir: PathBuf, stream_url: Option<String>) -> ExitCode {
                 Ok(s) => s,
                 Err(err) => return fail(70, &format!("cannot listen for signals: {err}")),
             };
+        let executor = open_executor(&state_dir);
+        // Forget old results once an hour.
+        tokio::spawn({
+            let executor = executor.clone();
+            async move {
+                let mut tick = tokio::time::interval(std::time::Duration::from_secs(3600));
+                loop {
+                    tick.tick().await;
+                    if let Err(err) = executor.cache().prune(now_unix()) {
+                        eprintln!("dhpanel-agent: {err}");
+                    }
+                }
+            }
+        });
         let (stop, stopped) = tokio::sync::watch::channel(false);
         let stream = stream::run(
             stream::Params {
@@ -315,6 +333,7 @@ fn run_command(state_dir: PathBuf, stream_url: Option<String>) -> ExitCode {
                 cert_pem,
                 key_pem,
             },
+            executor,
             stopped,
         );
         tokio::pin!(stream);
@@ -336,6 +355,37 @@ fn run_command(state_dir: PathBuf, stream_url: Option<String>) -> ExitCode {
             }
         }
     })
+}
+
+/// Opens the operation result cache in the state directory. A cache file that
+/// cannot be used is set aside (never deleted) and a fresh one is started: the
+/// node stays manageable, at the price of not recognising operations it ran
+/// before, which the log line makes visible.
+fn open_executor(state_dir: &std::path::Path) -> std::sync::Arc<Executor> {
+    let path = state_dir.join(CACHE_FILE);
+    let cache = match ResultCache::open(&path) {
+        Ok(cache) => cache,
+        Err(first) => {
+            let aside = state_dir.join(format!("{CACHE_FILE}.unusable-{}", now_unix()));
+            eprintln!(
+                "dhpanel-agent: {first}; moving {} to {} and starting an empty cache",
+                path.display(),
+                aside.display()
+            );
+            let _ = std::fs::rename(&path, &aside);
+            match ResultCache::open(&path).or_else(|second| {
+                eprintln!("dhpanel-agent: {second}; results are kept in memory only until restart");
+                ResultCache::in_memory()
+            }) {
+                Ok(cache) => cache,
+                Err(err) => {
+                    eprintln!("dhpanel-agent: {err}");
+                    std::process::exit(i32::from(EXIT_IOERR));
+                }
+            }
+        }
+    };
+    Executor::new(Registry::builtin(), cache, DEFAULT_MAX_PARALLEL)
 }
 
 fn main() -> ExitCode {

@@ -11,9 +11,8 @@
 use std::{sync::Arc, time::Duration};
 
 use dhpanel_node_protocol::{
-    AGENT_SILENCE_TIMEOUT_SECS, AgentError, AgentMessage, ControlMessage, ErrorCode, Hello,
-    MAX_FRAME_BYTES, Operation, OperationResult, Output, PROTOCOL_VERSION, Parsed, STREAM_PATH,
-    decode, encode, parse_operation_frame,
+    AGENT_SILENCE_TIMEOUT_SECS, AgentMessage, ControlMessage, Hello, MAX_FRAME_BYTES,
+    PROTOCOL_VERSION, STREAM_PATH, decode, encode,
 };
 use futures_util::{SinkExt as _, StreamExt as _};
 use rustls::{
@@ -22,9 +21,11 @@ use rustls::{
     version::TLS13,
 };
 use secrecy::{ExposeSecret as _, SecretString};
+
+use crate::ops::Executor;
 use tokio::{
     net::TcpStream,
-    sync::watch,
+    sync::{mpsc, watch},
     time::{Instant, timeout},
 };
 use tokio_rustls::TlsConnector;
@@ -169,7 +170,11 @@ enum Ended {
 ///
 /// # Errors
 /// Only configuration problems that retrying cannot fix.
-pub async fn run(params: Params, mut shutdown: watch::Receiver<bool>) -> Result<(), StreamError> {
+pub async fn run(
+    params: Params,
+    executor: Arc<Executor>,
+    mut shutdown: watch::Receiver<bool>,
+) -> Result<(), StreamError> {
     let (host, port) = split_address(&params.address)
         .ok_or_else(|| StreamError::BadAddress(params.address.clone()))?;
     let name = ServerName::try_from(host.clone())
@@ -178,7 +183,7 @@ pub async fn run(params: Params, mut shutdown: watch::Receiver<bool>) -> Result<
     let mut backoff = Backoff::default();
     loop {
         let started = Instant::now();
-        match connect_and_serve(&connector, &name, &host, port, &mut shutdown).await {
+        match connect_and_serve(&connector, &name, &host, port, &executor, &mut shutdown).await {
             Ended::Shutdown => return Ok(()),
             Ended::Failed {
                 established,
@@ -222,6 +227,7 @@ async fn connect_and_serve(
     name: &ServerName<'static>,
     host: &str,
     port: u16,
+    executor: &Arc<Executor>,
     shutdown: &mut watch::Receiver<bool>,
 ) -> Ended {
     let fail = |established: bool, reason: String| Ended::Failed {
@@ -286,11 +292,22 @@ async fn connect_and_serve(
     // Pings from the control plane arrive every 15 s and tungstenite answers
     // them while we read. Three missed pings means the path is dead.
     let silence = Duration::from_secs(AGENT_SILENCE_TIMEOUT_SECS);
+    // Operations run in their own tasks so that a slow one never stops the
+    // connection from answering pings; their results come back through here.
+    // A result that finds the connection gone is not lost: it is in the cache
+    // and is given again when the control plane asks again.
+    let (reply_tx, mut replies) = mpsc::channel::<String>(64);
     loop {
         let next = tokio::select! {
             () = stopped(shutdown) => {
                 let _ = timeout(Duration::from_secs(2), ws.close(None)).await;
                 return Ended::Shutdown;
+            }
+            Some(reply) = replies.recv() => {
+                if ws.send(Message::Text(reply.into())).await.is_err() {
+                    return fail(true, "cannot send".to_owned());
+                }
+                continue;
             }
             next = timeout(silence, ws.next()) => next,
         };
@@ -302,11 +319,12 @@ async fn connect_and_serve(
         };
         match message {
             Message::Text(text) => {
-                if let Some(reply) = answer(text.as_str())
-                    && ws.send(Message::Text(reply.into())).await.is_err()
-                {
-                    return fail(true, "cannot send".to_owned());
-                }
+                let (executor, reply_tx) = (executor.clone(), reply_tx.clone());
+                tokio::spawn(async move {
+                    if let Some(reply) = executor.execute(text.as_str(), unix_now()).await {
+                        let _ = reply_tx.send(reply).await;
+                    }
+                });
             }
             Message::Close(frame) => {
                 let why = frame.map(|f| f.reason.to_string()).unwrap_or_default();
@@ -318,48 +336,10 @@ async fn connect_and_serve(
     }
 }
 
-/// Answers a frame from the control plane. Only `Ping` is implemented here;
-/// the handler framework with the idempotency cache is T02.12, and everything
-/// else is answered with a clear refusal so the control plane never waits for a
-/// result that will not come.
-fn answer(frame: &str) -> Option<String> {
-    let result = match parse_operation_frame(frame) {
-        Ok(Parsed::Known(envelope)) => {
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX));
-            match (envelope.check_fresh(now), &envelope.op) {
-                (Err(error), _) => OperationResult::failure(envelope.op_id, error),
-                (Ok(()), Operation::Ping { nonce }) => {
-                    OperationResult::success(envelope.op_id, Output::Pong { nonce: *nonce })
-                }
-                (Ok(()), _) => OperationResult::failure(
-                    envelope.op_id,
-                    AgentError::new(
-                        ErrorCode::UnsupportedOperation,
-                        "this agent build does not run this operation yet",
-                    ),
-                ),
-            }
-        }
-        Ok(Parsed::Unsupported { header, op_type }) => OperationResult::failure(
-            header.op_id,
-            AgentError::new(
-                ErrorCode::UnsupportedOperation,
-                format!(
-                    "unknown operation `{}`",
-                    op_type.chars().take(64).collect::<String>()
-                ),
-            ),
-        ),
-        Ok(Parsed::InvalidArguments { header, message }) => OperationResult::failure(
-            header.op_id,
-            AgentError::new(ErrorCode::InvalidArguments, message),
-        ),
-        // Not an operation (for example a late Welcome): nothing to answer.
-        Err(_) => return None,
-    };
-    encode(&AgentMessage::Result(result)).ok()
+fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
 }
 
 #[cfg(test)]
@@ -423,64 +403,6 @@ mod tests {
             let d = b.next_delay(0.37);
             assert!(d <= BACKOFF_CAP && d >= Duration::from_millis(500));
         }
-    }
-
-    fn frame(op_id: uuid::Uuid, issued_at: i64, expires_at: i64, op: &str) -> String {
-        format!(
-            r#"{{"type":"operation","op_id":"{op_id}","idempotency_key":"k","issued_at":{issued_at},"expires_at":{expires_at},"protocol_version":1,"op":{op}}}"#
-        )
-    }
-
-    fn result_of(frame: &str) -> OperationResult {
-        match decode::<AgentMessage>(&answer(frame).expect("a reply")).unwrap() {
-            AgentMessage::Result(result) => result,
-            other => panic!("not a result: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn ping_is_answered_and_everything_else_is_refused_cleanly() {
-        let op_id = uuid::Uuid::now_v7();
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
-
-        let pong = result_of(&frame(op_id, now, now + 60, r#"{"type":"ping","nonce":7}"#));
-        assert_eq!(pong.op_id, op_id);
-        assert_eq!(pong.output, Some(Output::Pong { nonce: 7 }));
-        assert!(pong.error.is_none());
-
-        // Expired and not-yet-valid envelopes are refused, even for a ping.
-        let late = result_of(&frame(
-            op_id,
-            now - 120,
-            now - 60,
-            r#"{"type":"ping","nonce":1}"#,
-        ));
-        assert_eq!(late.error.unwrap().code, ErrorCode::Expired);
-        let early = result_of(&frame(
-            op_id,
-            now + 3600,
-            now + 3660,
-            r#"{"type":"ping","nonce":1}"#,
-        ));
-        assert_eq!(early.error.unwrap().code, ErrorCode::Expired);
-
-        // Known but not implemented yet, and unknown operations.
-        let caps = result_of(&frame(
-            op_id,
-            now,
-            now + 60,
-            r#"{"type":"report_capabilities"}"#,
-        ));
-        assert_eq!(caps.error.unwrap().code, ErrorCode::UnsupportedOperation);
-        let unknown = result_of(&frame(op_id, now, now + 60, r#"{"type":"format_disk"}"#));
-        assert_eq!(unknown.op_id, op_id);
-        assert!(unknown.error.unwrap().message.contains("format_disk"));
-
-        assert!(answer("not json").is_none());
-        assert!(answer(r#"{"type":"welcome","protocol_version":1,"server_time":1}"#).is_none());
     }
 
     #[test]

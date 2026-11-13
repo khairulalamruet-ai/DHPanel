@@ -9,6 +9,7 @@
 
 pub mod enroll;
 pub mod identity;
+pub mod ops;
 pub mod stream;
 pub mod verify;
 
