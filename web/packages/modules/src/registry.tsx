@@ -1,5 +1,5 @@
 import React from "react";
-import { LayoutDashboard, ShieldCheck, Sparkles, Puzzle, Globe, Users, Settings, FileText, Boxes, Server, Activity, Layers, Lock, FileCode2, Cpu } from "lucide-react";
+import { LayoutDashboard, ShieldCheck, Sparkles, Puzzle, Globe, Users, Settings, FileText, Boxes, Server, Activity, Layers, Lock, FileCode2, Cpu, Database } from "lucide-react";
 
 export interface ModuleManifest {
   name: string;
@@ -440,6 +440,37 @@ export const registeredFrontendModules: FrontendModule[] = [
         order: 28,
         permission: "services.read",
         feature: "services",
+      },
+    ],
+  },
+  {
+    manifest: {
+      name: "databases",
+      title: { en: "Databases", bn: "ডেটাবেসসমূহ" },
+      category: "database",
+      core: true,
+      permissions: ["databases.read", "databases.manage"],
+      features: ["databases"],
+    },
+    clientNav: [
+      {
+        id: "databases",
+        labelKey: "databases.nav",
+        icon: <Database className="h-4 w-4" />,
+        href: "/databases",
+        order: 25,
+        permission: "databases.read",
+        feature: "databases",
+      },
+    ],
+    adminNav: [
+      {
+        id: "databases",
+        labelKey: "databases.nav",
+        icon: <Database className="h-4 w-4" />,
+        href: "/client/databases",
+        order: 29,
+        permission: "databases.read",
       },
     ],
   },

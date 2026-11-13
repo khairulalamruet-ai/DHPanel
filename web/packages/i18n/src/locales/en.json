@@ -1253,5 +1253,130 @@
       "saveFailed": "Failed to save template changes",
       "resetFailed": "Failed to reset template to default"
     }
+  },
+  "databases": {
+    "nav": "Databases",
+    "title": "Databases (MySQL / MariaDB)",
+    "subtitle": "Manage relational databases, SQL users, permissions, import/export dumps, and phpMyAdmin access.",
+    "metrics": {
+      "databases": "Databases Provisioned",
+      "users": "Database Users",
+      "storage": "Total Database Storage",
+      "limit": "allowed"
+    },
+    "tabs": {
+      "databases": "Databases",
+      "users": "Database Users"
+    },
+    "actions": {
+      "createDatabase": "Create Database",
+      "createUser": "Create Database User",
+      "remoteAccess": "Remote Access",
+      "import": "Import SQL",
+      "export": "Export SQL (.sql.gz)",
+      "manageGrants": "Manage Privileges",
+      "generatePassword": "Generate",
+      "savePrivileges": "Save Privileges"
+    },
+    "fields": {
+      "name": "Database Name",
+      "username": "Database Username",
+      "password": "Password",
+      "fullUsername": "Full username",
+      "charset": "Character Set",
+      "collation": "Collation",
+      "connectionHost": "Allowed Connection Host",
+      "targetDatabase": "Target Database",
+      "assignDatabases": "Assign to Databases"
+    },
+    "table": {
+      "title": "All Databases",
+      "name": "Database Name",
+      "size": "Size",
+      "tables": "Tables",
+      "charset": "Collation",
+      "assignedUsers": "Assigned Users",
+      "assignedDatabases": "Database Grants",
+      "noDatabases": "No databases created yet."
+    },
+    "usersTable": {
+      "title": "Database Users & Privileges",
+      "noUsers": "No database users created yet."
+    },
+    "createDialog": {
+      "title": "Create Database",
+      "desc": "Databases are provisioned on the shared isolated database daemon.",
+      "fullDbName": "Full database name",
+      "limitReached": "You have reached the maximum number of databases allocated for your hosting plan."
+    },
+    "createUserDialog": {
+      "title": "Create Database User",
+      "desc": "Create SQL credentials to connect applications to databases.",
+      "limitReached": "You have reached the maximum number of database users allocated for your hosting plan."
+    },
+    "grantsDialog": {
+      "title": "Manage Database Privileges",
+      "presets": "Presets"
+    },
+    "importDialog": {
+      "title": "Import SQL Dump",
+      "warning": "Warning: Importing SQL statements will execute queries directly. Existing tables with matching names may be overwritten or modified.",
+      "fileLabel": "Select SQL File (.sql or .sql.gz)",
+      "browseFiles": "Click to select SQL dump file",
+      "fileTypes": "Supports raw SQL and gzip compressed dumps up to 500MB",
+      "uploading": "Uploading dump file...",
+      "executing": "Executing SQL statements...",
+      "importing": "Importing Dump..."
+    },
+    "remote": {
+      "dialogTitle": "Remote Database Access (CIDR)",
+      "desc": "Configure external client IP addresses or CIDR blocks authorized to connect directly to your SQL databases.",
+      "addLabel": "Add Authorized IP / CIDR",
+      "currentAllowlist": "Current Allowed Remote Hosts",
+      "empty": "No external IPs configured. Database is accessible only within the internal tenant container network.",
+      "invalidIp": "Enter a valid IPv4 address or CIDR (e.g. 192.168.1.100 or 10.5.0.0/16)",
+      "duplicateIp": "This IP address or CIDR is already in the allowlist"
+    },
+    "deleteDb": {
+      "title": "Delete Database",
+      "confirm": "Are you sure you want to permanently drop database {{name}}? All tables, views, and data will be permanently deleted."
+    },
+    "deleteUser": {
+      "title": "Delete Database User",
+      "confirm": "Are you sure you want to remove SQL user {{username}}? Any applications connecting using these credentials will be disconnected."
+    },
+    "export": {
+      "preparing": "Generating Database Dump",
+      "preparingDesc": "Packaging SQL dump for {{name}}..."
+    },
+    "validation": {
+      "nameRequired": "Database name is required",
+      "nameTooLong": "Database name must be 32 characters or fewer",
+      "usernameRequired": "Username is required",
+      "usernameTooLong": "Username must be 16 characters or fewer",
+      "passwordLength": "Password must be at least 10 characters"
+    },
+    "toast": {
+      "dbCreated": "Database {{name}} created successfully",
+      "userCreated": "Database user {{username}} created successfully",
+      "grantsUpdated": "Privileges updated for {{user}} on {{db}}",
+      "remoteHostsUpdated": "Remote database access allowlist updated",
+      "importSuccess": "SQL dump imported successfully into {{db}}",
+      "exportReady": "Download started for {{file}}",
+      "dbDeleted": "Database {{name}} deleted",
+      "userDeleted": "Database user {{username}} deleted"
+    },
+    "errors": {
+      "loadFailed": "Failed to load database configuration",
+      "createFailed": "Failed to create database",
+      "createUserFailed": "Failed to create database user",
+      "grantsUpdateFailed": "Failed to update grants",
+      "remoteUpdateFailed": "Failed to update remote database hosts",
+      "importFailed": "Failed to import SQL dump",
+      "exportFailed": "Failed to export database",
+      "deleteDbFailed": "Failed to delete database",
+      "deleteUserFailed": "Failed to delete database user",
+      "ssoFailed": "Failed to launch phpMyAdmin SSO"
+    }
   }
 }

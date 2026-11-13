@@ -32,6 +32,7 @@ import {
   PhpManagementPage,
   ServicesPage,
   ErrorPagesPage,
+  ClientDatabasesPage,
   filterNavItems,
   registeredFrontendModules,
 } from "@dhpanel/modules";
@@ -252,6 +253,19 @@ const errorPagesRoute = createRoute({
   component: ErrorPagesPage,
 });
 
+// 25. Databases route (T07.10)
+const clientDatabasesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/client/databases",
+  component: ClientDatabasesPage,
+});
+
+const databasesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/databases",
+  component: ClientDatabasesPage,
+});
+
 // 18. Login route
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -292,6 +306,8 @@ const routeTree = rootRoute.addChildren([
   phpRoute,
   servicesRoute,
   errorPagesRoute,
+  clientDatabasesRoute,
+  databasesRoute,
   loginRoute,
 ]);
 

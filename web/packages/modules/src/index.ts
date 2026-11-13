@@ -23,4 +23,5 @@ export * from "./vhost";
 export * from "./php";
 export * from "./services";
 export * from "./error-pages";
+export * from "./databases";
 export type { SslStatus } from "./domains";
