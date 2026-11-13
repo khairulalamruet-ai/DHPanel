@@ -7131,6 +7131,168 @@ export const handlers = [
                                                 mockWafPolicies[domain].mode = body.mode || "block";
                                                 return HttpResponse.json({ success: true, policy: mockWafPolicies[domain] });
                                               }),
+                                              // ==========================================
+                                              // T18.11: API Tokens & Scoped Execution
+                                              // ==========================================
+                                              ...(() => {
+                                                let mockTokens: Array<{
+                                                  id: string;
+                                                  name: string;
+                                                  token_preview: string;
+                                                  scopes: string[];
+                                                  created_at: string;
+                                                  expires_at: string | null;
+                                                  last_used_at: string | null;
+                                                }> = [
+                                                  {
+                                                    id: "tok-whmcs-01",
+                                                    name: "WHMCS Primary Production Node",
+                                                    token_preview: "dhp_live_9f82...104a",
+                                                    scopes: ["users:read", "users:write", "billing:whmcs"],
+                                                    created_at: new Date(Date.now() - 86400000 * 14).toISOString(),
+                                                    expires_at: null,
+                                                    last_used_at: new Date(Date.now() - 3600000).toISOString(),
+                                                  },
+                                                  {
+                                                    id: "tok-metrics-02",
+                                                    name: "Prometheus Exporter Scraper",
+                                                    token_preview: "dhp_live_4a11...99bc",
+                                                    scopes: ["users:read", "domains:read"],
+                                                    created_at: new Date(Date.now() - 86400000 * 30).toISOString(),
+                                                    expires_at: new Date(Date.now() + 86400000 * 60).toISOString(),
+                                                    last_used_at: new Date(Date.now() - 60000).toISOString(),
+                                                  },
+                                                ];
+
+                                                return [
+                                                  // TODO(api:T18.11): List API tokens
+                                                  http.get("/api/v1/tokens", () => {
+                                                    return HttpResponse.json({ tokens: mockTokens });
+                                                  }),
+
+                                                  // TODO(api:T18.11): Create API token
+                                                  http.post("/api/v1/tokens", async ({ request }) => {
+                                                    const body = (await request.json()) as {
+                                                      name: string;
+                                                      scopes: string[];
+                                                      expiry_days: number | null;
+                                                    };
+
+                                                    const hex = Math.random().toString(36).substring(2, 10);
+                                                    const secret = `dhp_live_${hex}${Date.now().toString(36)}`;
+                                                    const preview = `dhp_live_${hex.substring(0, 4)}...${secret.slice(-4)}`;
+
+                                                    const expiresAt = body.expiry_days
+                                                      ? new Date(Date.now() + body.expiry_days * 86400000).toISOString()
+                                                      : null;
+
+                                                    const newToken = {
+                                                      id: `tok-${Date.now()}`,
+                                                      name: body.name || "API Access Token",
+                                                      token_preview: preview,
+                                                      scopes: body.scopes || ["users:read"],
+                                                      created_at: new Date().toISOString(),
+                                                      expires_at: expiresAt,
+                                                      last_used_at: null,
+                                                    };
+
+                                                    mockTokens.unshift(newToken);
+
+                                                    return HttpResponse.json({
+                                                      token: newToken,
+                                                      secret_key: secret,
+                                                    });
+                                                  }),
+
+                                                  // TODO(api:T18.11): Revoke API token
+                                                  http.delete("/api/v1/tokens/:id", ({ params }) => {
+                                                    mockTokens = mockTokens.filter((t) => t.id !== params.id);
+                                                    return HttpResponse.json({ ok: true, revoked: true });
+                                                  }),
+
+                                                  // TODO(api:T18.11): Test call validating scope authorization (DoD)
+                                                  http.post("/api/v1/tokens/test-call", async ({ request }) => {
+                                                    const body = (await request.json()) as {
+                                                      token_id: string;
+                                                      endpoint: string;
+                                                      method: string;
+                                                    };
+
+                                                    const token = mockTokens.find((t) => t.id === body.token_id);
+                                                    if (!token) {
+                                                      return HttpResponse.json(
+                                                        { status: 401, message: "Unauthorized: Invalid or revoked Bearer token" },
+                                                        { status: 401 }
+                                                      );
+                                                    }
+
+                                                    // Endpoint 1: GET /users requires "users:read"
+                                                    if (body.endpoint === "/users") {
+                                                      if (!token.scopes.includes("users:read")) {
+                                                        return HttpResponse.json(
+                                                          { status: 403, message: "Forbidden: Token lacks required scope 'users:read'" },
+                                                          { status: 403 }
+                                                        );
+                                                      }
+                                                      return HttpResponse.json({
+                                                        status: 200,
+                                                        message: "Token authorized for scope 'users:read'",
+                                                        data: {
+                                                          users_count: 24,
+                                                          users: [
+                                                            { id: "usr-01", username: "admin", role: "super_admin" },
+                                                            { id: "usr-02", username: "client_alpha", role: "client" },
+                                                            { id: "usr-03", username: "solaris", role: "client" },
+                                                          ],
+                                                        },
+                                                      });
+                                                    }
+
+                                                    // Endpoint 2: POST /billing/whmcs/suspend requires "billing:whmcs"
+                                                    if (body.endpoint === "/billing/whmcs/suspend") {
+                                                      if (!token.scopes.includes("billing:whmcs")) {
+                                                        return HttpResponse.json(
+                                                          { status: 403, message: "Forbidden: Token lacks required scope 'billing:whmcs'" },
+                                                          { status: 403 }
+                                                        );
+                                                      }
+                                                      return HttpResponse.json({
+                                                        status: 200,
+                                                        message: "Token authorized for scope 'billing:whmcs'",
+                                                        data: {
+                                                          action: "account_suspended",
+                                                          tenant: "client_alpha",
+                                                          reason: "Invoice overdue",
+                                                          timestamp: new Date().toISOString(),
+                                                        },
+                                                      });
+                                                    }
+
+                                                    // Endpoint 3: POST /admin/nodes requires "cluster:admin"
+                                                    if (body.endpoint === "/admin/nodes") {
+                                                      if (!token.scopes.includes("cluster:admin")) {
+                                                        return HttpResponse.json(
+                                                          {
+                                                            status: 403,
+                                                            message: "Forbidden: Token lacks required scope 'cluster:admin'",
+                                                            required_scope: "cluster:admin",
+                                                          },
+                                                          { status: 200 } // returned as JSON payload in tester
+                                                        );
+                                                      }
+                                                      return HttpResponse.json({
+                                                        status: 200,
+                                                        message: "Token authorized for node enrollment",
+                                                      });
+                                                    }
+
+                                                    return HttpResponse.json({
+                                                      status: 404,
+                                                      message: "Endpoint not found",
+                                                    });
+                                                  }),
+                                                ];
+                                              })(),
                                             ];
                                           })(),
                                         ];

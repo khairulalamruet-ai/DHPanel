@@ -1,5 +1,5 @@
 import React from "react";
-import { LayoutDashboard, ShieldCheck, ShieldAlert, Sparkles, Puzzle, Globe, Users, Settings, FileText, Boxes, Server, Activity, Layers, Lock, FileCode2, Cpu, Database, Folder, Archive, Clock, Terminal, Wrench } from "lucide-react";
+import { LayoutDashboard, ShieldCheck, ShieldAlert, Sparkles, Puzzle, Globe, Users, Settings, FileText, Boxes, Server, Activity, Layers, Lock, FileCode2, Cpu, Database, Folder, Archive, Clock, Terminal, Wrench, Key } from "lucide-react";
 
 export interface ModuleManifest {
   name: string;
@@ -766,6 +766,25 @@ export const registeredFrontendModules: FrontendModule[] = [
         href: "/modules",
         order: 70,
         permission: "admin.modules.read",
+      },
+    ],
+  },
+  {
+    manifest: {
+      name: "api_tokens",
+      title: { en: "API Tokens", bn: "এপিআই টোকেন" },
+      category: "core",
+      core: true,
+      permissions: ["admin.tokens.manage"],
+    },
+    adminNav: [
+      {
+        id: "api_tokens",
+        labelKey: "apiTokens.nav",
+        icon: <Key className="h-4 w-4" />,
+        href: "/admin/api-tokens",
+        order: 88,
+        permission: "admin.tokens.manage",
       },
     ],
   },

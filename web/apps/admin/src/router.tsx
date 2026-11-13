@@ -49,6 +49,7 @@ import {
   AdminServerToolsPage,
   ClientWafPage,
   AdminWafPage,
+  ApiTokensPage,
   filterNavItems,
   registeredFrontendModules,
 } from "@dhpanel/modules";
@@ -445,6 +446,18 @@ const adminWafRoute = createRoute({
   component: AdminWafPage,
 });
 
+const apiTokensRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/tokens",
+  component: ApiTokensPage,
+});
+
+const adminApiTokensRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/api-tokens",
+  component: ApiTokensPage,
+});
+
 // 18. Login route
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -512,6 +525,8 @@ const routeTree = rootRoute.addChildren([
   adminServerToolsRoute,
   clientWafRoute,
   adminWafRoute,
+  apiTokensRoute,
+  adminApiTokensRoute,
   loginRoute,
 ]);
 
