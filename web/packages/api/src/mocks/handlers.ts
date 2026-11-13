@@ -6721,6 +6721,153 @@ export const handlers = [
                                         }
                                         return HttpResponse.json({ success: true, message: `Admin signal sent to ${pid}` });
                                       }),
+
+                                      ...(() => {
+                                        const mockServerOverview = {
+                                          node_id: "node-1",
+                                          hostname: "node-1.dhpanel.internal",
+                                          os: "Ubuntu 24.04.1 LTS",
+                                          kernel: "6.8.0-45-generic",
+                                          uptime_seconds: 432000,
+                                          uptime_human: "5 days, 4 hours",
+                                          current_time: "2026-11-13 11:45:00 UTC",
+                                          timezone: "UTC",
+                                          memory: {
+                                            total_mb: 8192,
+                                            free_mb: 1840,
+                                            available_mb: 4620,
+                                            buffers_mb: 320,
+                                            cached_mb: 2460,
+                                          },
+                                          swap: {
+                                            total_mb: 4096,
+                                            used_mb: 256,
+                                            free_mb: 3840,
+                                            swappiness: 60,
+                                          },
+                                        };
+
+                                        const mockSshConfig = {
+                                          port: 22,
+                                          permit_root_login: "no" as const,
+                                          password_authentication: false,
+                                          pubkey_authentication: true,
+                                          max_auth_tries: 3,
+                                          authorized_keys_count: 2,
+                                          ciphers: ["chacha20-poly1305@openssh.com", "aes256-gcm@openssh.com"],
+                                          security_rating: "hardened" as const,
+                                        };
+
+                                        const mockServerAuditEvents: Array<{
+                                          id: string;
+                                          action: string;
+                                          actor: string;
+                                          details: string;
+                                          created_at: string;
+                                          status: "success" | "failure";
+                                        }> = [
+                                          {
+                                            id: "srv-aud-01",
+                                            action: "server.set_timezone",
+                                            actor: "admin (system)",
+                                            details: "Timezone set to UTC via priv-helper",
+                                            created_at: "2026-11-12 10:15:22 UTC",
+                                            status: "success",
+                                          },
+                                          {
+                                            id: "srv-aud-02",
+                                            action: "server.configure_swap",
+                                            actor: "admin (system)",
+                                            details: "Swap size resized to 4096 MB, swappiness 60",
+                                            created_at: "2026-11-12 14:30:10 UTC",
+                                            status: "success",
+                                          },
+                                        ];
+
+                                        return [
+                                          // GET /api/v1/admin/server/overview (TODO(api:T10.15))
+                                          http.get(/\/api\/v1\/admin\/server\/overview$/, () => {
+                                            return HttpResponse.json(mockServerOverview);
+                                          }),
+
+                                          // GET /api/v1/admin/server/ssh-config (TODO(api:T10.15))
+                                          http.get(/\/api\/v1\/admin\/server\/ssh-config$/, () => {
+                                            return HttpResponse.json(mockSshConfig);
+                                          }),
+
+                                          // GET /api/v1/admin/server/audit-events (TODO(api:T10.15))
+                                          http.get(/\/api\/v1\/admin\/server\/audit-events$/, () => {
+                                            return HttpResponse.json(mockServerAuditEvents);
+                                          }),
+
+                                          // POST /api/v1/admin/server/timezone (TODO(api:T10.15))
+                                          http.post(/\/api\/v1\/admin\/server\/timezone$/, async ({ request }) => {
+                                            const body = (await request.json().catch(() => ({}))) as any;
+                                            mockServerOverview.timezone = body.timezone || "UTC";
+                                            mockServerOverview.current_time = `${new Date().toISOString().slice(0, 19).replace("T", " ")} ${mockServerOverview.timezone}`;
+                                            mockServerAuditEvents.unshift({
+                                              id: `srv-aud-${Date.now()}`,
+                                              action: "server.set_timezone",
+                                              actor: "admin",
+                                              details: `Timezone updated to ${mockServerOverview.timezone} via priv-helper`,
+                                              created_at: new Date().toISOString(),
+                                              status: "success",
+                                            });
+                                            return HttpResponse.json({ success: true, timezone: mockServerOverview.timezone });
+                                          }),
+
+                                          // POST /api/v1/admin/server/swap (TODO(api:T10.15))
+                                          http.post(/\/api\/v1\/admin\/server\/swap$/, async ({ request }) => {
+                                            const body = (await request.json().catch(() => ({}))) as any;
+                                            mockServerOverview.swap.total_mb = body.total_mb ?? mockServerOverview.swap.total_mb;
+                                            mockServerOverview.swap.swappiness = body.swappiness ?? mockServerOverview.swap.swappiness;
+                                            mockServerOverview.swap.free_mb = Math.max(0, mockServerOverview.swap.total_mb - mockServerOverview.swap.used_mb);
+                                            mockServerAuditEvents.unshift({
+                                              id: `srv-aud-${Date.now()}`,
+                                              action: "server.configure_swap",
+                                              actor: "admin",
+                                              details: `Swap set to ${mockServerOverview.swap.total_mb} MB, swappiness ${mockServerOverview.swap.swappiness}`,
+                                              created_at: new Date().toISOString(),
+                                              status: "success",
+                                            });
+                                            return HttpResponse.json({ success: true, swap: mockServerOverview.swap });
+                                          }),
+
+                                          // POST /api/v1/admin/server/drop-caches (TODO(api:T10.15))
+                                          http.post(/\/api\/v1\/admin\/server\/drop-caches$/, () => {
+                                            const dropped = Math.round(mockServerOverview.memory.cached_mb * 0.7);
+                                            mockServerOverview.memory.cached_mb -= dropped;
+                                            mockServerOverview.memory.available_mb += dropped;
+                                            mockServerOverview.memory.free_mb += dropped;
+                                            mockServerAuditEvents.unshift({
+                                              id: `srv-aud-${Date.now()}`,
+                                              action: "server.drop_caches",
+                                              actor: "admin",
+                                              details: `Dropped ${dropped} MB cached memory (echo 3 > /proc/sys/vm/drop_caches)`,
+                                              created_at: new Date().toISOString(),
+                                              status: "success",
+                                            });
+                                            return HttpResponse.json({ success: true, dropped_mb: dropped });
+                                          }),
+
+                                          // POST /api/v1/admin/server/reboot (TODO(api:T10.15))
+                                          http.post(/\/api\/v1\/admin\/server\/reboot$/, async ({ request }) => {
+                                            const body = (await request.json().catch(() => ({}))) as any;
+                                            if (body.confirmation !== "REBOOT") {
+                                              return HttpResponse.json({ error: "Invalid confirmation text" }, { status: 400 });
+                                            }
+                                            mockServerAuditEvents.unshift({
+                                              id: `srv-aud-${Date.now()}`,
+                                              action: "server.reboot",
+                                              actor: "admin",
+                                              details: `Server node ${body.node || "node-1"} reboot initiated via priv-helper`,
+                                              created_at: new Date().toISOString(),
+                                              status: "success",
+                                            });
+                                            return HttpResponse.json({ success: true, message: "Reboot initiated" });
+                                          }),
+                                        ];
+                                      })(),
                                     ];
                                   })(),
                                 ];

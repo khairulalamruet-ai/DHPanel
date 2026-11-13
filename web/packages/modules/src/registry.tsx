@@ -1,5 +1,5 @@
 import React from "react";
-import { LayoutDashboard, ShieldCheck, Sparkles, Puzzle, Globe, Users, Settings, FileText, Boxes, Server, Activity, Layers, Lock, FileCode2, Cpu, Database, Folder, Archive, Clock, Terminal } from "lucide-react";
+import { LayoutDashboard, ShieldCheck, Sparkles, Puzzle, Globe, Users, Settings, FileText, Boxes, Server, Activity, Layers, Lock, FileCode2, Cpu, Database, Folder, Archive, Clock, Terminal, Wrench } from "lucide-react";
 
 export interface ModuleManifest {
   name: string;
@@ -658,6 +658,26 @@ export const registeredFrontendModules: FrontendModule[] = [
         href: "/admin/processes",
         order: 62,
         permission: "admin.processes.manage",
+      },
+    ],
+  },
+  {
+    manifest: {
+      name: "server-tools",
+      title: { en: "Server Tools", bn: "সার্ভার টুলস" },
+      category: "tools",
+      core: true,
+      permissions: ["admin.server.manage", "admin.nodes.manage"],
+      features: ["server-tools"],
+    },
+    adminNav: [
+      {
+        id: "admin-server-tools",
+        labelKey: "serverTools.nav",
+        icon: <Wrench className="h-4 w-4" />,
+        href: "/admin/server-tools",
+        order: 64,
+        permission: "admin.server.manage",
       },
     ],
   },

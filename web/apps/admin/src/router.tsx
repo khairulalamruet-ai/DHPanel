@@ -46,6 +46,7 @@ import {
   AdminUsagePage,
   ClientProcessesPage,
   AdminProcessesPage,
+  AdminServerToolsPage,
   filterNavItems,
   registeredFrontendModules,
 } from "@dhpanel/modules";
@@ -422,6 +423,13 @@ const adminProcessesRoute = createRoute({
   component: AdminProcessesPage,
 });
 
+// 37. Server Tools route (T10.15)
+const adminServerToolsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/server-tools",
+  component: AdminServerToolsPage,
+});
+
 // 18. Login route
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -486,6 +494,7 @@ const routeTree = rootRoute.addChildren([
   clientProcessesRoute,
   processesRoute,
   adminProcessesRoute,
+  adminServerToolsRoute,
   loginRoute,
 ]);
 
