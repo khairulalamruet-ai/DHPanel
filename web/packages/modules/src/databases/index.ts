@@ -5,3 +5,4 @@ export * from "./ManageGrantsDialog";
 export * from "./SqlImportDialog";
 export * from "./RemoteAccessDialog";
 export * from "./ClientDatabasesPage";
+export * from "./AdminDatabasesPage";

@@ -468,7 +468,7 @@ export const registeredFrontendModules: FrontendModule[] = [
         id: "databases",
         labelKey: "databases.nav",
         icon: <Database className="h-4 w-4" />,
-        href: "/client/databases",
+        href: "/admin/databases",
         order: 29,
         permission: "databases.read",
       },

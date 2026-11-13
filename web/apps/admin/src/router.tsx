@@ -33,6 +33,7 @@ import {
   ServicesPage,
   ErrorPagesPage,
   ClientDatabasesPage,
+  AdminDatabasesPage,
   filterNavItems,
   registeredFrontendModules,
 } from "@dhpanel/modules";
@@ -266,6 +267,13 @@ const databasesRoute = createRoute({
   component: ClientDatabasesPage,
 });
 
+// 26. Admin Database Overview route (T07.11)
+const adminDatabasesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/databases",
+  component: AdminDatabasesPage,
+});
+
 // 18. Login route
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -308,6 +316,7 @@ const routeTree = rootRoute.addChildren([
   errorPagesRoute,
   clientDatabasesRoute,
   databasesRoute,
+  adminDatabasesRoute,
   loginRoute,
 ]);
 
