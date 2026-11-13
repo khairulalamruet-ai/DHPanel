@@ -1,0 +1,44 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*) FILTER (WHERE kind = 'primary') AS \"primary!\",\n                  count(*) FILTER (WHERE kind = 'addon') AS \"addon!\",\n                  count(*) FILTER (WHERE kind = 'sub') AS \"sub!\",\n                  count(*) FILTER (WHERE kind = 'alias') AS \"alias!\"\n           FROM domains WHERE tenant_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "primary!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "addon!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "sub!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "alias!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "64a62a25f1985d4b472cbb1dc547d1b4a2826328192c76bb59e553ac6854bda4"
+}

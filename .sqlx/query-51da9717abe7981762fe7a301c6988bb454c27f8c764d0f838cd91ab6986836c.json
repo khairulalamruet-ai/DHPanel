@@ -1,0 +1,131 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT d.id, d.tenant_id, d.fqdn, d.kind, d.parent_domain_id, d.docroot, d.status,\n                  extract(epoch FROM d.created_at)::bigint AS \"created_at!\",\n                  extract(epoch FROM d.suspended_at)::bigint AS suspended_at,\n                  t.username AS tenant_username\n           FROM domains d JOIN tenants t ON t.id = d.tenant_id\n           WHERE ($1::uuid IS NULL OR d.tenant_id = $1)\n             AND ($2::text IS NULL OR d.kind = $2)\n             AND ($3::text IS NULL OR d.status = $3)\n             AND ($4::text IS NULL OR d.fqdn ILIKE $4)\n           ORDER BY d.fqdn, d.id\n           LIMIT $5 OFFSET $6",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "domains",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "domains",
+            "name": "tenant_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "fqdn",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "domains",
+            "name": "fqdn"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "kind",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "domains",
+            "name": "kind"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "parent_domain_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "domains",
+            "name": "parent_domain_id"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "docroot",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "domains",
+            "name": "docroot"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "domains",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "created_at!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 8,
+        "name": "suspended_at",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 9,
+        "name": "tenant_username",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "tenants",
+            "name": "username"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      null,
+      null,
+      false
+    ]
+  },
+  "hash": "51da9717abe7981762fe7a301c6988bb454c27f8c764d0f838cd91ab6986836c"
+}

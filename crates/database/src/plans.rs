@@ -196,6 +196,27 @@ pub async fn get_default(pool: &PgPool) -> Result<Option<Plan>, sqlx::Error> {
     }
 }
 
+/// Whether a plan's feature set includes `feature` (or every feature).
+///
+/// # Errors
+/// Database errors.
+pub async fn includes_feature(
+    pool: &PgPool,
+    plan_id: Uuid,
+    feature: &str,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar!(
+        r#"SELECT (f.all_features OR $2::text::feature_key = ANY (f.features)) AS "included!"
+           FROM plans p JOIN feature_sets f ON f.id = p.feature_set_id
+           WHERE p.id = $1"#,
+        plan_id,
+        feature,
+    )
+    .fetch_optional(pool)
+    .await
+    .map(|found| found.unwrap_or(false))
+}
+
 /// Creates a plan and returns its id.
 ///
 /// # Errors

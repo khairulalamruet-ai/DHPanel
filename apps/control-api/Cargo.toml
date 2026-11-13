@@ -33,6 +33,7 @@ dhpanel-mod-nodes.workspace = true
 dhpanel-mod-plans.workspace = true
 dhpanel-mod-system.workspace = true
 dhpanel-mod-users.workspace = true
+dhpanel-mod-domains.workspace = true
 dhpanel-dispatcher.workspace = true
 dhpanel-events.workspace = true
 dhpanel-kernel.workspace = true

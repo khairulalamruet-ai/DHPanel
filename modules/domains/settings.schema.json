@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Domains",
+  "description": "Which domain names may be hosted.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "permit_subdomain_sharing": {
+      "type": "boolean",
+      "title": "Permit subdomain sharing",
+      "default": false,
+      "x-scope": "global",
+      "x-title": {
+        "en": "Permit subdomain sharing",
+        "bn": "সাবডোমেইন শেয়ারিং অনুমতি"
+      },
+      "x-description": {
+        "en": "Let an account host a subdomain of a domain that belongs to another account. Off: such a name is refused.",
+        "bn": "অন্য অ্যাকাউন্টের ডোমেইনের সাবডোমেইন হোস্ট করতে দিন। বন্ধ থাকলে এমন নাম গ্রহণ করা হয় না।"
+      }
+    },
+    "blocked_domains": {
+      "type": "string",
+      "title": "Blocked domains",
+      "maxLength": 20000,
+      "default": "",
+      "x-scope": "global",
+      "x-title": {
+        "en": "Blocked domains",
+        "bn": "নিষিদ্ধ ডোমেইন"
+      },
+      "x-description": {
+        "en": "Names nobody may host, one per line (commas and spaces also separate them). An entry closes that name and every name below it; it may be a whole ending such as gov.",
+        "bn": "যে নামগুলো কেউ হোস্ট করতে পারবে না, প্রতি লাইনে একটি (কমা ও স্পেসও আলাদা করে)। একটি এন্ট্রি সেই নাম ও এর নিচের সব নাম বন্ধ করে; gov-এর মতো পুরো এন্ডিংও দেওয়া যায়।"
+      }
+    }
+  }
+}

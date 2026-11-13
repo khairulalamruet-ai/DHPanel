@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT (f.all_features OR $2::text::feature_key = ANY (f.features)) AS \"included!\"\n           FROM plans p JOIN feature_sets f ON f.id = p.feature_set_id\n           WHERE p.id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "included!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "a5f726ecc41ed0db67e9747f7fbf320d2123884b52e2f8579511d4e2b6a58cc2"
+}

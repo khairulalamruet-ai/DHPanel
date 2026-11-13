@@ -105,6 +105,14 @@ pub mod permissions {
         pub UsersImpersonate = "admin.users.impersonate"
     );
     crate::permission!(
+        /// See every domain on the panel.
+        pub DomainsRead = "admin.domains.read"
+    );
+    crate::permission!(
+        /// Add, change and remove any account's domains.
+        pub DomainsManage = "admin.domains.manage"
+    );
+    crate::permission!(
         /// See the panel's settings.
         pub SettingsRead = "admin.settings.read"
     );

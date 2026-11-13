@@ -591,7 +591,8 @@ async fn data_of_deleted_tenants_is_purged_when_due_and_the_tenant_goes_when_the
     pool: PgPool,
 ) {
     let p = plane(&pool).await;
-    let d = p.start_dispatcher();
+    // Not running: the test asks for purges itself, at the moment it wants to.
+    let d = Dispatcher::new(p.ops.clone(), p.gateway.clone(), None, dispatch_settings());
     let node = make_node(&p, &pool, "purger").await;
     let account: Uuid = sqlx::query_scalar(
         "INSERT INTO accounts (kind, username, email, password_hash)

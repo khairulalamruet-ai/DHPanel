@@ -234,3 +234,200 @@ pub async fn find(pool: &PgPool, fqdn: &Fqdn) -> Result<Option<Domain>, sqlx::Er
     .await?;
     Ok(row.map(Domain::from))
 }
+
+/// A domain with the account it belongs to, for lists.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DomainListing {
+    /// The domain.
+    pub domain: Domain,
+    /// System name of its tenant.
+    pub tenant_username: String,
+    /// When it was suspended (Unix seconds).
+    pub suspended_at: Option<i64>,
+}
+
+/// What to look for in [`list`].
+#[derive(Debug, Clone, Default)]
+pub struct Filter<'a> {
+    /// Only this tenant's domains.
+    pub tenant_id: Option<Uuid>,
+    /// Only this kind.
+    pub kind: Option<DomainKind>,
+    /// Only this status.
+    pub status: Option<DomainStatus>,
+    /// Text to find in the name.
+    pub search: Option<&'a str>,
+}
+
+fn like_pattern(text: &str) -> String {
+    let mut out = String::from("%");
+    for c in text.chars() {
+        if matches!(c, '%' | '_' | '\\') {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out.push('%');
+    out
+}
+
+/// Domains by name, and how many match in all.
+///
+/// # Errors
+/// Database errors.
+pub async fn list(
+    pool: &PgPool,
+    filter: &Filter<'_>,
+    limit: i64,
+    offset: i64,
+) -> Result<(Vec<DomainListing>, i64), sqlx::Error> {
+    let kind = filter.kind.map(DomainKind::as_str);
+    let status = filter.status.map(DomainStatus::as_str);
+    let pattern = filter.search.map(like_pattern);
+    let total = sqlx::query_scalar!(
+        r#"SELECT count(*) AS "n!" FROM domains d
+           WHERE ($1::uuid IS NULL OR d.tenant_id = $1)
+             AND ($2::text IS NULL OR d.kind = $2)
+             AND ($3::text IS NULL OR d.status = $3)
+             AND ($4::text IS NULL OR d.fqdn ILIKE $4)"#,
+        filter.tenant_id,
+        kind,
+        status,
+        pattern,
+    )
+    .fetch_one(pool)
+    .await?;
+    let rows = sqlx::query!(
+        r#"SELECT d.id, d.tenant_id, d.fqdn, d.kind, d.parent_domain_id, d.docroot, d.status,
+                  extract(epoch FROM d.created_at)::bigint AS "created_at!",
+                  extract(epoch FROM d.suspended_at)::bigint AS suspended_at,
+                  t.username AS tenant_username
+           FROM domains d JOIN tenants t ON t.id = d.tenant_id
+           WHERE ($1::uuid IS NULL OR d.tenant_id = $1)
+             AND ($2::text IS NULL OR d.kind = $2)
+             AND ($3::text IS NULL OR d.status = $3)
+             AND ($4::text IS NULL OR d.fqdn ILIKE $4)
+           ORDER BY d.fqdn, d.id
+           LIMIT $5 OFFSET $6"#,
+        filter.tenant_id,
+        kind,
+        status,
+        pattern,
+        limit,
+        offset,
+    )
+    .fetch_all(pool)
+    .await?;
+    let items = rows
+        .into_iter()
+        .map(|r| DomainListing {
+            domain: Domain::from(Row {
+                id: r.id,
+                tenant_id: r.tenant_id,
+                fqdn: r.fqdn,
+                kind: r.kind,
+                parent_domain_id: r.parent_domain_id,
+                docroot: r.docroot,
+                status: r.status,
+                created_at: r.created_at,
+            }),
+            tenant_username: r.tenant_username,
+            suspended_at: r.suspended_at,
+        })
+        .collect();
+    Ok((items, total))
+}
+
+/// How many domains a tenant has of each kind: `(primary, addon, sub, alias)`.
+///
+/// # Errors
+/// Database errors.
+pub async fn counts(
+    conn: &mut PgConnection,
+    tenant_id: Uuid,
+) -> Result<(i64, i64, i64, i64), sqlx::Error> {
+    let row = sqlx::query!(
+        r#"SELECT count(*) FILTER (WHERE kind = 'primary') AS "primary!",
+                  count(*) FILTER (WHERE kind = 'addon') AS "addon!",
+                  count(*) FILTER (WHERE kind = 'sub') AS "sub!",
+                  count(*) FILTER (WHERE kind = 'alias') AS "alias!"
+           FROM domains WHERE tenant_id = $1"#,
+        tenant_id,
+    )
+    .fetch_one(conn)
+    .await?;
+    Ok((row.primary, row.addon, row.sub, row.alias))
+}
+
+/// Serialises the changes of one tenant's domains (limits are checked against a
+/// count that must not change under the check). Call it first in a transaction.
+///
+/// # Errors
+/// Database errors.
+pub async fn lock_tenant(conn: &mut PgConnection, tenant_id: Uuid) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        "SELECT pg_advisory_xact_lock($1, hashtext($2::text))",
+        TENANT_LOCK,
+        tenant_id.to_string(),
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
+/// Advisory lock namespace for one tenant's domain count.
+const TENANT_LOCK: i32 = 7_305_002;
+
+/// Removes a domain and what hangs off it (subdomains, aliases, redirects).
+/// Returns whether it existed.
+///
+/// # Errors
+/// Database errors.
+pub async fn delete(conn: &mut PgConnection, id: Uuid) -> Result<bool, sqlx::Error> {
+    let done = sqlx::query!("DELETE FROM domains WHERE id = $1", id)
+        .execute(conn)
+        .await?;
+    Ok(done.rows_affected() == 1)
+}
+
+/// Suspends or resumes a domain. Returns whether it exists.
+///
+/// # Errors
+/// Database errors.
+pub async fn set_status(
+    conn: &mut PgConnection,
+    id: Uuid,
+    status: DomainStatus,
+) -> Result<bool, sqlx::Error> {
+    let suspended = status == DomainStatus::Suspended;
+    let done = sqlx::query!(
+        "UPDATE domains
+         SET status = $2, suspended_at = CASE WHEN $3 THEN COALESCE(suspended_at, now()) ELSE NULL END
+         WHERE id = $1",
+        id,
+        status.as_str(),
+        suspended,
+    )
+    .execute(conn)
+    .await?;
+    Ok(done.rows_affected() == 1)
+}
+
+/// Changes where a domain's files are. Returns whether it exists.
+///
+/// # Errors
+/// Database errors.
+pub async fn set_docroot(
+    conn: &mut PgConnection,
+    id: Uuid,
+    docroot: &Docroot,
+) -> Result<bool, sqlx::Error> {
+    let done = sqlx::query!(
+        "UPDATE domains SET docroot = $2 WHERE id = $1",
+        id,
+        docroot.as_str(),
+    )
+    .execute(conn)
+    .await?;
+    Ok(done.rows_affected() == 1)
+}

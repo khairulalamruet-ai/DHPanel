@@ -21,6 +21,7 @@ const EMBEDDED: &[(&str, &str)] = &[
     ("system", dhpanel_mod_system::MANIFEST),
     ("plans", dhpanel_mod_plans::MANIFEST),
     ("users", dhpanel_mod_users::MANIFEST),
+    ("domains", dhpanel_mod_domains::MANIFEST),
 ];
 
 /// Days the data of a deleted user is kept before it is purged.
@@ -47,6 +48,7 @@ impl Module for Wired {
     fn settings_schema(&self) -> Option<serde_json::Value> {
         match self.manifest.module.name.as_str() {
             "system" => serde_json::from_str(dhpanel_mod_system::SETTINGS_SCHEMA).ok(),
+            "domains" => serde_json::from_str(dhpanel_mod_domains::SETTINGS_SCHEMA).ok(),
             _ => None,
         }
     }
@@ -61,7 +63,7 @@ pub fn settings(registry: &Registry) -> Result<SettingsRegistry, Vec<String>> {
     let mut problems = Vec::new();
     for module in registry.modules() {
         let name = module.manifest().module.name.clone();
-        if name == "system" && module.settings_schema().is_none() {
+        if matches!(name.as_str(), "system" | "domains") && module.settings_schema().is_none() {
             problems.push(format!(
                 "settings schema of module `{name}`: not valid JSON"
             ));
@@ -201,6 +203,30 @@ pub fn mount(
                                 },
                             )),
                             ..ModuleRoutes::none()
+                        })
+                    }
+                    "domains" => {
+                        let (db, sessions, late_settings) =
+                            (db.clone(), sessions.clone(), late_settings.clone());
+                        Box::new(move || match late_settings.get() {
+                            Some(settings) => {
+                                let state = dhpanel_mod_domains::DomainsState {
+                                    db: db.clone(),
+                                    sessions: sessions.clone(),
+                                    settings: settings.clone(),
+                                };
+                                ModuleRoutes {
+                                    admin: Some(
+                                        dhpanel_mod_domains::admin_router()
+                                            .with_state(state.clone()),
+                                    ),
+                                    client: Some(
+                                        dhpanel_mod_domains::client_router().with_state(state),
+                                    ),
+                                    ..ModuleRoutes::none()
+                                }
+                            }
+                            None => ModuleRoutes::none(),
                         })
                     }
                     // A manifest without code behind it has no routes.
@@ -419,17 +445,21 @@ mod tests {
         let names: Vec<_> = manifests.iter().map(|m| m.module.name.as_str()).collect();
         assert_eq!(
             names,
-            ["auth", "rbac", "audit", "nodes", "system", "plans", "users"]
+            [
+                "auth", "rbac", "audit", "nodes", "system", "plans", "users", "domains"
+            ]
         );
         // And they fit together: dependencies first.
         let registry = registry().unwrap_or_else(|e| panic!("{}", e.join("\n")));
         assert_eq!(
             registry.names().collect::<Vec<_>>(),
-            ["auth", "rbac", "audit", "nodes", "system", "plans", "users"]
+            [
+                "auth", "rbac", "audit", "nodes", "system", "plans", "users", "domains"
+            ]
         );
         assert_eq!(
             registry.dependents_of("rbac"),
-            ["audit", "nodes", "system", "plans", "users"]
+            ["audit", "nodes", "system", "plans", "users", "domains"]
         );
         // Every dependency names a module that exists.
         for m in &manifests {
@@ -468,12 +498,14 @@ mod tests {
             p::UsersRead::KEY,
             p::UsersManage::KEY,
             p::UsersImpersonate::KEY,
+            p::DomainsRead::KEY,
+            p::DomainsManage::KEY,
         ] {
             assert!(declared.iter().any(|d| d == key), "{key} is in no manifest");
         }
         assert_eq!(
             declared.len(),
-            16,
+            18,
             "a manifest declares a key the code does not know: {declared:?}"
         );
     }

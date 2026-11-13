@@ -1,0 +1,26 @@
+# Domains: the names a hosting account serves, their document roots, and (with the
+# later web server tasks) their redirects, DNS and certificates
+# (crates/modules/domains).
+[module]
+name       = "domains"
+version    = "0.1.0"
+title      = { en = "Domains", bn = "ডোমেইন" }
+category   = "web"
+core       = false
+depends_on = ["auth", "rbac", "audit", "system", "plans", "users"]
+
+[permissions]
+keys = ["admin.domains.read", "admin.domains.manage"]
+
+[features]
+keys = ["domains", "redirects"]
+
+# A plan without these keys gets the defaults: the limit counts main, addon and
+# alias names (`max_domains`) and subdomains (`max_subdomains`) separately.
+[limits]
+max_domains    = { type = "int", default = 10, unlimited = -1 }
+max_subdomains = { type = "int", default = 20, unlimited = -1 }
+
+[ui]
+admin_nav  = { group = "Web", order = 10, icon = "globe" }
+client_nav = { group = "Domains", order = 10, icon = "globe" }
