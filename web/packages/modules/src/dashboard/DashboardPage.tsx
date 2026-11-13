@@ -1,5 +1,6 @@
 import React from "react";
 import { HealthCard } from "./HealthCard";
+import { AdminQuickstartChecklist } from "../onboarding";
 import { useTranslation } from "@dhpanel/i18n";
 import { useSession } from "@dhpanel/auth";
 import { Card, CardHeader, CardTitle, CardContent } from "@dhpanel/ui";
@@ -17,6 +18,8 @@ export function DashboardPage() {
           {session?.branding?.companyName || "DHPanel"} Control Center
         </p>
       </div>
+
+      <AdminQuickstartChecklist />
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         <HealthCard />
