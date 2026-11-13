@@ -100,6 +100,8 @@ pub fn mount(
     let late_mount: Arc<std::sync::OnceLock<ModuleMount>> = Arc::default();
     // Likewise the settings schemas come from the modules once they exist.
     let late_settings: Arc<std::sync::OnceLock<Arc<SettingsRegistry>>> = Arc::default();
+    // One cache for every rebuild of the system routes, so it survives a module switch.
+    let branding: Arc<dhpanel_mod_system::bootstrap::BrandingCache> = Arc::default();
     let (db, sessions) = (states.auth.db.clone(), states.auth.sessions.clone());
     let States { auth, admin, nodes } = states;
     let modules = manifests
@@ -145,6 +147,7 @@ pub fn mount(
                             late_mount.clone(),
                             late_settings.clone(),
                         );
+                        let branding = branding.clone();
                         Box::new(move || match (late_mount.get(), late_settings.get()) {
                             (Some(mount), Some(settings)) => ModuleRoutes {
                                 admin: Some(dhpanel_mod_system::router().with_state(
@@ -153,6 +156,7 @@ pub fn mount(
                                         sessions: sessions.clone(),
                                         mount: mount.clone(),
                                         settings: settings.clone(),
+                                        branding: branding.clone(),
                                     },
                                 )),
                                 ..ModuleRoutes::none()

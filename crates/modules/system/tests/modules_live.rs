@@ -88,8 +88,12 @@ async fn env(pool: &PgPool) -> Env {
     let redis = RedisHandle::new(&SecretString::from(url)).expect("valid REDIS_URL");
     let sessions = SessionStore::new(redis, pool.clone(), SessionConfig::default());
     let late: Arc<OnceLock<ModuleMount>> = Arc::default();
+    let branding: Arc<dhpanel_mod_system::bootstrap::BrandingCache> = Arc::default();
     let settings = Arc::new(
         SettingsRegistry::build(vec![(
+            "system".to_owned(),
+            serde_json::from_str(dhpanel_mod_system::SETTINGS_SCHEMA).unwrap(),
+        ), (
             "dns".to_owned(),
             json!({
                 "type": "object",
@@ -110,6 +114,7 @@ async fn env(pool: &PgPool) -> Env {
         routes: Box::new({
             let (pool, sessions, late) = (pool.clone(), sessions.clone(), late.clone());
             let settings = settings.clone();
+            let branding = branding.clone();
             move || match late.get() {
                 Some(mount) => ModuleRoutes {
                     admin: Some(router().with_state(SystemState {
@@ -117,6 +122,7 @@ async fn env(pool: &PgPool) -> Env {
                         sessions: sessions.clone(),
                         mount: mount.clone(),
                         settings: settings.clone(),
+                        branding: branding.clone(),
                     })),
                     ..ModuleRoutes::none()
                 },
@@ -527,8 +533,10 @@ async fn settings_are_listed_validated_saved_and_audited_with_a_diff(pool: PgPoo
     let (status, body) = e.call(Some(&root), "GET", path, None, false).await;
     assert_eq!(status, StatusCode::OK);
     let items = body["items"].as_array().unwrap();
-    assert_eq!(items.len(), 1);
+    assert_eq!(items.len(), 2);
     assert_eq!(items[0]["module"], "dns");
+    assert_eq!(items[1]["module"], "system");
+    assert_eq!(items[1]["title"]["bn"], "সাধারণ");
     assert_eq!(items[0]["title"]["bn"], "ডিএনএস");
     assert_eq!(
         items[0]["values"],
@@ -703,4 +711,131 @@ async fn changing_settings_needs_the_manage_permission_csrf_and_a_known_module(p
         .await
         .unwrap();
     assert_eq!(stored, 0);
+}
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn bootstrap_gives_the_interface_everything_in_one_fast_request(pool: PgPool) {
+    let e = env(&pool).await;
+    let root_id = account(&pool, "rootuser", &["super_admin"]).await;
+    let root = e.sign_in(root_id).await;
+    let path = "/api/v1/admin/bootstrap";
+
+    assert_eq!(
+        e.call(None, "GET", path, None, false).await.0,
+        StatusCode::UNAUTHORIZED
+    );
+    let (status, body) = e.call(Some(&root), "GET", path, None, false).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["user"]["username"], "rootuser");
+    assert_eq!(body["user"]["kind"], "admin");
+    assert_eq!(body["roles"], json!(["super_admin"]));
+    assert_eq!(body["permissions"], json!(["*"]));
+    assert_eq!(body["csrf_token"], root.csrf.as_str());
+    assert_eq!(
+        body["mfa"],
+        json!({"enabled": false, "required": false, "setup_required": false})
+    );
+    assert_eq!(
+        (body["features"].clone(), body["limits"].clone()),
+        (json!([]), json!({}))
+    );
+    // The default language of the settings when the account has no preference of its own.
+    assert_eq!(body["branding"]["panel_name"], "DHPanel");
+    assert!(body["locale"].is_string());
+    // The modules being served, dependencies first, with their menu data.
+    let names: Vec<&str> = body["modules"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["dns", "system", "domains", "ssl"]);
+    assert_eq!(body["modules"][0]["title"]["en"], "dns title");
+    assert_eq!(body["modules"][1]["name"], "system");
+    assert_eq!(body["modules"][1]["core"], true);
+
+    // Switching a module off changes the next bootstrap: the menu follows.
+    let (status, _) = e.switch(&root, "ssl", false, false).await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, body) = e.call(Some(&root), "GET", path, None, false).await;
+    let names: Vec<&str> = body["modules"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["dns", "system", "domains"]);
+
+    // It is never cached by a browser or a proxy (it holds the CSRF token).
+    let req = Request::builder()
+        .uri(path)
+        .header(header::COOKIE, &root.cookie)
+        .body(Body::empty())
+        .unwrap();
+    let res = e.app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.headers()[header::CACHE_CONTROL], "no-store");
+
+    // A customer account is not an administrator.
+    let client: Uuid = sqlx::query_scalar(
+        "INSERT INTO accounts (kind, username, email, password_hash)
+         VALUES ('client', 'customer', 'customer@example.com', $1) RETURNING id",
+    )
+    .bind(HASH)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let c = e.sign_in(client).await;
+    let (status, body) = e.call(Some(&c), "GET", path, None, false).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::FORBIDDEN, "not_an_administrator")
+    );
+}
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn bootstrap_answers_in_under_fifty_milliseconds_and_follows_the_settings(pool: PgPool) {
+    let e = env(&pool).await;
+    let root = e
+        .sign_in(account(&pool, "rootuser", &["super_admin"]).await)
+        .await;
+    let path = "/api/v1/admin/bootstrap";
+    // The first call fills the caches; the rest are what users feel.
+    e.call(Some(&root), "GET", path, None, false).await;
+    let mut times = Vec::new();
+    for _ in 0..30 {
+        let started = std::time::Instant::now();
+        let (status, _) = e.call(Some(&root), "GET", path, None, false).await;
+        times.push(started.elapsed());
+        assert_eq!(status, StatusCode::OK);
+    }
+    times.sort();
+    let (median, worst) = (times[times.len() / 2], times[times.len() - 1]);
+    assert!(
+        median < std::time::Duration::from_millis(50),
+        "median {median:?}"
+    );
+    assert!(
+        worst < std::time::Duration::from_millis(250),
+        "worst {worst:?}"
+    );
+
+    // The panel's name is remembered for a few seconds, but a change made through
+    // the settings API shows up in the very next bootstrap.
+    let (_, body) = e.call(Some(&root), "GET", path, None, false).await;
+    assert_eq!(body["branding"]["panel_name"], "DHPanel");
+    let (status, saved) = e
+        .call(
+            Some(&root),
+            "PUT",
+            "/api/v1/admin/settings/system",
+            Some(json!({"values": {"panel_name": "My Hosting", "default_language": "bn"}})),
+            true,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    let (_, body) = e.call(Some(&root), "GET", path, None, false).await;
+    assert_eq!(body["branding"]["panel_name"], "My Hosting");
+    assert_eq!(body["branding"]["default_language"], "bn");
 }

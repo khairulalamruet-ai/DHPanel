@@ -22,8 +22,10 @@ dhpanel-session.workspace = true
 axum = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+tokio = { version = "1", features = ["macros"] }
 tracing = "0.1.44"
 utoipa = { version = "6", features = ["uuid"] }
+uuid = { version = "1", features = ["serde"] }
 
 [dev-dependencies]
 dhpanel-settings.workspace = true

@@ -2,6 +2,7 @@
 //!
 //! | Method | Path | Needs |
 //! |---|---|---|
+//! | GET | `/api/v1/admin/bootstrap` | a signed-in administrator |
 //! | GET | `/api/v1/admin/modules` | `admin.modules.read` |
 //! | PUT | `/api/v1/admin/modules/{name}` | `admin.modules.manage`, sudo mode |
 //! | GET | `/api/v1/admin/settings` | `admin.settings.read` |
@@ -19,6 +20,8 @@
 //!   409 and names them, so the interface can ask first;
 //! * every module that changes is written to the audit log in the same
 //!   transaction.
+
+pub mod bootstrap;
 
 use std::{collections::BTreeSet, sync::Arc};
 
@@ -57,6 +60,8 @@ pub struct SystemState {
     pub mount: ModuleMount,
     /// The checked settings schemas of all modules.
     pub settings: Arc<SettingsRegistry>,
+    /// The panel's look, kept in memory for a few seconds.
+    pub branding: Arc<bootstrap::BrandingCache>,
 }
 
 impl FromRef<SystemState> for PgPool {
@@ -74,6 +79,7 @@ impl FromRef<SystemState> for SessionStore {
 /// Routes with full paths; merge into the application router.
 pub fn router() -> Router<SystemState> {
     Router::new()
+        .route("/api/v1/admin/bootstrap", get(bootstrap::admin_bootstrap))
         .route("/api/v1/admin/modules", get(list_modules))
         .route("/api/v1/admin/modules/{name}", put(set_module))
         .route("/api/v1/admin/settings", get(list_settings))
@@ -580,6 +586,9 @@ pub async fn put_settings(
         .map_err(internal)?;
     }
     tx.commit().await.map_err(internal)?;
+    if module == "system" {
+        state.branding.invalidate();
+    }
     Ok(Json(SettingsChange {
         values: serde_json::to_value(&change.after).unwrap_or_default(),
         changed: change.changed,
@@ -589,10 +598,14 @@ pub async fn put_settings(
 /// OpenAPI fragment (full paths; merge into the root document).
 #[derive(OpenApi)]
 #[openapi(
-    paths(list_modules, set_module, list_settings, get_settings, put_settings),
+    paths(
+        bootstrap::admin_bootstrap, list_modules, set_module, list_settings, get_settings,
+        put_settings
+    ),
     components(schemas(
         ModuleView, ModuleList, SetModule, ModuleChange, SettingsView, SettingsList, PutSettings,
-        SettingsChange
+        SettingsChange, bootstrap::Bootstrap, bootstrap::BootstrapUser, bootstrap::BootstrapMfa,
+        bootstrap::BootstrapNav, bootstrap::BootstrapModule, bootstrap::Branding
     )),
     tags((name = "system", description = "Modules and settings"))
 )]

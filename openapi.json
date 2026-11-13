@@ -813,6 +813,52 @@
         ]
       }
     },
+    "/api/v1/admin/bootstrap": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Everything the admin interface needs after sign-in.",
+        "operationId": "adminBootstrap",
+        "responses": {
+          "200": {
+            "description": "The caller, their permissions, the modules being served, branding and the CSRF token. Never cached.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Bootstrap"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`not_an_administrator`: customer accounts use the customer bootstrap",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/modules": {
       "get": {
         "tags": [
@@ -2806,6 +2852,223 @@
               "type": "string"
             },
             "description": "Ten single-use codes; store them somewhere safe."
+          }
+        }
+      },
+      "Bootstrap": {
+        "type": "object",
+        "description": "What the admin interface needs to start.",
+        "required": [
+          "user",
+          "locale",
+          "roles",
+          "permissions",
+          "mfa",
+          "modules",
+          "features",
+          "limits",
+          "branding",
+          "csrf_token"
+        ],
+        "properties": {
+          "branding": {
+            "$ref": "#/components/schemas/Branding",
+            "description": "The panel's look."
+          },
+          "csrf_token": {
+            "type": "string",
+            "description": "Send as `X-CSRF-Token` on POST/PUT/PATCH/DELETE. Keep it in memory only."
+          },
+          "features": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Plan features. Administrators have no plan, so this is empty; the\ncustomer bootstrap fills it."
+          },
+          "limits": {
+            "type": "object",
+            "description": "Plan limits and usage, by key. Empty for administrators."
+          },
+          "locale": {
+            "type": "string",
+            "description": "The language to use: the account's, else the panel's default.",
+            "example": "bn"
+          },
+          "mfa": {
+            "$ref": "#/components/schemas/BootstrapMfa",
+            "description": "Two-factor authentication."
+          },
+          "modules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BootstrapModule"
+            },
+            "description": "Modules being served right now, in dependency order."
+          },
+          "permissions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Permission grants: exact keys, subtrees (`admin.*`) or `*`. For showing\nor hiding things; the server checks every request."
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Role names."
+          },
+          "user": {
+            "$ref": "#/components/schemas/BootstrapUser",
+            "description": "The signed-in account."
+          }
+        }
+      },
+      "BootstrapMfa": {
+        "type": "object",
+        "description": "Two-factor authentication state.",
+        "required": [
+          "enabled",
+          "required",
+          "setup_required"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "A second factor is set up."
+          },
+          "required": {
+            "type": "boolean",
+            "description": "An administrator made it mandatory."
+          },
+          "setup_required": {
+            "type": "boolean",
+            "description": "Mandatory but not set up: the interface should send the user to the\nsecurity page; protected endpoints answer 403 `mfa_setup_required`."
+          }
+        }
+      },
+      "BootstrapModule": {
+        "type": "object",
+        "description": "A module that is being served.",
+        "required": [
+          "name",
+          "version",
+          "title",
+          "category",
+          "core"
+        ],
+        "properties": {
+          "category": {
+            "type": "string",
+            "description": "Category."
+          },
+          "core": {
+            "type": "boolean",
+            "description": "Cannot be switched off."
+          },
+          "name": {
+            "type": "string",
+            "description": "Name; also the feature key of its interface module."
+          },
+          "nav": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BootstrapNav",
+                "description": "Entry in the administrator's menu, if it has one."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": {
+            "type": "object",
+            "description": "Display name by language code."
+          },
+          "version": {
+            "type": "string",
+            "description": "Version of the build."
+          }
+        }
+      },
+      "BootstrapNav": {
+        "type": "object",
+        "description": "A menu entry.",
+        "required": [
+          "group",
+          "order",
+          "icon"
+        ],
+        "properties": {
+          "group": {
+            "type": "string",
+            "description": "Menu group."
+          },
+          "icon": {
+            "type": "string",
+            "description": "Icon name."
+          },
+          "order": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Position in the group, lower first.",
+            "minimum": 0
+          }
+        }
+      },
+      "BootstrapUser": {
+        "type": "object",
+        "description": "The signed-in account.",
+        "required": [
+          "id",
+          "username",
+          "email",
+          "kind"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "description": "E-mail address."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Account id."
+          },
+          "kind": {
+            "type": "string",
+            "description": "`admin`, `reseller` or `client`."
+          },
+          "username": {
+            "type": "string",
+            "description": "Login name."
+          }
+        }
+      },
+      "Branding": {
+        "type": "object",
+        "description": "The panel's look, from the `system` settings.",
+        "required": [
+          "panel_name",
+          "maintenance_notice",
+          "default_language"
+        ],
+        "properties": {
+          "default_language": {
+            "type": "string",
+            "description": "Language used when the account has no preference (`en` or `bn`).",
+            "example": "en"
+          },
+          "maintenance_notice": {
+            "type": "string",
+            "description": "A notice for all users while it is not empty."
+          },
+          "panel_name": {
+            "type": "string",
+            "description": "Name shown on the sign-in page and in the browser tab.",
+            "example": "DHPanel"
           }
         }
       },
