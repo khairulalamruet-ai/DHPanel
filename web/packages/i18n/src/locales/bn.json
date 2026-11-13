@@ -1969,5 +1969,28 @@
     "disableReason": "বন্ধ করার কারণ",
     "disabledAt": "বন্ধের সময়",
     "reEnableRule": "পুনরায় সক্রিয় করুন"
+  },
+  "dashboard": {
+    "customizeLayout": "লেআউট কাস্টমাইজ করুন",
+    "customizeLayoutTitle": "ড্যাশবোর্ড লেআউট পরিবর্তন",
+    "customizeLayoutDesc": "উইজেটের ক্রম পরিবর্তন ও দৃশ্যমানতা নিয়ন্ত্রণ করুন। আপনার লেআউট স্বয়ংক্রিয়ভাবে সংরক্ষিত থাকে।",
+    "widgetNodes": "ক্লাস্টার নোড অবস্থা",
+    "widgetNodesDesc": "অনলাইন বনাম মোট নোড ও ক্লাস্টার স্বাস্থ্য।",
+    "nodesOnlineLabel": "নোডসমূহ সক্রিয় ও হার্টবিট ঠিক আছে",
+    "viewNodes": "নোডসমূহ দেখুন",
+    "widgetTenants": "টেন্যান্ট ও হোস্টেড ডোমেন",
+    "widgetTenantsDesc": "সক্রিয় টেন্যান্ট অ্যাকাউন্ট, ডোমেন এবং MySQL ডাটাবেজ।",
+    "manageTenants": "টেন্যান্ট পরিচালনা",
+    "widgetResources": "রিসোর্স ব্যবহার (CPU / RAM / Disk)",
+    "widgetResourcesDesc": "রিয়েল-টাইম হার্ডওয়্যার ব্যবহার মিটার।",
+    "widgetOperations": "সাম্প্রতিক অপারেশন লেজার",
+    "widgetOperationsDesc": "লাইভ অ্যাসিনক্রোনাস কাজের অবস্থা ও সময়কাল।",
+    "widgetSecurity": "নিরাপত্তা ও ঝুঁকি অ্যালার্ট",
+    "widgetSecurityDesc": "Coraza WAF ব্লক, Fail2ban জেল এবং লগইন অসঙ্গতি।",
+    "threatsBlocked24h": "২৪ ঘণ্টায় প্রতিহত হুমকি",
+    "inspectWaf": "WAF কনসোল",
+    "widgetLicense": "লাইসেন্স অথরিটি অবস্থা",
+    "widgetLicenseDesc": "Ed25519 স্বাক্ষর বৈধতা ও ধারণক্ষমতা কোটা।",
+    "manageLicense": "লাইসেন্স পরিচালনা"
   }
 }

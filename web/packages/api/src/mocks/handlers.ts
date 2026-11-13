@@ -7133,6 +7133,55 @@ export const handlers = [
                                               }),
                                             ];
                                           })(),
+...(() => {
+  // Admin Dashboard Summary Handlers (T18.01)
+  const mockDashboardSummary = {
+    nodes: {
+      total: 3,
+      online: 3,
+      avg_cpu_percent: 18,
+      avg_ram_percent: 42,
+    },
+    tenants: {
+      total: 24,
+      active: 22,
+      domains_count: 58,
+      databases_count: 36,
+    },
+    resources: {
+      cpu_percent: 24,
+      memory_used_mb: 6144,
+      memory_total_mb: 16384,
+      disk_used_gb: 142,
+      disk_total_gb: 512,
+      network_rx_mb: 4.8,
+      network_tx_mb: 8.2,
+    },
+    operations: [
+      { id: "op-vhost-842", type: "VhostTemplateApply", status: "completed", duration_ms: 120, created_at: new Date().toISOString() },
+      { id: "op-ssl-910", type: "AcmeCertificateIssue", status: "completed", duration_ms: 3200, created_at: new Date(Date.now() - 300000).toISOString() },
+      { id: "op-db-104", type: "DatabaseBackupExport", status: "completed", duration_ms: 450, created_at: new Date(Date.now() - 600000).toISOString() },
+    ],
+    security: {
+      blocked_threats_24h: 142,
+      active_waf_rules: 942,
+      ssh_bans: 12,
+    },
+    license: {
+      tier: "DHPanel Enterprise Edition",
+      status: "active",
+      signature_valid: true,
+      expires_in_days: 305,
+    },
+  };
+
+  return [
+    // GET /api/v1/admin/dashboard/summary (TODO(api:T18.01))
+    http.get(/\/api\/v1\/admin\/dashboard\/summary$/, () => {
+      return HttpResponse.json(mockDashboardSummary);
+    }),
+  ];
+})(),
                                         ];
                                       })(),
                                     ];
