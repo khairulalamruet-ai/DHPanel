@@ -11,6 +11,7 @@
 
 pub mod accounts;
 pub mod admins;
+pub mod feature_sets;
 pub mod mfa;
 pub mod modules;
 pub mod node_enrollments;

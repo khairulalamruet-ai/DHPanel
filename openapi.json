@@ -859,6 +859,374 @@
         ]
       }
     },
+    "/api/v1/admin/feature-sets": {
+      "get": {
+        "tags": [
+          "plans"
+        ],
+        "summary": "List the feature sets.",
+        "operationId": "listFeatureSets",
+        "responses": {
+          "200": {
+            "description": "All feature sets, by name",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureSetList"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied` (needs admin.plans.read) or `mfa_setup_required`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "plans"
+        ],
+        "summary": "Create a feature set.",
+        "operationId": "createFeatureSet",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeatureSetInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureSetView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied`, `reauth_required` or `csrf_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`feature_set_name_taken`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid fields",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/feature-sets/{id}": {
+      "get": {
+        "tags": [
+          "plans"
+        ],
+        "summary": "One feature set.",
+        "operationId": "getFeatureSet",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Feature set id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The feature set",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureSetView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied` (needs admin.plans.read)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such feature set",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "plans"
+        ],
+        "summary": "Replace a feature set's contents.",
+        "operationId": "updateFeatureSet",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Feature set id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeatureSetInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureSetView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied`, `reauth_required` or `csrf_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such feature set",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`feature_set_name_taken`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid fields",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "plans"
+        ],
+        "summary": "Delete a feature set that no plan uses.",
+        "operationId": "deleteFeatureSet",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Feature set id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "403": {
+            "description": "`permission_denied`, `reauth_required` or `csrf_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such feature set",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`feature_set_built_in` or `feature_set_in_use`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/features": {
+      "get": {
+        "tags": [
+          "plans"
+        ],
+        "summary": "List the features the installed modules offer (for the feature set editor).",
+        "operationId": "listFeatures",
+        "responses": {
+          "200": {
+            "description": "The feature catalogue",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureList"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied` (needs admin.plans.read) or `mfa_setup_required`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/modules": {
       "get": {
         "tags": [
@@ -3391,6 +3759,166 @@
           }
         }
       },
+      "FeatureList": {
+        "type": "object",
+        "description": "Every feature of the installed modules.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FeatureView"
+            },
+            "description": "By category, module, then key."
+          }
+        }
+      },
+      "FeatureSetInput": {
+        "type": "object",
+        "description": "What a feature set is made of (create and replace).",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "all_features": {
+            "type": "boolean",
+            "description": "Every feature of every module. Then `features` must be empty."
+          },
+          "description": {
+            "type": "string",
+            "description": "Description (at most 255 characters)."
+          },
+          "features": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Feature keys (`a-z`, `0-9`, `_`; at most 256)."
+          },
+          "name": {
+            "type": "string",
+            "description": "Unique name: 2-32 characters of `a-z`, `0-9` and `_`, starting with a\nletter. Ignored when updating a built-in set.",
+            "example": "web_only"
+          }
+        },
+        "additionalProperties": false
+      },
+      "FeatureSetList": {
+        "type": "object",
+        "description": "All feature sets.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FeatureSetView"
+            },
+            "description": "By name."
+          }
+        }
+      },
+      "FeatureSetView": {
+        "type": "object",
+        "description": "A feature set.",
+        "required": [
+          "id",
+          "name",
+          "description",
+          "all_features",
+          "features",
+          "unknown_features",
+          "built_in",
+          "plans",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "all_features": {
+            "type": "boolean",
+            "description": "Every feature of every module, including ones added later."
+          },
+          "built_in": {
+            "type": "boolean",
+            "description": "Created by the installation: cannot be renamed or deleted."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Creation time (RFC 3339, UTC)."
+          },
+          "description": {
+            "type": "string",
+            "description": "Description."
+          },
+          "features": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The feature keys (empty when `all_features`)."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Id."
+          },
+          "name": {
+            "type": "string",
+            "description": "Unique name.",
+            "example": "basic"
+          },
+          "plans": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Plans that use it."
+          },
+          "unknown_features": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Keys in the list that no installed module declares: kept, but they\nenable nothing."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Last change (RFC 3339, UTC)."
+          }
+        }
+      },
+      "FeatureView": {
+        "type": "object",
+        "description": "A feature a module offers.",
+        "required": [
+          "key",
+          "module",
+          "module_title",
+          "category"
+        ],
+        "properties": {
+          "category": {
+            "type": "string",
+            "description": "The module's category (`web`, `db`, ...), for grouping."
+          },
+          "key": {
+            "type": "string",
+            "description": "The key, for example `redirects`.",
+            "example": "redirects"
+          },
+          "module": {
+            "type": "string",
+            "description": "The module that declares it."
+          },
+          "module_title": {
+            "type": "object",
+            "description": "That module's display name by language code."
+          }
+        }
+      },
       "FieldError": {
         "type": "object",
         "description": "One invalid input field (used with 422).",
@@ -4365,6 +4893,10 @@
     {
       "name": "system",
       "description": "Modules and settings"
+    },
+    {
+      "name": "plans",
+      "description": "Feature sets and hosting plans"
     }
   ]
 }

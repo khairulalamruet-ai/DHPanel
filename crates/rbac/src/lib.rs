@@ -85,6 +85,14 @@ pub mod permissions {
         pub ModulesManage = "admin.modules.manage"
     );
     crate::permission!(
+        /// See feature sets and plans.
+        pub PlansRead = "admin.plans.read"
+    );
+    crate::permission!(
+        /// Create, change and delete feature sets and plans.
+        pub PlansManage = "admin.plans.manage"
+    );
+    crate::permission!(
         /// See the panel's settings.
         pub SettingsRead = "admin.settings.read"
     );

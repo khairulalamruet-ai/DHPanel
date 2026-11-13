@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE feature_sets\n           SET name = CASE WHEN built_in THEN name ELSE $2 END,\n               description = $3, all_features = $4, features = $5::text[]::feature_key[]\n           WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Bool",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f5e9c1bbf6e78a75455427244108da5bc23e4497b877b4c26732949066056b64"
+}

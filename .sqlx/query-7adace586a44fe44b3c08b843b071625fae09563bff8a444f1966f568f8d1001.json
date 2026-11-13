@@ -1,0 +1,102 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT f.id, f.name, f.description, f.all_features,\n                  f.features::text[] AS \"features!\", f.built_in,\n                  (SELECT count(*) FROM plans p WHERE p.feature_set_id = f.id) AS \"plans!\",\n                  extract(epoch FROM f.created_at)::bigint AS \"created_at!\",\n                  extract(epoch FROM f.updated_at)::bigint AS \"updated_at!\"\n           FROM feature_sets f ORDER BY f.name",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "feature_sets",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "feature_sets",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "description",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "feature_sets",
+            "name": "description"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "all_features",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "feature_sets",
+            "name": "all_features"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "features!",
+        "type_info": "TextArray",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "built_in",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "feature_sets",
+            "name": "built_in"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "plans!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 7,
+        "name": "created_at!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 8,
+        "name": "updated_at!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      null,
+      false,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "7adace586a44fe44b3c08b843b071625fae09563bff8a444f1966f568f8d1001"
+}

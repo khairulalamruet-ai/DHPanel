@@ -1,0 +1,14 @@
+# Plans and feature sets: what a hosting account is given (crates/modules/plans).
+[module]
+name       = "plans"
+version    = "0.1.0"
+title      = { en = "Plans and feature sets", bn = "প্ল্যান ও ফিচার সেট" }
+category   = "core"
+core       = true
+depends_on = ["auth", "rbac", "audit", "system"]
+
+[permissions]
+keys = ["admin.plans.read", "admin.plans.manage"]
+
+[ui]
+admin_nav = { group = "Hosting", order = 10, icon = "package" }
