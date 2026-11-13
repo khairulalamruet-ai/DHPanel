@@ -14,6 +14,7 @@ pub mod admins;
 pub mod mfa;
 pub mod node_enrollments;
 pub mod nodes;
+pub mod operations;
 pub mod rbac;
 
 use std::{future::Future, pin::Pin, time::Duration};

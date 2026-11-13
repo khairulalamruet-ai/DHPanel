@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE operations\n           SET status = CASE\n                   WHEN $3::int IS NOT NULL\n                        AND attempts < max_attempts\n                        AND now() + make_interval(secs => $3::int) < expires_at\n                   THEN 'retryable' ELSE 'failed' END,\n               error = $2,\n               next_attempt_at = CASE\n                   WHEN $3::int IS NOT NULL THEN now() + make_interval(secs => $3::int)\n                   ELSE next_attempt_at END,\n               finished_at = CASE\n                   WHEN $3::int IS NOT NULL\n                        AND attempts < max_attempts\n                        AND now() + make_interval(secs => $3::int) < expires_at\n                   THEN NULL ELSE now() END\n           WHERE id = $1 AND status = 'dispatched'\n           RETURNING status AS \"status!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "status!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "operations",
+            "name": "status"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Jsonb",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "e0c9e6ab59b06d9cd0db052da39ca44f7930916c809e119a081e2b4bc5516111"
+}

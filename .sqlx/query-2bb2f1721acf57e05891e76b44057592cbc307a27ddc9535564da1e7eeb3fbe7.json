@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE operations SET status = 'succeeded', output = $2, error = NULL, finished_at = now()\n         WHERE id = $1 AND status = 'dispatched'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2bb2f1721acf57e05891e76b44057592cbc307a27ddc9535564da1e7eeb3fbe7"
+}

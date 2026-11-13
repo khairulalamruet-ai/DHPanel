@@ -14,10 +14,11 @@ workspace = true
 dhpanel-domain.workspace = true
 # Async PostgreSQL driver + migrations (fixed stack). No TLS yet: the database
 # listens on localhost / a private network; TLS is added with remote DB support.
-sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "postgres", "migrate", "macros", "uuid", "time"] }
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "postgres", "migrate", "macros", "uuid", "time", "json"] }
 # Database URL stays wrapped so it never reaches logs.
 secrecy = "0.10"
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 thiserror = "2.0.21"
 tracing = "0.1.44"
 

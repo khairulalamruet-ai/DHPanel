@@ -1,0 +1,202 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO operations\n               (kind, tenant_id, node_id, payload, idempotency_key, created_by, expires_at, max_attempts)\n           VALUES ($1, $2, $3, $4, $5, $6, now() + make_interval(secs => $7::int), $8)\n           ON CONFLICT (node_id, idempotency_key) DO NOTHING\n           RETURNING id, kind, tenant_id, node_id, payload, status, attempts, max_attempts,\n                     idempotency_key, output, error, created_by,\n                     extract(epoch FROM created_at)::bigint AS \"created_at!\",\n                     extract(epoch FROM expires_at)::bigint AS \"expires_at!\",\n                     extract(epoch FROM next_attempt_at)::bigint AS \"next_attempt_at!\",\n                     extract(epoch FROM dispatched_at)::bigint AS dispatched_at,\n                     extract(epoch FROM finished_at)::bigint AS finished_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "operations",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "kind",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "operations",
+            "name": "kind"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "tenant_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "operations",
+            "name": "tenant_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "node_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "operations",
+            "name": "node_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "payload",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "operations",
+            "name": "payload"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "operations",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "attempts",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "operations",
+            "name": "attempts"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "max_attempts",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "operations",
+            "name": "max_attempts"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "idempotency_key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "operations",
+            "name": "idempotency_key"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "output",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "operations",
+            "name": "output"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "error",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "operations",
+            "name": "error"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "created_by",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "operations",
+            "name": "created_by"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "created_at!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 13,
+        "name": "expires_at!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 14,
+        "name": "next_attempt_at!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 15,
+        "name": "dispatched_at",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 16,
+        "name": "finished_at",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "Uuid",
+        "Jsonb",
+        "Text",
+        "Uuid",
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "918141298e023fcc8032e80e715b7ef6016b537a70dc29d3aceac70ba4609241"
+}

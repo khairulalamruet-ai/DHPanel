@@ -325,3 +325,13 @@ pub async fn revoke_node(
         certificates: done.rows_affected(),
     })
 }
+
+/// A node's stored status (`online`, `offline`, `draining`, `revoked`), if it exists.
+///
+/// # Errors
+/// Database errors.
+pub async fn status_of(pool: &sqlx::PgPool, id: Uuid) -> Result<Option<String>, sqlx::Error> {
+    sqlx::query_scalar!("SELECT status FROM nodes WHERE id = $1", id)
+        .fetch_optional(pool)
+        .await
+}

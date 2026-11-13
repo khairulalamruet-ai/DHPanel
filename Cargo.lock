@@ -881,6 +881,7 @@ dependencies = [
  "dhpanel-domain",
  "secrecy",
  "serde",
+ "serde_json",
  "sqlx",
  "thiserror",
  "tokio",
@@ -1089,6 +1090,19 @@ dependencies = [
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "dhpanel-operations"
+version = "0.1.0"
+dependencies = [
+ "dhpanel-database",
+ "dhpanel-node-protocol",
+ "serde_json",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
