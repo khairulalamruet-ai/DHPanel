@@ -55,6 +55,8 @@ import {
   AppsPage,
   ClientEmailPage,
   AdminMailQueuePage,
+  ResellerPortalPage,
+  AdminResellersPage,
   filterNavItems,
   registeredFrontendModules,
 } from "@dhpanel/modules";
@@ -497,6 +499,19 @@ const clientEmailRoute = createRoute({
   component: ClientEmailPage,
 });
 
+// 43. Reseller routes (T14.05, T14.02)
+const adminResellersRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/resellers",
+  component: AdminResellersPage,
+});
+
+const resellerRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/reseller",
+  component: ResellerPortalPage,
+});
+
 // 18. Login route
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -571,6 +586,8 @@ const routeTree = rootRoute.addChildren([
   appsRoute,
   adminMailRoute,
   clientEmailRoute,
+  adminResellersRoute,
+  resellerRoute,
   loginRoute,
 ]);
 

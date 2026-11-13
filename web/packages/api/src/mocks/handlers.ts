@@ -8043,6 +8043,302 @@ export const handlers = [
                                                            http.get(/\/api\/v1\/admin\/email\/deliverability$/, () => {
                                                              return HttpResponse.json(mockDeliverability);
                                                            }),
+...(() => {
+                                                         // Reseller Handlers (T14.01, T14.02, T14.03, T14.04, T14.05, T14.07)
+                                                         let mockResellerPackages = [
+                                                           {
+                                                             id: "pkg-1",
+                                                             name: "Growth Agency Tier",
+                                                             max_accounts: 25,
+                                                             max_disk_gb: 150,
+                                                             max_bandwidth_gb: 1500,
+                                                             allow_overselling: true,
+                                                             allowed_plans: ["all"],
+                                                             created_at: new Date(Date.now() - 60 * 86400000).toISOString(),
+                                                           },
+                                                           {
+                                                             id: "pkg-2",
+                                                             name: "Enterprise Partner Tier",
+                                                             max_accounts: 100,
+                                                             max_disk_gb: 500,
+                                                             max_bandwidth_gb: 5000,
+                                                             allow_overselling: false,
+                                                             allowed_plans: ["all"],
+                                                             created_at: new Date(Date.now() - 90 * 86400000).toISOString(),
+                                                           },
+                                                         ];
+
+                                                         const mockResellerAccount = {
+                                                           id: "reseller-1",
+                                                           username: "apex_reseller",
+                                                           email: "partner@apexcloud.net",
+                                                           company_name: "Apex Cloud Solutions",
+                                                           package_id: "pkg-1",
+                                                           package_name: "Growth Agency Tier",
+                                                           status: "active" as "active" | "suspended",
+                                                           accounts_count: 8,
+                                                           disk_used_gb: 42,
+                                                           bandwidth_used_gb: 380,
+                                                           branding: {
+                                                             brand_name: "Apex Cloud Solutions",
+                                                             logo_url: "https://example.com/logo.png",
+                                                             primary_color: "#2563eb",
+                                                             support_email: "support@apexcloud.net",
+                                                             custom_login_message: "Welcome to your high performance cloud control panel.",
+                                                           },
+                                                           created_at: new Date(Date.now() - 45 * 86400000).toISOString(),
+                                                         };
+
+                                                         let mockAdminResellers = [
+                                                           mockResellerAccount,
+                                                           {
+                                                             id: "reseller-2",
+                                                             username: "pixel_craft",
+                                                             email: "admin@pixelcraft.agency",
+                                                             company_name: "PixelCraft Hosting",
+                                                             package_id: "pkg-2",
+                                                             package_name: "Enterprise Partner Tier",
+                                                             status: "active" as "active" | "suspended",
+                                                             accounts_count: 34,
+                                                             disk_used_gb: 180,
+                                                             bandwidth_used_gb: 1200,
+                                                             branding: {
+                                                               brand_name: "PixelCraft Hosting",
+                                                               logo_url: "https://example.com/pixel-logo.png",
+                                                               primary_color: "#7c3aed",
+                                                               support_email: "help@pixelcraft.agency",
+                                                               custom_login_message: "Powered by PixelCraft Studio Cloud.",
+                                                             },
+                                                             created_at: new Date(Date.now() - 80 * 86400000).toISOString(),
+                                                           },
+                                                         ];
+
+                                                         let mockResellerPlans = [
+                                                           {
+                                                             id: "rp-1",
+                                                             reseller_id: "reseller-1",
+                                                             name: "Client Starter",
+                                                             disk_mb: 5120,
+                                                             bandwidth_mb: 51200,
+                                                             domains_limit: 1,
+                                                             databases_limit: 2,
+                                                             mailboxes_limit: 5,
+                                                             created_at: new Date(Date.now() - 30 * 86400000).toISOString(),
+                                                           },
+                                                           {
+                                                             id: "rp-2",
+                                                             reseller_id: "reseller-1",
+                                                             name: "Business Pro",
+                                                             disk_mb: 15360,
+                                                             bandwidth_mb: 153600,
+                                                             domains_limit: 5,
+                                                             databases_limit: 10,
+                                                             mailboxes_limit: 20,
+                                                             created_at: new Date(Date.now() - 20 * 86400000).toISOString(),
+                                                           },
+                                                         ];
+
+                                                         let mockResellerUsers = [
+                                                           {
+                                                             id: "ru-1",
+                                                             reseller_id: "reseller-1",
+                                                             username: "novatech",
+                                                             email: "admin@novatech.io",
+                                                             domain: "novatech.io",
+                                                             plan_name: "Business Pro",
+                                                             disk_used_mb: 4200,
+                                                             status: "active" as "active" | "suspended",
+                                                             created_at: new Date(Date.now() - 15 * 86400000).toISOString(),
+                                                           },
+                                                           {
+                                                             id: "ru-2",
+                                                             reseller_id: "reseller-1",
+                                                             username: "sweetbakery",
+                                                             email: "contact@sweetbakery.com",
+                                                             domain: "sweetbakery.com",
+                                                             plan_name: "Client Starter",
+                                                             disk_used_mb: 1200,
+                                                             status: "active" as "active" | "suspended",
+                                                             created_at: new Date(Date.now() - 10 * 86400000).toISOString(),
+                                                           },
+                                                         ];
+
+                                                         return [
+                                                           // GET /api/v1/reseller/me (TODO(api:T14.01))
+                                                           http.get(/\/api\/v1\/reseller\/me$/, () => {
+                                                             return HttpResponse.json(mockResellerAccount);
+                                                           }),
+
+                                                           // GET /api/v1/reseller/me/package (TODO(api:T14.01))
+                                                           http.get(/\/api\/v1\/reseller\/me\/package$/, () => {
+                                                             const pkg = mockResellerPackages.find((p) => p.id === mockResellerAccount.package_id) || mockResellerPackages[0];
+                                                             return HttpResponse.json(pkg);
+                                                           }),
+
+                                                           // PUT /api/v1/reseller/me/branding (TODO(api:T14.05))
+                                                           http.put(/\/api\/v1\/reseller\/me\/branding$/, async ({ request }) => {
+                                                             const body = (await request.json().catch(() => ({}))) as any;
+                                                             mockResellerAccount.branding = {
+                                                               ...mockResellerAccount.branding,
+                                                               ...body,
+                                                             };
+                                                             return HttpResponse.json(mockResellerAccount.branding);
+                                                           }),
+
+                                                           // GET /api/v1/reseller/users (TODO(api:T14.03))
+                                                           http.get(/\/api\/v1\/reseller\/users$/, () => {
+                                                             return HttpResponse.json(mockResellerUsers);
+                                                           }),
+
+                                                           // POST /api/v1/reseller/users (TODO(api:T14.04))
+                                                           http.post(/\/api\/v1\/reseller\/users$/, async ({ request }) => {
+                                                             const body = (await request.json().catch(() => ({}))) as any;
+                                                             const newUser = {
+                                                               id: `ru-${Date.now()}`,
+                                                               reseller_id: mockResellerAccount.id,
+                                                               username: body.username,
+                                                               email: body.email,
+                                                               domain: body.domain,
+                                                               plan_name: body.plan_name || "Client Starter",
+                                                               disk_used_mb: 0,
+                                                               status: "active" as const,
+                                                               created_at: new Date().toISOString(),
+                                                             };
+                                                             mockResellerUsers.push(newUser);
+                                                             mockResellerAccount.accounts_count += 1;
+                                                             return HttpResponse.json(newUser, { status: 201 });
+                                                           }),
+
+                                                           // POST /api/v1/reseller/users/:id/status (TODO(api:T14.07))
+                                                           http.post(/\/api\/v1\/reseller\/users\/([^/]+)\/status$/, async ({ params, request }) => {
+                                                             const id = String(params[0]);
+                                                             const body = (await request.json().catch(() => ({}))) as any;
+                                                             const user = mockResellerUsers.find((u) => u.id === id);
+                                                             if (user) {
+                                                               user.status = body.status;
+                                                             }
+                                                             return HttpResponse.json({ success: true, status: body.status });
+                                                           }),
+
+                                                           // DELETE /api/v1/reseller/users/:id (TODO(api:T14.03))
+                                                           http.delete(/\/api\/v1\/reseller\/users\/([^/]+)$/, ({ params }) => {
+                                                             const id = String(params[0]);
+                                                             mockResellerUsers = mockResellerUsers.filter((u) => u.id !== id);
+                                                             mockResellerAccount.accounts_count = Math.max(0, mockResellerAccount.accounts_count - 1);
+                                                             return new HttpResponse(null, { status: 204 });
+                                                           }),
+
+                                                           // GET /api/v1/reseller/plans (TODO(api:T14.05))
+                                                           http.get(/\/api\/v1\/reseller\/plans$/, () => {
+                                                             return HttpResponse.json(mockResellerPlans);
+                                                           }),
+
+                                                           // POST /api/v1/reseller/plans (TODO(api:T14.05))
+                                                           http.post(/\/api\/v1\/reseller\/plans$/, async ({ request }) => {
+                                                             const body = (await request.json().catch(() => ({}))) as any;
+                                                             const newPlan = {
+                                                               id: `rp-${Date.now()}`,
+                                                               reseller_id: mockResellerAccount.id,
+                                                               name: body.name,
+                                                               disk_mb: Number(body.disk_mb) || 5120,
+                                                               bandwidth_mb: Number(body.bandwidth_mb) || 51200,
+                                                               domains_limit: Number(body.domains_limit) || 1,
+                                                               databases_limit: Number(body.databases_limit) || 1,
+                                                               mailboxes_limit: Number(body.mailboxes_limit) || 1,
+                                                               created_at: new Date().toISOString(),
+                                                             };
+                                                             mockResellerPlans.push(newPlan);
+                                                             return HttpResponse.json(newPlan, { status: 201 });
+                                                           }),
+
+                                                           // DELETE /api/v1/reseller/plans/:id (TODO(api:T14.05))
+                                                           http.delete(/\/api\/v1\/reseller\/plans\/([^/]+)$/, ({ params }) => {
+                                                             const id = String(params[0]);
+                                                             mockResellerPlans = mockResellerPlans.filter((p) => p.id !== id);
+                                                             return new HttpResponse(null, { status: 204 });
+                                                           }),
+
+                                                           // GET /api/v1/admin/resellers (TODO(api:T14.01))
+                                                           http.get(/\/api\/v1\/admin\/resellers$/, () => {
+                                                             return HttpResponse.json(mockAdminResellers);
+                                                           }),
+
+                                                           // POST /api/v1/admin/resellers (TODO(api:T14.01))
+                                                           http.post(/\/api\/v1\/admin\/resellers$/, async ({ request }) => {
+                                                             const body = (await request.json().catch(() => ({}))) as any;
+                                                             const pkg = mockResellerPackages.find((p) => p.id === body.package_id) || mockResellerPackages[0];
+                                                             const newReseller = {
+                                                               id: `reseller-${Date.now()}`,
+                                                               username: body.username,
+                                                               email: body.email,
+                                                               company_name: body.company_name,
+                                                               package_id: pkg.id,
+                                                               package_name: pkg.name,
+                                                               status: "active" as const,
+                                                               accounts_count: 0,
+                                                               disk_used_gb: 0,
+                                                               bandwidth_used_gb: 0,
+                                                               branding: {
+                                                                 brand_name: body.company_name,
+                                                                 logo_url: "https://example.com/logo.png",
+                                                                 primary_color: "#2563eb",
+                                                                 support_email: body.email,
+                                                                 custom_login_message: "Welcome to your control panel",
+                                                               },
+                                                               created_at: new Date().toISOString(),
+                                                             };
+                                                             mockAdminResellers.push(newReseller);
+                                                             return HttpResponse.json(newReseller, { status: 201 });
+                                                           }),
+
+                                                           // POST /api/v1/admin/resellers/:id/status (TODO(api:T14.07))
+                                                           http.post(/\/api\/v1\/admin\/resellers\/([^/]+)\/status$/, async ({ params, request }) => {
+                                                             const id = String(params[0]);
+                                                             const body = (await request.json().catch(() => ({}))) as any;
+                                                             const reseller = mockAdminResellers.find((r) => r.id === id);
+                                                             if (reseller) {
+                                                               reseller.status = body.status;
+                                                             }
+                                                             return HttpResponse.json({ success: true, status: body.status });
+                                                           }),
+
+                                                           // DELETE /api/v1/admin/resellers/:id (TODO(api:T14.01))
+                                                           http.delete(/\/api\/v1\/admin\/resellers\/([^/]+)$/, ({ params }) => {
+                                                             const id = String(params[0]);
+                                                             mockAdminResellers = mockAdminResellers.filter((r) => r.id !== id);
+                                                             return new HttpResponse(null, { status: 204 });
+                                                           }),
+
+                                                           // GET /api/v1/admin/reseller-packages (TODO(api:T14.02))
+                                                           http.get(/\/api\/v1\/admin\/reseller-packages$/, () => {
+                                                             return HttpResponse.json(mockResellerPackages);
+                                                           }),
+
+                                                           // POST /api/v1/admin/reseller-packages (TODO(api:T14.02))
+                                                           http.post(/\/api\/v1\/admin\/reseller-packages$/, async ({ request }) => {
+                                                             const body = (await request.json().catch(() => ({}))) as any;
+                                                             const newPkg = {
+                                                               id: `pkg-${Date.now()}`,
+                                                               name: body.name,
+                                                               max_accounts: Number(body.max_accounts) || 25,
+                                                               max_disk_gb: Number(body.max_disk_gb) || 100,
+                                                               max_bandwidth_gb: Number(body.max_bandwidth_gb) || 1000,
+                                                               allow_overselling: Boolean(body.allow_overselling),
+                                                               allowed_plans: ["all"],
+                                                               created_at: new Date().toISOString(),
+                                                             };
+                                                             mockResellerPackages.push(newPkg);
+                                                             return HttpResponse.json(newPkg, { status: 201 });
+                                                           }),
+
+                                                           // DELETE /api/v1/admin/reseller-packages/:id (TODO(api:T14.02))
+                                                           http.delete(/\/api\/v1\/admin\/reseller-packages\/([^/]+)$/, ({ params }) => {
+                                                             const id = String(params[0]);
+                                                             mockResellerPackages = mockResellerPackages.filter((p) => p.id !== id);
+                                                             return new HttpResponse(null, { status: 204 });
+                                                           }),
+                                                         ];
+                                                       })(),
                                                          ];
                                                        })(),
                                                      ];

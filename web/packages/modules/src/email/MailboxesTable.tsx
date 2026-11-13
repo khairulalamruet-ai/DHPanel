@@ -21,7 +21,6 @@ import {
   ExternalLink,
   Trash2,
   Key,
-  HardDrive,
   Search,
   Plus,
   AlertTriangle,

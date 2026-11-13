@@ -37,4 +37,5 @@ export * from "./firewall";
 export * from "./security-center";
 export * from "./apps";
 export * from "./email";
+export * from "./resellers";
 export type { SslStatus } from "./domains";

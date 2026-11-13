@@ -1,5 +1,5 @@
 import React from "react";
-import { LayoutDashboard, ShieldCheck, ShieldAlert, Sparkles, Puzzle, Globe, Users, Settings, FileText, Boxes, Server, Activity, Layers, Lock, FileCode2, Cpu, Database, Folder, Archive, Clock, Terminal, Wrench, Flame, Mail } from "lucide-react";
+import { LayoutDashboard, ShieldCheck, ShieldAlert, Sparkles, Puzzle, Globe, Users, Settings, FileText, Boxes, Server, Activity, Layers, Lock, FileCode2, Cpu, Database, Folder, Archive, Clock, Terminal, Wrench, Flame, Mail, Briefcase } from "lucide-react";
 
 export interface ModuleManifest {
   name: string;
@@ -819,6 +819,36 @@ export const registeredFrontendModules: FrontendModule[] = [
         href: "/admin/mail",
         order: 56,
         permission: "admin.email.manage",
+      },
+    ],
+  },
+  {
+    manifest: {
+      name: "resellers",
+      title: { en: "Resellers", bn: "রিসেলার" },
+      category: "core",
+      core: true,
+      permissions: ["resellers.read", "resellers.manage", "admin.resellers.manage"],
+      features: ["resellers"],
+    },
+    clientNav: [
+      {
+        id: "reseller-portal",
+        labelKey: "reseller.nav",
+        icon: <Briefcase className="h-4 w-4" />,
+        href: "/reseller",
+        order: 38,
+        permission: "resellers.read",
+      },
+    ],
+    adminNav: [
+      {
+        id: "admin-resellers",
+        labelKey: "reseller.adminNav",
+        icon: <Briefcase className="h-4 w-4" />,
+        href: "/admin/resellers",
+        order: 58,
+        permission: "admin.resellers.manage",
       },
     ],
   },
