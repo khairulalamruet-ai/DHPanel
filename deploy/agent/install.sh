@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # Installs the DHPanel node agent on a Linux server (run as root).
 #
-#   sudo ./install.sh --binary ./dhpanel-agent [--rootless-docker]
+#   sudo ./install.sh --binary ./dhpanel-agent [--priv-helper ./dhpanel-priv-helper] [--rootless-docker]
 #
 # What it does (safe to run again):
 #   * creates the unprivileged system user `dhpanel-agent`
 #   * installs the binary to /usr/local/bin and the hardened systemd unit
 #   * creates /var/lib/dhpanel-agent (mode 0700, owned by the agent)
+#   * with --priv-helper: installs and starts the small root helper the agent
+#     asks for the few host changes that need root (its own hardened unit)
 #   * with --rootless-docker: gives the agent its own rootless Docker daemon
 #
 # It does NOT enrol or start the agent: enrol first, with the command the panel
@@ -20,12 +22,14 @@ UNIT_DST=/etc/systemd/system/dhpanel-agent.service
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 binary=""
+helper=""
 rootless=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --binary) binary="${2:?--binary needs a path}"; shift 2 ;;
+    --priv-helper) helper="${2:?--priv-helper needs a path}"; shift 2 ;;
     --rootless-docker) rootless=1; shift ;;
-    -h|--help) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "install.sh: unknown option: $1" >&2; exit 64 ;;
   esac
 done
@@ -64,6 +68,29 @@ if command -v systemd-analyze >/dev/null; then
   systemd-analyze verify "$UNIT_DST" 2>&1 | grep -v "^$" | sed 's/^/    /' || true
 fi
 systemctl daemon-reload
+
+# --- privileged helper -------------------------------------------------------
+if [ -n "$helper" ]; then
+  [ -x "$helper" ] || die "$helper is not an executable file"
+  "$helper" --version >/dev/null 2>&1 || die "$helper does not run on this machine"
+  HELPER_DST=/usr/local/bin/dhpanel-priv-helper
+  HELPER_UNIT=/etc/systemd/system/dhpanel-priv-helper.service
+  say "installing $HELPER_DST"
+  install -m 0755 -o root -g root "$helper" "$HELPER_DST.new"
+  mv -f "$HELPER_DST.new" "$HELPER_DST"
+  install -m 0644 -o root -g root "$HERE/dhpanel-priv-helper.service" "$HELPER_UNIT"
+  systemctl daemon-reload
+  say "starting dhpanel-priv-helper"
+  systemctl enable dhpanel-priv-helper >/dev/null 2>&1
+  systemctl restart dhpanel-priv-helper
+  for _ in $(seq 1 20); do
+    [ -S /run/dhpanel/priv-helper.sock ] && break
+    sleep 0.5
+  done
+  [ -S /run/dhpanel/priv-helper.sock ] || die "the privileged helper did not create its socket (journalctl -u dhpanel-priv-helper)"
+else
+  say "skipping the privileged helper (use --priv-helper PATH to install it)"
+fi
 
 # --- rootless Docker for the agent -------------------------------------------
 if [ "$rootless" -eq 1 ]; then

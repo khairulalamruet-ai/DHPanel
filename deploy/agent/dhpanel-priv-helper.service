@@ -1,0 +1,49 @@
+# DHPanel privileged helper: the only part of the node side that runs as root.
+# It listens on a Unix socket that only the dhpanel-agent user can open and
+# carries out a short, fixed list of actions (see apps/priv-helper).
+[Unit]
+Description=DHPanel privileged helper
+Documentation=https://docs.dhpanel.dev/agent
+Before=dhpanel-agent.service
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/dhpanel-priv-helper --socket /run/dhpanel/priv-helper.sock --agent-user dhpanel-agent
+# /run/dhpanel, root-owned; other users can look inside but the socket is 0600.
+RuntimeDirectory=dhpanel
+RuntimeDirectoryMode=0755
+Restart=always
+RestartSec=2
+
+# --- Hardening. Root, but with almost nothing root can normally do. The
+# --- capability list grows only together with the action that needs it.
+NoNewPrivileges=yes
+# CAP_CHOWN: hand the socket file to the agent user.
+CapabilityBoundingSet=CAP_CHOWN
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateNetwork=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+SystemCallFilter=chown fchown fchownat
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

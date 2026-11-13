@@ -1208,6 +1208,10 @@ name = "dhpanel-priv-helper"
 version = "0.1.0"
 dependencies = [
  "dhpanel-common",
+ "rustix",
+ "serde",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]
