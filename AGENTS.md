@@ -31,6 +31,14 @@ Never open or edit another agent's worktree. Start every task from the latest `m
 5. Dependency additions go in their own small PR with a reason.
 6. Commit or push only when the human asks.
 7. Always use the latest stable versions: the newest stable Rust toolchain in `rust-toolchain.toml` and the newest stable release of every Rust crate and npm package (check crates.io / npm before adding or bumping; never pick an older major/minor to match what is already in the lockfile). Use current idioms and APIs, not deprecated ones. An older version is allowed only when the latest is incompatible, broken or has an open advisory; say why in the PR and add a `TODO` to upgrade.
+8. Claude works through the roadmap on its own, one task after another, without
+   asking for permission between tasks: verify each task on the build box,
+   commit it, merge it into `main` (fast-forward) and start the next one. Stop
+   and ask only for a special issue: a decision that belongs to the human
+   (product scope, anything irreversible outside the repo, spending, secrets),
+   a hard limit below, or a blocker that cannot be solved inside Claude's
+   folders. The human checks progress about once an hour, so status notes are
+   short and say what was verified, what is not, and what needs a decision.
 
 ## Hard limits
 
