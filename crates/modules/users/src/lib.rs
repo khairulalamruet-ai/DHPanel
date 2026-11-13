@@ -38,13 +38,14 @@ use dhpanel_database::{
     operations::{self, EnqueueError, NewOperation},
     plans::{self, Plan},
     rbac::{self, AssignRole},
+    skeleton,
     sqlx::{PgConnection, PgPool},
     tenants::{self, CreateError},
     users::{self, Filter, UpdateError, User},
 };
 use dhpanel_domain::{AccountKind, Email, TenantStatus, TenantUsername, Username};
 use dhpanel_http_kit::{AppError, FieldError, ProblemDetails};
-use dhpanel_node_protocol::Operation as NodeOperation;
+use dhpanel_node_protocol::{Operation as NodeOperation, SkeletonFile, check_skeleton};
 use dhpanel_rbac::{
     Principal, Require, RequireRecent,
     permissions::{UsersImpersonate, UsersManage, UsersRead},
@@ -108,6 +109,12 @@ pub fn router() -> Router<UsersState> {
         .route("/api/v1/admin/users/{id}/password", post(reset_password))
         .route("/api/v1/admin/users/{id}/retry-setup", post(retry_setup))
         .route("/api/v1/admin/users/{id}/impersonate", post(impersonate))
+        .route(
+            "/api/v1/admin/skeleton-files",
+            get(list_skeleton_files)
+                .put(put_skeleton_file)
+                .delete(delete_skeleton_file),
+        )
 }
 
 fn internal(err: impl Into<Box<dyn std::error::Error + Send + Sync + 'static>>) -> AppError {
@@ -299,11 +306,25 @@ async fn queue(
     Ok(queued.operation().id)
 }
 
+/// The default files, as the node wants them.
+async fn skeleton_for_new_tenant(conn: &mut PgConnection) -> Result<Vec<SkeletonFile>, AppError> {
+    Ok(skeleton::list_in(conn)
+        .await
+        .map_err(internal)?
+        .into_iter()
+        .map(|f| SkeletonFile {
+            path: f.path,
+            content: f.content,
+        })
+        .collect())
+}
+
 fn set_up_operation(
     tenant_id: Uuid,
     username: &str,
     uid: i32,
     plan: &Plan,
+    skeleton: Vec<SkeletonFile>,
 ) -> Result<NodeOperation, AppError> {
     let w = wire(plan)?;
     Ok(NodeOperation::SetUpTenant {
@@ -315,6 +336,7 @@ fn set_up_operation(
         cpu_millis: w.cpu_millis,
         memory_bytes: w.memory_bytes,
         pids: w.pids,
+        skeleton,
     })
 }
 
@@ -614,7 +636,8 @@ pub async fn create_user(
         ),
         CreateError::BadOwner | CreateError::Database(_) => internal(e),
     })?;
-    let op = set_up_operation(tenant.id, system.as_str(), tenant.uid, &plan)?;
+    let files = skeleton_for_new_tenant(&mut tx).await?;
+    let op = set_up_operation(tenant.id, system.as_str(), tenant.uid, &plan, files)?;
     let operation_id = queue(&mut tx, node_id, tenant.id, &op, &who).await?;
     dhpanel_audit::insert(
         &mut *tx,
@@ -1083,7 +1106,8 @@ pub async fn retry_setup(
             "Only a user whose set-up failed can be set up again.",
         ));
     }
-    let op = set_up_operation(tenant.id, &tenant.username, tenant.uid, &plan)?;
+    let files = skeleton_for_new_tenant(&mut tx).await?;
+    let op = set_up_operation(tenant.id, &tenant.username, tenant.uid, &plan, files)?;
     let operation_id = queue(&mut tx, tenant.node_id, tenant.id, &op, &who).await?;
     dhpanel_audit::insert(
         &mut *tx,
@@ -1240,16 +1264,197 @@ pub async fn impersonate(
     }))
 }
 
+// ----------------------------------------------------------- skeleton files
+
+/// A default file of new users.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct SkeletonFileView {
+    /// Path below the docroot, for example `index.html` or `css/site.css`.
+    pub path: String,
+    /// The file's text.
+    pub content: String,
+    /// Size in bytes.
+    pub size: usize,
+    /// Last change (RFC 3339, UTC).
+    #[schema(format = DateTime)]
+    pub updated_at: String,
+}
+
+/// The default files.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct SkeletonFileList {
+    /// By path.
+    pub items: Vec<SkeletonFileView>,
+    /// Bytes in all files (the limit is 24576).
+    pub total_bytes: usize,
+}
+
+/// A default file to add or replace.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PutSkeletonFile {
+    /// Path below the docroot: names of letters, digits, `.`, `_`, `-` separated
+    /// by `/`, at most 6 levels.
+    #[schema(example = "index.html")]
+    pub path: String,
+    /// The text, at most 16 KiB.
+    pub content: String,
+}
+
+/// Which default file.
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct SkeletonPath {
+    /// The file's path.
+    pub path: String,
+}
+
+fn skeleton_list(files: Vec<skeleton::SkeletonFile>) -> SkeletonFileList {
+    let total_bytes = files.iter().map(|f| f.content.len()).sum();
+    SkeletonFileList {
+        items: files
+            .into_iter()
+            .map(|f| SkeletonFileView {
+                size: f.content.len(),
+                updated_at: rfc3339(f.updated_at),
+                path: f.path,
+                content: f.content,
+            })
+            .collect(),
+        total_bytes,
+    }
+}
+
+/// The files every new user's docroot starts with.
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/skeleton-files",
+    tag = "users",
+    operation_id = "listSkeletonFiles",
+    security(("session" = [])),
+    responses(
+        (status = 200, description = "The default files", body = SkeletonFileList),
+        (status = 403, description = "`permission_denied` (needs admin.users.read) or `mfa_setup_required`", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+pub async fn list_skeleton_files(
+    State(state): State<UsersState>,
+    _who: Require<UsersRead>,
+) -> Result<Json<SkeletonFileList>, AppError> {
+    Ok(Json(skeleton_list(
+        skeleton::list(&state.db).await.map_err(internal)?,
+    )))
+}
+
+/// Add a default file or replace its content. Existing users keep their files.
+#[utoipa::path(
+    put,
+    path = "/api/v1/admin/skeleton-files",
+    tag = "users",
+    operation_id = "putSkeletonFile",
+    security(("session" = [])),
+    params(("X-CSRF-Token" = String, Header, description = "The session's csrf_token")),
+    request_body = PutSkeletonFile,
+    responses(
+        (status = 200, description = "Saved; the whole list", body = SkeletonFileList),
+        (status = 403, description = "`permission_denied`, `reauth_required` or `csrf_failed`", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 422, description = "A bad path, or the files would be too many or too large", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+pub async fn put_skeleton_file(
+    State(state): State<UsersState>,
+    RequireRecent(who, _): RequireRecent<UsersManage>,
+    Json(req): Json<PutSkeletonFile>,
+) -> Result<Json<SkeletonFileList>, AppError> {
+    // The list as it would be, checked the way the node will check it.
+    let mut tx = state.db.begin().await.map_err(internal)?;
+    let mut files: Vec<SkeletonFile> = skeleton::list_in(&mut tx)
+        .await
+        .map_err(internal)?
+        .into_iter()
+        .filter(|f| f.path != req.path)
+        .map(|f| SkeletonFile {
+            path: f.path,
+            content: f.content,
+        })
+        .collect();
+    files.push(SkeletonFile {
+        path: req.path.clone(),
+        content: req.content.clone(),
+    });
+    if let Err(message) = check_skeleton(&files) {
+        return Err(AppError::validation(vec![FieldError::new(
+            "path",
+            "invalid_skeleton",
+            message,
+        )]));
+    }
+    skeleton::put(&mut tx, &req.path, &req.content, who.account_id())
+        .await
+        .map_err(internal)?;
+    dhpanel_audit::insert(
+        &mut *tx,
+        &AuditEntry::new("admin.skeleton_file_saved", Outcome::Success)
+            .actor(who.account_id())
+            .target("skeleton_file", req.path.as_str())
+            .metadata(serde_json::json!({ "size": req.content.len() })),
+    )
+    .await
+    .map_err(internal)?;
+    let list = skeleton::list_in(&mut tx).await.map_err(internal)?;
+    tx.commit().await.map_err(internal)?;
+    Ok(Json(skeleton_list(list)))
+}
+
+/// Remove a default file. Existing users keep their files.
+#[utoipa::path(
+    delete,
+    path = "/api/v1/admin/skeleton-files",
+    tag = "users",
+    operation_id = "deleteSkeletonFile",
+    security(("session" = [])),
+    params(
+        SkeletonPath,
+        ("X-CSRF-Token" = String, Header, description = "The session's csrf_token")
+    ),
+    responses(
+        (status = 204, description = "Removed"),
+        (status = 403, description = "`permission_denied`, `reauth_required` or `csrf_failed`", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 404, description = "No such file", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+pub async fn delete_skeleton_file(
+    State(state): State<UsersState>,
+    RequireRecent(who, _): RequireRecent<UsersManage>,
+    Query(q): Query<SkeletonPath>,
+) -> Result<StatusCode, AppError> {
+    let mut tx = state.db.begin().await.map_err(internal)?;
+    if !skeleton::delete(&mut tx, &q.path).await.map_err(internal)? {
+        return Err(AppError::not_found("skeleton file"));
+    }
+    dhpanel_audit::insert(
+        &mut *tx,
+        &AuditEntry::new("admin.skeleton_file_deleted", Outcome::Success)
+            .actor(who.account_id())
+            .target("skeleton_file", q.path.as_str()),
+    )
+    .await
+    .map_err(internal)?;
+    tx.commit().await.map_err(internal)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 /// OpenAPI fragment (full paths; merge into the root document).
 #[derive(OpenApi)]
 #[openapi(
     paths(
         list_users, get_user, create_user, update_user, change_plan, suspend_user,
-        unsuspend_user, delete_user, retry_setup, reset_password, impersonate
+        unsuspend_user, delete_user, retry_setup, reset_password, impersonate,
+        list_skeleton_files, put_skeleton_file, delete_skeleton_file
     ),
     components(schemas(
         TenantView, UserView, UserChange, UserList, CreateUser, UpdateUser, ChangePlan,
-        ResetPassword, ImpersonationToken
+        ResetPassword, ImpersonationToken, SkeletonFileView, SkeletonFileList, PutSkeletonFile
     )),
     tags((name = "users", description = "Client accounts and their hosting"))
 )]

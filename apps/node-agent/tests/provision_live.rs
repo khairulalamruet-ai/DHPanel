@@ -457,6 +457,16 @@ async fn one_operation_sets_a_tenant_up_and_repeating_it_is_fine() {
         cpu_millis: Some(1000),
         memory_bytes: Some(256 << 20),
         pids: Some(100),
+        skeleton: vec![
+            dhpanel_node_protocol::SkeletonFile {
+                path: "index.html".into(),
+                content: "<h1>Welcome</h1>".into(),
+            },
+            dhpanel_node_protocol::SkeletonFile {
+                path: "assets/site.css".into(),
+                content: "body{margin:0}".into(),
+            },
+        ],
     };
     let output = set_up_tenant(context.clone(), op.clone())
         .await
@@ -469,6 +479,28 @@ async fn one_operation_sets_a_tenant_up_and_repeating_it_is_fine() {
         panic!("unexpected output {output:?}")
     };
     assert_eq!(containers.len(), 2);
+    {
+        use std::os::unix::fs::MetadataExt as _;
+        let www = PathBuf::from(std::env::var_os("DHPANEL_TEST_TENANTS_ROOT").unwrap())
+            .join(tenant_id.to_string())
+            .join("www");
+        assert_eq!(
+            std::fs::read_to_string(www.join("index.html")).unwrap(),
+            "<h1>Welcome</h1>"
+        );
+        assert_eq!(
+            std::fs::read_to_string(www.join("assets/site.css")).unwrap(),
+            "body{margin:0}"
+        );
+        let owner = std::fs::metadata(&www).unwrap().uid();
+        for file in ["index.html", "assets", "assets/site.css"] {
+            assert_eq!(
+                std::fs::metadata(www.join(file)).unwrap().uid(),
+                owner,
+                "{file} belongs to the tenant"
+            );
+        }
+    }
     assert!(storage_quota.is_none() || storage_quota.as_deref() == Some("xfs"));
     for name in &containers {
         assert!(

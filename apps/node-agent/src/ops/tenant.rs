@@ -305,19 +305,14 @@ pub async fn set_up_tenant(
         cpu_millis,
         memory_bytes,
         pids,
+        skeleton,
     } = op
     else {
         return Err(super::wrong_operation());
     };
-    create_tenant(
-        context.clone(),
-        Operation::CreateTenant {
-            tenant_id,
-            username: username.clone(),
-            uid,
-        },
-    )
-    .await?;
+    dhpanel_node_protocol::check_skeleton(&skeleton)
+        .map_err(|m| AgentError::new(ErrorCode::InvalidArguments, m))?;
+    create_tenant_with(context.clone(), tenant_id, &username, uid, &skeleton).await?;
     let mut storage_quota = None;
     if disk_bytes.is_some() || inodes.is_some() {
         match set_storage_quota(
@@ -679,8 +674,19 @@ pub async fn create_tenant(
     else {
         return Err(super::wrong_operation());
     };
+    create_tenant_with(context, tenant_id, &username, uid, &[]).await
+}
+
+/// The work of `create_tenant`, optionally with default files for its docroot.
+async fn create_tenant_with(
+    context: Arc<TenantContext>,
+    tenant_id: Uuid,
+    username: &str,
+    uid: u32,
+    skeleton: &[dhpanel_node_protocol::SkeletonFile],
+) -> Result<Output, AgentError> {
     let invalid = |m: &str| AgentError::new(ErrorCode::InvalidArguments, m.to_owned());
-    let username = TenantUsername::parse(&username).map_err(|e| invalid(&e.to_string()))?;
+    let username = TenantUsername::parse(username).map_err(|e| invalid(&e.to_string()))?;
     if !UidRange::DEFAULT.contains(uid) {
         return Err(invalid("the user id is outside the tenant range"));
     }
@@ -693,8 +699,22 @@ pub async fn create_tenant(
 
     // 1. Directories (blocking socket call off the async runtime).
     let socket = context.helper_socket.clone();
+    let skeleton: Vec<dhpanel_priv_helper::protocol::SkeletonFile> = skeleton
+        .iter()
+        .map(|f| dhpanel_priv_helper::protocol::SkeletonFile {
+            path: f.path.clone(),
+            content: f.content.clone(),
+        })
+        .collect();
     tokio::task::spawn_blocking(move || {
-        ask_helper(&socket, Action::PrepareTenant { tenant_id: id, uid })
+        ask_helper(
+            &socket,
+            Action::PrepareTenant {
+                tenant_id: id,
+                uid,
+                skeleton,
+            },
+        )
     })
     .await
     .map_err(|_| {

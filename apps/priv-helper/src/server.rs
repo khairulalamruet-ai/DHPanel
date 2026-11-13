@@ -186,9 +186,11 @@ fn handle(stream: UnixStream, config: &Config, log: &dyn Log) -> io::Result<()> 
 fn execute(action: &Action, config: &Config) -> Result<(), (ErrorCode, &'static str)> {
     match action {
         Action::Noop => Ok(()),
-        Action::PrepareTenant { tenant_id, uid } => {
-            tenant::prepare(&config.tenants, tenant_id, *uid)
-        }
+        Action::PrepareTenant {
+            tenant_id,
+            uid,
+            skeleton,
+        } => tenant::prepare_with_files(&config.tenants, tenant_id, *uid, skeleton),
         Action::SetStorageQuota {
             tenant_id,
             uid,

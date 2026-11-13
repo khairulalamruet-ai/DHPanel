@@ -21,6 +21,7 @@
 pub mod protocol;
 pub mod quota;
 pub mod server;
+pub mod skeleton;
 pub mod tenant;
 
 pub use protocol::{Action, ErrorCode, Request, Response};

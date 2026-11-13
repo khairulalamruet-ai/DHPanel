@@ -106,6 +106,106 @@ impl AgentError {
     }
 }
 
+// ------------------------------------------------------------ skeleton files
+
+/// One default file of a new tenant: text, at a plain relative path below its
+/// docroot. At most [`SKELETON_MAX_FILES`] files, [`SKELETON_MAX_FILE_BYTES`]
+/// each and [`SKELETON_MAX_TOTAL_BYTES`] together: they travel inside one
+/// operation, which is a single bounded message end to end.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SkeletonFile {
+    /// Path with `/` between names, for example `css/site.css`.
+    pub path: String,
+    /// The file's text.
+    pub content: String,
+}
+
+/// Most skeleton files.
+pub const SKELETON_MAX_FILES: usize = 20;
+/// Largest skeleton file, in bytes.
+pub const SKELETON_MAX_FILE_BYTES: usize = 16 * 1024;
+/// Most bytes in all skeleton files together.
+pub const SKELETON_MAX_TOTAL_BYTES: usize = 24 * 1024;
+/// Deepest nesting of a skeleton file.
+pub const SKELETON_MAX_DEPTH: usize = 6;
+/// Longest single name.
+pub const SKELETON_MAX_NAME: usize = 64;
+
+/// Checks one skeleton path: relative, plain names (letters, digits, `.`, `_`,
+/// `-`), no `.` or `..`, limited depth.
+///
+/// # Errors
+/// What is wrong, for the person who wrote it.
+pub fn check_skeleton_path(path: &str) -> Result<(), &'static str> {
+    if path.is_empty() || path.len() > SKELETON_MAX_DEPTH * (SKELETON_MAX_NAME + 1) {
+        return Err("the path must be 1 to 450 characters");
+    }
+    let parts: Vec<&str> = path.split('/').collect();
+    if parts.len() > SKELETON_MAX_DEPTH {
+        return Err("the path is nested too deeply (at most 6 levels)");
+    }
+    for part in parts {
+        let plain = !part.is_empty()
+            && part.len() <= SKELETON_MAX_NAME
+            && part != "."
+            && part != ".."
+            && part
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'));
+        if !plain {
+            return Err(
+                "names may hold letters, digits, dot, dash and underscore only (no empty names, `.` or `..`)",
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Checks a whole list the way the node will. Within these limits the JSON of a
+/// set-up operation stays under 56 KiB, inside the 64 KiB of the operations
+/// ledger and of the privileged helper's request line.
+///
+/// # Errors
+/// What is wrong, for the person who wrote it.
+pub fn check_skeleton(files: &[SkeletonFile]) -> Result<(), &'static str> {
+    if files.len() > SKELETON_MAX_FILES {
+        return Err("too many files (at most 20)");
+    }
+    let mut total = 0usize;
+    for (i, file) in files.iter().enumerate() {
+        check_skeleton_path(&file.path)?;
+        if file.content.len() > SKELETON_MAX_FILE_BYTES {
+            return Err("a file is larger than 16 KiB");
+        }
+        // Control characters other than line breaks and tabs can grow six-fold
+        // when written as JSON, which would break the size promise below.
+        if file
+            .content
+            .chars()
+            .any(|c| c.is_control() && !matches!(c, '\n' | '\r' | '\t'))
+        {
+            return Err("a file holds control characters (only line breaks and tabs are allowed)");
+        }
+        total += file.content.len();
+        if total > SKELETON_MAX_TOTAL_BYTES {
+            return Err("the files are larger than 24 KiB together");
+        }
+        for other in &files[..i] {
+            if other.path == file.path {
+                return Err("a path is listed twice");
+            }
+            let (a, b) = (other.path.as_str(), file.path.as_str());
+            if (b.len() > a.len() && b.starts_with(a) && b.as_bytes()[a.len()] == b'/')
+                || (a.len() > b.len() && a.starts_with(b) && a.as_bytes()[b.len()] == b'/')
+            {
+                return Err("a path is both a file and a directory of another file");
+            }
+        }
+    }
+    Ok(())
+}
+
 // -------------------------------------------------------------- operations
 
 /// What the control plane asks a node to do. Every variant is a narrow,
@@ -185,6 +285,10 @@ pub enum Operation {
         memory_bytes: Option<u64>,
         /// Processes (`None` = unlimited).
         pids: Option<u32>,
+        /// Default files for the tenant's docroot, written when its directories
+        /// are first made (see [`SkeletonFile`] for the limits).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        skeleton: Vec<SkeletonFile>,
     },
     /// Stop a tenant's containers; its files stay. Safe to repeat. Answered with
     /// [`Output::TenantSuspended`].
@@ -1137,6 +1241,7 @@ mod tests {
                 cpu_millis: Some(500),
                 memory_bytes: Some(256 << 20),
                 pids: Some(100),
+                skeleton: Vec::new(),
             },
             Operation::SuspendTenant {
                 username: "alice".into(),
@@ -1160,6 +1265,53 @@ mod tests {
             10,
             "update TYPE_NAMES and type_name() together with the enum"
         );
+    }
+
+    #[test]
+    fn skeleton_files_are_checked_for_paths_sizes_and_clashes() {
+        let f = |p: &str, c: &str| SkeletonFile {
+            path: p.into(),
+            content: c.into(),
+        };
+        assert!(
+            check_skeleton(&[f("index.html", "x"), f("css/a.css", ""), f(".htaccess", "")]).is_ok()
+        );
+        for bad in [
+            "", "/a", "../a", "a/../b", "a//b", ".", "a/", "a b", "a\\b", "é",
+        ] {
+            assert!(check_skeleton(&[f(bad, "x")]).is_err(), "{bad:?}");
+        }
+        assert!(check_skeleton(&[f("a", "1"), f("a", "2")]).is_err());
+        assert!(check_skeleton(&[f("a", "1"), f("a/b", "2")]).is_err());
+        assert!(check_skeleton(&[f("a/b", "1"), f("a", "2")]).is_err());
+        assert!(check_skeleton(&[f("a", "1"), f("ab/c", "2")]).is_ok());
+        assert!(check_skeleton(&[f("a", &"x".repeat(SKELETON_MAX_FILE_BYTES + 1))]).is_err());
+        assert!(check_skeleton(&[f("a", "x\0")]).is_err());
+        let heavy: Vec<_> = (0..3)
+            .map(|i| f(&format!("f{i}"), &"x".repeat(SKELETON_MAX_FILE_BYTES)))
+            .collect();
+        assert!(check_skeleton(&heavy).is_err());
+        // The shipped default has to fit in one operation, with room to spare.
+        let worst = Operation::SetUpTenant {
+            tenant_id: Uuid::nil(),
+            username: "x".repeat(32),
+            uid: 59_999,
+            disk_bytes: Some(u64::MAX),
+            inodes: Some(u64::MAX),
+            cpu_millis: Some(u32::MAX),
+            memory_bytes: Some(u64::MAX),
+            pids: Some(u32::MAX),
+            skeleton: (0..SKELETON_MAX_FILES)
+                .map(|i| {
+                    f(
+                        &format!("{i:02}{}", "n".repeat(60)),
+                        &"\"".repeat(SKELETON_MAX_TOTAL_BYTES / SKELETON_MAX_FILES),
+                    )
+                })
+                .collect(),
+        };
+        // Quotes double in JSON: the worst case still fits the ledger (64 KiB) and the helper (64 KiB).
+        assert!(serde_json::to_string(&worst).unwrap().len() < 56 * 1024);
     }
 
     #[test]

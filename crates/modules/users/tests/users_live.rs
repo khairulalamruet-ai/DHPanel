@@ -805,3 +805,137 @@ async fn only_those_allowed_get_a_token_and_only_for_an_active_user(pool: PgPool
         .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn new_users_get_the_default_files_and_administrators_can_edit_them(pool: PgPool) {
+    let e = env(&pool).await;
+    let root = e
+        .sign_in(account(&pool, "rootuser", &["super_admin"]).await)
+        .await;
+    let plain = e
+        .sign_in(account(&pool, "plainadmin", &["admin"]).await)
+        .await;
+    add_node(&pool, "node1", true).await;
+    const FILES: &str = "/api/v1/admin/skeleton-files";
+
+    let (status, b) = e.call(Some(&plain), "GET", FILES, None, false).await;
+    assert_eq!(
+        (status, code(&b)),
+        (StatusCode::FORBIDDEN, "permission_denied")
+    );
+    // The installation ships one default page.
+    let (status, list) = e.call(Some(&root), "GET", FILES, None, false).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(list["items"].as_array().unwrap().len(), 1);
+    assert_eq!(list["items"][0]["path"], "index.html");
+    assert!(
+        list["items"][0]["content"]
+            .as_str()
+            .unwrap()
+            .contains("Your site is ready")
+    );
+
+    // Add and change files.
+    let put = |path: &str, content: &str| json!({"path": path, "content": content});
+    let (status, list) = e
+        .call(
+            Some(&root),
+            "PUT",
+            FILES,
+            Some(put("css/site.css", "body{}")),
+            true,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    let (_, list) = e
+        .call(
+            Some(&root),
+            "PUT",
+            FILES,
+            Some(put("index.html", "<h1>Mine</h1>")),
+            true,
+        )
+        .await;
+    let paths: Vec<&str> = list["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f["path"].as_str().unwrap())
+        .collect();
+    assert_eq!(paths, ["css/site.css", "index.html"]);
+    assert_eq!(list["total_bytes"], 6 + 13);
+
+    // Bad paths, clashes and sizes are refused; nothing is saved.
+    for (path, content) in [
+        ("../etc/passwd", "x"),
+        ("/abs", "x"),
+        ("a//b", "x"),
+        ("index.html/x", "x"),
+        ("css", "x"),
+        ("big.txt", &"x".repeat(16 * 1024 + 1)),
+    ] {
+        let (status, b) = e
+            .call(Some(&root), "PUT", FILES, Some(put(path, content)), true)
+            .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{path}: {b}");
+    }
+    let (_, list) = e.call(Some(&root), "GET", FILES, None, false).await;
+    assert_eq!(list["items"].as_array().unwrap().len(), 2);
+
+    // A new user's set-up carries exactly these files.
+    let (status, body) = e
+        .call(Some(&root), "POST", USERS, Some(new_user("judy")), true)
+        .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let (_, payload, _) = operation(&pool, body["operation_id"].as_str().unwrap()).await;
+    assert_eq!(
+        payload["skeleton"],
+        json!([
+            {"path": "css/site.css", "content": "body{}"},
+            {"path": "index.html", "content": "<h1>Mine</h1>"}
+        ])
+    );
+    assert!(payload.to_string().len() < 64 * 1024);
+
+    // Removing a file changes later users only.
+    let (status, _) = e
+        .call(
+            Some(&root),
+            "DELETE",
+            &format!("{FILES}?path=css/site.css"),
+            None,
+            true,
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _) = e
+        .call(
+            Some(&root),
+            "DELETE",
+            &format!("{FILES}?path=css/site.css"),
+            None,
+            true,
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (_, body) = e
+        .call(Some(&root), "POST", USERS, Some(new_user("kate")), true)
+        .await;
+    let (_, payload, _) = operation(&pool, body["operation_id"].as_str().unwrap()).await;
+    assert_eq!(payload["skeleton"].as_array().unwrap().len(), 1);
+    let actions: Vec<String> = sqlx::query_scalar(
+        "SELECT action FROM audit_logs WHERE action LIKE 'admin.skeleton_%' ORDER BY at, id",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        actions,
+        [
+            "admin.skeleton_file_saved",
+            "admin.skeleton_file_saved",
+            "admin.skeleton_file_deleted"
+        ]
+    );
+}

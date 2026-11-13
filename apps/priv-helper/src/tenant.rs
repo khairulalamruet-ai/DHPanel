@@ -18,7 +18,10 @@ use std::{
     path::PathBuf,
 };
 
-use crate::{protocol::ErrorCode, quota};
+use crate::{
+    protocol::{ErrorCode, SkeletonFile},
+    quota, skeleton,
+};
 
 /// First and one-past-last tenant id (kept in step with `dhpanel_domain::UidRange::DEFAULT`).
 pub const UID_START: u32 = 10_000;
@@ -93,10 +96,25 @@ pub fn host_uid(range: (u32, u32), uid: u32) -> Result<u32, Failure> {
 /// # Errors
 /// [`Failure`] with a fixed message.
 pub fn prepare(env: &TenantEnv, tenant_id: &str, uid: u32) -> Result<(), Failure> {
+    prepare_with_files(env, tenant_id, uid, &[])
+}
+
+/// [`prepare`], also putting default files into `www` when the directories are
+/// created now. A tenant that was already finished keeps its files as they are.
+///
+/// # Errors
+/// [`Failure`].
+pub fn prepare_with_files(
+    env: &TenantEnv,
+    tenant_id: &str,
+    uid: u32,
+    skeleton: &[SkeletonFile],
+) -> Result<(), Failure> {
     if !valid_tenant_id(tenant_id) {
         return Err((ErrorCode::InvalidArguments, "the tenant id is not a UUID"));
     }
     // Checked before any file is read: a bad request costs nothing.
+    skeleton::check(skeleton)?;
     if !(UID_START..UID_END).contains(&uid) {
         return Err((
             ErrorCode::InvalidArguments,
@@ -114,11 +132,12 @@ pub fn prepare(env: &TenantEnv, tenant_id: &str, uid: u32) -> Result<(), Failure
         .ok()
         .and_then(|text| quota::detect(&text, &env.root.join(tenant_id)))
         .map(|backend| (backend, uid));
-    prepare_as(
+    prepare_as_with(
         env,
         tenant_id,
         owner,
         project.as_ref().map(|(b, u)| (b, *u)),
+        skeleton,
     )
 }
 
@@ -261,6 +280,20 @@ pub fn prepare_as(
     owner: u32,
     project: Option<(&quota::Backend, u32)>,
 ) -> Result<(), Failure> {
+    prepare_as_with(env, tenant_id, owner, project, &[])
+}
+
+/// [`prepare_as`] with default files.
+///
+/// # Errors
+/// [`Failure`].
+pub fn prepare_as_with(
+    env: &TenantEnv,
+    tenant_id: &str,
+    owner: u32,
+    project: Option<(&quota::Backend, u32)>,
+    skeleton: &[SkeletonFile],
+) -> Result<(), Failure> {
     let failed = |_: io::Error| (ErrorCode::Failed, "cannot create the tenant directory");
     let clash = (
         ErrorCode::Failed,
@@ -307,6 +340,10 @@ pub fn prepare_as(
     for dir in [&www, &tenant] {
         fs::set_permissions(dir, fs::Permissions::from_mode(0o750)).map_err(failed)?;
     }
+    // Default files, while everything here is still ours; they join the quota
+    // project below and are handed over with the directory.
+    skeleton::write(&www, skeleton, owner, env.agent_gid)
+        .map_err(|_| (ErrorCode::Failed, "cannot write the tenant's default files"))?;
     // Quota project: while the tree is empty and ours, everything created in it
     // later joins the project.
     if let Some((backend, id)) = project {
@@ -417,6 +454,52 @@ mod tests {
             0o755
         );
         prepare_as(&env, ID, uid, None).unwrap(); // again: nothing to do
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn default_files_land_in_www_owned_by_the_tenant_and_only_once() {
+        let root = scratch("skeleton");
+        let (uid, gid) = me();
+        let env = TenantEnv {
+            root: root.clone(),
+            agent_name: "agent".into(),
+            subuid_file: "/nonexistent".into(),
+            agent_gid: gid,
+            mountinfo: "/nonexistent".into(),
+        };
+        let files = [
+            SkeletonFile {
+                path: "index.html".into(),
+                content: "<h1>hi</h1>".into(),
+            },
+            SkeletonFile {
+                path: "css/site.css".into(),
+                content: "a{}".into(),
+            },
+        ];
+        prepare_as_with(&env, ID, uid, None, &files).unwrap();
+        let www = root.join(ID).join("www");
+        assert_eq!(
+            fs::read_to_string(www.join("index.html")).unwrap(),
+            "<h1>hi</h1>"
+        );
+        assert_eq!(fs::read_to_string(www.join("css/site.css")).unwrap(), "a{}");
+        // A tenant that was finished before keeps what it has, even if it deleted them.
+        fs::remove_file(www.join("index.html")).unwrap();
+        prepare_as_with(&env, ID, uid, None, &files).unwrap();
+        assert!(!www.join("index.html").exists());
+        // A bad list is refused before anything is made.
+        let other = "0190b6a2-0000-7000-8000-000000000002";
+        let bad = [SkeletonFile {
+            path: "../escape".into(),
+            content: String::new(),
+        }];
+        assert_eq!(
+            prepare_with_files(&env, other, 10_000, &bad).unwrap_err().0,
+            ErrorCode::InvalidArguments
+        );
+        assert!(!root.join(other).exists());
         let _ = fs::remove_dir_all(&root);
     }
 

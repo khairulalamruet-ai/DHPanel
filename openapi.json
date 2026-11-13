@@ -2533,6 +2533,164 @@
         ]
       }
     },
+    "/api/v1/admin/skeleton-files": {
+      "get": {
+        "tags": [
+          "users"
+        ],
+        "summary": "The files every new user's docroot starts with.",
+        "operationId": "listSkeletonFiles",
+        "responses": {
+          "200": {
+            "description": "The default files",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkeletonFileList"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied` (needs admin.users.read) or `mfa_setup_required`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Add a default file or replace its content. Existing users keep their files.",
+        "operationId": "putSkeletonFile",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutSkeletonFile"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Saved; the whole list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkeletonFileList"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied`, `reauth_required` or `csrf_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A bad path, or the files would be too many or too large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Remove a default file. Existing users keep their files.",
+        "operationId": "deleteSkeletonFile",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "query",
+            "description": "The file's path.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed"
+          },
+          "403": {
+            "description": "`permission_denied`, `reauth_required` or `csrf_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such file",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/users": {
       "get": {
         "tags": [
@@ -6209,6 +6367,26 @@
         },
         "additionalProperties": false
       },
+      "PutSkeletonFile": {
+        "type": "object",
+        "description": "A default file to add or replace.",
+        "required": [
+          "path",
+          "content"
+        ],
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "The text, at most 16 KiB."
+          },
+          "path": {
+            "type": "string",
+            "description": "Path below the docroot: names of letters, digits, `.`, `_`, `-` separated\nby `/`, at most 6 levels.",
+            "example": "index.html"
+          }
+        },
+        "additionalProperties": false
+      },
       "ReadinessReport": {
         "type": "object",
         "description": "Body of `/ready`.",
@@ -6502,6 +6680,58 @@
           "values": {
             "type": "object",
             "description": "Current values (the default where nothing was changed), by setting key."
+          }
+        }
+      },
+      "SkeletonFileList": {
+        "type": "object",
+        "description": "The default files.",
+        "required": [
+          "items",
+          "total_bytes"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SkeletonFileView"
+            },
+            "description": "By path."
+          },
+          "total_bytes": {
+            "type": "integer",
+            "description": "Bytes in all files (the limit is 24576).",
+            "minimum": 0
+          }
+        }
+      },
+      "SkeletonFileView": {
+        "type": "object",
+        "description": "A default file of new users.",
+        "required": [
+          "path",
+          "content",
+          "size",
+          "updated_at"
+        ],
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "The file's text."
+          },
+          "path": {
+            "type": "string",
+            "description": "Path below the docroot, for example `index.html` or `css/site.css`."
+          },
+          "size": {
+            "type": "integer",
+            "description": "Size in bytes.",
+            "minimum": 0
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Last change (RFC 3339, UTC)."
           }
         }
       },

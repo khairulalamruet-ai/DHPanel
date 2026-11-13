@@ -5,6 +5,16 @@ use serde::{Deserialize, Serialize};
 /// Largest request line accepted, in bytes.
 pub const MAX_REQUEST_BYTES: usize = 64 * 1024;
 
+/// One default file of a new tenant.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SkeletonFile {
+    /// Path below the tenant's `www`, with `/` between names.
+    pub path: String,
+    /// The file's text.
+    pub content: String,
+}
+
 /// Everything the helper can be asked to do. Adding a variant here is the only
 /// way to add a privileged action, and each one is reviewed on its own.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -19,6 +29,9 @@ pub enum Action {
         tenant_id: String,
         /// The tenant's numeric id inside the user namespace (10000..59999).
         uid: u32,
+        /// Default files for the tenant's `www` directory (see [`crate::skeleton`]).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        skeleton: Vec<SkeletonFile>,
     },
     /// Sets the disk and file-count limits of a tenant (see [`crate::quota`]).
     /// `None` means unlimited.
@@ -142,7 +155,7 @@ fn valid_id(id: &str) -> bool {
 fn allowed_fields(action: &str) -> Option<&'static [&'static str]> {
     match action {
         "noop" => Some(&["type"]),
-        "prepare_tenant" => Some(&["type", "tenant_id", "uid"]),
+        "prepare_tenant" => Some(&["type", "tenant_id", "uid", "skeleton"]),
         "set_storage_quota" => Some(&["type", "tenant_id", "uid", "disk_bytes", "inodes"]),
         "remove_tenant" => Some(&["type", "tenant_id", "uid"]),
         _ => None,
