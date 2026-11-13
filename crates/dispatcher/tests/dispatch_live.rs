@@ -41,6 +41,7 @@ fn dispatch_settings() -> Settings {
         retry_cap: Duration::from_secs(2),
         capabilities_check: Duration::from_millis(200),
         capabilities_max_age: Duration::from_secs(3600),
+        purge_check: Duration::from_secs(3600),
     }
 }
 
@@ -582,4 +583,83 @@ async fn a_connected_node_is_asked_for_its_capabilities_and_they_are_stored(pool
 
     agent_stop.send(true).unwrap();
     agent.await.unwrap();
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs PostgreSQL"]
+async fn data_of_deleted_tenants_is_purged_when_due_and_the_tenant_goes_when_the_node_says_so(
+    pool: PgPool,
+) {
+    let p = plane(&pool).await;
+    let d = p.start_dispatcher();
+    let node = make_node(&p, &pool, "purger").await;
+    let account: Uuid = sqlx::query_scalar(
+        "INSERT INTO accounts (kind, username, email, password_hash)
+         VALUES ('client', 'zed', 'zed@example.com',
+                 '$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHQ$aGFzaGhhc2hoYXNoaGFzaA') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let plan: Uuid = sqlx::query_scalar("SELECT id FROM plans WHERE is_default")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let tenant = |name: &'static str, uid: i32, days: i32| {
+        let (pool, node_id) = (pool.clone(), node.id);
+        async move {
+            sqlx::query_scalar::<_, Uuid>(
+                "INSERT INTO tenants (owner_account_id, node_id, plan_id, username, uid, status, deleted_at, purge_after)
+                 VALUES ($1, $2, $3, $4, $5, 'deleting', now() - interval '10 days', now() + make_interval(days => $6)) RETURNING id",
+            )
+            .bind(account)
+            .bind(node_id)
+            .bind(plan)
+            .bind(name)
+            .bind(uid)
+            .bind(days)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        }
+    };
+    let due = tenant("duetenant", 10_000, -1).await;
+    let later = tenant("latertenant", 10_001, 3).await;
+
+    // Only the one whose time has come is asked for; asking again changes nothing.
+    assert_eq!(d.request_purges().await, 1);
+    assert_eq!(d.request_purges().await, 0);
+    let rows: Vec<(Option<Uuid>, String, serde_json::Value)> = sqlx::query_as(
+        "SELECT tenant_id, kind, payload FROM operations WHERE kind = 'delete_tenant'",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].0, Some(due));
+    assert_eq!(rows[0].2["purge_data"], true);
+    assert_eq!(rows[0].2["username"], "duetenant");
+    assert_ne!(rows[0].0, Some(later));
+
+    // The node's success removes the tenant row; the other one stays.
+    let op: Uuid = sqlx::query_scalar("SELECT id FROM operations WHERE kind = 'delete_tenant'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE operations SET status = 'dispatched', attempts = 1 WHERE id = $1")
+        .bind(op)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(
+        dhpanel_database::operations::succeed(&pool, op, &serde_json::json!({}))
+            .await
+            .unwrap()
+    );
+    let left: Vec<Uuid> = sqlx::query_scalar("SELECT id FROM tenants ORDER BY username")
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    assert_eq!(left, [later]);
+    assert_eq!(d.request_purges().await, 0, "nothing more is due");
 }

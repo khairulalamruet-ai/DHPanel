@@ -46,6 +46,8 @@ pub struct Settings {
     pub capabilities_check: Duration,
     /// How old a capability report may get before a new one is requested.
     pub capabilities_max_age: Duration,
+    /// How often deleted tenants are checked for data that is due to be purged.
+    pub purge_check: Duration,
 }
 
 impl Default for Settings {
@@ -58,6 +60,7 @@ impl Default for Settings {
             retry_cap: Duration::from_secs(60),
             capabilities_check: Duration::from_secs(30),
             capabilities_max_age: Duration::from_secs(3600),
+            purge_check: Duration::from_secs(600),
         }
     }
 }
@@ -122,11 +125,14 @@ impl Dispatcher {
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut capabilities = tokio::time::interval(self.settings.capabilities_check);
         capabilities.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut purges = tokio::time::interval(self.settings.purge_check);
+        purges.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             tokio::select! {
                 () = stopped(&mut shutdown) => return,
                 _ = tick.tick() => { self.tick().await; }
                 _ = capabilities.tick() => { self.request_capabilities().await; }
+                _ = purges.tick() => { self.request_purges().await; }
                 Some(report) = results.recv() => self.handle_result(report).await,
             }
         }
@@ -166,6 +172,52 @@ impl Dispatcher {
                 Ok(dhpanel_operations::Enqueued::Created(_)) => asked += 1,
                 Ok(dhpanel_operations::Enqueued::Existing(_)) => {}
                 Err(err) => tracing::warn!(%node, error = %err, "could not request capabilities"),
+            }
+        }
+        asked
+    }
+
+    /// Asks the nodes to delete the data of tenants that were deleted at least
+    /// `purge_after` ago (their stack is already gone). Returns how many
+    /// requests were made. The idempotency key carries the day, so a purge that
+    /// failed for good is tried again the next day and never more often; the
+    /// listing leaves out tenants that already have a purge queued or running.
+    /// When the node reports success, the operations ledger removes the tenant
+    /// (migration 17).
+    pub async fn request_purges(&self) -> usize {
+        let due = match dhpanel_database::tenants::due_for_purge(self.ops.db(), 50).await {
+            Ok(due) => due,
+            Err(err) => {
+                tracing::warn!(error = %err, "could not look for data to purge");
+                return 0;
+            }
+        };
+        let day = u64::try_from(unix_now()).unwrap_or(0) / 86_400;
+        let mut asked = 0;
+        for tenant in due {
+            let Ok(uid) = u32::try_from(tenant.uid) else {
+                continue;
+            };
+            let mut request = dhpanel_operations::Request::new(
+                tenant.node_id,
+                dhpanel_node_protocol::Operation::DeleteTenant {
+                    tenant_id: tenant.id,
+                    username: tenant.username.clone(),
+                    uid,
+                    purge_data: true,
+                },
+                format!("purge:{}:{day}", tenant.id.simple()),
+            );
+            request.tenant_id = Some(tenant.id);
+            match self.ops.enqueue(&request).await {
+                Ok(dhpanel_operations::Enqueued::Created(_)) => {
+                    tracing::info!(tenant = %tenant.id, "purge of deleted tenant's data requested");
+                    asked += 1;
+                }
+                Ok(dhpanel_operations::Enqueued::Existing(_)) => {}
+                Err(err) => {
+                    tracing::warn!(tenant = %tenant.id, error = %err, "could not request a purge")
+                }
             }
         }
         asked

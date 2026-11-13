@@ -197,3 +197,40 @@ pub async fn counts_by_plan(pool: &PgPool) -> Result<Vec<(Uuid, i64)>, sqlx::Err
     .await?;
     Ok(rows.into_iter().map(|r| (r.plan_id, r.n)).collect())
 }
+
+/// A deleted tenant whose data is due to be purged.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DuePurge {
+    /// Tenant id.
+    pub id: Uuid,
+    /// Its node.
+    pub node_id: Uuid,
+    /// System user name.
+    pub username: String,
+    /// Numeric user id on the node.
+    pub uid: i32,
+}
+
+/// Deleted tenants whose `purge_after` has passed and for which no purge is
+/// already queued or running, oldest first.
+///
+/// # Errors
+/// Database errors.
+pub async fn due_for_purge(pool: &PgPool, limit: i64) -> Result<Vec<DuePurge>, sqlx::Error> {
+    sqlx::query_as!(
+        DuePurge,
+        r#"SELECT t.id, t.node_id, t.username, t.uid
+           FROM tenants t
+           WHERE t.status = 'deleting' AND t.purge_after <= now()
+             AND NOT EXISTS (
+                 SELECT 1 FROM operations o
+                 WHERE o.tenant_id = t.id AND o.kind = 'delete_tenant'
+                   AND o.payload ->> 'purge_data' = 'true'
+                   AND o.status IN ('pending', 'dispatched', 'retryable'))
+           ORDER BY t.purge_after, t.id
+           LIMIT $1"#,
+        limit,
+    )
+    .fetch_all(pool)
+    .await
+}
