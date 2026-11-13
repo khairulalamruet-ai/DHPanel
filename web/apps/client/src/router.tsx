@@ -9,9 +9,9 @@ import { ThemeProvider, ToastProvider } from "@dhpanel/ui";
 import { SessionProvider, useSession, LoginPage, AccountSecurityPage } from "@dhpanel/auth";
 import { queryClient, QueryClientProvider } from "@dhpanel/api";
 import { AppShell, NotFoundPage, RouteErrorFallback } from "@dhpanel/shell";
-import { ClientDashboardPage, ClientDomainsPage, DnsEditorPage, SslPage, PhpManagementPage, ServicesPage, ClientDatabasesPage, FileManagerPage, DiskUsagePage, FtpAccountsPage, ClientBackupsPage } from "@dhpanel/modules";
+import { ClientDashboardPage, ClientDomainsPage, DnsEditorPage, SslPage, PhpManagementPage, ServicesPage, ClientDatabasesPage, FileManagerPage, DiskUsagePage, FtpAccountsPage, ClientBackupsPage, CronJobsPage } from "@dhpanel/modules";
 import { useTranslation } from "@dhpanel/i18n";
-import { LayoutDashboard, ShieldCheck, Globe, Lock, Database, Folder, Server, Archive } from "lucide-react";
+import { LayoutDashboard, ShieldCheck, Globe, Lock, Database, Folder, Server, Archive, Clock } from "lucide-react";
 
 function AuthenticatedContent() {
   const { data: session, isLoading } = useSession();
@@ -65,6 +65,12 @@ function AuthenticatedContent() {
       labelKey: "backups.nav",
       icon: <Archive className="h-4 w-4" />,
       href: "/backups",
+    },
+    {
+      id: "cron",
+      labelKey: "cron.nav",
+      icon: <Clock className="h-4 w-4" />,
+      href: "/cron",
     },
     {
       id: "security",
@@ -184,6 +190,12 @@ const backupsRoute = createRoute({
   component: ClientBackupsPage,
 });
 
+const cronRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/cron",
+  component: CronJobsPage,
+});
+
 const securityRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/security",
@@ -204,7 +216,7 @@ const loginRoute = createRoute({
   },
 });
 
-const routeTree = rootRoute.addChildren([indexRoute, domainsRoute, dnsRoute, sslRoute, phpRoute, servicesRoute, databasesRoute, filesRoute, diskUsageRoute, ftpRoute, backupsRoute, securityRoute, loginRoute]);
+const routeTree = rootRoute.addChildren([indexRoute, domainsRoute, dnsRoute, sslRoute, phpRoute, servicesRoute, databasesRoute, filesRoute, diskUsageRoute, ftpRoute, backupsRoute, cronRoute, securityRoute, loginRoute]);
 
 export const router = createRouter({
   routeTree,

@@ -1,5 +1,5 @@
 import React from "react";
-import { LayoutDashboard, ShieldCheck, Sparkles, Puzzle, Globe, Users, Settings, FileText, Boxes, Server, Activity, Layers, Lock, FileCode2, Cpu, Database, Folder, Archive } from "lucide-react";
+import { LayoutDashboard, ShieldCheck, Sparkles, Puzzle, Globe, Users, Settings, FileText, Boxes, Server, Activity, Layers, Lock, FileCode2, Cpu, Database, Folder, Archive, Clock } from "lucide-react";
 
 export interface ModuleManifest {
   name: string;
@@ -544,6 +544,27 @@ export const registeredFrontendModules: FrontendModule[] = [
         href: "/admin/backups",
         order: 55,
         permission: "backups.manage",
+      },
+    ],
+  },
+  {
+    manifest: {
+      name: "cron",
+      title: { en: "Cron Jobs", bn: "ক্রন জব" },
+      category: "tools",
+      core: true,
+      permissions: ["cron.read", "cron.manage"],
+      features: ["cron"],
+    },
+    clientNav: [
+      {
+        id: "cron",
+        labelKey: "cron.nav",
+        icon: <Clock className="h-4 w-4" />,
+        href: "/cron",
+        order: 30,
+        permission: "cron.read",
+        feature: "cron",
       },
     ],
   },

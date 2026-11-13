@@ -27,4 +27,5 @@ export * from "./databases";
 export * from "./files";
 export * from "./ftp";
 export * from "./backups";
+export * from "./cron";
 export type { SslStatus } from "./domains";

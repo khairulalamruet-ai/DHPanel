@@ -5913,6 +5913,181 @@ export const handlers = [
                       job_id: newSystemJob.id,
                     });
                   }),
+
+                  // ==========================================
+                  // CRON JOBS (TODO(api:T10.01, T10.02))
+                  // ==========================================
+                  ...(() => {
+                    interface MockCronJob {
+                      id: string;
+                      name: string;
+                      command: string;
+                      schedule: string;
+                      schedule_human?: string;
+                      enabled: boolean;
+                      description?: string;
+                      timeout_seconds: number;
+                      created_at: string;
+                      last_run_at: string | null;
+                      next_run_at: string;
+                      last_status: "success" | "failed" | "running" | "idle";
+                      last_exit_code: number | null;
+                      last_output: string | null;
+                      last_duration_ms: number | null;
+                    }
+
+                    const mockCronJobs: MockCronJob[] = [
+                      {
+                        id: "cron_01",
+                        name: "Laravel Artisan Scheduler",
+                        command: "php /home/demo/artisan schedule:run",
+                        schedule: "0 * * * *",
+                        schedule_human: "Hourly",
+                        enabled: true,
+                        description: "Dispatches scheduled artisan commands, notifications and cache pruning",
+                        timeout_seconds: 300,
+                        created_at: new Date(Date.now() - 86400 * 20 * 1000).toISOString(),
+                        last_run_at: new Date(Date.now() - 1800 * 1000).toISOString(),
+                        next_run_at: new Date(Date.now() + 1800 * 1000).toISOString(),
+                        last_status: "success",
+                        last_exit_code: 0,
+                        last_output: "Running scheduled command: 'cache:prune-stale-tags' [OK]\nRunning scheduled command: 'queue:restart' [OK]\nExecution completed with status 0.",
+                        last_duration_ms: 320,
+                      },
+                      {
+                        id: "cron_02",
+                        name: "Daily Database Optimization",
+                        command: "mariadb-dump-optimize --user=demo --silent",
+                        schedule: "0 2 * * *",
+                        schedule_human: "Daily at 02:00 AM",
+                        enabled: true,
+                        description: "Nightly OPTIMIZE TABLE on all MySQL databases",
+                        timeout_seconds: 600,
+                        created_at: new Date(Date.now() - 86400 * 10 * 1000).toISOString(),
+                        last_run_at: new Date(Date.now() - 25200 * 1000).toISOString(),
+                        next_run_at: new Date(Date.now() + 61200 * 1000).toISOString(),
+                        last_status: "success",
+                        last_exit_code: 0,
+                        last_output: "[2026-11-13 02:00:01] Optimizing 2 databases for user 'demo'...\nTable demo_wordpress.wp_posts: OK\nTable demo_wordpress.wp_postmeta: OK\nOptimization finished.",
+                        last_duration_ms: 1850,
+                      },
+                      {
+                        id: "cron_03",
+                        name: "External Webhook Sync",
+                        command: "curl -f -s https://api.partner.example/v1/webhooks/poll",
+                        schedule: "*/15 * * * *",
+                        schedule_human: "Every 15 minutes",
+                        enabled: false,
+                        description: "Polls partner API for queued billing callbacks",
+                        timeout_seconds: 60,
+                        created_at: new Date(Date.now() - 86400 * 5 * 1000).toISOString(),
+                        last_run_at: new Date(Date.now() - 86400 * 1000).toISOString(),
+                        next_run_at: new Date(Date.now() + 900 * 1000).toISOString(),
+                        last_status: "failed",
+                        last_exit_code: 22,
+                        last_output: "curl: (22) The requested URL returned error: 503 Service Unavailable\nSync aborted with exit code 22.",
+                        last_duration_ms: 5040,
+                      },
+                    ];
+
+                    return [
+                      // GET /api/v1/client/cron (TODO(api:T10.01))
+                      http.get(/\/api\/v1\/client\/cron$/, () => {
+                        return HttpResponse.json(mockCronJobs);
+                      }),
+
+                      // POST /api/v1/client/cron (TODO(api:T10.01))
+                      http.post(/\/api\/v1\/client\/cron$/, async ({ request }) => {
+                        const body = (await request.json()) as any;
+                        const schedule = (body.schedule || "").trim();
+                        const parts = schedule.split(/\s+/);
+
+                        // T10.01 DoD: * * * * * or intervals < 5 mins are rejected
+                        if (
+                          parts[0] === "*" ||
+                          parts[0] === "*/1" ||
+                          parts[0] === "*/2" ||
+                          parts[0] === "*/3" ||
+                          parts[0] === "*/4"
+                        ) {
+                          return HttpResponse.json(
+                            { error: "Execution interval cannot be less than 5 minutes" },
+                            { status: 400 }
+                          );
+                        }
+
+                        const newJob: MockCronJob = {
+                          id: `cron_${Date.now()}`,
+                          name: body.name || "Custom Job",
+                          command: body.command,
+                          schedule: body.schedule || "0 * * * *",
+                          schedule_human: body.schedule === "0 * * * *" ? "Hourly" : "Custom",
+                          enabled: true,
+                          description: body.description,
+                          timeout_seconds: body.timeout_seconds || 300,
+                          created_at: new Date().toISOString(),
+                          last_run_at: null,
+                          next_run_at: new Date(Date.now() + 3600 * 1000).toISOString(),
+                          last_status: "idle",
+                          last_exit_code: null,
+                          last_output: null,
+                          last_duration_ms: null,
+                        };
+
+                        mockCronJobs.unshift(newJob);
+                        return HttpResponse.json(newJob, { status: 201 });
+                      }),
+
+                      // PUT /api/v1/client/cron/:id/toggle (TODO(api:T10.01))
+                      http.put(/\/api\/v1\/client\/cron\/([^/]+)\/toggle$/, ({ params }) => {
+                        const id = (params[0] || params.id) as string;
+                        const job = mockCronJobs.find((j) => j.id === id);
+                        if (job) {
+                          job.enabled = !job.enabled;
+                          return HttpResponse.json(job);
+                        }
+                        return HttpResponse.json({ error: "Job not found" }, { status: 404 });
+                      }),
+
+                      // POST /api/v1/client/cron/:id/run (TODO(api:T10.02))
+                      http.post(/\/api\/v1\/client\/cron\/([^/]+)\/run$/, ({ params }) => {
+                        const id = (params[0] || params.id) as string;
+                        const job = mockCronJobs.find((j) => j.id === id);
+                        if (!job) {
+                          return HttpResponse.json({ error: "Job not found" }, { status: 404 });
+                        }
+
+                        const now = new Date().toISOString();
+                        const duration = Math.floor(Math.random() * 200) + 120;
+                        const output = `[${now}] Executing in tenant container '${job.name}':\n$ ${job.command}\nExecution completed successfully with exit code 0.`;
+
+                        job.last_run_at = now;
+                        job.last_status = "success";
+                        job.last_exit_code = 0;
+                        job.last_output = output;
+                        job.last_duration_ms = duration;
+
+                        return HttpResponse.json({
+                          job_id: job.id,
+                          status: "success",
+                          exit_code: 0,
+                          output,
+                          duration_ms: duration,
+                          executed_at: now,
+                        });
+                      }),
+
+                      // DELETE /api/v1/client/cron/:id (TODO(api:T10.01))
+                      http.delete(/\/api\/v1\/client\/cron\/([^/]+)$/, ({ params }) => {
+                        const id = (params[0] || params.id) as string;
+                        const idx = mockCronJobs.findIndex((j) => j.id === id);
+                        if (idx !== -1) {
+                          mockCronJobs.splice(idx, 1);
+                        }
+                        return HttpResponse.json({ success: true });
+                      }),
+                    ];
+                  })(),
                 ];
               })(),
             ];

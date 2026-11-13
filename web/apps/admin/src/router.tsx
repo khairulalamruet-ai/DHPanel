@@ -39,6 +39,7 @@ import {
   FtpAccountsPage,
   ClientBackupsPage,
   AdminBackupsPage,
+  CronJobsPage,
   filterNavItems,
   registeredFrontendModules,
 } from "@dhpanel/modules";
@@ -338,6 +339,19 @@ const adminBackupsRoute = createRoute({
   component: AdminBackupsPage,
 });
 
+// 32. Cron routes (T10.03)
+const clientCronRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/client/cron",
+  component: CronJobsPage,
+});
+
+const cronRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/cron",
+  component: CronJobsPage,
+});
+
 // 18. Login route
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -390,6 +404,8 @@ const routeTree = rootRoute.addChildren([
   clientBackupsRoute,
   backupsRoute,
   adminBackupsRoute,
+  clientCronRoute,
+  cronRoute,
   loginRoute,
 ]);
 
