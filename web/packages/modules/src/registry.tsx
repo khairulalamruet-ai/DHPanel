@@ -1,5 +1,5 @@
 import React from "react";
-import { LayoutDashboard, ShieldCheck, Sparkles, Puzzle, Globe, Users, Settings, FileText, Boxes, Server, Activity, Layers, Lock, FileCode2, Cpu, Database, Folder, Archive, Clock, Terminal, Wrench } from "lucide-react";
+import { LayoutDashboard, ShieldCheck, ShieldAlert, Sparkles, Puzzle, Globe, Users, Settings, FileText, Boxes, Server, Activity, Layers, Lock, FileCode2, Cpu, Database, Folder, Archive, Clock, Terminal, Wrench } from "lucide-react";
 
 export interface ModuleManifest {
   name: string;
@@ -678,6 +678,37 @@ export const registeredFrontendModules: FrontendModule[] = [
         href: "/admin/server-tools",
         order: 64,
         permission: "admin.server.manage",
+      },
+    ],
+  },
+  {
+    manifest: {
+      name: "waf",
+      title: { en: "WAF & Security", bn: "ডাব্লিউএএফ ও নিরাপত্তা" },
+      category: "security",
+      core: true,
+      permissions: ["waf.read", "waf.manage", "admin.waf.manage"],
+      features: ["waf"],
+    },
+    clientNav: [
+      {
+        id: "waf",
+        labelKey: "waf.nav",
+        icon: <ShieldAlert className="h-4 w-4" />,
+        href: "/waf",
+        order: 37,
+        permission: "waf.read",
+        feature: "waf",
+      },
+    ],
+    adminNav: [
+      {
+        id: "admin-waf",
+        labelKey: "waf.nav",
+        icon: <ShieldAlert className="h-4 w-4" />,
+        href: "/admin/waf",
+        order: 63,
+        permission: "admin.waf.manage",
       },
     ],
   },

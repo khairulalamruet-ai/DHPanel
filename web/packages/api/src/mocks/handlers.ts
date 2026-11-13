@@ -6866,6 +6866,273 @@ export const handlers = [
                                             });
                                             return HttpResponse.json({ success: true, message: "Reboot initiated" });
                                           }),
+
+                                          ...(() => {
+                                            const mockWafEvents: Array<{
+                                              id: string;
+                                              timestamp: string;
+                                              client_ip: string;
+                                              country: string;
+                                              domain: string;
+                                              http_method: string;
+                                              uri: string;
+                                              rule_id: number;
+                                              rule_message: string;
+                                              category: "sqli" | "xss" | "rce" | "scanner" | "protocol" | "generic";
+                                              severity: "CRITICAL" | "HIGH" | "MEDIUM" | "LOW";
+                                              action: "blocked" | "detected";
+                                              matched_data?: string;
+                                              user_agent?: string;
+                                              tags?: string[];
+                                            }> = [
+                                              {
+                                                id: "waf-ev-01",
+                                                timestamp: "2026-11-13 11:20:14",
+                                                client_ip: "198.51.100.42",
+                                                country: "US",
+                                                domain: "example.com",
+                                                http_method: "POST",
+                                                uri: "/wp-login.php",
+                                                rule_id: 942100,
+                                                rule_message: "SQL Injection Attack: SQL Operator Detected",
+                                                category: "sqli" as const,
+                                                severity: "CRITICAL" as const,
+                                                action: "blocked" as const,
+                                                matched_data: "ARGS:log -> admin' OR '1'='1",
+                                                user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                                                tags: ["OWASP_CRS/WEB_ATTACK/SQL_INJECTION", "attack-sqli"],
+                                              },
+                                              {
+                                                id: "waf-ev-02",
+                                                timestamp: "2026-11-13 11:32:05",
+                                                client_ip: "203.0.113.88",
+                                                country: "BD",
+                                                domain: "example.com",
+                                                http_method: "GET",
+                                                uri: "/search?q=<script>alert(1)</script>",
+                                                rule_id: 941100,
+                                                rule_message: "XSS Attack Detected via libinjection",
+                                                category: "xss" as const,
+                                                severity: "HIGH" as const,
+                                                action: "blocked" as const,
+                                                matched_data: "ARGS:q -> <script>alert(1)</script>",
+                                                user_agent: "curl/8.5.0",
+                                                tags: ["OWASP_CRS/WEB_ATTACK/XSS", "attack-xss"],
+                                              },
+                                              {
+                                                id: "waf-ev-03",
+                                                timestamp: "2026-11-13 11:45:50",
+                                                client_ip: "192.0.2.15",
+                                                country: "DE",
+                                                domain: "example.com",
+                                                http_method: "POST",
+                                                uri: "/api/checkout",
+                                                rule_id: 920350,
+                                                rule_message: "Host header is a numeric IP address",
+                                                category: "protocol" as const,
+                                                severity: "MEDIUM" as const,
+                                                action: "detected" as const,
+                                                matched_data: "REQUEST_HEADERS:Host -> 192.0.2.1",
+                                                user_agent: "python-requests/2.31.0",
+                                                tags: ["OWASP_CRS/PROTOCOL_VIOLATION"],
+                                              },
+                                            ];
+
+                                            const mockDisabledRules = [
+                                              {
+                                                rule_id: 920350,
+                                                domain: "example.com",
+                                                description: "Host header is a numeric IP address",
+                                                disabled_at: "2026-11-12 09:00:00",
+                                                reason: "Internal microservice webhook traffic using IP addresses",
+                                              },
+                                            ];
+
+                                            const mockWafPolicies: Record<string, any> = {
+                                              "example.com": {
+                                                domain: "example.com",
+                                                mode: "block",
+                                                disabled_rules: [920350],
+                                                paranoia_level: 1,
+                                                updated_at: "2026-11-12 09:00:00",
+                                              },
+                                              "all": {
+                                                domain: "all",
+                                                mode: "block",
+                                                disabled_rules: [],
+                                                paranoia_level: 1,
+                                                updated_at: "2026-11-12 09:00:00",
+                                              },
+                                            };
+
+                                            const computeStats = (dom?: string) => {
+                                              const list = dom && dom !== "all" ? mockWafEvents.filter((e) => e.domain === dom) : mockWafEvents;
+                                              return {
+                                                total_events: list.length,
+                                                blocked_events: list.filter((e) => e.action === "blocked").length,
+                                                detected_events: list.filter((e) => e.action === "detected").length,
+                                                sqli_count: list.filter((e) => e.category === "sqli").length,
+                                                xss_count: list.filter((e) => e.category === "xss").length,
+                                                rce_count: list.filter((e) => e.category === "rce").length,
+                                                scanner_count: list.filter((e) => e.category === "scanner").length,
+                                              };
+                                            };
+
+                                            return [
+                                              // GET /api/v1/client/waf/events (TODO(api:T11.04))
+                                              http.get(/\/api\/v1\/client\/waf\/events$/, ({ request }) => {
+                                                const url = new URL(request.url);
+                                                const domain = url.searchParams.get("domain");
+                                                if (domain && domain !== "all") {
+                                                  return HttpResponse.json(mockWafEvents.filter((e) => e.domain === domain));
+                                                }
+                                                return HttpResponse.json(mockWafEvents);
+                                              }),
+
+                                              // GET /api/v1/client/waf/rules/disabled (TODO(api:T11.04))
+                                              http.get(/\/api\/v1\/client\/waf\/rules\/disabled$/, ({ request }) => {
+                                                const url = new URL(request.url);
+                                                const domain = url.searchParams.get("domain");
+                                                if (domain && domain !== "all") {
+                                                  return HttpResponse.json(mockDisabledRules.filter((r) => r.domain === domain));
+                                                }
+                                                return HttpResponse.json(mockDisabledRules);
+                                              }),
+
+                                              // GET /api/v1/client/waf/policy (TODO(api:T11.04))
+                                              http.get(/\/api\/v1\/client\/waf\/policy$/, ({ request }) => {
+                                                const url = new URL(request.url);
+                                                const domain = url.searchParams.get("domain") || "example.com";
+                                                return HttpResponse.json(mockWafPolicies[domain] || {
+                                                  domain,
+                                                  mode: "block",
+                                                  disabled_rules: [],
+                                                  paranoia_level: 1,
+                                                  updated_at: new Date().toISOString(),
+                                                });
+                                              }),
+
+                                              // GET /api/v1/client/waf/stats (TODO(api:T11.04))
+                                              http.get(/\/api\/v1\/client\/waf\/stats$/, ({ request }) => {
+                                                const url = new URL(request.url);
+                                                const domain = url.searchParams.get("domain") || "example.com";
+                                                return HttpResponse.json(computeStats(domain));
+                                              }),
+
+                                              // POST /api/v1/client/waf/rules/disable (TODO(api:T11.04))
+                                              http.post(/\/api\/v1\/client\/waf\/rules\/disable$/, async ({ request }) => {
+                                                const body = (await request.json().catch(() => ({}))) as any;
+                                                const ruleId = Number(body.rule_id);
+                                                const domain = body.domain || "example.com";
+                                                const existingIdx = mockDisabledRules.findIndex((r) => r.rule_id === ruleId && r.domain === domain);
+                                                if (existingIdx === -1) {
+                                                  mockDisabledRules.unshift({
+                                                    rule_id: ruleId,
+                                                    domain,
+                                                    description: body.reason || `Rule ${ruleId} disabled for false positive`,
+                                                    disabled_at: new Date().toISOString().slice(0, 19).replace("T", " "),
+                                                    reason: body.reason || "False positive report via UI",
+                                                  });
+                                                }
+                                                return HttpResponse.json({ success: true, rule_id: ruleId, domain });
+                                              }),
+
+                                              // POST /api/v1/client/waf/rules/enable (TODO(api:T11.04))
+                                              http.post(/\/api\/v1\/client\/waf\/rules\/enable$/, async ({ request }) => {
+                                                const body = (await request.json().catch(() => ({}))) as any;
+                                                const ruleId = Number(body.rule_id);
+                                                const domain = body.domain || "example.com";
+                                                const idx = mockDisabledRules.findIndex((r) => r.rule_id === ruleId && r.domain === domain);
+                                                if (idx !== -1) {
+                                                  mockDisabledRules.splice(idx, 1);
+                                                }
+                                                return HttpResponse.json({ success: true, rule_id: ruleId, domain });
+                                              }),
+
+                                              // POST /api/v1/client/waf/policy (TODO(api:T11.04))
+                                              http.post(/\/api\/v1\/client\/waf\/policy$/, async ({ request }) => {
+                                                const body = (await request.json().catch(() => ({}))) as any;
+                                                const domain = body.domain || "example.com";
+                                                if (!mockWafPolicies[domain]) {
+                                                  mockWafPolicies[domain] = { domain, mode: "block", disabled_rules: [], paranoia_level: 1, updated_at: "" };
+                                                }
+                                                mockWafPolicies[domain].mode = body.mode || "block";
+                                                mockWafPolicies[domain].updated_at = new Date().toISOString();
+                                                return HttpResponse.json({ success: true, policy: mockWafPolicies[domain] });
+                                              }),
+
+                                              // GET /api/v1/admin/waf/events (TODO(api:T11.04))
+                                              http.get(/\/api\/v1\/admin\/waf\/events$/, ({ request }) => {
+                                                const url = new URL(request.url);
+                                                const domain = url.searchParams.get("domain");
+                                                if (domain && domain !== "all") {
+                                                  return HttpResponse.json(mockWafEvents.filter((e) => e.domain === domain));
+                                                }
+                                                return HttpResponse.json(mockWafEvents);
+                                              }),
+
+                                              // GET /api/v1/admin/waf/rules/disabled (TODO(api:T11.04))
+                                              http.get(/\/api\/v1\/admin\/waf\/rules\/disabled$/, () => {
+                                                return HttpResponse.json(mockDisabledRules);
+                                              }),
+
+                                              // GET /api/v1/admin/waf/policy (TODO(api:T11.04))
+                                              http.get(/\/api\/v1\/admin\/waf\/policy$/, ({ request }) => {
+                                                const url = new URL(request.url);
+                                                const domain = url.searchParams.get("domain") || "all";
+                                                return HttpResponse.json(mockWafPolicies[domain] || {
+                                                  domain,
+                                                  mode: "block",
+                                                  disabled_rules: [],
+                                                  paranoia_level: 1,
+                                                  updated_at: new Date().toISOString(),
+                                                });
+                                              }),
+
+                                              // GET /api/v1/admin/waf/stats (TODO(api:T11.04))
+                                              http.get(/\/api\/v1\/admin\/waf\/stats$/, () => {
+                                                return HttpResponse.json(computeStats("all"));
+                                              }),
+
+                                              // POST /api/v1/admin/waf/rules/disable (TODO(api:T11.04))
+                                              http.post(/\/api\/v1\/admin\/waf\/rules\/disable$/, async ({ request }) => {
+                                                const body = (await request.json().catch(() => ({}))) as any;
+                                                const ruleId = Number(body.rule_id);
+                                                const domain = body.domain || "example.com";
+                                                mockDisabledRules.unshift({
+                                                  rule_id: ruleId,
+                                                  domain,
+                                                  description: body.reason || `Admin disabled rule ${ruleId}`,
+                                                  disabled_at: new Date().toISOString().slice(0, 19).replace("T", " "),
+                                                  reason: body.reason || "False positive override by admin",
+                                                });
+                                                return HttpResponse.json({ success: true, rule_id: ruleId, domain });
+                                              }),
+
+                                              // POST /api/v1/admin/waf/rules/enable (TODO(api:T11.04))
+                                              http.post(/\/api\/v1\/admin\/waf\/rules\/enable$/, async ({ request }) => {
+                                                const body = (await request.json().catch(() => ({}))) as any;
+                                                const ruleId = Number(body.rule_id);
+                                                const domain = body.domain || "example.com";
+                                                const idx = mockDisabledRules.findIndex((r) => r.rule_id === ruleId && r.domain === domain);
+                                                if (idx !== -1) {
+                                                  mockDisabledRules.splice(idx, 1);
+                                                }
+                                                return HttpResponse.json({ success: true, rule_id: ruleId, domain });
+                                              }),
+
+                                              // POST /api/v1/admin/waf/policy (TODO(api:T11.04))
+                                              http.post(/\/api\/v1\/admin\/waf\/policy$/, async ({ request }) => {
+                                                const body = (await request.json().catch(() => ({}))) as any;
+                                                const domain = body.domain || "all";
+                                                if (!mockWafPolicies[domain]) {
+                                                  mockWafPolicies[domain] = { domain, mode: "block", disabled_rules: [], paranoia_level: 1, updated_at: "" };
+                                                }
+                                                mockWafPolicies[domain].mode = body.mode || "block";
+                                                return HttpResponse.json({ success: true, policy: mockWafPolicies[domain] });
+                                              }),
+                                            ];
+                                          })(),
                                         ];
                                       })(),
                                     ];

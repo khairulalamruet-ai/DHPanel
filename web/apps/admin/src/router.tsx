@@ -47,6 +47,8 @@ import {
   ClientProcessesPage,
   AdminProcessesPage,
   AdminServerToolsPage,
+  ClientWafPage,
+  AdminWafPage,
   filterNavItems,
   registeredFrontendModules,
 } from "@dhpanel/modules";
@@ -430,6 +432,19 @@ const adminServerToolsRoute = createRoute({
   component: AdminServerToolsPage,
 });
 
+// 38. WAF routes (T11.04)
+const clientWafRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/waf",
+  component: ClientWafPage,
+});
+
+const adminWafRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/waf",
+  component: AdminWafPage,
+});
+
 // 18. Login route
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -495,6 +510,8 @@ const routeTree = rootRoute.addChildren([
   processesRoute,
   adminProcessesRoute,
   adminServerToolsRoute,
+  clientWafRoute,
+  adminWafRoute,
   loginRoute,
 ]);
 

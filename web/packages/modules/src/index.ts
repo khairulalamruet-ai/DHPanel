@@ -32,4 +32,5 @@ export * from "./logs";
 export * from "./usage";
 export * from "./processes";
 export * from "./server-tools";
+export * from "./waf";
 export type { SslStatus } from "./domains";
