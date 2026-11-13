@@ -5380,6 +5380,130 @@ export const handlers = [
           message: "Recalculation scheduled",
         });
       }),
+
+      // ==========================================
+      // FTP Accounts: T08.13 Handlers
+      // TODO(api:T08.12): Real FTPS account management endpoints
+      // ==========================================
+      ...(() => {
+        interface MockFtpAccount {
+          id: string;
+          username: string;
+          password?: string;
+          home_directory: string;
+          quota_bytes: number;
+          quota_formatted: string;
+          used_bytes: number;
+          used_formatted: string;
+          status: "active" | "suspended";
+          created_at: string;
+        }
+
+        const mockFtpAccounts: MockFtpAccount[] = [
+          {
+            id: "ftp_01",
+            username: "demo_deploy",
+            home_directory: "/home/demo/public_html",
+            quota_bytes: 1073741824,
+            quota_formatted: "1.0 GB",
+            used_bytes: 125829120,
+            used_formatted: "120.0 MB",
+            status: "active",
+            created_at: new Date(Date.now() - 86400 * 7 * 1000).toISOString(),
+          },
+          {
+            id: "ftp_02",
+            username: "demo_backup",
+            home_directory: "/home/demo/backups",
+            quota_bytes: -1,
+            quota_formatted: "Unlimited",
+            used_bytes: 78643200,
+            used_formatted: "75.0 MB",
+            status: "active",
+            created_at: new Date(Date.now() - 86400 * 14 * 1000).toISOString(),
+          },
+        ];
+
+        return [
+          // GET /api/v1/client/ftp/connection-info
+          http.get(/\/api\/v1\/client\/ftp\/connection-info$/, () => {
+            return HttpResponse.json({
+              host: "ftp.demo.dhpanel.test",
+              port: 21,
+              protocol: "FTPS (FTP over TLS/SSL)",
+              encryption: "Explicit TLS",
+              sftp_port: 2222,
+            });
+          }),
+
+          // GET /api/v1/client/ftp/accounts
+          http.get(/\/api\/v1\/client\/ftp\/accounts$/, () => {
+            return HttpResponse.json(mockFtpAccounts);
+          }),
+
+          // POST /api/v1/client/ftp/accounts
+          http.post(/\/api\/v1\/client\/ftp\/accounts$/, async ({ request }) => {
+            const body = (await request.json()) as {
+              username: string;
+              password: string;
+              home_directory: string;
+              quota_mb: number;
+            };
+
+            const quotaBytes = body.quota_mb === -1 ? -1 : body.quota_mb * 1024 * 1024;
+            const quotaFormatted = body.quota_mb === -1 ? "Unlimited" : `${body.quota_mb}.0 MB`;
+
+            const newAcc: MockFtpAccount = {
+              id: `ftp_${Date.now()}`,
+              username: body.username,
+              password: body.password,
+              home_directory: body.home_directory,
+              quota_bytes: quotaBytes,
+              quota_formatted: quotaFormatted,
+              used_bytes: 0,
+              used_formatted: "0 B",
+              status: "active",
+              created_at: new Date().toISOString(),
+            };
+
+            mockFtpAccounts.push(newAcc);
+            return HttpResponse.json(newAcc, { status: 201 });
+          }),
+
+          // PUT /api/v1/client/ftp/accounts/:id/password
+          http.put(/\/api\/v1\/client\/ftp\/accounts\/([^/]+)\/password$/, async ({ params, request }) => {
+            const id = (params[0] || params.id) as string;
+            const body = (await request.json()) as { password: string };
+            const found = mockFtpAccounts.find((a) => a.id === id);
+            if (found) {
+              found.password = body.password;
+            }
+            return HttpResponse.json({ success: true });
+          }),
+
+          // PUT /api/v1/client/ftp/accounts/:id/quota
+          http.put(/\/api\/v1\/client\/ftp\/accounts\/([^/]+)\/quota$/, async ({ params, request }) => {
+            const id = (params[0] || params.id) as string;
+            const body = (await request.json()) as { quota_mb: number };
+            const found = mockFtpAccounts.find((a) => a.id === id);
+            if (found) {
+              found.quota_bytes = body.quota_mb === -1 ? -1 : body.quota_mb * 1024 * 1024;
+              found.quota_formatted = body.quota_mb === -1 ? "Unlimited" : `${body.quota_mb}.0 MB`;
+            }
+            return HttpResponse.json({ success: true, account: found });
+          }),
+
+          // DELETE /api/v1/client/ftp/accounts/:id
+          http.delete(/\/api\/v1\/client\/ftp\/accounts\/([^/]+)$/, ({ params }) => {
+            const id = (params[0] || params.id) as string;
+            const idx = mockFtpAccounts.findIndex((a) => a.id === id);
+            if (idx !== -1) {
+              mockFtpAccounts.splice(idx, 1);
+            }
+            return HttpResponse.json({ success: true });
+          }),
+        ];
+      })(),
     ];
   })(),
 ];

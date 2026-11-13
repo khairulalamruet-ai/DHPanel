@@ -497,6 +497,27 @@ export const registeredFrontendModules: FrontendModule[] = [
   },
   {
     manifest: {
+      name: "ftp",
+      title: { en: "FTP Accounts", bn: "এফটিপি অ্যাকাউন্ট" },
+      category: "files",
+      core: true,
+      permissions: ["ftp.read", "ftp.manage"],
+      features: ["ftp"],
+    },
+    clientNav: [
+      {
+        id: "ftp",
+        labelKey: "ftp.nav",
+        icon: <Server className="h-4 w-4" />,
+        href: "/ftp",
+        order: 27,
+        permission: "ftp.read",
+        feature: "ftp",
+      },
+    ],
+  },
+  {
+    manifest: {
       name: "users",
       title: { en: "Users", bn: "ব্যবহারকারী" },
       category: "core",

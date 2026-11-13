@@ -36,6 +36,7 @@ import {
   AdminDatabasesPage,
   FileManagerPage,
   DiskUsagePage,
+  FtpAccountsPage,
   filterNavItems,
   registeredFrontendModules,
 } from "@dhpanel/modules";
@@ -302,6 +303,19 @@ const diskUsageRoute = createRoute({
   component: DiskUsagePage,
 });
 
+// 29. FTP Accounts route (T08.13)
+const clientFtpRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/client/ftp",
+  component: FtpAccountsPage,
+});
+
+const ftpRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/ftp",
+  component: FtpAccountsPage,
+});
+
 // 18. Login route
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -349,6 +363,8 @@ const routeTree = rootRoute.addChildren([
   filesRoute,
   clientDiskUsageRoute,
   diskUsageRoute,
+  clientFtpRoute,
+  ftpRoute,
   loginRoute,
 ]);
 

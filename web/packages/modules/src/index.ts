@@ -25,4 +25,5 @@ export * from "./services";
 export * from "./error-pages";
 export * from "./databases";
 export * from "./files";
+export * from "./ftp";
 export type { SslStatus } from "./domains";

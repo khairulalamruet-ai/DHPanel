@@ -9,9 +9,9 @@ import { ThemeProvider, ToastProvider } from "@dhpanel/ui";
 import { SessionProvider, useSession, LoginPage, AccountSecurityPage } from "@dhpanel/auth";
 import { queryClient, QueryClientProvider } from "@dhpanel/api";
 import { AppShell, NotFoundPage, RouteErrorFallback } from "@dhpanel/shell";
-import { ClientDashboardPage, ClientDomainsPage, DnsEditorPage, SslPage, PhpManagementPage, ServicesPage, ClientDatabasesPage, FileManagerPage, DiskUsagePage } from "@dhpanel/modules";
+import { ClientDashboardPage, ClientDomainsPage, DnsEditorPage, SslPage, PhpManagementPage, ServicesPage, ClientDatabasesPage, FileManagerPage, DiskUsagePage, FtpAccountsPage } from "@dhpanel/modules";
 import { useTranslation } from "@dhpanel/i18n";
-import { LayoutDashboard, ShieldCheck, Globe, Lock, Database, Folder } from "lucide-react";
+import { LayoutDashboard, ShieldCheck, Globe, Lock, Database, Folder, Server } from "lucide-react";
 
 function AuthenticatedContent() {
   const { data: session, isLoading } = useSession();
@@ -53,6 +53,12 @@ function AuthenticatedContent() {
       labelKey: "files.nav",
       icon: <Folder className="h-4 w-4" />,
       href: "/files",
+    },
+    {
+      id: "ftp",
+      labelKey: "ftp.nav",
+      icon: <Server className="h-4 w-4" />,
+      href: "/ftp",
     },
     {
       id: "security",
@@ -160,6 +166,12 @@ const diskUsageRoute = createRoute({
   component: DiskUsagePage,
 });
 
+const ftpRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/ftp",
+  component: FtpAccountsPage,
+});
+
 const securityRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/security",
@@ -180,7 +192,7 @@ const loginRoute = createRoute({
   },
 });
 
-const routeTree = rootRoute.addChildren([indexRoute, domainsRoute, dnsRoute, sslRoute, phpRoute, servicesRoute, databasesRoute, filesRoute, diskUsageRoute, securityRoute, loginRoute]);
+const routeTree = rootRoute.addChildren([indexRoute, domainsRoute, dnsRoute, sslRoute, phpRoute, servicesRoute, databasesRoute, filesRoute, diskUsageRoute, ftpRoute, securityRoute, loginRoute]);
 
 export const router = createRouter({
   routeTree,
