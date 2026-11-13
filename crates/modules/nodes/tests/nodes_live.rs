@@ -57,6 +57,7 @@ fn env(pool: &PgPool, public_url: Option<&str>, sudo_secs: u64) -> Env {
             ca: None,
             limiter: dhpanel_mod_nodes::enrollment_limiter(redis_for_limiter),
             gateway: None,
+            operations: dhpanel_operations::Operations::new(pool.clone()),
             audit: dhpanel_audit::AuditWriter::new(pool.clone()),
         })
         .layer(MockConnectInfo(std::net::SocketAddr::from((
@@ -637,4 +638,203 @@ async fn revoking_a_node_kills_its_certificates_and_is_audited(pool: PgPool) {
     );
     assert_eq!(rows[0].0, "admin.node_revoked");
     assert_eq!(rows[0].1, json!({"certificates_revoked": 2}));
+}
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn operations_can_be_listed_pinged_and_retried_over_http(pool: PgPool) {
+    let e = env(&pool, None, 600);
+    let root = account(&pool, "rootuser", &["super_admin"]).await;
+    let plain = account(&pool, "plainadmin", &["admin"]).await;
+    let nobody = account(&pool, "norole", &[]).await;
+    let node: Uuid = sqlx::query_scalar("INSERT INTO nodes (name) VALUES ('target') RETURNING id")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let ping = format!("{BASE}/{node}/ping");
+    let r = e.sign_in(root).await;
+
+    // Pinging needs the manage permission and a CSRF token.
+    let (status, _, _) = e.call(None, "POST", &ping, None, true).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let n = e.sign_in(nobody).await;
+    let (status, body) = e.send(&n, "POST", &ping, None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::FORBIDDEN, "permission_denied")
+    );
+    let (status, _, _) = e.call(Some(&r), "POST", &ping, None, false).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "no CSRF header");
+
+    let (status, body) = e.send(&r, "POST", &ping, None).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+    assert_eq!(
+        (
+            body["kind"].as_str(),
+            body["status"].as_str(),
+            body["attempts"].as_i64()
+        ),
+        (Some("ping"), Some("pending"), Some(0))
+    );
+    assert_eq!(body["payload"]["type"], "ping");
+    let first = body["id"].as_str().unwrap().to_owned();
+    // A second click is a second ping; the same Idempotency-Key is the same one.
+    let (_, body) = e.send(&r, "POST", &ping, None).await;
+    assert_ne!(body["id"].as_str().unwrap(), first);
+    let with_key = |key: &'static str| {
+        let e = &e;
+        let r = &r;
+        let ping = ping.clone();
+        async move {
+            let req = Request::builder()
+                .method("POST")
+                .uri(&ping)
+                .header(header::COOKIE, &r.cookie)
+                .header(CSRF_HEADER, &r.csrf)
+                .header("idempotency-key", key)
+                .body(Body::empty())
+                .unwrap();
+            let res = e.app.clone().oneshot(req).await.unwrap();
+            let status = res.status();
+            let bytes = axum::body::to_bytes(res.into_body(), 1 << 20)
+                .await
+                .unwrap();
+            (
+                status,
+                serde_json::from_slice::<Value>(&bytes).unwrap_or(Value::Null),
+            )
+        }
+    };
+    let (s1, b1) = with_key("click-1").await;
+    let (s2, b2) = with_key("click-1").await;
+    assert_eq!((s1, s2), (StatusCode::ACCEPTED, StatusCode::ACCEPTED));
+    assert_eq!(b1["id"], b2["id"]);
+    let (status, body) = with_key("bad key!").await;
+    assert_eq!(
+        (status, body["errors"][0]["field"].as_str()),
+        (StatusCode::UNPROCESSABLE_ENTITY, Some("Idempotency-Key"))
+    );
+
+    // Unknown and revoked nodes.
+    let (status, _) = e
+        .send(&r, "POST", &format!("{BASE}/{}/ping", Uuid::now_v7()), None)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let revoked: Uuid = sqlx::query_scalar(
+        "INSERT INTO nodes (name, status) VALUES ('gone', 'revoked') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let (status, body) = e
+        .send(&r, "POST", &format!("{BASE}/{revoked}/ping"), None)
+        .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "node_revoked")
+    );
+
+    // Reading: list, filters, one operation. The plain admin may read nodes? Not here: only super_admin.
+    let ops = "/api/v1/admin/operations";
+    let (status, body, _) = e.call(Some(&r), "GET", ops, None, false).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["items"].as_array().unwrap().len(), 3);
+    let (_, body, _) = e
+        .call(
+            Some(&r),
+            "GET",
+            &format!("{ops}?status=failed"),
+            None,
+            false,
+        )
+        .await;
+    assert!(body["items"].as_array().unwrap().is_empty());
+    let (_, body, _) = e
+        .call(
+            Some(&r),
+            "GET",
+            &format!("{ops}?kind=ping&node_id={node}"),
+            None,
+            false,
+        )
+        .await;
+    assert_eq!(body["items"].as_array().unwrap().len(), 3);
+    let (status, body, _) = e
+        .call(
+            Some(&r),
+            "GET",
+            &format!("{ops}?status=nonsense"),
+            None,
+            false,
+        )
+        .await;
+    assert_eq!(
+        (status, body["errors"][0]["field"].as_str()),
+        (StatusCode::UNPROCESSABLE_ENTITY, Some("status"))
+    );
+    let (status, body, _) = e
+        .call(Some(&r), "GET", &format!("{ops}/{first}"), None, false)
+        .await;
+    assert_eq!(
+        (status, body["id"].as_str()),
+        (StatusCode::OK, Some(first.as_str()))
+    );
+    let (status, _, _) = e
+        .call(
+            Some(&r),
+            "GET",
+            &format!("{ops}/{}", Uuid::now_v7()),
+            None,
+            false,
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _, _) = e
+        .call(Some(&e.sign_in(nobody).await), "GET", ops, None, false)
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // Retry: only failed operations, and asking twice gives the same new operation.
+    let (status, body) = e
+        .send(&r, "POST", &format!("{ops}/{first}/retry"), None)
+        .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "operation_not_retryable")
+    );
+    sqlx::query(
+        "UPDATE operations SET status = 'dispatched', attempts = 1, dispatched_at = now() WHERE id = $1::uuid",
+    )
+    .bind(&first)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE operations SET status = 'failed', finished_at = now(),
+                error = '{\"code\":\"internal\",\"message\":\"x\",\"retryable\":false}' WHERE id = $1::uuid",
+    )
+    .bind(&first)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let p = e.sign_in(plain).await;
+    let (status, _) = e
+        .send(&p, "POST", &format!("{ops}/{first}/retry"), None)
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, a) = e
+        .send(&r, "POST", &format!("{ops}/{first}/retry"), None)
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{a}");
+    assert_eq!(a["status"], "pending");
+    assert_eq!(a["idempotency_key"], format!("retry:{first}"));
+    assert_eq!(a["payload"]["type"], "ping");
+    let (_, b) = e
+        .send(&r, "POST", &format!("{ops}/{first}/retry"), None)
+        .await;
+    assert_eq!(a["id"], b["id"], "retrying twice must not queue twice");
+    let (status, _) = e
+        .send(&r, "POST", &format!("{ops}/{}/retry", Uuid::now_v7()), None)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
 }

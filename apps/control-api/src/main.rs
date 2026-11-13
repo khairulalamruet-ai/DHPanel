@@ -213,6 +213,7 @@ async fn main() -> ExitCode {
             ))
         }
     };
+    let operations = dhpanel_operations::Operations::new(db.clone());
     let nodes = dhpanel_mod_nodes::NodesState {
         db: db.clone(),
         sessions: sessions.clone(),
@@ -224,6 +225,7 @@ async fn main() -> ExitCode {
         ca,
         limiter: dhpanel_mod_nodes::enrollment_limiter(redis.clone()),
         gateway: gateway.as_ref().map(|(gateway, _)| gateway.clone()),
+        operations: operations.clone(),
         audit: dhpanel_audit::AuditWriter::new(db.clone()),
     };
     let admin = dhpanel_mod_admin::AdminState {
@@ -265,6 +267,17 @@ async fn main() -> ExitCode {
         shutdown_signal().await;
         let _ = stop.send(true);
     });
+    // The dispatcher lives next to the agent port: it needs the live sessions.
+    let dispatcher_task = gateway.as_ref().and_then(|(gateway, _)| {
+        let results = gateway.take_results()?;
+        let dispatcher = dhpanel_dispatcher::Dispatcher::new(
+            operations.clone(),
+            gateway.clone(),
+            Some(redis.clone()),
+            dhpanel_dispatcher::Settings::default(),
+        );
+        Some(tokio::spawn(dispatcher.run(results, stopped.clone())))
+    });
     let gateway_task =
         gateway.map(|(gateway, listener)| tokio::spawn(gateway.serve(listener, stopped.clone())));
 
@@ -291,6 +304,9 @@ async fn main() -> ExitCode {
     })
     .await;
     if let Some(task) = gateway_task {
+        let _ = task.await;
+    }
+    if let Some(task) = dispatcher_task {
         let _ = task.await;
     }
 

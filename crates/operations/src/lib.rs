@@ -172,16 +172,18 @@ impl Operations {
         Ok(db::get(&self.db, id).await?)
     }
 
-    /// Recent operations, newest first.
+    /// Recent operations, newest first, optionally of one node, status or kind.
     ///
     /// # Errors
     /// Database errors.
     pub async fn recent(
         &self,
         node_id: Option<Uuid>,
+        status: Option<Status>,
+        kind: Option<&str>,
         limit: i64,
     ) -> Result<Vec<Row>, OperationsError> {
-        Ok(db::list_recent(&self.db, node_id, limit.clamp(1, 500)).await?)
+        Ok(db::list_recent(&self.db, node_id, status, kind, limit.clamp(1, 500)).await?)
     }
 
     /// Takes due operations of these nodes for delivery (marks them `dispatched`).
@@ -224,6 +226,19 @@ impl Operations {
     ) -> Result<Option<Status>, OperationsError> {
         let secs = retry_in.map(|d| i32::try_from(d.as_secs()).unwrap_or(i32::MAX));
         Ok(db::fail(&self.db, id, error, secs).await?)
+    }
+
+    /// Handles operations that were sent and never answered within `timeout`.
+    ///
+    /// # Errors
+    /// Database errors.
+    pub async fn time_out_dispatched(
+        &self,
+        timeout: Duration,
+        retry_in: Duration,
+    ) -> Result<Vec<(Uuid, Status)>, OperationsError> {
+        let secs = |d: Duration| i32::try_from(d.as_secs()).unwrap_or(i32::MAX);
+        Ok(db::time_out_dispatched(&self.db, secs(timeout), secs(retry_in)).await?)
     }
 
     /// Fails operations that expired before they could be sent.

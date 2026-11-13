@@ -33,6 +33,14 @@ impl Status {
         }
     }
 
+    /// Reads a stored or user-given status name.
+    #[must_use]
+    pub fn from_name(name: &str) -> Option<Self> {
+        ["pending", "dispatched", "succeeded", "failed", "retryable"]
+            .contains(&name)
+            .then(|| Self::parse(name))
+    }
+
     fn parse(s: &str) -> Self {
         match s {
             "dispatched" => Self::Dispatched,
@@ -406,13 +414,15 @@ pub async fn expire_overdue(pool: &PgPool) -> Result<u64, sqlx::Error> {
     Ok(done.rows_affected())
 }
 
-/// Recent operations, newest first, optionally of one node.
+/// Recent operations, newest first, optionally of one node, status or kind.
 ///
 /// # Errors
 /// Database errors.
 pub async fn list_recent(
     pool: &PgPool,
     node_id: Option<Uuid>,
+    status: Option<Status>,
+    kind: Option<&str>,
     limit: i64,
 ) -> Result<Vec<Operation>, sqlx::Error> {
     let rows = sqlx::query_as!(
@@ -425,13 +435,55 @@ pub async fn list_recent(
                   extract(epoch FROM dispatched_at)::bigint AS dispatched_at,
                   extract(epoch FROM finished_at)::bigint AS finished_at
            FROM operations
-           WHERE $1::uuid IS NULL OR node_id = $1
+           WHERE ($1::uuid IS NULL OR node_id = $1)
+             AND ($2::text IS NULL OR status = $2)
+             AND ($3::text IS NULL OR kind = $3)
            ORDER BY created_at DESC, id DESC
-           LIMIT $2"#,
+           LIMIT $4"#,
         node_id,
+        status.map(Status::as_str),
+        kind,
         limit,
     )
     .fetch_all(pool)
     .await?;
     Ok(rows.into_iter().map(Into::into).collect())
+}
+
+/// Handles operations that were sent but never answered within `timeout_secs`
+/// (the node vanished, restarted, or lost the frame): they become `retryable`
+/// after `retry_in_secs` while attempts and time remain, otherwise `failed`.
+/// Returns the ids and the status each ended in.
+///
+/// # Errors
+/// Database errors.
+pub async fn time_out_dispatched(
+    pool: &PgPool,
+    timeout_secs: i32,
+    retry_in_secs: i32,
+) -> Result<Vec<(Uuid, Status)>, sqlx::Error> {
+    let rows = sqlx::query!(
+        r#"UPDATE operations
+           SET status = CASE
+                   WHEN attempts < max_attempts
+                        AND now() + make_interval(secs => $2::int) < expires_at
+                   THEN 'retryable' ELSE 'failed' END,
+               error = '{"code": "timeout", "message": "the node did not answer in time", "retryable": true}'::jsonb,
+               next_attempt_at = now() + make_interval(secs => $2::int),
+               finished_at = CASE
+                   WHEN attempts < max_attempts
+                        AND now() + make_interval(secs => $2::int) < expires_at
+                   THEN NULL ELSE now() END
+           WHERE status = 'dispatched'
+             AND dispatched_at < now() - make_interval(secs => $1::int)
+           RETURNING id, status AS "status!""#,
+        timeout_secs,
+        retry_in_secs,
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| (r.id, Status::parse(&r.status)))
+        .collect())
 }

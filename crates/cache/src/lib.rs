@@ -120,6 +120,16 @@ impl RedisHandle {
         Ok(conn.get(key).await?)
     }
 
+    /// Publishes a message on a pub/sub channel; returns how many subscribers
+    /// received it. Fire-and-forget: nobody listening is not an error.
+    ///
+    /// # Errors
+    /// Connection or command failures.
+    pub async fn publish(&self, channel: &str, message: &str) -> Result<u64, CacheError> {
+        let mut conn = self.connection().await?;
+        Ok(conn.publish(channel, message).await?)
+    }
+
     /// Deletes a key; returns whether it existed.
     ///
     /// # Errors

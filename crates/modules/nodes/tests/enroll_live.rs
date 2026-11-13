@@ -75,6 +75,7 @@ fn env(pool: &PgPool, with_ca: bool) -> Env {
             ca: ca.clone(),
             limiter,
             gateway: None,
+            operations: dhpanel_operations::Operations::new(pool.clone()),
             audit: dhpanel_audit::AuditWriter::new(pool.clone()),
         })
         .layer(axum::middleware::from_fn_with_state(

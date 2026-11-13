@@ -130,7 +130,7 @@ async fn serve(
         .map_err(|e| e.to_string())?;
 
     // The node is now online: this process owns its session.
-    let (session, stop) = inner.registry.register(node.id);
+    let (session, stop, mut outbound) = inner.registry.register(node.id);
     let ip = peer.ip().to_string();
     if let Err(err) = nodes::mark_online(&inner.db, node.id, &hello.agent_version, Some(&ip)).await
     {
@@ -140,7 +140,7 @@ async fn serve(
     }
     tracing::info!(node = %node.name, node_id = %node.id, agent = %hello.agent_version, protocol = version, "node online");
 
-    let outcome = pump(inner, &mut ws, node.id, &stop, &mut shutdown).await;
+    let outcome = pump(inner, &mut ws, node.id, &stop, &mut outbound, &mut shutdown).await;
 
     if inner.registry.release(node.id, session)
         && let Err(err) = nodes::mark_offline(&inner.db, node.id).await
@@ -157,6 +157,7 @@ async fn pump(
     ws: &mut Ws,
     node: uuid::Uuid,
     stop: &crate::registry::Stop,
+    outbound: &mut tokio::sync::mpsc::Receiver<String>,
     shutdown: &mut watch::Receiver<bool>,
 ) -> &'static str {
     let settings = &inner.settings;
@@ -176,6 +177,12 @@ async fn pump(
                 }
                 close(ws, CloseCode::Policy, "replaced by a newer connection").await;
                 return "replaced by a newer connection";
+            }
+            Some(frame) = outbound.recv() => {
+                let sent = timeout(settings.liveness_timeout, ws.send(Message::Text(frame.into()))).await;
+                if !matches!(sent, Ok(Ok(()))) {
+                    return "could not send a frame";
+                }
             }
             _ = ticker.tick() => {
                 if last_heard.elapsed() >= settings.liveness_timeout {
@@ -200,8 +207,13 @@ async fn pump(
                     Message::Ping(_) | Message::Frame(_) => {}
                     Message::Text(text) => match decode::<AgentMessage>(text.as_str()) {
                         Ok(AgentMessage::Result(result)) => {
-                            // Delivered to the operations ledger by the dispatcher (T02.11).
                             tracing::debug!(%node, op_id = %result.op_id, status = ?result.status, "operation result");
+                            let report = crate::NodeResult { node_id: node, result };
+                            if inner.results.try_send(report).is_err() {
+                                // Nobody is listening or the queue is full. The operation
+                                // times out and is asked again; the agent answers from memory.
+                                tracing::warn!(%node, "operation result dropped: dispatcher not keeping up");
+                            }
                         }
                         Ok(AgentMessage::Hello(_)) | Err(_) => {
                             close(ws, CloseCode::Invalid, "unexpected or malformed message").await;

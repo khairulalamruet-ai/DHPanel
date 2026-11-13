@@ -40,6 +40,9 @@ use tokio_rustls::TlsAcceptor;
 use uuid::Uuid;
 
 use crate::registry::Registry;
+pub use crate::registry::SendError;
+use dhpanel_node_protocol::OperationResult;
+use std::sync::Mutex;
 
 /// Timing and limits. The defaults are what production uses; tests shorten them.
 #[derive(Debug, Clone)]
@@ -65,7 +68,22 @@ impl Default for Settings {
     }
 }
 
+/// An agent's answer to an operation, with the node that sent it. The receiver
+/// must check that the operation belongs to that node.
+#[derive(Debug, Clone)]
+pub struct NodeResult {
+    /// The node whose certificate the connection was authenticated with.
+    pub node_id: Uuid,
+    /// What it reported.
+    pub result: OperationResult,
+}
+
+/// Results waiting for the dispatcher.
+const RESULT_QUEUE: usize = 1024;
+
 struct Inner {
+    results: tokio::sync::mpsc::Sender<NodeResult>,
+    results_rx: Mutex<Option<tokio::sync::mpsc::Receiver<NodeResult>>>,
     db: PgPool,
     acceptor: TlsAcceptor,
     registry: Registry,
@@ -82,14 +100,42 @@ impl Gateway {
     /// Builds a gateway from a TLS configuration (see [`tls::server_config`]).
     #[must_use]
     pub fn new(db: PgPool, tls: Arc<rustls::ServerConfig>, settings: Settings) -> Self {
+        let (results, results_rx) = tokio::sync::mpsc::channel(RESULT_QUEUE);
         Self {
             inner: Arc::new(Inner {
+                results,
+                results_rx: Mutex::new(Some(results_rx)),
                 db,
                 acceptor: TlsAcceptor::from(tls),
                 registry: Registry::default(),
                 settings,
             }),
         }
+    }
+
+    /// Sends a text frame (an encoded operation) to the node's live session.
+    ///
+    /// # Errors
+    /// [`SendError`] when the node is not connected or its queue is full.
+    pub fn send(&self, node: Uuid, frame: String) -> Result<(), SendError> {
+        self.inner.registry.send(node, frame)
+    }
+
+    /// Nodes that have a live session right now.
+    #[must_use]
+    pub fn connected_nodes(&self) -> Vec<Uuid> {
+        self.inner.registry.connected()
+    }
+
+    /// The stream of operation results from all nodes. There is one stream:
+    /// the first caller gets it, later calls get `None`.
+    #[must_use]
+    pub fn take_results(&self) -> Option<tokio::sync::mpsc::Receiver<NodeResult>> {
+        self.inner
+            .results_rx
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
     }
 
     /// Whether this process holds a live session for the node.

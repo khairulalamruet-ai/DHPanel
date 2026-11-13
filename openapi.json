@@ -1030,6 +1030,95 @@
         ]
       }
     },
+    "/api/v1/admin/nodes/{id}/ping": {
+      "post": {
+        "tags": [
+          "operations"
+        ],
+        "summary": "Ask a node to answer a ping (a liveness check that goes through the whole\npipeline). Each call is a new ping unless an `Idempotency-Key` header says\nit is the same request.",
+        "operationId": "pingNode",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Node id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Same key, same ping",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Queued; follow it with GET /api/v1/admin/operations/{id}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied` (needs admin.nodes.manage) or `csrf_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such node",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`node_revoked` or `idempotency_key_reused`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/nodes/{id}/revoke": {
       "post": {
         "tags": [
@@ -1091,6 +1180,226 @@
           },
           "409": {
             "description": "`node_already_revoked`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/operations": {
+      "get": {
+        "tags": [
+          "operations"
+        ],
+        "summary": "List recent operations.",
+        "operationId": "listOperations",
+        "parameters": [
+          {
+            "name": "node_id",
+            "in": "path",
+            "description": "Only this node.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "status",
+            "in": "path",
+            "description": "Only this status.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "kind",
+            "in": "path",
+            "description": "Only this kind (`ping`, ...).",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Newest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationList"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied` (needs admin.nodes.read) or `mfa_setup_required`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unknown status",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/operations/{id}": {
+      "get": {
+        "tags": [
+          "operations"
+        ],
+        "summary": "One operation.",
+        "operationId": "getOperation",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Operation id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied` (needs admin.nodes.read)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such operation",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/operations/{id}/retry": {
+      "post": {
+        "tags": [
+          "operations"
+        ],
+        "summary": "Try a failed operation again as a new operation. Asking twice returns the\nsame new operation.",
+        "operationId": "retryOperation",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The failed operation",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "The new operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied`, `reauth_required` or `csrf_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such operation or node",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`operation_not_retryable` (only failed operations) or `node_revoked`",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2753,6 +3062,131 @@
             "type": "string",
             "description": "`online`, `offline`, `draining` or `revoked`. `online` means the agent\nanswered a heartbeat within the last 45 seconds.",
             "example": "online"
+          }
+        }
+      },
+      "OperationList": {
+        "type": "object",
+        "description": "Recent operations.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OperationView"
+            },
+            "description": "Newest first (at most 100)."
+          }
+        }
+      },
+      "OperationView": {
+        "type": "object",
+        "description": "An operation as shown to administrators.",
+        "required": [
+          "id",
+          "kind",
+          "node_id",
+          "status",
+          "attempts",
+          "max_attempts",
+          "idempotency_key",
+          "payload",
+          "created_at",
+          "expires_at",
+          "next_attempt_at"
+        ],
+        "properties": {
+          "attempts": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Deliveries so far."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Creation time (RFC 3339, UTC)."
+          },
+          "created_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Account that asked."
+          },
+          "dispatched_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Last delivery (RFC 3339, UTC)."
+          },
+          "error": {
+            "description": "Why it failed (`code`, `message`, `retryable`), also the last failure of\nan operation that is being retried."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Not sent after this (RFC 3339, UTC)."
+          },
+          "finished_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When it became final (RFC 3339, UTC)."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Ledger id."
+          },
+          "idempotency_key": {
+            "type": "string",
+            "description": "The key that makes asking again harmless."
+          },
+          "kind": {
+            "type": "string",
+            "description": "What it does (`ping`, `report_capabilities`, ...).",
+            "example": "ping"
+          },
+          "max_attempts": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Most deliveries."
+          },
+          "next_attempt_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Earliest next delivery (RFC 3339, UTC)."
+          },
+          "node_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The node that runs it."
+          },
+          "output": {
+            "description": "What the node produced, on success."
+          },
+          "payload": {
+            "description": "The operation as sent."
+          },
+          "status": {
+            "type": "string",
+            "description": "`pending`, `dispatched`, `succeeded`, `failed` or `retryable`.",
+            "example": "succeeded"
+          },
+          "tenant_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Tenant it is about."
           }
         }
       },

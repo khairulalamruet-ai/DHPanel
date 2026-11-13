@@ -72,6 +72,7 @@ async fn control_plane(pool: &PgPool) -> Control {
             },
         ),
         gateway: None,
+        operations: dhpanel_operations::Operations::new(pool.clone()),
         audit: dhpanel_audit::AuditWriter::new(pool.clone()),
     };
     let app = router()

@@ -2,6 +2,7 @@
 //!
 //! | Method | Path | Needs |
 //! |---|---|---|
+//! | GET    | `/api/v1/admin/operations[/{id}]`, POST `.../{id}/retry`, POST `/api/v1/admin/nodes/{id}/ping` | see [`operations`] |
 //! | GET    | `/api/v1/admin/nodes` | `admin.nodes.read` |
 //! | POST   | `/api/v1/admin/nodes/{id}/revoke` | `admin.nodes.manage`, sudo mode |
 //! | POST   | `/api/v1/admin/nodes` | `admin.nodes.manage`, sudo mode |
@@ -21,6 +22,7 @@
 //!   The token never appears in the audit log or in any log line.
 
 pub mod enroll;
+pub mod operations;
 pub mod token;
 
 use std::{sync::Arc, time::Duration};
@@ -79,6 +81,8 @@ pub struct NodesState {
     /// The agent port, to close the connection of a node that is revoked.
     /// `None` while the agent port is off.
     pub gateway: Option<dhpanel_node_gateway::Gateway>,
+    /// The operations ledger.
+    pub operations: dhpanel_operations::Operations,
     /// Audit log for outcomes that have no transaction of their own.
     pub audit: AuditWriter,
 }
@@ -123,6 +127,19 @@ pub fn router() -> Router<NodesState> {
         .route(
             "/api/v1/admin/nodes",
             get(list_nodes).post(create_enrollment),
+        )
+        .route("/api/v1/admin/operations", get(operations::list_operations))
+        .route(
+            "/api/v1/admin/operations/{id}",
+            get(operations::get_operation),
+        )
+        .route(
+            "/api/v1/admin/operations/{id}/retry",
+            axum::routing::post(operations::retry_operation),
+        )
+        .route(
+            "/api/v1/admin/nodes/{id}/ping",
+            axum::routing::post(operations::ping_node),
         )
         .route(
             "/api/v1/admin/nodes/{id}/revoke",
@@ -535,9 +552,9 @@ pub async fn revoke_node(
 /// OpenAPI fragment (full paths; merge into the root document).
 #[derive(OpenApi)]
 #[openapi(
-    paths(list_nodes, create_enrollment, list_enrollments, revoke_enrollment, revoke_node, enroll::enroll_node),
+    paths(operations::list_operations, operations::get_operation, operations::retry_operation, operations::ping_node, list_nodes, create_enrollment, list_enrollments, revoke_enrollment, revoke_node, enroll::enroll_node),
     components(schemas(
-        CreateEnrollment, CreatedEnrollment, EnrollmentView, EnrollmentList, NodeView, NodeList, RevokedNode,
+        CreateEnrollment, CreatedEnrollment, EnrollmentView, EnrollmentList, NodeView, NodeList, RevokedNode, operations::OperationView, operations::OperationList,
         enroll::EnrollRequest, enroll::EnrollResponse
     )),
     tags((name = "nodes", description = "Add and manage servers (nodes)"))
