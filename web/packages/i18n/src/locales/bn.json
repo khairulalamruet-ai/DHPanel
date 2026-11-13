@@ -1969,5 +1969,16 @@
     "disableReason": "বন্ধ করার কারণ",
     "disabledAt": "বন্ধের সময়",
     "reEnableRule": "পুনরায় সক্রিয় করুন"
+  },
+  "search": {
+    "inputPlaceholder": "ইউজার, ডোমেন, পেজ, সেটিংস খুঁজুন (Ctrl+K)...",
+    "noResultsTitle": "কোনো ফলাফল পাওয়া যায়নি",
+    "noResultsDesc": "'{{query}}'-এর জন্য কোনো পেজ, ডোমেন বা ইউজার পাওয়া যায়নি।",
+    "navigateHint": "নেভিগেট করতে",
+    "selectHint": "নির্বাচন করতে",
+    "closeHint": "বন্ধ করতে",
+    "triggerLabel": "অনুসন্ধান বা দ্রুত যান...",
+    "triggerTitle": "গ্লোবাল সার্চ ও কমান্ড প্যালেট (Ctrl+K)",
+    "triggerPlaceholder": "অনুসন্ধান..."
   }
 }

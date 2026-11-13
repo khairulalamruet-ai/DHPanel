@@ -25,10 +25,11 @@ export interface NavItem {
 export interface AppShellProps {
   title: string;
   navItems?: NavItem[];
+  headerActions?: React.ReactNode;
   children: React.ReactNode;
 }
 
-export function AppShell({ title, navItems, children }: AppShellProps) {
+export function AppShell({ title, navItems, headerActions, children }: AppShellProps) {
   const { data: session, logout } = useSession();
   const { t } = useTranslation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -151,6 +152,7 @@ export function AppShell({ title, navItems, children }: AppShellProps) {
               </h2>
             </div>
             <div className="flex items-center gap-3">
+              {headerActions}
               <LanguageSwitcher />
               <ThemeToggle />
               <button

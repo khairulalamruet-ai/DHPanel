@@ -49,6 +49,8 @@ import {
   AdminServerToolsPage,
   ClientWafPage,
   AdminWafPage,
+  CommandPalette,
+  CommandPaletteTrigger,
   filterNavItems,
   registeredFrontendModules,
 } from "@dhpanel/modules";
@@ -57,6 +59,7 @@ import { useTranslation } from "@dhpanel/i18n";
 function AuthenticatedContent() {
   const { data: session, isLoading } = useSession();
   const { t } = useTranslation();
+  const [commandPaletteOpen, setCommandPaletteOpen] = React.useState(false);
 
   const navItems = filterNavItems(registeredFrontendModules, session, "admin");
 
@@ -78,12 +81,20 @@ function AuthenticatedContent() {
   }
 
   return (
-    <AppShell
-      title={t("common.adminTitle")}
-      navItems={navItems}
-    >
-      <Outlet />
-    </AppShell>
+    <>
+      <AppShell
+        title={t("common.adminTitle")}
+        navItems={navItems}
+        headerActions={<CommandPaletteTrigger onClick={() => setCommandPaletteOpen(true)} />}
+      >
+        <Outlet />
+      </AppShell>
+      <CommandPalette
+        open={commandPaletteOpen}
+        onOpenChange={setCommandPaletteOpen}
+        onNavigate={(href) => router.navigate({ to: href as any })}
+      />
+    </>
   );
 }
 
