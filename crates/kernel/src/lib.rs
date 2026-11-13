@@ -1,8 +1,13 @@
-//! Module trait, module registry, event bus and core error types.
+//! Module manifest, module trait, module registry and (later) the event bus.
 //!
-//! So far: the module manifest ([`manifest`], T03.01). The `Module` trait and
-//! the registry arrive with T03.02.
+//! * [`manifest`]: `module.toml` (T03.01).
+//! * [`module`]: the `Module` trait (T03.02).
+//! * [`registry`]: all modules of a build, checked and ordered (T03.02).
 
 pub mod manifest;
+pub mod module;
+pub mod registry;
 
 pub use manifest::{Manifest, ManifestError};
+pub use module::{Event, Health, ManifestOnly, Module, ModuleRoutes};
+pub use registry::{Registry, RegistryError};

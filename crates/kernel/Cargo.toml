@@ -11,6 +11,8 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+# The `Module` trait hands out Axum routers.
+axum = "0.8"
 serde = { version = "1", features = ["derive"] }
 thiserror = "2.0.21"
 # Module manifests (`module.toml`) are TOML.

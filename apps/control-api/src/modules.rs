@@ -4,7 +4,9 @@
 //! manifest stops the service with a message that lists every problem.
 //! (The `Module` trait and the registry that will own this list are T03.02.)
 
-use dhpanel_kernel::{Manifest, ManifestError};
+use std::sync::Arc;
+
+use dhpanel_kernel::{Manifest, ManifestError, ManifestOnly, Module, Registry};
 
 /// Directory name under `modules/` and the manifest text found there.
 const EMBEDDED: &[(&str, &str)] = &[
@@ -18,13 +20,14 @@ const EMBEDDED: &[(&str, &str)] = &[
 ///
 /// # Errors
 /// One [`ManifestError`] per broken manifest.
+#[cfg(test)]
 pub fn load() -> Result<Vec<Manifest>, Vec<ManifestError>> {
     load_from(EMBEDDED)
 }
 
 /// Parses `(directory, text)` pairs. Besides each manifest's own rules, the
-/// module name must equal its directory, and no name, permission key or
-/// feature key may be claimed by two modules.
+/// module name must equal its directory. How the modules fit together is
+/// checked by [`registry`].
 pub fn load_from(sources: &[(&str, &str)]) -> Result<Vec<Manifest>, Vec<ManifestError>> {
     let mut manifests = Vec::new();
     let mut errors = Vec::new();
@@ -42,43 +45,33 @@ pub fn load_from(sources: &[(&str, &str)]) -> Result<Vec<Manifest>, Vec<Manifest
             Err(err) => errors.push(err),
         }
     }
-    let mut owners: std::collections::BTreeMap<(&str, &str), &str> =
-        std::collections::BTreeMap::new();
-    for manifest in &manifests {
-        let name = manifest.module.name.as_str();
-        let claims = std::iter::once(("module", name))
-            .chain(
-                manifest
-                    .permissions
-                    .keys
-                    .iter()
-                    .map(|k| ("permission", k.as_str())),
-            )
-            .chain(
-                manifest
-                    .features
-                    .keys
-                    .iter()
-                    .map(|k| ("feature", k.as_str())),
-            )
-            .chain(manifest.limits.keys().map(|k| ("limit", k.as_str())));
-        for claim in claims {
-            if let Some(first) = owners.insert(claim, name) {
-                errors.push(ManifestError {
-                    origin: format!("module `{name}`"),
-                    problems: vec![format!(
-                        "{} `{}` is already defined by module `{first}`",
-                        claim.0, claim.1
-                    )],
-                });
-            }
-        }
-    }
     if errors.is_empty() {
         Ok(manifests)
     } else {
         Err(errors)
     }
+}
+
+/// Builds the module registry of this binary: every manifest valid, every
+/// dependency present, no cycles, no key defined twice.
+///
+/// # Errors
+/// The messages to show, one per broken manifest or one for the module set.
+pub fn registry() -> Result<Registry, Vec<String>> {
+    registry_from(EMBEDDED)
+}
+
+/// [`registry`] for the given manifests.
+pub fn registry_from(sources: &[(&str, &str)]) -> Result<Registry, Vec<String>> {
+    let manifests = load_from(sources)
+        .map_err(|errors| errors.iter().map(ToString::to_string).collect::<Vec<_>>())?;
+    // Until the modules' code is behind the `Module` trait (T03.04) they are
+    // represented by their manifests.
+    let modules = manifests
+        .into_iter()
+        .map(|m| Arc::new(ManifestOnly(m)) as Arc<dyn Module>)
+        .collect();
+    Registry::build(modules).map_err(|err| vec![err.to_string()])
 }
 
 #[cfg(test)]
@@ -100,6 +93,13 @@ mod tests {
         });
         let names: Vec<_> = manifests.iter().map(|m| m.module.name.as_str()).collect();
         assert_eq!(names, ["auth", "rbac", "audit", "nodes"]);
+        // And they fit together: dependencies first.
+        let registry = registry().unwrap_or_else(|e| panic!("{}", e.join("\n")));
+        assert_eq!(
+            registry.names().collect::<Vec<_>>(),
+            ["auth", "rbac", "audit", "nodes"]
+        );
+        assert_eq!(registry.dependents_of("rbac"), ["audit", "nodes"]);
         // Every dependency names a module that exists.
         for m in &manifests {
             for dep in &m.module.depends_on {
@@ -161,11 +161,20 @@ mod tests {
             "{text}"
         );
 
-        // Two modules cannot define the same permission key.
+        // Two modules cannot define the same permission key, and a missing
+        // dependency or a cycle stops the build of the registry.
         let thief = good.replace("name = \"alpha\"", "name = \"delta\"");
-        let text = load_from(&[("alpha", good), ("delta", &thief)]).unwrap_err()[0].to_string();
+        let text = registry_from(&[("alpha", good), ("delta", &thief)])
+            .unwrap_err()
+            .join("\n");
         assert!(
-            text.contains("permission `alpha.read` is already defined by module `alpha`"),
+            text.contains("permission `alpha.read` is defined by both `alpha` and `delta`"),
+            "{text}"
+        );
+        let needy = "[module]\nname = \"needy\"\nversion = \"1.0.0\"\ntitle = { en = \"N\" }\ncategory = \"web\"\ndepends_on = [\"ghost\"]\n";
+        let text = registry_from(&[("needy", needy)]).unwrap_err().join("\n");
+        assert!(
+            text.contains("module `needy` depends on `ghost`, which is not part of this build"),
             "{text}"
         );
     }

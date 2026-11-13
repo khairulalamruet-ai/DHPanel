@@ -50,20 +50,23 @@ async fn main() -> ExitCode {
 
     // Module manifests are part of the build; a broken one is a build mistake
     // that must not reach users half-working.
-    match modules::load() {
-        Ok(manifests) => tracing::info!(
-            modules = %manifests.iter().map(|m| m.module.name.as_str()).collect::<Vec<_>>().join(", "),
-            "module manifests valid"
-        ),
-        Err(errors) => {
-            for err in errors {
-                tracing::error!("{err}");
-                eprintln!("{SERVICE}: {err}");
+    let _registry = match modules::registry() {
+        Ok(registry) => {
+            tracing::info!(
+                modules = %registry.names().collect::<Vec<_>>().join(", "),
+                "module registry built"
+            );
+            registry
+        }
+        Err(messages) => {
+            for message in messages {
+                tracing::error!("{message}");
+                eprintln!("{SERVICE}: {message}");
             }
             telemetry.shutdown();
             return ExitCode::from(EXIT_CONFIG);
         }
-    }
+    };
 
     // Lazy pool: the API starts even if PostgreSQL is down; /ready reports it.
     let db = match config
