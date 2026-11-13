@@ -271,6 +271,19 @@ export function FileManagerPage() {
           <Button
             variant="outline"
             size="sm"
+            className="gap-2"
+            onClick={() => {
+              window.location.href = "/disk-usage";
+            }}
+            data-testid="disk-usage-nav-button"
+          >
+            <HardDrive className="w-4 h-4 text-primary" />
+            <span>{t("diskUsage.title")}</span>
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
             className="gap-2 relative"
             onClick={() => setTrashOpen(true)}
             data-testid="trash-view-button"

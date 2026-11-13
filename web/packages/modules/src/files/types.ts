@@ -82,3 +82,27 @@ export interface ExtractPayload {
 export interface RestoreTrashPayload {
   item_ids: string[];
 }
+
+export interface DirectoryUsageItem {
+  path: string;
+  name: string;
+  size_bytes: number;
+  size_formatted: string;
+  percentage_of_total: number;
+  inodes_count: number;
+  files_count: number;
+  last_calculated_at: string;
+}
+
+export interface DiskUsageResponse {
+  disk_used_bytes: number;
+  disk_used_formatted: string;
+  disk_limit_bytes: number;
+  disk_limit_formatted: string;
+  disk_usage_pct: number;
+  inodes_used: number;
+  inodes_limit: number;
+  inodes_usage_pct: number;
+  last_scanned_at: string;
+  top_directories: DirectoryUsageItem[];
+}

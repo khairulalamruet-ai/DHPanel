@@ -1450,5 +1450,26 @@
     "uploadSuccess": "File uploaded successfully",
     "folderEmpty": "This folder is empty",
     "dragDropToUpload": "Drag and drop files here to upload"
+  },
+  "diskUsage": {
+    "title": "Disk & Inode Usage",
+    "description": "Inspect storage breakdown and your largest 10 directories",
+    "recalculate": "Recalculate Usage",
+    "recalculatedSuccess": "Disk usage recalculated successfully",
+    "diskQuota": "Disk Storage Quota",
+    "inodesQuota": "Inode Allocation",
+    "used": "used",
+    "limit": "Limit",
+    "lastScanned": "Last scanned",
+    "inodesDescription": "Total file and directory system index nodes allocated",
+    "topTenDirectories": "Top 10 Largest Folders",
+    "topTenDescription": "Ranked by total disk space consumed",
+    "folderPath": "Directory Path",
+    "size": "Disk Size",
+    "quotaShare": "Share of Quota",
+    "inodes": "Inodes",
+    "filesCount": "Files",
+    "openInFileManager": "Open in File Manager",
+    "noDirectoriesFound": "No directory usage metrics available"
   }
 }

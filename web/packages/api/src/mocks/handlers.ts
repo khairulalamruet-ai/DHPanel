@@ -5254,6 +5254,132 @@ export const handlers = [
       http.post(/\/api\/v1\/client\/files\/extract$/, async () => {
         return HttpResponse.json({ success: true });
       }),
+
+      // GET /api/v1/client/files/disk-usage (T08.10)
+      // TODO(api:T08.10): Real agent du ionice storage overview
+      http.get(/\/api\/v1\/client\/files\/disk-usage$/, () => {
+        return HttpResponse.json({
+          disk_used_bytes: 1258291200,
+          disk_used_formatted: "1.2 GB",
+          disk_limit_bytes: 5368709120,
+          disk_limit_formatted: "5.0 GB",
+          disk_usage_pct: 24,
+          inodes_used: 12450,
+          inodes_limit: 250000,
+          inodes_usage_pct: 5,
+          last_scanned_at: new Date(Date.now() - 1800 * 1000).toISOString(),
+          top_directories: [
+            {
+              path: "/home/demo/public_html/wp-content/uploads",
+              name: "uploads",
+              size_bytes: 471859200,
+              size_formatted: "450.0 MB",
+              percentage_of_total: 37.5,
+              inodes_count: 3200,
+              files_count: 3150,
+              last_calculated_at: new Date().toISOString(),
+            },
+            {
+              path: "/home/demo/public_html/wp-content/plugins",
+              name: "plugins",
+              size_bytes: 209715200,
+              size_formatted: "200.0 MB",
+              percentage_of_total: 16.7,
+              inodes_count: 4500,
+              files_count: 4420,
+              last_calculated_at: new Date().toISOString(),
+            },
+            {
+              path: "/home/demo/logs",
+              name: "logs",
+              size_bytes: 157286400,
+              size_formatted: "150.0 MB",
+              percentage_of_total: 12.5,
+              inodes_count: 120,
+              files_count: 120,
+              last_calculated_at: new Date().toISOString(),
+            },
+            {
+              path: "/home/demo/public_html/wp-content/themes",
+              name: "themes",
+              size_bytes: 83886080,
+              size_formatted: "80.0 MB",
+              percentage_of_total: 6.7,
+              inodes_count: 850,
+              files_count: 810,
+              last_calculated_at: new Date().toISOString(),
+            },
+            {
+              path: "/home/demo/backups",
+              name: "backups",
+              size_bytes: 78643200,
+              size_formatted: "75.0 MB",
+              percentage_of_total: 6.3,
+              inodes_count: 8,
+              files_count: 8,
+              last_calculated_at: new Date().toISOString(),
+            },
+            {
+              path: "/home/demo/public_html/wp-includes",
+              name: "wp-includes",
+              size_bytes: 68157440,
+              size_formatted: "65.0 MB",
+              percentage_of_total: 5.4,
+              inodes_count: 1800,
+              files_count: 1780,
+              last_calculated_at: new Date().toISOString(),
+            },
+            {
+              path: "/home/demo/public_html/wp-admin",
+              name: "wp-admin",
+              size_bytes: 47185920,
+              size_formatted: "45.0 MB",
+              percentage_of_total: 3.8,
+              inodes_count: 750,
+              files_count: 730,
+              last_calculated_at: new Date().toISOString(),
+            },
+            {
+              path: "/home/demo/.trash",
+              name: ".trash",
+              size_bytes: 31457280,
+              size_formatted: "30.0 MB",
+              percentage_of_total: 2.5,
+              inodes_count: 45,
+              files_count: 45,
+              last_calculated_at: new Date().toISOString(),
+            },
+            {
+              path: "/home/demo/ssl",
+              name: "ssl",
+              size_bytes: 10485760,
+              size_formatted: "10.0 MB",
+              percentage_of_total: 0.8,
+              inodes_count: 12,
+              files_count: 12,
+              last_calculated_at: new Date().toISOString(),
+            },
+            {
+              path: "/home/demo/tmp",
+              name: "tmp",
+              size_bytes: 5242880,
+              size_formatted: "5.0 MB",
+              percentage_of_total: 0.4,
+              inodes_count: 35,
+              files_count: 35,
+              last_calculated_at: new Date().toISOString(),
+            },
+          ],
+        });
+      }),
+
+      // POST /api/v1/client/files/disk-usage/recalculate (T08.10)
+      http.post(/\/api\/v1\/client\/files\/disk-usage\/recalculate$/, () => {
+        return HttpResponse.json({
+          success: true,
+          message: "Recalculation scheduled",
+        });
+      }),
     ];
   })(),
 ];

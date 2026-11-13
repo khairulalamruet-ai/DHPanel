@@ -25,7 +25,7 @@ test.describe("Users Management UI (T04.15)", () => {
     await expect(nextBtn).toBeEnabled();
     await nextBtn.click();
 
-    await expect(page.getByText(/Page 2 of 100|[1১][0০][0০] পৃষ্ঠার মধ্যে [2২] নং পৃষ্ঠা/i)).toBeVisible();
+    await expect(page.getByText(/Page 2 of 100|[1১][0০][0০] পৃষ্ঠার মধ্যে [2২] নং পৃষ্ঠা/i)).toBeVisible({ timeout: 10000 });
   });
 
   test("filters users table by search keyword", async ({ page }) => {

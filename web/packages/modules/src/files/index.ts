@@ -7,3 +7,4 @@ export * from "./ArchiveDialog";
 export * from "./ExtractDialog";
 export * from "./TrashViewModal";
 export * from "./FileManagerPage";
+export * from "./DiskUsagePage";

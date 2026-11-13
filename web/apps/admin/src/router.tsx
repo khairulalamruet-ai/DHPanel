@@ -35,6 +35,7 @@ import {
   ClientDatabasesPage,
   AdminDatabasesPage,
   FileManagerPage,
+  DiskUsagePage,
   filterNavItems,
   registeredFrontendModules,
 } from "@dhpanel/modules";
@@ -288,6 +289,19 @@ const filesRoute = createRoute({
   component: FileManagerPage,
 });
 
+// 28. Disk Usage route (T08.10)
+const clientDiskUsageRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/client/disk-usage",
+  component: DiskUsagePage,
+});
+
+const diskUsageRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/disk-usage",
+  component: DiskUsagePage,
+});
+
 // 18. Login route
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -333,6 +347,8 @@ const routeTree = rootRoute.addChildren([
   adminDatabasesRoute,
   clientFilesRoute,
   filesRoute,
+  clientDiskUsageRoute,
+  diskUsageRoute,
   loginRoute,
 ]);
 

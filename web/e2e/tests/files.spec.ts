@@ -66,7 +66,7 @@ test.describe("Client File Manager UI (T08.09)", () => {
     // 4. Open Trash modal and verify file is in trash
     await page.getByTestId("trash-view-button").click();
     await expect(page.getByTestId("trash-modal-title")).toBeVisible();
-    await expect(page.getByText(fileName)).toBeVisible();
+    await expect(page.getByText(fileName, { exact: true })).toBeVisible();
 
     // 5. Restore the file from trash
     const restoreBtn = page.locator(`button:has-text("Restore"), button:has-text("পুনরুদ্ধার")`).first();
