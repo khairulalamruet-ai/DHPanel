@@ -1,5 +1,5 @@
 import React from "react";
-import { LayoutDashboard, ShieldCheck, ShieldAlert, Sparkles, Puzzle, Globe, Users, Settings, FileText, Boxes, Server, Activity, Layers, Lock, FileCode2, Cpu, Database, Folder, Archive, Clock, Terminal, Wrench, Flame, Mail, Briefcase } from "lucide-react";
+import { LayoutDashboard, ShieldCheck, ShieldAlert, Sparkles, Puzzle, Globe, Users, Settings, FileText, Boxes, Server, Activity, Layers, Lock, FileCode2, Cpu, Database, Folder, Archive, Clock, Terminal, Wrench, Flame, Mail, Briefcase, ArrowRightLeft } from "lucide-react";
 
 export interface ModuleManifest {
   name: string;
@@ -849,6 +849,36 @@ export const registeredFrontendModules: FrontendModule[] = [
         href: "/admin/resellers",
         order: 58,
         permission: "admin.resellers.manage",
+      },
+    ],
+  },
+  {
+    manifest: {
+      name: "migration",
+      title: { en: "Migration & Transfers", bn: "মাইগ্রেশন ও ট্রান্সফার" },
+      category: "core",
+      core: true,
+      permissions: ["migration.read", "migration.execute", "admin.migration.manage"],
+      features: ["migration"],
+    },
+    adminNav: [
+      {
+        id: "admin-migration",
+        labelKey: "migration.adminNav",
+        icon: <ArrowRightLeft className="h-4 w-4" />,
+        href: "/admin/migration",
+        order: 60,
+        permission: "admin.migration.manage",
+      },
+    ],
+    clientNav: [
+      {
+        id: "client-migration",
+        labelKey: "migration.nav",
+        icon: <ArrowRightLeft className="h-4 w-4" />,
+        href: "/migration",
+        order: 42,
+        permission: "migration.read",
       },
     ],
   },

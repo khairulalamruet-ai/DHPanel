@@ -57,6 +57,7 @@ import {
   AdminMailQueuePage,
   ResellerPortalPage,
   AdminResellersPage,
+  MigrationPage,
   filterNavItems,
   registeredFrontendModules,
 } from "@dhpanel/modules";
@@ -512,6 +513,19 @@ const resellerRoute = createRoute({
   component: ResellerPortalPage,
 });
 
+// 44. Migration & Transfer routes (T15.06)
+const adminMigrationRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/migration",
+  component: MigrationPage,
+});
+
+const clientMigrationRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/migration",
+  component: MigrationPage,
+});
+
 // 18. Login route
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -588,6 +602,8 @@ const routeTree = rootRoute.addChildren([
   clientEmailRoute,
   adminResellersRoute,
   resellerRoute,
+  adminMigrationRoute,
+  clientMigrationRoute,
   loginRoute,
 ]);
 

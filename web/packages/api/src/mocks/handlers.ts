@@ -8337,6 +8337,298 @@ export const handlers = [
                                                              mockResellerPackages = mockResellerPackages.filter((p) => p.id !== id);
                                                              return new HttpResponse(null, { status: 204 });
                                                            }),
+...(() => {
+                                                         // Migration & Transfer Handlers (T15.04, T15.05, T15.06)
+                                                         let mockTransferJobs: Array<{
+                                                           id: string;
+                                                           source_type: "cpanel" | "cyberpanel" | "openpanel" | "dhpanel_archive";
+                                                           source_host?: string;
+                                                           tenant_username: string;
+                                                           target_domain: string;
+                                                           status: "pending" | "running" | "completed" | "failed" | "cancelled";
+                                                           progress_percent: number;
+                                                           current_step: string;
+                                                           size_bytes?: number;
+                                                           created_at: string;
+                                                           updated_at: string;
+                                                           steps: Array<{
+                                                             id: string;
+                                                             name: string;
+                                                             status: "pending" | "running" | "completed" | "failed";
+                                                             started_at?: string;
+                                                             completed_at?: string;
+                                                             details?: string;
+                                                           }>;
+                                                           logs: string[];
+                                                         }> = [
+                                                           {
+                                                             id: "TRF-90241A",
+                                                             source_type: "cpanel" as const,
+                                                             source_host: "cpanel.legacy-host.com",
+                                                             tenant_username: "apex_store",
+                                                             target_domain: "apexstore.com",
+                                                             status: "running" as const,
+                                                             progress_percent: 65,
+                                                             current_step: "Restoring MySQL Databases",
+                                                             size_bytes: 858993459,
+                                                             created_at: new Date(Date.now() - 360000).toISOString(),
+                                                             updated_at: new Date().toISOString(),
+                                                             steps: [
+                                                               {
+                                                                 id: "step-1",
+                                                                 name: "Connecting to Remote Server via SSH",
+                                                                 status: "completed" as const,
+                                                                 started_at: new Date(Date.now() - 360000).toISOString(),
+                                                                 completed_at: new Date(Date.now() - 350000).toISOString(),
+                                                                 details: "Authenticated successfully as root via port 22",
+                                                               },
+                                                               {
+                                                                 id: "step-2",
+                                                                 name: "Generating & Fetching cpmove Backup Archive",
+                                                                 status: "completed" as const,
+                                                                 started_at: new Date(Date.now() - 350000).toISOString(),
+                                                                 completed_at: new Date(Date.now() - 210000).toISOString(),
+                                                                 details: "Transferred 819 MB archive (cpmove-apex_store.tar.gz)",
+                                                               },
+                                                               {
+                                                                 id: "step-3",
+                                                                 name: "Extracting Archive & Parsing Metadata",
+                                                                 status: "completed" as const,
+                                                                 started_at: new Date(Date.now() - 210000).toISOString(),
+                                                                 completed_at: new Date(Date.now() - 170000).toISOString(),
+                                                                 details: "Parsed 3 domains, 2 MySQL DBs, 5 mailboxes, and 12 cron entries",
+                                                               },
+                                                               {
+                                                                 id: "step-4",
+                                                                 name: "Restoring MySQL Databases & Users",
+                                                                 status: "running" as const,
+                                                                 started_at: new Date(Date.now() - 170000).toISOString(),
+                                                                 details: "Importing apex_store_prod (184 MB) table structure & data",
+                                                               },
+                                                               {
+                                                                 id: "step-5",
+                                                                 name: "Restoring Web Root & Vhost Configuration",
+                                                                 status: "pending" as const,
+                                                               },
+                                                               {
+                                                                 id: "step-6",
+                                                                 name: "Configuring DNS & SSL Certificates",
+                                                                 status: "pending" as const,
+                                                               },
+                                                               {
+                                                                 id: "step-7",
+                                                                 name: "Verifying Tenant Services & Health Check",
+                                                                 status: "pending" as const,
+                                                               },
+                                                             ],
+                                                             logs: [
+                                                               "Connecting to remote host cpanel.legacy-host.com on port 22...",
+                                                               "SSH handshake complete. Key accepted.",
+                                                               "Checking source cPanel version: 110.0.12 (Linux x86_64)",
+                                                               "Triggering /scripts/pkgacct apex_store --skiphomedir=0...",
+                                                               "pkgacct completed in 42s. Archive size: 819,200 KB.",
+                                                               "Starting streaming rsync transfer to /var/dhpanel/transfers/cpmove-apex_store.tar.gz...",
+                                                               "Transfer completed: 858,993,459 bytes received (speed 38.4 MB/s).",
+                                                               "Validating SHA256 checksum... OK.",
+                                                               "Extracting archive metadata from cp/apex_store yaml manifest...",
+                                                               "Discovered primary domain: apexstore.com (document_root: public_html)",
+                                                               "Provisioning DHPanel tenant apex_store with linux user and cgroup limits...",
+                                                               "RESTORED user apex_store (UID 1042, GID 1042)",
+                                                               "Extracting MySQL dumps: apex_store_prod.sql.gz, apex_store_cache.sql.gz...",
+                                                               "Creating MySQL user apex_store_u with grant on apex_store_prod.*...",
+                                                               "Importing database apex_store_prod (table count: 48)...",
+                                                             ],
+                                                           },
+                                                           {
+                                                             id: "TRF-88192C",
+                                                             source_type: "cyberpanel" as const,
+                                                             source_host: "198.51.100.24",
+                                                             tenant_username: "agency_portal",
+                                                             target_domain: "agencyportal.io",
+                                                             status: "completed" as const,
+                                                             progress_percent: 100,
+                                                             current_step: "Migration Completed Successfully",
+                                                             size_bytes: 429496729,
+                                                             created_at: new Date(Date.now() - 7200000).toISOString(),
+                                                             updated_at: new Date(Date.now() - 6900000).toISOString(),
+                                                             steps: [
+                                                               {
+                                                                 id: "step-1",
+                                                                 name: "Connecting to Remote Server via SSH",
+                                                                 status: "completed" as const,
+                                                                 started_at: new Date(Date.now() - 7200000).toISOString(),
+                                                                 completed_at: new Date(Date.now() - 7190000).toISOString(),
+                                                               },
+                                                               {
+                                                                 id: "step-2",
+                                                                 name: "Generating & Fetching CyberPanel Backup",
+                                                                 status: "completed" as const,
+                                                                 started_at: new Date(Date.now() - 7190000).toISOString(),
+                                                                 completed_at: new Date(Date.now() - 7080000).toISOString(),
+                                                               },
+                                                               {
+                                                                 id: "step-3",
+                                                                 name: "Extracting Archive & Parsing Metadata",
+                                                                 status: "completed" as const,
+                                                                 started_at: new Date(Date.now() - 7080000).toISOString(),
+                                                                 completed_at: new Date(Date.now() - 7040000).toISOString(),
+                                                               },
+                                                               {
+                                                                 id: "step-4",
+                                                                 name: "Restoring MySQL Databases & Users",
+                                                                 status: "completed" as const,
+                                                                 started_at: new Date(Date.now() - 7040000).toISOString(),
+                                                                 completed_at: new Date(Date.now() - 6980000).toISOString(),
+                                                               },
+                                                               {
+                                                                 id: "step-5",
+                                                                 name: "Restoring Web Root & Vhost Configuration",
+                                                                 status: "completed" as const,
+                                                                 started_at: new Date(Date.now() - 6980000).toISOString(),
+                                                                 completed_at: new Date(Date.now() - 6930000).toISOString(),
+                                                               },
+                                                               {
+                                                                 id: "step-6",
+                                                                 name: "Configuring DNS & SSL Certificates",
+                                                                 status: "completed" as const,
+                                                                 started_at: new Date(Date.now() - 6930000).toISOString(),
+                                                                 completed_at: new Date(Date.now() - 6910000).toISOString(),
+                                                               },
+                                                               {
+                                                                 id: "step-7",
+                                                                 name: "Verifying Tenant Services & Health Check",
+                                                                 status: "completed" as const,
+                                                                 started_at: new Date(Date.now() - 6910000).toISOString(),
+                                                                 completed_at: new Date(Date.now() - 6900000).toISOString(),
+                                                                 details: "All HTTP/HTTPS endpoints healthy with status 200 OK",
+                                                               },
+                                                             ],
+                                                             logs: [
+                                                               "Connecting to remote CyberPanel instance 198.51.100.24:22...",
+                                                               "Transfer initiated for agency_portal...",
+                                                               "Fetching backup archive: 429,496,729 bytes transferred.",
+                                                               "Archive extracted and verified.",
+                                                               "RESTORED database agency_portal_main (size: 42 MB).",
+                                                               "RESTORED public_html web files (file count: 3,420).",
+                                                               "Generated Caddy virtual host configuration for agencyportal.io.",
+                                                               "ACME TLS certificate provisioned.",
+                                                               "SUCCESS: Migration completed in 5m 0s. All services live.",
+                                                             ],
+                                                           },
+                                                         ];
+
+                                                         return [
+                                                           // GET /api/v1/migration/transfers (TODO(api:T15.06))
+                                                           http.get(/\/api\/v1\/migration\/transfers$/, () => {
+                                                             return HttpResponse.json(mockTransferJobs);
+                                                           }),
+
+                                                           // GET /api/v1/migration/transfers/:id (TODO(api:T15.06))
+                                                           http.get(/\/api\/v1\/migration\/transfers\/([^/]+)$/, ({ params }) => {
+                                                             const id = String(params[0]);
+                                                             const job = mockTransferJobs.find((j) => j.id === id);
+                                                             if (!job) return new HttpResponse(null, { status: 404 });
+                                                             return HttpResponse.json(job);
+                                                           }),
+
+                                                           // POST /api/v1/migration/transfers (TODO(api:T15.04), TODO(api:T15.05))
+                                                           http.post(/\/api\/v1\/migration\/transfers$/, async ({ request }) => {
+                                                             const body = (await request.json().catch(() => ({}))) as any;
+                                                             const newJob = {
+                                                               id: `TRF-${Math.floor(10000 + Math.random() * 90000)}X`,
+                                                               source_type: body.source_type || "cpanel",
+                                                               source_host: body.remote_host || "127.0.0.1",
+                                                               tenant_username: body.tenant_username,
+                                                               target_domain: body.target_domain,
+                                                               status: "running" as const,
+                                                               progress_percent: 15,
+                                                               current_step: "Connecting to Remote Server via SSH",
+                                                               size_bytes: 104857600,
+                                                               created_at: new Date().toISOString(),
+                                                               updated_at: new Date().toISOString(),
+                                                               steps: [
+                                                                 {
+                                                                   id: "step-1",
+                                                                   name: "Connecting to Remote Server via SSH",
+                                                                   status: "running" as const,
+                                                                   started_at: new Date().toISOString(),
+                                                                   details: `Connecting to ${body.remote_host || "source"}...`,
+                                                                 },
+                                                                 {
+                                                                   id: "step-2",
+                                                                   name: "Generating & Fetching Archive",
+                                                                   status: "pending" as const,
+                                                                 },
+                                                                 {
+                                                                   id: "step-3",
+                                                                   name: "Extracting Archive & Parsing Metadata",
+                                                                   status: "pending" as const,
+                                                                 },
+                                                                 {
+                                                                   id: "step-4",
+                                                                   name: "Restoring MySQL Databases & Users",
+                                                                   status: "pending" as const,
+                                                                 },
+                                                                 {
+                                                                   id: "step-5",
+                                                                   name: "Restoring Web Root & Vhost Configuration",
+                                                                   status: "pending" as const,
+                                                                 },
+                                                                 {
+                                                                   id: "step-6",
+                                                                   name: "Configuring DNS & SSL Certificates",
+                                                                   status: "pending" as const,
+                                                                 },
+                                                                 {
+                                                                   id: "step-7",
+                                                                   name: "Verifying Tenant Services",
+                                                                   status: "pending" as const,
+                                                                 },
+                                                               ],
+                                                               logs: [
+                                                                 `Initiating migration transfer from ${body.source_type} at ${body.remote_host || "local"}...`,
+                                                                 `Connecting via SSH to ${body.remote_user || "root"}@${body.remote_host}:${body.remote_ssh_port || 22}...`,
+                                                                 "SSH connection established. Handshake verified.",
+                                                                 `Target tenant account: ${body.tenant_username} (@${body.target_domain}).`,
+                                                               ],
+                                                             };
+                                                             mockTransferJobs.unshift(newJob);
+                                                             return HttpResponse.json(newJob, { status: 201 });
+                                                           }),
+
+                                                           // POST /api/v1/migration/transfers/:id/retry (TODO(api:T15.06))
+                                                           http.post(/\/api\/v1\/migration\/transfers\/([^/]+)\/retry$/, ({ params }) => {
+                                                             const id = String(params[0]);
+                                                             const job = mockTransferJobs.find((j) => j.id === id);
+                                                             if (job) {
+                                                               job.status = "running";
+                                                               job.progress_percent = 20;
+                                                               job.current_step = "Connecting to Remote Server via SSH";
+                                                               job.logs.push("Retrying migration transfer from step 1...");
+                                                             }
+                                                             return HttpResponse.json({ success: true });
+                                                           }),
+
+                                                           // POST /api/v1/migration/transfers/:id/cancel (TODO(api:T15.06))
+                                                           http.post(/\/api\/v1\/migration\/transfers\/([^/]+)\/cancel$/, ({ params }) => {
+                                                             const id = String(params[0]);
+                                                             const job = mockTransferJobs.find((j) => j.id === id);
+                                                             if (job) {
+                                                               job.status = "cancelled";
+                                                               job.current_step = "Transfer Aborted by User";
+                                                               job.logs.push("WARNING: Transfer cancelled by operator.");
+                                                             }
+                                                             return HttpResponse.json({ success: true });
+                                                           }),
+
+                                                           // DELETE /api/v1/migration/transfers/:id (TODO(api:T15.06))
+                                                           http.delete(/\/api\/v1\/migration\/transfers\/([^/]+)$/, ({ params }) => {
+                                                             const id = String(params[0]);
+                                                             mockTransferJobs = mockTransferJobs.filter((j) => j.id !== id);
+                                                             return new HttpResponse(null, { status: 204 });
+                                                           }),
+                                                         ];
+                                                       })(),
                                                          ];
                                                        })(),
                                                          ];
