@@ -195,6 +195,7 @@ fn execute(action: &Action, config: &Config) -> Result<(), (ErrorCode, &'static 
             disk_bytes,
             inodes,
         } => tenant::set_storage_quota(&config.tenants, tenant_id, *uid, *disk_bytes, *inodes),
+        Action::RemoveTenant { tenant_id, uid } => tenant::remove(&config.tenants, tenant_id, *uid),
     }
 }
 

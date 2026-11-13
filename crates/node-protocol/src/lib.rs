@@ -162,6 +162,31 @@ pub enum Operation {
         /// Processes the plan gives the stack (`None` = unlimited).
         pids: Option<u32>,
     },
+    /// Stop a tenant's containers; its files stay. Safe to repeat. Answered with
+    /// [`Output::TenantSuspended`].
+    SuspendTenant {
+        /// The tenant's system name.
+        username: String,
+    },
+    /// Start a suspended tenant's containers again and wait until they run.
+    /// Safe to repeat. Answered with [`Output::TenantResumed`].
+    ResumeTenant {
+        /// The tenant's system name.
+        username: String,
+    },
+    /// Remove a tenant from the node: containers, network, volume and, when
+    /// `purge_data` is set, its files and directories (without it the files stay
+    /// for a later purge). Safe to repeat. Answered with [`Output::TenantDeleted`].
+    DeleteTenant {
+        /// The tenant's id.
+        tenant_id: Uuid,
+        /// The tenant's system name.
+        username: String,
+        /// The tenant's numeric user id.
+        uid: u32,
+        /// Delete the site files too. Irreversible.
+        purge_data: bool,
+    },
     /// Change the limits of a tenant's running containers to a plan's, without
     /// restarting them. Answered with [`Output::ResourceLimitsSet`].
     SetResourceLimits {
@@ -185,6 +210,9 @@ impl Operation {
         "set_storage_quota",
         "provision_tenant_stack",
         "set_resource_limits",
+        "suspend_tenant",
+        "resume_tenant",
+        "delete_tenant",
     ];
 
     /// The operation's wire name.
@@ -197,6 +225,9 @@ impl Operation {
             Self::SetStorageQuota { .. } => "set_storage_quota",
             Self::ProvisionTenantStack { .. } => "provision_tenant_stack",
             Self::SetResourceLimits { .. } => "set_resource_limits",
+            Self::SuspendTenant { .. } => "suspend_tenant",
+            Self::ResumeTenant { .. } => "resume_tenant",
+            Self::DeleteTenant { .. } => "delete_tenant",
         }
     }
 }
@@ -328,6 +359,21 @@ pub enum Output {
     StorageQuotaSet {
         /// How the node enforces it (`xfs`).
         backend: String,
+    },
+    /// Answer to [`Operation::SuspendTenant`].
+    TenantSuspended {
+        /// Names of the containers that are stopped, in the order they were stopped.
+        containers: Vec<String>,
+    },
+    /// Answer to [`Operation::ResumeTenant`].
+    TenantResumed {
+        /// Names of the running containers, in start order.
+        containers: Vec<String>,
+    },
+    /// Answer to [`Operation::DeleteTenant`].
+    TenantDeleted {
+        /// Whether the files were deleted too.
+        purged: bool,
     },
     /// Answer to [`Operation::SetResourceLimits`].
     ResourceLimitsSet {
@@ -1049,6 +1095,18 @@ mod tests {
                 memory_bytes: Some(1 << 30),
                 pids: Some(300),
             },
+            Operation::SuspendTenant {
+                username: "alice".into(),
+            },
+            Operation::ResumeTenant {
+                username: "alice".into(),
+            },
+            Operation::DeleteTenant {
+                tenant_id: id(),
+                username: "alice".into(),
+                uid: 10_000,
+                purge_data: true,
+            },
         ] {
             let wire = serde_json::to_value(&op).unwrap();
             assert_eq!(wire["type"], op.type_name());
@@ -1056,7 +1114,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            6,
+            9,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }

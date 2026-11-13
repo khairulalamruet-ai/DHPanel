@@ -32,6 +32,14 @@ pub enum Action {
         /// Most files and directories.
         inodes: Option<u64>,
     },
+    /// Removes a tenant's two (empty) directories after its files were
+    /// deleted. Never deletes any file: a non-empty directory is a failure.
+    RemoveTenant {
+        /// The tenant's id (a lower-case UUID).
+        tenant_id: String,
+        /// The tenant's numeric id (10000..59999).
+        uid: u32,
+    },
 }
 
 impl Action {
@@ -42,6 +50,7 @@ impl Action {
             Self::Noop => "noop",
             Self::PrepareTenant { .. } => "prepare_tenant",
             Self::SetStorageQuota { .. } => "set_storage_quota",
+            Self::RemoveTenant { .. } => "remove_tenant",
         }
     }
 }
@@ -135,6 +144,7 @@ fn allowed_fields(action: &str) -> Option<&'static [&'static str]> {
         "noop" => Some(&["type"]),
         "prepare_tenant" => Some(&["type", "tenant_id", "uid"]),
         "set_storage_quota" => Some(&["type", "tenant_id", "uid", "disk_bytes", "inodes"]),
+        "remove_tenant" => Some(&["type", "tenant_id", "uid"]),
         _ => None,
     }
 }

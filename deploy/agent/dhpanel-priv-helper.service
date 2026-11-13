@@ -54,7 +54,7 @@ MemoryDenyWriteExecute=yes
 SystemCallArchitectures=native
 SystemCallFilter=@system-service
 SystemCallFilter=~@privileged @resources
-SystemCallFilter=chown fchown fchownat quotactl quotactl_fd
+SystemCallFilter=chown fchown fchownat lchown quotactl quotactl_fd
 UMask=0077
 
 [Install]

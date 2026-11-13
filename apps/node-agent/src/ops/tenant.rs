@@ -20,12 +20,14 @@ use std::{
     time::Duration,
 };
 
-use dhpanel_docker_manager::{DockerError, DockerManager, Name};
+use dhpanel_docker_manager::{
+    ContainerSpec, DockerError, DockerManager, Name, Network, VolumeMount,
+};
 use dhpanel_domain::{TenantUsername, UidRange};
 use dhpanel_node_protocol::{AgentError, ErrorCode, Operation, Output};
 use dhpanel_priv_helper::protocol::{Action, ErrorCode as HelperCode, Request, Response};
 use dhpanel_tenant_stack::{
-    Allowlist, PlanResources, Tenant, files_volume_name, network_name, plan_limits, render,
+    Allowlist, PlanResources, Role, Tenant, files_volume_name, network_name, plan_limits, render,
 };
 use uuid::Uuid;
 
@@ -283,6 +285,250 @@ pub async fn provision_tenant_stack(
     Ok(Output::StackProvisioned {
         containers: started,
     })
+}
+
+/// How long a stopping container gets before it is killed.
+const STOP_GRACE: Duration = Duration::from_secs(20);
+/// Longest the file-deleting container may take.
+const PURGE_TIMEOUT: Duration = Duration::from_secs(600);
+
+fn parse_username(username: &str) -> Result<TenantUsername, AgentError> {
+    TenantUsername::parse(username)
+        .map_err(|e| AgentError::new(ErrorCode::InvalidArguments, e.to_string()))
+}
+
+/// Names of a tenant's containers, in start order (PHP, then the web server).
+fn stack_names(username: &TenantUsername) -> Result<Vec<Name>, AgentError> {
+    plan_limits(
+        username,
+        &PlanResources {
+            cpu_millis: None,
+            memory_bytes: None,
+            pids: None,
+        },
+    )
+    .map(|all| all.into_iter().map(|(name, _)| name).collect())
+    .map_err(|e| AgentError::new(ErrorCode::InvalidArguments, e.to_string()))
+}
+
+/// Fails (not retryable) unless every container of the stack exists.
+async fn require_provisioned(docker: &DockerManager, names: &[Name]) -> Result<(), AgentError> {
+    for name in names {
+        match docker.inspect(name).await {
+            Ok(_) => {}
+            Err(DockerError::NotFound) => {
+                return Err(AgentError::new(
+                    ErrorCode::InvalidArguments,
+                    "the tenant's stack has not been provisioned here",
+                ));
+            }
+            Err(e) => return Err(docker_error(&e)),
+        }
+    }
+    Ok(())
+}
+
+/// `suspend_tenant`: stops the web server first, then PHP. The files stay.
+///
+/// # Errors
+/// [`AgentError`]: bad arguments or no stack here (not retryable); Docker
+/// unavailable (retryable).
+pub async fn suspend_tenant(
+    context: Arc<TenantContext>,
+    op: Operation,
+) -> Result<Output, AgentError> {
+    let Operation::SuspendTenant { username } = op else {
+        return Err(super::wrong_operation());
+    };
+    let mut names = stack_names(&parse_username(&username)?)?;
+    require_provisioned(&context.docker, &names).await?;
+    names.reverse();
+    let mut stopped = Vec::new();
+    for name in &names {
+        context
+            .docker
+            .stop(name, STOP_GRACE)
+            .await
+            .map_err(|e| docker_error(&e))?;
+        stopped.push(name.as_str().to_owned());
+    }
+    Ok(Output::TenantSuspended {
+        containers: stopped,
+    })
+}
+
+/// `resume_tenant`: starts PHP, then the web server, and waits until they run.
+///
+/// # Errors
+/// As [`provision_tenant_stack`], without the plan checks.
+pub async fn resume_tenant(
+    context: Arc<TenantContext>,
+    op: Operation,
+) -> Result<Output, AgentError> {
+    let Operation::ResumeTenant { username } = op else {
+        return Err(super::wrong_operation());
+    };
+    let names = stack_names(&parse_username(&username)?)?;
+    require_provisioned(&context.docker, &names).await?;
+    let mut running = Vec::new();
+    for name in &names {
+        context
+            .docker
+            .start(name)
+            .await
+            .map_err(|e| docker_error(&e))?;
+        wait_healthy(&context.docker, name).await?;
+        running.push(name.as_str().to_owned());
+    }
+    Ok(Output::TenantResumed {
+        containers: running,
+    })
+}
+
+/// Ignores "it is not there": removing what is already gone is success.
+fn gone_is_fine(result: Result<(), DockerError>) -> Result<(), AgentError> {
+    match result {
+        Ok(()) | Err(DockerError::NotFound) => Ok(()),
+        Err(e) => Err(docker_error(&e)),
+    }
+}
+
+/// Deletes every file of a tenant by running a throw-away container as the
+/// tenant itself: the tenant may delete its own files and nobody else's, so no
+/// privileged code ever walks a directory the tenant controls.
+async fn delete_files(
+    context: &TenantContext,
+    id: &str,
+    username: &TenantUsername,
+    uid: u32,
+) -> Result<(), AgentError> {
+    let docker = &context.docker;
+    let root = context.tenants_root.join(id);
+    let volume = files_volume_name(username).map_err(|e| invalid_arg(&e.to_string()))?;
+    // The volume goes when a tenant is deleted without purging; make it again.
+    docker
+        .create_bind_volume(&volume, &root.join("www"), &context.tenants_root)
+        .await
+        .map_err(|e| docker_error(&e))?;
+    let allowlist = Allowlist::embedded().map_err(|e| {
+        AgentError::new(
+            ErrorCode::Internal,
+            format!("the image list is broken: {e}"),
+        )
+    })?;
+    let image = allowlist
+        .current(Role::Php)
+        .map_err(|e| invalid_arg(&e.to_string()))?
+        .clone();
+    let name =
+        Name::parse(&format!("dh-{username}-purge")).map_err(|e| invalid_arg(&e.to_string()))?;
+    let mut spec = ContainerSpec::new(name.clone(), image.clone());
+    spec.command = ["find", "/data", "-mindepth", "1", "-delete"]
+        .map(str::to_owned)
+        .to_vec();
+    spec.user = Some((uid, uid));
+    spec.memory_bytes = 64 * 1024 * 1024;
+    spec.pids_limit = 32;
+    spec.network = Network::None;
+    spec.volumes = vec![VolumeMount {
+        volume,
+        target: "/data".to_owned(),
+        read_only: false,
+    }];
+    gone_is_fine(docker.remove(&name, true).await)?; // left over from a failed attempt
+    docker
+        .pull_image(&image)
+        .await
+        .map_err(|e| docker_error(&e))?;
+    docker
+        .create_container(&spec)
+        .await
+        .map_err(|e| docker_error(&e))?;
+    let outcome = async {
+        docker.start(&name).await.map_err(|e| docker_error(&e))?;
+        let deadline = tokio::time::Instant::now() + PURGE_TIMEOUT;
+        loop {
+            let info = docker.inspect(&name).await.map_err(|e| docker_error(&e))?;
+            if !info.running && info.status != "created" {
+                return if info.exit_code == Some(0) {
+                    Ok(())
+                } else {
+                    Err(AgentError::new(
+                        ErrorCode::Internal,
+                        "deleting the tenant's files failed",
+                    ))
+                };
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return Err(AgentError::new(
+                    ErrorCode::Internal,
+                    "deleting the tenant's files took too long",
+                )
+                .retryable());
+            }
+            tokio::time::sleep(POLL).await;
+        }
+    }
+    .await;
+    gone_is_fine(docker.remove(&name, true).await)?;
+    outcome
+}
+
+fn invalid_arg(message: &str) -> AgentError {
+    AgentError::new(ErrorCode::InvalidArguments, message.to_owned())
+}
+
+/// `delete_tenant`: removes the stack; with `purge_data` also the files.
+///
+/// # Errors
+/// [`AgentError`]: bad arguments (not retryable); Docker or the helper
+/// unavailable, a slow purge (retryable).
+pub async fn delete_tenant(
+    context: Arc<TenantContext>,
+    op: Operation,
+) -> Result<Output, AgentError> {
+    let Operation::DeleteTenant {
+        tenant_id,
+        username,
+        uid,
+        purge_data,
+    } = op
+    else {
+        return Err(super::wrong_operation());
+    };
+    let username = parse_username(&username)?;
+    if !UidRange::DEFAULT.contains(uid) {
+        return Err(invalid_arg("the user id is outside the tenant range"));
+    }
+    let docker = &context.docker;
+    let id = tenant_id.to_string();
+    let mut names = stack_names(&username)?;
+    names.reverse(); // web first
+    for name in &names {
+        gone_is_fine(docker.remove(name, true).await)?;
+    }
+    if purge_data {
+        // Only if the directory is still there (a repeated purge has nothing to do).
+        let root = context.tenants_root.join(&id);
+        if tokio::fs::symlink_metadata(&root).await.is_ok() {
+            delete_files(&context, &id, &username, uid).await?;
+        }
+    }
+    let network = network_name(&username).map_err(|e| invalid_arg(&e.to_string()))?;
+    let volume = files_volume_name(&username).map_err(|e| invalid_arg(&e.to_string()))?;
+    gone_is_fine(docker.remove_volume(&volume).await)?;
+    gone_is_fine(docker.remove_network(&network).await)?;
+    if purge_data {
+        let socket = context.helper_socket.clone();
+        tokio::task::spawn_blocking(move || {
+            ask_helper(&socket, Action::RemoveTenant { tenant_id: id, uid })
+        })
+        .await
+        .map_err(|_| {
+            AgentError::new(ErrorCode::Internal, "the helper call was cancelled").retryable()
+        })??;
+    }
+    Ok(Output::TenantDeleted { purged: purge_data })
 }
 
 /// `set_resource_limits`.

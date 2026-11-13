@@ -171,6 +171,79 @@ pub fn set_storage_quota(
         .map_err(|_| (ErrorCode::Failed, "applying the quota failed"))
 }
 
+/// Removes the (empty) directories of a deleted tenant.
+///
+/// # Errors
+/// [`Failure`]: bad arguments, a directory that is not the tenant's, or one
+/// that still holds files (the agent empties it first).
+pub fn remove(env: &TenantEnv, tenant_id: &str, uid: u32) -> Result<(), Failure> {
+    if !valid_tenant_id(tenant_id) {
+        return Err((ErrorCode::InvalidArguments, "the tenant id is not a UUID"));
+    }
+    let subuid = fs::read_to_string(&env.subuid_file)
+        .map_err(|_| (ErrorCode::Failed, "cannot read the subordinate id file"))?;
+    let range = subuid_range(&subuid, &env.agent_name)
+        .ok_or((ErrorCode::Failed, "the agent has no subordinate id range"))?;
+    let owner = host_uid(range, uid)?;
+    remove_as(env, tenant_id, owner)
+}
+
+/// The filesystem part of [`remove`], with the owner already worked out.
+///
+/// The helper holds only `CAP_CHOWN`, so it first takes the tenant directory
+/// back (the tenant's containers are gone, nobody else can be inside), which
+/// lets it look inside again; then both directories go. `remove_dir` only ever
+/// removes an empty directory, so a tenant's files can never be deleted here.
+///
+/// # Errors
+/// [`Failure`].
+pub fn remove_as(env: &TenantEnv, tenant_id: &str, owner: u32) -> Result<(), Failure> {
+    let failed = |_: io::Error| (ErrorCode::Failed, "cannot remove the tenant directory");
+    let clash = (
+        ErrorCode::Failed,
+        "the tenant directory has a different owner or type",
+    );
+    let me = rustix::process::geteuid().as_raw();
+    let my_gid = rustix::process::getegid().as_raw();
+    let tenant = env.root.join(tenant_id);
+    let www = tenant.join("www");
+    match fs::symlink_metadata(&tenant) {
+        // Already gone: a repeated request is fine.
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(err) => return Err(failed(err)),
+        Ok(meta) if meta.file_type().is_dir() && (meta.uid() == owner || meta.uid() == me) => {
+            if meta.uid() != me {
+                // lchown: never through a link.
+                std::os::unix::fs::lchown(&tenant, Some(me), Some(my_gid)).map_err(failed)?;
+            }
+        }
+        Ok(_) => return Err(clash),
+    }
+    // Now ours: nobody can change what is inside while we look at it.
+    match fs::symlink_metadata(&www) {
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+        Err(err) => return Err(failed(err)),
+        Ok(meta) if meta.file_type().is_dir() => {
+            if meta.uid() != me {
+                std::os::unix::fs::lchown(&www, Some(me), Some(my_gid)).map_err(failed)?;
+            }
+            fs::remove_dir(&www).map_err(|_| {
+                (
+                    ErrorCode::Failed,
+                    "the tenant's files must be deleted before its directories",
+                )
+            })?;
+        }
+        Ok(_) => return Err(clash),
+    }
+    fs::remove_dir(&tenant).map_err(|_| {
+        (
+            ErrorCode::Failed,
+            "the tenant directory holds something besides the site files",
+        )
+    })
+}
+
 /// The filesystem part, with the owner already worked out.
 ///
 /// The helper holds only `CAP_CHOWN`: once a directory belongs to the tenant,
@@ -345,6 +418,43 @@ mod tests {
         );
         prepare_as(&env, ID, uid, None).unwrap(); // again: nothing to do
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn removal_takes_empty_directories_only_and_is_repeatable() {
+        let root = scratch("remove");
+        let (uid, gid) = me();
+        let env = TenantEnv {
+            root: root.clone(),
+            agent_name: "agent".into(),
+            subuid_file: "/nonexistent".into(),
+            agent_gid: gid,
+            mountinfo: "/nonexistent".into(),
+        };
+        // Nothing there: fine.
+        fs::create_dir_all(&root).unwrap();
+        remove_as(&env, ID, uid).unwrap();
+        // Files inside: refused, nothing deleted.
+        prepare_as(&env, ID, uid, None).unwrap();
+        let file = root.join(ID).join("www").join("index.html");
+        fs::write(&file, b"keep me").unwrap();
+        let err = remove_as(&env, ID, uid).unwrap_err();
+        assert_eq!(err.0, ErrorCode::Failed);
+        assert_eq!(fs::read(&file).unwrap(), b"keep me");
+        // Emptied: both directories go, and asking again is fine.
+        fs::remove_file(&file).unwrap();
+        remove_as(&env, ID, uid).unwrap();
+        assert!(!root.join(ID).exists());
+        remove_as(&env, ID, uid).unwrap();
+        // A symlink in the place of the tenant directory is never followed or removed.
+        let target = scratch("remove-target");
+        fs::create_dir_all(target.join("www")).unwrap();
+        std::os::unix::fs::symlink(&target, root.join(ID)).unwrap();
+        assert_eq!(remove_as(&env, ID, uid).unwrap_err().0, ErrorCode::Failed);
+        assert!(target.join("www").is_dir());
+        assert!(fs::symlink_metadata(root.join(ID)).unwrap().is_symlink());
+        let _ = fs::remove_dir_all(&root);
+        let _ = fs::remove_dir_all(&target);
     }
 
     #[test]

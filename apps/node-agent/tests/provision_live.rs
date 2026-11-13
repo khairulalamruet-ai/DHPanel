@@ -271,3 +271,158 @@ async fn changing_the_plan_changes_the_limits_of_the_running_stack() {
         .remove_network(&Name::parse(&format!("dh-{username}-net")).unwrap())
         .await;
 }
+
+#[tokio::test]
+#[ignore = "needs the privileged helper running as root, Docker and registry access"]
+async fn suspend_keeps_the_files_resume_restores_the_site_and_delete_removes_everything() {
+    use dhpanel_docker_manager::DockerError;
+    use dhpanel_node_agent::ops::tenant::{delete_tenant, resume_tenant, suspend_tenant};
+    let (Some(helper_socket), Some(tenants_root)) = (
+        std::env::var_os("DHPANEL_TEST_HELPER_SOCKET"),
+        std::env::var_os("DHPANEL_TEST_TENANTS_ROOT"),
+    ) else {
+        eprintln!("skipped: no helper (see the live script)");
+        return;
+    };
+    let tenants_root = PathBuf::from(tenants_root);
+    let socket = docker_socket();
+    let docker = DockerManager::connect(&socket).unwrap();
+    let context = Arc::new(TenantContext {
+        helper_socket: PathBuf::from(helper_socket),
+        tenants_root: tenants_root.clone(),
+        docker: docker.clone(),
+    });
+    let tenant_id = Uuid::now_v7();
+    let username = format!("d{}x", std::process::id());
+    let uid = 10_079;
+    let php = Name::parse(&format!("dh-{username}-php")).unwrap();
+    let web = Name::parse(&format!("dh-{username}-web")).unwrap();
+    let root = tenants_root.join(tenant_id.to_string());
+    let docker_cli = |args: &[&str]| {
+        Command::new("docker")
+            .args(["-H", &format!("unix://{}", socket.display())])
+            .args(args)
+            .output()
+            .unwrap()
+    };
+
+    create_tenant(
+        context.clone(),
+        Operation::CreateTenant {
+            tenant_id,
+            username: username.clone(),
+            uid,
+        },
+    )
+    .await
+    .unwrap();
+    provision_tenant_stack(
+        context.clone(),
+        Operation::ProvisionTenantStack {
+            tenant_id,
+            username: username.clone(),
+            uid,
+            cpu_millis: Some(1000),
+            memory_bytes: Some(256 << 20),
+            pids: Some(100),
+        },
+    )
+    .await
+    .expect("stack provisioned");
+    // The tenant's site: a file, and a hidden one in a nested directory.
+    let wrote = docker_cli(&[
+        "exec",
+        php.as_str(),
+        "sh",
+        "-c",
+        "echo hello > /var/www/html/index.php && mkdir -p /var/www/html/sub/.hidden && echo x > /var/www/html/sub/.hidden/.secret",
+    ]);
+    assert!(wrote.status.success(), "{wrote:?}");
+
+    let suspend = Operation::SuspendTenant {
+        username: username.clone(),
+    };
+    let output = suspend_tenant(context.clone(), suspend.clone())
+        .await
+        .expect("suspended");
+    assert_eq!(
+        output,
+        Output::TenantSuspended {
+            containers: vec![web.as_str().to_owned(), php.as_str().to_owned()]
+        },
+        "the web server stops first"
+    );
+    for name in [&php, &web] {
+        assert!(!docker.inspect(name).await.unwrap().running, "{name:?}");
+    }
+    assert_eq!(
+        std::fs::read_to_string(root.join("www/index.php"))
+            .unwrap()
+            .trim(),
+        "hello",
+        "suspending keeps the site's files"
+    );
+    suspend_tenant(context.clone(), suspend)
+        .await
+        .expect("suspending twice is fine");
+
+    let resume = Operation::ResumeTenant {
+        username: username.clone(),
+    };
+    resume_tenant(context.clone(), resume.clone())
+        .await
+        .expect("resumed");
+    for name in [&php, &web] {
+        assert!(docker.inspect(name).await.unwrap().running, "{name:?}");
+    }
+    resume_tenant(context.clone(), resume)
+        .await
+        .expect("resuming twice is fine");
+
+    // Soft delete: everything but the files goes.
+    let soft = Operation::DeleteTenant {
+        tenant_id,
+        username: username.clone(),
+        uid,
+        purge_data: false,
+    };
+    assert_eq!(
+        delete_tenant(context.clone(), soft.clone()).await.unwrap(),
+        Output::TenantDeleted { purged: false }
+    );
+    for name in [&php, &web] {
+        assert!(matches!(
+            docker.inspect(name).await,
+            Err(DockerError::NotFound)
+        ));
+    }
+    let listed = docker_cli(&["network", "ls", "--format", "{{.Name}}"]);
+    assert!(!String::from_utf8_lossy(&listed.stdout).contains(&format!("dh-{username}-net")));
+    let volumes = docker_cli(&["volume", "ls", "--format", "{{.Name}}"]);
+    assert!(!String::from_utf8_lossy(&volumes.stdout).contains(&format!("dh-{username}-www")));
+    assert!(root.join("www/index.php").exists(), "the files are kept");
+    delete_tenant(context.clone(), soft)
+        .await
+        .expect("deleting twice is fine");
+
+    // Purge: the files and both directories go, including hidden ones.
+    let purge = Operation::DeleteTenant {
+        tenant_id,
+        username: username.clone(),
+        uid,
+        purge_data: true,
+    };
+    assert_eq!(
+        delete_tenant(context.clone(), purge.clone()).await.unwrap(),
+        Output::TenantDeleted { purged: true }
+    );
+    assert!(
+        std::fs::symlink_metadata(&root).is_err(),
+        "the tenant's directory is gone"
+    );
+    let leftovers = docker_cli(&["ps", "-a", "--format", "{{.Names}}"]);
+    assert!(!String::from_utf8_lossy(&leftovers.stdout).contains(&username));
+    delete_tenant(context.clone(), purge)
+        .await
+        .expect("purging twice is fine");
+}

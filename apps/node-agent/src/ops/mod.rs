@@ -85,6 +85,18 @@ impl Registry {
                 let context = context.clone();
                 move |op| tenant::create_tenant(context.clone(), op)
             });
+            registry.register("suspend_tenant", {
+                let context = context.clone();
+                move |op| tenant::suspend_tenant(context.clone(), op)
+            });
+            registry.register("resume_tenant", {
+                let context = context.clone();
+                move |op| tenant::resume_tenant(context.clone(), op)
+            });
+            registry.register("delete_tenant", {
+                let context = context.clone();
+                move |op| tenant::delete_tenant(context.clone(), op)
+            });
             registry.register("set_resource_limits", {
                 let context = context.clone();
                 move |op| tenant::set_resource_limits(context.clone(), op)
