@@ -37,6 +37,7 @@ import {
   FileManagerPage,
   DiskUsagePage,
   FtpAccountsPage,
+  ClientBackupsPage,
   filterNavItems,
   registeredFrontendModules,
 } from "@dhpanel/modules";
@@ -316,6 +317,19 @@ const ftpRoute = createRoute({
   component: FtpAccountsPage,
 });
 
+// 30. Backups route (T09.09)
+const clientBackupsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/client/backups",
+  component: ClientBackupsPage,
+});
+
+const backupsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/backups",
+  component: ClientBackupsPage,
+});
+
 // 18. Login route
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -365,6 +379,8 @@ const routeTree = rootRoute.addChildren([
   diskUsageRoute,
   clientFtpRoute,
   ftpRoute,
+  clientBackupsRoute,
+  backupsRoute,
   loginRoute,
 ]);
 

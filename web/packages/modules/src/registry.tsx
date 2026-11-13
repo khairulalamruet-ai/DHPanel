@@ -1,5 +1,5 @@
 import React from "react";
-import { LayoutDashboard, ShieldCheck, Sparkles, Puzzle, Globe, Users, Settings, FileText, Boxes, Server, Activity, Layers, Lock, FileCode2, Cpu, Database, Folder } from "lucide-react";
+import { LayoutDashboard, ShieldCheck, Sparkles, Puzzle, Globe, Users, Settings, FileText, Boxes, Server, Activity, Layers, Lock, FileCode2, Cpu, Database, Folder, Archive } from "lucide-react";
 
 export interface ModuleManifest {
   name: string;
@@ -513,6 +513,27 @@ export const registeredFrontendModules: FrontendModule[] = [
         order: 27,
         permission: "ftp.read",
         feature: "ftp",
+      },
+    ],
+  },
+  {
+    manifest: {
+      name: "backups",
+      title: { en: "Backups", bn: "ব্যাকআপসমূহ" },
+      category: "backup",
+      core: true,
+      permissions: ["backups.read", "backups.manage"],
+      features: ["backups"],
+    },
+    clientNav: [
+      {
+        id: "backups",
+        labelKey: "backups.nav",
+        icon: <Archive className="h-4 w-4" />,
+        href: "/backups",
+        order: 28,
+        permission: "backups.read",
+        feature: "backups",
       },
     ],
   },

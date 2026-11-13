@@ -5502,6 +5502,143 @@ export const handlers = [
             }
             return HttpResponse.json({ success: true });
           }),
+
+          // ==========================================
+          // Backup & Restore: T09.09 Handlers
+          // TODO(api:T09.08): Real agent backup creation and restoration endpoints
+          // ==========================================
+          ...(() => {
+            interface MockBackupItem {
+              id: string;
+              name: string;
+              type: "full" | "files" | "databases";
+              size_bytes: number;
+              size_formatted: string;
+              status: "completed" | "in_progress" | "failed";
+              created_at: string;
+              completed_at?: string;
+              destination: string;
+              download_url?: string;
+              sha256: string;
+              manifest: {
+                domains: string[];
+                databases: string[];
+                has_mail?: boolean;
+                has_dns?: boolean;
+              };
+            }
+
+            const mockBackups: MockBackupItem[] = [
+              {
+                id: "bk_01",
+                name: "backup-demo-20261110-full.tar.zst",
+                type: "full",
+                size_bytes: 471859200,
+                size_formatted: "450.0 MB",
+                status: "completed",
+                created_at: new Date(Date.now() - 86400 * 3 * 1000).toISOString(),
+                completed_at: new Date(Date.now() - 86400 * 3 * 1000 + 120000).toISOString(),
+                destination: "Local Storage",
+                sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                manifest: {
+                  domains: ["demo.dhpanel.test"],
+                  databases: ["demo_wordpress", "demo_analytics"],
+                  has_mail: true,
+                  has_dns: true,
+                },
+              },
+              {
+                id: "bk_02",
+                name: "backup-demo-20261112-dbs.tar.zst",
+                type: "databases",
+                size_bytes: 52428800,
+                size_formatted: "50.0 MB",
+                status: "completed",
+                created_at: new Date(Date.now() - 86400 * 1 * 1000).toISOString(),
+                completed_at: new Date(Date.now() - 86400 * 1 * 1000 + 45000).toISOString(),
+                destination: "Amazon S3 (us-east-1)",
+                sha256: "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb",
+                manifest: {
+                  domains: [],
+                  databases: ["demo_wordpress"],
+                  has_mail: false,
+                  has_dns: false,
+                },
+              },
+            ];
+
+            return [
+              // GET /api/v1/client/backups
+              http.get(/\/api\/v1\/client\/backups$/, () => {
+                return HttpResponse.json(mockBackups);
+              }),
+
+              // POST /api/v1/client/backups
+              http.post(/\/api\/v1\/client\/backups$/, async ({ request }) => {
+                const body = (await request.json()) as {
+                  type: "full" | "files" | "databases";
+                  include_databases: boolean;
+                  include_files: boolean;
+                  include_mail: boolean;
+                  note?: string;
+                };
+
+                const now = new Date();
+                const dateStr = now.toISOString().slice(0, 10).replace(/-/g, "");
+                const newBackup: MockBackupItem = {
+                  id: `bk_${Date.now()}`,
+                  name: `backup-demo-${dateStr}-${body.type}.tar.zst`,
+                  type: body.type,
+                  size_bytes: body.type === "full" ? 524288000 : body.type === "files" ? 419430400 : 104857600,
+                  size_formatted: body.type === "full" ? "500.0 MB" : body.type === "files" ? "400.0 MB" : "100.0 MB",
+                  status: "completed",
+                  created_at: now.toISOString(),
+                  completed_at: new Date(now.getTime() + 60000).toISOString(),
+                  destination: "Local Storage",
+                  sha256: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+                  manifest: {
+                    domains: body.include_files ? ["demo.dhpanel.test"] : [],
+                    databases: body.include_databases ? ["demo_wordpress", "demo_analytics"] : [],
+                    has_mail: body.include_mail,
+                    has_dns: body.type === "full",
+                  },
+                };
+
+                mockBackups.unshift(newBackup);
+                return HttpResponse.json(newBackup, { status: 201 });
+              }),
+
+              // POST /api/v1/client/backups/:id/restore
+              http.post(/\/api\/v1\/client\/backups\/([^/]+)\/restore$/, async ({ params }) => {
+                const id = (params[0] || params.id) as string;
+                return HttpResponse.json({
+                  success: true,
+                  message: "Restore job submitted successfully",
+                  restore_job_id: `job_rst_${Date.now()}`,
+                  backup_id: id,
+                });
+              }),
+
+              // GET /api/v1/client/backups/:id/download
+              http.get(/\/api\/v1\/client\/backups\/([^/]+)\/download$/, ({ params }) => {
+                const id = (params[0] || params.id) as string;
+                const found = mockBackups.find((b) => b.id === id);
+                return HttpResponse.json({
+                  download_url: `/api/v1/client/backups/download/${found?.name || "backup.tar.zst"}`,
+                });
+              }),
+
+              // DELETE /api/v1/client/backups/:id
+              http.delete(/\/api\/v1\/client\/backups\/([^/]+)$/, ({ params }) => {
+                const id = (params[0] || params.id) as string;
+                const idx = mockBackups.findIndex((b) => b.id === id);
+                if (idx !== -1) {
+                  mockBackups.splice(idx, 1);
+                }
+                return HttpResponse.json({ success: true });
+              }),
+            ];
+          })(),
         ];
       })(),
     ];
