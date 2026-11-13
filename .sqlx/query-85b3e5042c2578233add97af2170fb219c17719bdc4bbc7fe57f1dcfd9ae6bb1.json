@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE modules\n                           SET version = $2, category = $3, core = $4, manifest = $5,\n                               status = 'present', last_seen_at = now(),\n                               enabled = enabled OR $4\n                           WHERE name = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Bool",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "85b3e5042c2578233add97af2170fb219c17719bdc4bbc7fe57f1dcfd9ae6bb1"
+}

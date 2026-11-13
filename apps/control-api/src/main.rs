@@ -50,7 +50,7 @@ async fn main() -> ExitCode {
 
     // Module manifests are part of the build; a broken one is a build mistake
     // that must not reach users half-working.
-    let _registry = match modules::registry() {
+    let registry = match modules::registry() {
         Ok(registry) => {
             tracing::info!(
                 modules = %registry.names().collect::<Vec<_>>().join(", "),
@@ -103,6 +103,9 @@ async fn main() -> ExitCode {
             return ExitCode::from(EXIT_CONFIG);
         }
     };
+
+    // Tell the database which modules this build has (retried until it works).
+    tokio::spawn(modules::sync_until_done(db.clone(), registry.clone()));
 
     let readiness = Readiness::default()
         .with_probe("database", {

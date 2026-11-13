@@ -12,6 +12,7 @@
 pub mod accounts;
 pub mod admins;
 pub mod mfa;
+pub mod modules;
 pub mod node_enrollments;
 pub mod nodes;
 pub mod operations;

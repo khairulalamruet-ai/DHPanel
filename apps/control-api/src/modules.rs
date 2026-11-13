@@ -74,6 +74,66 @@ pub fn registry_from(sources: &[(&str, &str)]) -> Result<Registry, Vec<String>> 
     Registry::build(modules).map_err(|err| vec![err.to_string()])
 }
 
+/// Writes the modules of this build into the `modules` table (T03.03): new
+/// ones appear switched on, known ones are refreshed, and modules that are no
+/// longer part of the build are marked missing.
+///
+/// # Errors
+/// Database errors (the caller retries; the API works without the sync).
+pub async fn sync(
+    db: &dhpanel_database::sqlx::PgPool,
+    registry: &Registry,
+) -> Result<dhpanel_database::modules::SyncReport, dhpanel_database::sqlx::Error> {
+    let manifests: Vec<(&Manifest, serde_json::Value)> = registry
+        .modules()
+        .iter()
+        .map(|m| {
+            let manifest = m.manifest();
+            (manifest, serde_json::to_value(manifest).unwrap_or_default())
+        })
+        .collect();
+    let records: Vec<dhpanel_database::modules::ModuleRecord<'_>> = manifests
+        .iter()
+        .map(|(manifest, json)| dhpanel_database::modules::ModuleRecord {
+            name: &manifest.module.name,
+            version: &manifest.module.version,
+            category: manifest.module.category.as_str(),
+            core: manifest.module.core,
+            manifest: json,
+        })
+        .collect();
+    dhpanel_database::modules::sync(db, &records).await
+}
+
+/// Runs [`sync`] until it succeeds once (the database may come up after the
+/// API does), logging what changed.
+pub async fn sync_until_done(db: dhpanel_database::sqlx::PgPool, registry: Registry) {
+    let mut wait = std::time::Duration::from_secs(1);
+    loop {
+        match sync(&db, &registry).await {
+            Ok(report) => {
+                if report.is_empty() {
+                    tracing::debug!("modules table already matches this build");
+                } else {
+                    tracing::info!(
+                        added = ?report.added,
+                        restored = ?report.restored,
+                        updated = ?report.updated,
+                        missing = ?report.missing,
+                        "modules table synced with this build"
+                    );
+                }
+                return;
+            }
+            Err(err) => {
+                tracing::warn!(error = %err, retry_in = ?wait, "could not sync the modules table");
+                tokio::time::sleep(wait).await;
+                wait = (wait * 2).min(std::time::Duration::from_secs(30));
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::unwrap_used)]
 mod tests {
