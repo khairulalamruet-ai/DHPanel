@@ -1,0 +1,26 @@
+[package]
+name = "dhpanel-events"
+description = "The event bus: events written with their change (outbox) and relayed to enabled modules."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+dhpanel-database.workspace = true
+dhpanel-kernel.workspace = true
+serde_json = "1"
+thiserror = "2.0.21"
+tokio = { version = "1", features = ["macros", "rt", "time", "sync"] }
+tracing = "0.1.44"
+uuid = { version = "1", features = ["serde"] }
+
+[dev-dependencies]
+dhpanel-database.workspace = true
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "postgres", "macros", "uuid", "json", "migrate"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+uuid = { version = "1", features = ["serde", "v7"] }

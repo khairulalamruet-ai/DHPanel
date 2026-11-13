@@ -13,6 +13,7 @@ workspace = true
 [dependencies]
 dhpanel-audit.workspace = true
 dhpanel-database.workspace = true
+dhpanel-events.workspace = true
 dhpanel-http-kit.workspace = true
 dhpanel-kernel.workspace = true
 dhpanel-rbac.workspace = true

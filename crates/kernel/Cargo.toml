@@ -17,6 +17,8 @@ serde = { version = "1", features = ["derive"] }
 thiserror = "2.0.21"
 # Module manifests (`module.toml`) are TOML.
 toml = "1"
+# Ids inside events.
+uuid = { version = "1", features = ["serde"] }
 # `oneshot` to hand a request to the currently mounted router.
 tower = { version = "0.5", features = ["util"] }
 

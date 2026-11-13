@@ -73,6 +73,20 @@ impl ModuleMount {
             .clone()
     }
 
+    /// The modules whose routes are being served right now, dependencies first.
+    /// These are the modules that receive events.
+    #[must_use]
+    pub fn active_modules(&self) -> Vec<Arc<dyn crate::module::Module>> {
+        let mounted = self.mounted();
+        self.inner
+            .registry
+            .modules()
+            .iter()
+            .filter(|m| mounted.contains(&m.manifest().module.name))
+            .cloned()
+            .collect()
+    }
+
     /// What would be served if exactly `enabled` were switched on: core
     /// modules always, others only with all their dependencies.
     #[must_use]

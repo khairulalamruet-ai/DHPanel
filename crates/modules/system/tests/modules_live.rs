@@ -329,6 +329,25 @@ async fn a_switched_off_module_answers_404_at_once_and_comes_back_when_switched_
         ("admin.module_enabled", "ssl")
     );
     assert_eq!(audit[0].2, json!({"requested": "ssl", "cascade": false}));
+    // And the matching events are in the outbox, written in the same transaction.
+    let events: Vec<(String, Value)> =
+        sqlx::query_as("SELECT event_type, payload FROM outbox ORDER BY id")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        events,
+        [
+            (
+                "module_disabled".to_owned(),
+                json!({"type": "module_disabled", "name": "ssl"})
+            ),
+            (
+                "module_enabled".to_owned(),
+                json!({"type": "module_enabled", "name": "ssl"})
+            ),
+        ]
+    );
 }
 
 #[sqlx::test(migrations = "../../../migrations")]
@@ -454,4 +473,9 @@ async fn core_modules_strangers_and_bad_requests_are_refused(pool: PgPool) {
         .await
         .unwrap();
     assert_eq!(audited, 0);
+    let announced: i64 = sqlx::query_scalar("SELECT count(*) FROM outbox")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(announced, 0, "refused requests announce nothing");
 }

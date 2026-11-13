@@ -27,7 +27,7 @@ use axum::{
 use dhpanel_audit::{AuditEntry, Outcome};
 use dhpanel_database::{modules as db, sqlx::PgPool};
 use dhpanel_http_kit::{AppError, ProblemDetails};
-use dhpanel_kernel::ModuleMount;
+use dhpanel_kernel::{Event, ModuleMount};
 use dhpanel_rbac::{
     Require, RequireRecent,
     permissions::{ModulesManage, ModulesRead},
@@ -289,6 +289,19 @@ pub async fn set_module(
         )
         .await
         .map_err(internal)?;
+        // Announced with the change: if the transaction fails, nobody hears of it.
+        let event = if change.enabled {
+            Event::ModuleEnabled {
+                name: module.clone(),
+            }
+        } else {
+            Event::ModuleDisabled {
+                name: module.clone(),
+            }
+        };
+        dhpanel_events::publish(&mut tx, &event)
+            .await
+            .map_err(internal)?;
     }
     let now_enabled: BTreeSet<String> = db::enabled_names_in(&mut tx)
         .await

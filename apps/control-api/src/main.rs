@@ -298,6 +298,15 @@ async fn main() -> ExitCode {
         std::time::Duration::from_secs(15),
     ));
     let app = app::router(mount.service(), trusted_proxies);
+    // The event relay: hands outbox events to the enabled modules.
+    let relay = dhpanel_events::Relay::new(
+        db.clone(),
+        {
+            let mount = mount.clone();
+            Arc::new(move || mount.active_modules())
+        },
+        dhpanel_events::Settings::default(),
+    );
 
     // One signal stops the API and the agent port.
     let (stop, stopped) = tokio::sync::watch::channel(false);
@@ -316,6 +325,7 @@ async fn main() -> ExitCode {
         );
         Some(tokio::spawn(dispatcher.run(results, stopped.clone())))
     });
+    let relay_task = tokio::spawn(relay.run(stopped.clone()));
     let gateway_task =
         gateway.map(|(gateway, listener)| tokio::spawn(gateway.serve(listener, stopped.clone())));
 
@@ -347,6 +357,7 @@ async fn main() -> ExitCode {
     if let Some(task) = dispatcher_task {
         let _ = task.await;
     }
+    let _ = relay_task.await;
 
     db.close().await;
     telemetry.shutdown();

@@ -16,6 +16,7 @@ pub mod modules;
 pub mod node_enrollments;
 pub mod nodes;
 pub mod operations;
+pub mod outbox;
 pub mod rbac;
 
 use std::{future::Future, pin::Pin, time::Duration};

@@ -9,6 +9,8 @@
 use std::{future::Future, pin::Pin, time::Duration};
 
 use axum::Router;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use crate::manifest::Manifest;
 
@@ -61,9 +63,16 @@ pub struct JobSpec {
     pub every: Duration,
 }
 
-/// Something that happened, announced to every enabled module. The typed
-/// domain events (tenant created, domain added, ...) are added by T03.05.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Something that happened, announced to every enabled module (T03.05).
+///
+/// Events are facts in the past tense with the ids needed to act on them, not
+/// copies of the data: a handler reads what it needs. They are written to the
+/// outbox in the transaction that made them true and delivered afterwards, at
+/// least once, so handlers must be safe to repeat. New kinds are added here as
+/// modules need them; a build that does not know an event's type cannot
+/// deliver it and reports that.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 #[non_exhaustive]
 pub enum Event {
     /// A module was switched on.
@@ -76,6 +85,49 @@ pub enum Event {
         /// Its name.
         name: String,
     },
+    /// A tenant (hosting account) was created.
+    TenantCreated {
+        /// The tenant.
+        tenant_id: Uuid,
+    },
+    /// A tenant was deleted; everything that belongs to it has to go.
+    TenantDeleted {
+        /// The tenant.
+        tenant_id: Uuid,
+    },
+    /// A domain was added to a tenant.
+    DomainAdded {
+        /// The tenant.
+        tenant_id: Uuid,
+        /// The domain's id.
+        domain_id: Uuid,
+        /// The domain name.
+        name: String,
+    },
+    /// A domain was removed from a tenant.
+    DomainRemoved {
+        /// The tenant.
+        tenant_id: Uuid,
+        /// The domain's id.
+        domain_id: Uuid,
+        /// The domain name.
+        name: String,
+    },
+}
+
+impl Event {
+    /// The event's wire name (the `type` in its JSON form).
+    #[must_use]
+    pub fn type_name(&self) -> &'static str {
+        match self {
+            Self::ModuleEnabled { .. } => "module_enabled",
+            Self::ModuleDisabled { .. } => "module_disabled",
+            Self::TenantCreated { .. } => "tenant_created",
+            Self::TenantDeleted { .. } => "tenant_deleted",
+            Self::DomainAdded { .. } => "domain_added",
+            Self::DomainRemoved { .. } => "domain_removed",
+        }
+    }
 }
 
 /// A module could not handle an event. The message is for the log.

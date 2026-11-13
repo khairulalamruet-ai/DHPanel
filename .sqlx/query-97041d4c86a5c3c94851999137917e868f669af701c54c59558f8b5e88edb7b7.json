@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE outbox\n           SET attempts = attempts + 1,\n               last_error = left($2, 2000),\n               next_attempt_at = now() + make_interval(secs => $3::int),\n               dead_at = CASE WHEN attempts + 1 >= $4 THEN now() ELSE NULL END\n           WHERE id = $1\n           RETURNING dead_at IS NOT NULL AS \"dead!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "dead!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "97041d4c86a5c3c94851999137917e868f669af701c54c59558f8b5e88edb7b7"
+}

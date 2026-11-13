@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*) FILTER (WHERE delivered_at IS NULL AND dead_at IS NULL) AS \"pending!\",\n                  count(*) FILTER (WHERE dead_at IS NOT NULL) AS \"dead!\"\n           FROM outbox",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pending!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "dead!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "1d2d544c65ca8245f0860df91ec6d3980f1a7419965b58b0b93b478930618c66"
+}
