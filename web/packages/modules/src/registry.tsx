@@ -570,6 +570,37 @@ export const registeredFrontendModules: FrontendModule[] = [
   },
   {
     manifest: {
+      name: "logs",
+      title: { en: "Log Viewer", bn: "লগ ভিউয়ার" },
+      category: "monitoring",
+      core: true,
+      permissions: ["logs.read"],
+      features: ["logs"],
+    },
+    clientNav: [
+      {
+        id: "logs",
+        labelKey: "logs.nav",
+        icon: <FileText className="h-4 w-4" />,
+        href: "/logs",
+        order: 32,
+        permission: "logs.read",
+        feature: "logs",
+      },
+    ],
+    adminNav: [
+      {
+        id: "admin-logs",
+        labelKey: "logs.nav",
+        icon: <FileText className="h-4 w-4" />,
+        href: "/admin/logs",
+        order: 58,
+        permission: "logs.read",
+      },
+    ],
+  },
+  {
+    manifest: {
       name: "users",
       title: { en: "Users", bn: "ব্যবহারকারী" },
       category: "core",

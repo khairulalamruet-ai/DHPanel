@@ -28,4 +28,5 @@ export * from "./files";
 export * from "./ftp";
 export * from "./backups";
 export * from "./cron";
+export * from "./logs";
 export type { SslStatus } from "./domains";

@@ -6086,6 +6086,157 @@ export const handlers = [
                         }
                         return HttpResponse.json({ success: true });
                       }),
+
+                      // ==========================================
+                      // LOG VIEWER (TODO(api:T10.04))
+                      // ==========================================
+                      ...(() => {
+                        const mockDomainOverviews = [
+                          {
+                            domain: "demo.dhpanel.test",
+                            access_log_size_bytes: 8945600,
+                            access_log_size_formatted: "8.5 MB",
+                            error_log_size_bytes: 421000,
+                            error_log_size_formatted: "411 KB",
+                            php_error_log_size_bytes: 184500,
+                            php_error_log_size_formatted: "180 KB",
+                            last_updated_at: new Date().toISOString(),
+                          },
+                          {
+                            domain: "store.dhpanel.test",
+                            access_log_size_bytes: 15420000,
+                            access_log_size_formatted: "14.7 MB",
+                            error_log_size_bytes: 120500,
+                            error_log_size_formatted: "117 KB",
+                            php_error_log_size_bytes: 52100,
+                            php_error_log_size_formatted: "50 KB",
+                            last_updated_at: new Date().toISOString(),
+                          },
+                          {
+                            domain: "api.dhpanel.test",
+                            access_log_size_bytes: 28450000,
+                            access_log_size_formatted: "27.1 MB",
+                            error_log_size_bytes: 84000,
+                            error_log_size_formatted: "82 KB",
+                            php_error_log_size_bytes: 12000,
+                            php_error_log_size_formatted: "11 KB",
+                            last_updated_at: new Date().toISOString(),
+                          },
+                        ];
+
+                        const generateSeedLogs = (domain: string, type: string) => {
+                          const entries: any[] = [];
+                          const targetDomain = domain === "all" ? "demo.dhpanel.test" : domain;
+                          const baseTime = Date.now() - 3600 * 1000 * 4;
+
+                          if (type === "access") {
+                            const paths = [
+                              "/",
+                              "/wp-login.php",
+                              "/api/v1/health",
+                              "/products/12",
+                              "/cart/checkout",
+                              "/assets/app.css",
+                              "/assets/vendor.js",
+                              "/favicon.ico",
+                              "/robots.txt",
+                              "/admin/settings",
+                            ];
+                            const methods = ["GET", "GET", "POST", "GET", "PUT", "DELETE"];
+                            const statuses = [200, 200, 201, 301, 304, 404, 500];
+
+                            for (let i = 1; i <= 250; i++) {
+                              const time = new Date(baseTime + i * 55000).toISOString();
+                              const path = paths[i % paths.length];
+                              const method = methods[i % methods.length];
+                              const status = statuses[i % statuses.length];
+                              const ip = `192.168.1.${(i % 150) + 10}`;
+
+                              entries.push({
+                                id: `log_acc_${i}`,
+                                lineNumber: i,
+                                timestamp: time,
+                                type: "access",
+                                domain: targetDomain,
+                                status_code: status,
+                                level: status >= 500 ? "error" : status >= 400 ? "warn" : "info",
+                                method,
+                                path,
+                                ip,
+                                message: `${method} ${path} HTTP/2.0 ${status} - ${ip}`,
+                                raw: `${time} [${targetDomain}] ${ip} "${method} ${path} HTTP/2.0" ${status} 4280 "Mozilla/5.0"`,
+                              });
+                            }
+                          } else if (type === "error") {
+                            const errorMessages = [
+                              "[error] connect() failed (111: Connection refused) while connecting to upstream",
+                              "[warn] directory index of \"/var/www/html/\" is forbidden",
+                              "[error] open() \"/var/www/demo/public_html/.env\" failed (13: Permission denied)",
+                              "[error] upstream timed out (110: Connection timed out) while reading response header",
+                              "[error] client closed connection while SSL handshaking",
+                            ];
+
+                            for (let i = 1; i <= 50; i++) {
+                              const time = new Date(baseTime + i * 280000).toISOString();
+                              const msg = errorMessages[i % errorMessages.length];
+                              entries.push({
+                                id: `log_err_${i}`,
+                                lineNumber: i,
+                                timestamp: time,
+                                type: "error",
+                                domain: targetDomain,
+                                level: msg.includes("[warn]") ? "warn" : "error",
+                                message: msg,
+                                raw: `${time} [${targetDomain}] ${msg}, client: 192.168.1.45, server: ${targetDomain}`,
+                              });
+                            }
+                          } else {
+                            // PHP error log
+                            const phpErrors = [
+                              "PHP Fatal error:  Uncaught TypeError: Argument 1 passed to App\\Services\\Payment::process() must be of the type string, null given in /var/www/demo/app/Services/Payment.php:64",
+                              "PHP Warning:  Undefined array key \"session_token\" in /var/www/demo/bootstrap.php on line 28",
+                              "PHP Notice:  session_start(): Ignoring session_start() because a session is already active in /var/www/demo/index.php on line 12",
+                              "PHP Deprecated:  Creation of dynamic property App\\Models\\User::$temp_auth is deprecated in /var/www/demo/app/Models/User.php:89",
+                            ];
+
+                            for (let i = 1; i <= 40; i++) {
+                              const time = new Date(baseTime + i * 360000).toISOString();
+                              const msg = phpErrors[i % phpErrors.length];
+                              const isFatal = msg.includes("Fatal");
+                              const isWarn = msg.includes("Warning");
+
+                              entries.push({
+                                id: `log_php_${i}`,
+                                lineNumber: i,
+                                timestamp: time,
+                                type: "php",
+                                domain: targetDomain,
+                                level: isFatal ? "error" : isWarn ? "warn" : "info",
+                                message: msg,
+                                raw: `[${time.slice(0, 19).replace("T", " ")} UTC] ${msg}`,
+                              });
+                            }
+                          }
+
+                          return entries;
+                        };
+
+                        return [
+                          // GET /api/v1/client/logs/overview (TODO(api:T10.04))
+                          http.get(/\/api\/v1\/client\/logs\/overview$/, () => {
+                            return HttpResponse.json(mockDomainOverviews);
+                          }),
+
+                          // GET /api/v1/client/logs (TODO(api:T10.04))
+                          http.get(/\/api\/v1\/client\/logs$/, ({ request }) => {
+                            const url = new URL(request.url);
+                            const domain = url.searchParams.get("domain") || "all";
+                            const type = url.searchParams.get("type") || "access";
+                            const logs = generateSeedLogs(domain, type);
+                            return HttpResponse.json(logs);
+                          }),
+                        ];
+                      })(),
                     ];
                   })(),
                 ];

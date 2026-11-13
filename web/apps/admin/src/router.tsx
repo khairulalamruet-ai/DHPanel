@@ -40,6 +40,7 @@ import {
   ClientBackupsPage,
   AdminBackupsPage,
   CronJobsPage,
+  LogViewerPage,
   filterNavItems,
   registeredFrontendModules,
 } from "@dhpanel/modules";
@@ -352,6 +353,25 @@ const cronRoute = createRoute({
   component: CronJobsPage,
 });
 
+// 33. Log Viewer routes (T10.06)
+const clientLogsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/client/logs",
+  component: LogViewerPage,
+});
+
+const logsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/logs",
+  component: LogViewerPage,
+});
+
+const adminLogsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/logs",
+  component: LogViewerPage,
+});
+
 // 18. Login route
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -406,6 +426,9 @@ const routeTree = rootRoute.addChildren([
   adminBackupsRoute,
   clientCronRoute,
   cronRoute,
+  clientLogsRoute,
+  logsRoute,
+  adminLogsRoute,
   loginRoute,
 ]);
 

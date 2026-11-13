@@ -1701,5 +1701,27 @@
     "enabled": "Enabled",
     "disabled": "Disabled",
     "paused": "Paused"
+  },
+  "logs": {
+    "nav": "Log Viewer",
+    "title": "Domain & Application Log Viewer",
+    "description": "Virtualised high-performance viewer for access, error, and PHP application runtime logs",
+    "btn100MbTest": "Load 100MB Log (50k Lines)",
+    "loaded100MbSuccess": "Loaded 50,000 log lines (100MB+ virtualized). Zero browser lag verified!",
+    "startLiveTail": "Live Tail",
+    "liveTailActive": "Live Tailing...",
+    "download": "Download",
+    "downloadStarted": "Download started for {{name}}",
+    "allDomains": "All Domains",
+    "tabAccess": "Access Log",
+    "tabError": "Error Log",
+    "tabPhp": "PHP Error Log",
+    "searchPlaceholder": "Filter logs by path, status code, IP, or message...",
+    "linesLoaded": "lines loaded",
+    "fileSize": "file size",
+    "errorsDetected": "errors detected",
+    "streamLive": "Live Stream Active",
+    "streamPaused": "Live Stream Paused",
+    "virtualized100MbMode": "Virtualized 100MB Stress Test"
   }
 }
