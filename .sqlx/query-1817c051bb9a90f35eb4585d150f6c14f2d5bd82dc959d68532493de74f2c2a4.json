@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM settings\n           WHERE scope = $1 AND scope_id IS NOT DISTINCT FROM $2 AND module = $3 AND key = $4",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1817c051bb9a90f35eb4585d150f6c14f2d5bd82dc959d68532493de74f2c2a4"
+}

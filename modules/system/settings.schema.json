@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "General",
+  "description": "Basic settings of the panel.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "panel_name": {
+      "type": "string",
+      "title": "Panel name",
+      "description": "Shown in the sign-in page and the browser tab.",
+      "minLength": 1,
+      "maxLength": 64,
+      "default": "DHPanel",
+      "x-scope": "global",
+      "x-title": {
+        "en": "Panel name",
+        "bn": "প্যানেলের নাম"
+      },
+      "x-description": {
+        "en": "Shown in the sign-in page and the browser tab.",
+        "bn": "লগইন পেজ ও ব্রাউজার ট্যাবে দেখানো হয়।"
+      }
+    },
+    "default_language": {
+      "type": "string",
+      "title": "Default language",
+      "enum": [
+        "en",
+        "bn"
+      ],
+      "default": "en",
+      "x-scope": "global",
+      "x-title": {
+        "en": "Default language",
+        "bn": "ডিফল্ট ভাষা"
+      }
+    },
+    "maintenance_notice": {
+      "type": "string",
+      "title": "Maintenance notice",
+      "description": "Shown to all users while it is not empty.",
+      "maxLength": 500,
+      "default": "",
+      "x-scope": "global",
+      "x-title": {
+        "en": "Maintenance notice",
+        "bn": "রক্ষণাবেক্ষণ বিজ্ঞপ্তি"
+      },
+      "x-description": {
+        "en": "Shown to all users while it is not empty.",
+        "bn": "খালি না থাকলে সব ব্যবহারকারীকে দেখানো হয়।"
+      }
+    }
+  },
+  "x-title": {
+    "en": "General",
+    "bn": "সাধারণ"
+  },
+  "x-description": {
+    "en": "Basic settings of the panel.",
+    "bn": "প্যানেলের মৌলিক সেটিংস।"
+  }
+}

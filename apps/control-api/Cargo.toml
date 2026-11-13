@@ -36,6 +36,7 @@ dhpanel-events.workspace = true
 dhpanel-kernel.workspace = true
 dhpanel-node-gateway.workspace = true
 dhpanel-operations.workspace = true
+dhpanel-settings.workspace = true
 dhpanel-observability.workspace = true
 dhpanel-pki.workspace = true
 dhpanel-session.workspace = true

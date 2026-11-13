@@ -156,6 +156,15 @@ pub trait Module: Send + Sync + 'static {
         ModuleRoutes::none()
     }
 
+    /// The module's settings, as a JSON Schema (T03.08): an object whose
+    /// properties are the settings, each with a `type`, a `default` and
+    /// optionally `x-scope` (`global`, `node` or `tenant`; `global` if absent),
+    /// `title`, `description`. The settings service checks it at startup and
+    /// validates every value against it before storing.
+    fn settings_schema(&self) -> Option<serde_json::Value> {
+        None
+    }
+
     /// The module's database migrations, oldest first.
     fn migrations(&self) -> &'static [Migration] {
         &[]

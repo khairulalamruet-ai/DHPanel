@@ -6,6 +6,8 @@
 
 use std::sync::Arc;
 
+use dhpanel_settings::SettingsRegistry;
+
 use dhpanel_kernel::{
     Manifest, ManifestError, ManifestOnly, Module, ModuleMount, ModuleRoutes, Registry,
 };
@@ -33,6 +35,41 @@ impl Module for Wired {
 
     fn routes(&self) -> ModuleRoutes {
         (self.routes)()
+    }
+
+    fn settings_schema(&self) -> Option<serde_json::Value> {
+        match self.manifest.module.name.as_str() {
+            "system" => serde_json::from_str(dhpanel_mod_system::SETTINGS_SCHEMA).ok(),
+            _ => None,
+        }
+    }
+}
+
+/// Checks the settings schemas of all modules (T03.08).
+///
+/// # Errors
+/// The messages to show, one per unusable schema.
+pub fn settings(registry: &Registry) -> Result<SettingsRegistry, Vec<String>> {
+    let mut schemas = Vec::new();
+    let mut problems = Vec::new();
+    for module in registry.modules() {
+        let name = module.manifest().module.name.clone();
+        if name == "system" && module.settings_schema().is_none() {
+            problems.push(format!(
+                "settings schema of module `{name}`: not valid JSON"
+            ));
+        }
+        if let Some(schema) = module.settings_schema() {
+            schemas.push((name, schema));
+        }
+    }
+    match SettingsRegistry::build(schemas) {
+        Ok(settings) if problems.is_empty() => Ok(settings),
+        Ok(_) => Err(problems),
+        Err(errors) => {
+            problems.extend(errors.iter().map(ToString::to_string));
+            Err(problems)
+        }
     }
 }
 

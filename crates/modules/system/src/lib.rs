@@ -36,6 +36,9 @@ use dhpanel_session::SessionStore;
 use serde::{Deserialize, Serialize};
 use utoipa::{OpenApi, ToSchema};
 
+/// The settings of the system module, as a JSON Schema (see `Module::settings_schema`).
+pub const SETTINGS_SCHEMA: &str = include_str!("../../../../modules/system/settings.schema.json");
+
 /// The system module's manifest text.
 pub const MANIFEST: &str = include_str!("../../../../modules/system/module.toml");
 

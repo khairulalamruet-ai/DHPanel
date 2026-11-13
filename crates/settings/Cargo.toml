@@ -1,0 +1,27 @@
+[package]
+name = "dhpanel-settings"
+description = "Typed settings: JSON Schema per module, validated before they are stored."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+dhpanel-database.workspace = true
+dhpanel-http-kit.workspace = true
+# Schema validation. The default features (fetching schemas over HTTP or from
+# files, and the TLS stack that needs) are switched off: a schema is only ever
+# a document we ship, never something fetched.
+jsonschema = { version = "0.61", default-features = false }
+serde_json = "1"
+thiserror = "2.0.21"
+uuid = { version = "1", features = ["serde"] }
+
+[dev-dependencies]
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "postgres", "macros", "uuid", "json", "migrate"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+uuid = { version = "1", features = ["serde", "v7"] }

@@ -292,6 +292,22 @@ async fn main() -> ExitCode {
             return ExitCode::from(EXIT_CONFIG);
         }
     };
+    // The settings schemas of all modules must be usable (T03.08); the settings
+    // API (T03.09) will serve them.
+    match modules::settings(mount.registry()) {
+        Ok(settings) => tracing::info!(
+            modules = %settings.modules().map(|m| m.module.as_str()).collect::<Vec<_>>().join(", "),
+            "settings schemas valid"
+        ),
+        Err(messages) => {
+            for message in messages {
+                tracing::error!("{message}");
+                eprintln!("{SERVICE}: {message}");
+            }
+            telemetry.shutdown();
+            return ExitCode::from(EXIT_CONFIG);
+        }
+    }
     tokio::spawn(modules::follow_enabled(
         db.clone(),
         mount.clone(),

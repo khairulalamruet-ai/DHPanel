@@ -19,6 +19,7 @@ pub mod operations;
 pub mod outbox;
 pub mod permissions;
 pub mod rbac;
+pub mod settings;
 
 use std::{future::Future, pin::Pin, time::Duration};
 
