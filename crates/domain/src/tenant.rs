@@ -169,6 +169,12 @@ impl UidRange {
         (self.start..self.end).contains(&uid)
     }
 
+    /// `uid` as a [`Uid`], if it lies inside the range.
+    #[must_use]
+    pub fn checked(self, uid: u32) -> Option<Uid> {
+        self.contains(uid).then_some(Uid(uid))
+    }
+
     /// The lowest id in the range that is not in `used` (which may be in any
     /// order, hold duplicates and ids outside the range).
     ///

@@ -144,6 +144,24 @@ pub enum Operation {
         /// Most files and directories.
         inodes: Option<u64>,
     },
+    /// Create and start a tenant's containers (web server + PHP) from the
+    /// stack template, and wait until they run. Needs [`Operation::CreateTenant`]
+    /// first. Safe to repeat: containers that exist are only started. Answered
+    /// with [`Output::StackProvisioned`].
+    ProvisionTenantStack {
+        /// The tenant's id.
+        tenant_id: Uuid,
+        /// The tenant's system name.
+        username: String,
+        /// The tenant's numeric user id on this node.
+        uid: u32,
+        /// CPU the plan gives the stack, in thousandths of a core (`None` = unlimited).
+        cpu_millis: Option<u32>,
+        /// Memory the plan gives the stack, in bytes (`None` = unlimited).
+        memory_bytes: Option<u64>,
+        /// Processes the plan gives the stack (`None` = unlimited).
+        pids: Option<u32>,
+    },
 }
 
 impl Operation {
@@ -153,6 +171,7 @@ impl Operation {
         "report_capabilities",
         "create_tenant",
         "set_storage_quota",
+        "provision_tenant_stack",
     ];
 
     /// The operation's wire name.
@@ -163,6 +182,7 @@ impl Operation {
             Self::ReportCapabilities => "report_capabilities",
             Self::CreateTenant { .. } => "create_tenant",
             Self::SetStorageQuota { .. } => "set_storage_quota",
+            Self::ProvisionTenantStack { .. } => "provision_tenant_stack",
         }
     }
 }
@@ -294,6 +314,11 @@ pub enum Output {
     StorageQuotaSet {
         /// How the node enforces it (`xfs`).
         backend: String,
+    },
+    /// Answer to [`Operation::ProvisionTenantStack`].
+    StackProvisioned {
+        /// Names of the running containers, in start order.
+        containers: Vec<String>,
     },
     /// Answer to [`Operation::CreateTenant`].
     TenantCreated {
@@ -826,12 +851,12 @@ mod tests {
         let frame = json!({
             "type": "operation", "op_id": ID, "idempotency_key": "k",
             "issued_at": 1000, "expires_at": 1300, "protocol_version": 1,
-            "op": {"type": "provision_tenant_stack", "tenant": "x", "plan": {"cpus": 2}}
+            "op": {"type": "teleport_tenant", "tenant": "x", "plan": {"cpus": 2}}
         })
         .to_string();
         match parse_operation_frame(&frame).unwrap() {
             Parsed::Unsupported { header, op_type } => {
-                assert_eq!(op_type, "provision_tenant_stack");
+                assert_eq!(op_type, "teleport_tenant");
                 assert_eq!(header.op_id, id());
                 assert_eq!(header.tenant_id, None);
             }
@@ -991,6 +1016,14 @@ mod tests {
                 disk_bytes: Some(1 << 30),
                 inodes: None,
             },
+            Operation::ProvisionTenantStack {
+                tenant_id: id(),
+                username: "alice".into(),
+                uid: 10_000,
+                cpu_millis: Some(1000),
+                memory_bytes: Some(512 << 20),
+                pids: None,
+            },
         ] {
             let wire = serde_json::to_value(&op).unwrap();
             assert_eq!(wire["type"], op.type_name());
@@ -998,7 +1031,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            4,
+            5,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }

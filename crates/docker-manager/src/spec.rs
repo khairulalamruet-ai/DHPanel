@@ -4,8 +4,8 @@
 use std::{collections::BTreeMap, net::IpAddr};
 
 use bollard::models::{
-    ContainerCreateBody, HostConfig, HostConfigLogConfig, Mount, MountType, PortBinding,
-    RestartPolicy as DockerRestartPolicy, RestartPolicyNameEnum,
+    ContainerCreateBody, HostConfig, HostConfigLogConfig, Mount, MountType, MountVolumeOptions,
+    PortBinding, RestartPolicy as DockerRestartPolicy, RestartPolicyNameEnum,
 };
 
 /// Label every object this crate creates carries. Actions refuse objects
@@ -435,6 +435,13 @@ impl ContainerSpec {
                 source: Some(v.volume.as_str().to_owned()),
                 typ: Some(MountType::VOLUME),
                 read_only: Some(v.read_only),
+                // Never copy the image's files, owners or modes into a tenant's
+                // volume: the first mount of an empty volume would otherwise
+                // replace the ownership set for the tenant with the image's.
+                volume_options: Some(MountVolumeOptions {
+                    no_copy: Some(true),
+                    ..Default::default()
+                }),
                 ..Default::default()
             })
             .collect();
@@ -692,6 +699,11 @@ mod tests {
         assert_eq!(mounts[0].typ, Some(MountType::VOLUME));
         assert_eq!(mounts[0].source.as_deref(), Some("dh-data"));
         assert_eq!(mounts[0].read_only, Some(true));
+        assert_eq!(
+            mounts[0].volume_options.as_ref().and_then(|o| o.no_copy),
+            Some(true),
+            "an image must not rewrite the owner of a tenant's files"
+        );
         assert_eq!(
             host.tmpfs.unwrap()["/tmp"],
             "rw,noexec,nosuid,nodev,size=16777216"

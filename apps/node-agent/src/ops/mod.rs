@@ -85,6 +85,10 @@ impl Registry {
                 let context = context.clone();
                 move |op| tenant::create_tenant(context.clone(), op)
             });
+            registry.register("provision_tenant_stack", {
+                let context = context.clone();
+                move |op| tenant::provision_tenant_stack(context.clone(), op)
+            });
             registry.register("set_storage_quota", move |op| {
                 tenant::set_storage_quota(context.clone(), op)
             });

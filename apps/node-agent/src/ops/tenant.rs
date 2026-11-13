@@ -20,11 +20,13 @@ use std::{
     time::Duration,
 };
 
-use dhpanel_docker_manager::{DockerError, DockerManager};
+use dhpanel_docker_manager::{DockerError, DockerManager, Name};
 use dhpanel_domain::{TenantUsername, UidRange};
 use dhpanel_node_protocol::{AgentError, ErrorCode, Operation, Output};
 use dhpanel_priv_helper::protocol::{Action, ErrorCode as HelperCode, Request, Response};
-use dhpanel_tenant_stack::{files_volume_name, network_name};
+use dhpanel_tenant_stack::{
+    Allowlist, PlanResources, Tenant, files_volume_name, network_name, render,
+};
 use uuid::Uuid;
 
 /// Longest the helper may take to answer.
@@ -159,6 +161,127 @@ pub async fn set_storage_quota(
     })??;
     Ok(Output::StorageQuotaSet {
         backend: "xfs".to_owned(),
+    })
+}
+
+/// How long the stack gets to come up, and how long a container must stay up
+/// to count as healthy (a crash loop restarts faster than this).
+const START_TIMEOUT: Duration = Duration::from_secs(60);
+const STEADY_FOR: Duration = Duration::from_secs(3);
+const POLL: Duration = Duration::from_millis(500);
+
+/// Waits until `name` has been running steadily for [`STEADY_FOR`].
+async fn wait_healthy(docker: &DockerManager, name: &Name) -> Result<(), AgentError> {
+    let deadline = tokio::time::Instant::now() + START_TIMEOUT;
+    let mut up_since: Option<tokio::time::Instant> = None;
+    loop {
+        let info = docker.inspect(name).await.map_err(|e| docker_error(&e))?;
+        match (info.running, info.status.as_str()) {
+            (true, "running") => {
+                let since = *up_since.get_or_insert_with(tokio::time::Instant::now);
+                if since.elapsed() >= STEADY_FOR {
+                    return Ok(());
+                }
+            }
+            (_, "exited" | "dead") => {
+                return Err(AgentError::new(
+                    ErrorCode::Internal,
+                    format!(
+                        "container {} stopped right after starting (exit code {})",
+                        name.as_str(),
+                        info.exit_code
+                            .map_or_else(|| "?".to_owned(), |c| c.to_string())
+                    ),
+                ));
+            }
+            // Restarting, created or paused: not steady yet.
+            _ => up_since = None,
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Err(AgentError::new(
+                ErrorCode::Internal,
+                format!("container {} did not come up in time", name.as_str()),
+            )
+            .retryable());
+        }
+        tokio::time::sleep(POLL).await;
+    }
+}
+
+/// `provision_tenant_stack`.
+///
+/// # Errors
+/// [`AgentError`]: bad arguments or a plan too small for the stack (not
+/// retryable); Docker unavailable, a slow start (retryable); a container that
+/// stops again right after starting (not retryable: it needs a person).
+pub async fn provision_tenant_stack(
+    context: Arc<TenantContext>,
+    op: Operation,
+) -> Result<Output, AgentError> {
+    let Operation::ProvisionTenantStack {
+        tenant_id,
+        username,
+        uid,
+        cpu_millis,
+        memory_bytes,
+        pids,
+    } = op
+    else {
+        return Err(super::wrong_operation());
+    };
+    let invalid = |m: &str| AgentError::new(ErrorCode::InvalidArguments, m.to_owned());
+    let username = TenantUsername::parse(&username).map_err(|e| invalid(&e.to_string()))?;
+    let uid = UidRange::DEFAULT
+        .checked(uid)
+        .ok_or_else(|| invalid("the user id is outside the tenant range"))?;
+    let allowlist = Allowlist::embedded().map_err(|e| {
+        AgentError::new(
+            ErrorCode::Internal,
+            format!("the image list is broken: {e}"),
+        )
+    })?;
+    let stack = render(
+        &Tenant {
+            id: tenant_id,
+            username: &username,
+            uid,
+            resources: PlanResources {
+                cpu_millis,
+                memory_bytes,
+                pids,
+            },
+        },
+        &allowlist,
+    )
+    .map_err(|e| invalid(&e.to_string()))?;
+
+    let docker = &context.docker;
+    let mut started = Vec::new();
+    for spec in &stack.services {
+        match docker.inspect(&spec.name).await {
+            Ok(_) => {}
+            Err(DockerError::NotFound) => {
+                docker
+                    .pull_image(&spec.image)
+                    .await
+                    .map_err(|e| docker_error(&e))?;
+                match docker.create_container(spec).await {
+                    // Another attempt created it in the meantime.
+                    Ok(_) | Err(DockerError::Conflict(_)) => {}
+                    Err(e) => return Err(docker_error(&e)),
+                }
+            }
+            Err(e) => return Err(docker_error(&e)),
+        }
+        docker
+            .start(&spec.name)
+            .await
+            .map_err(|e| docker_error(&e))?;
+        wait_healthy(docker, &spec.name).await?;
+        started.push(spec.name.as_str().to_owned());
+    }
+    Ok(Output::StackProvisioned {
+        containers: started,
     })
 }
 
