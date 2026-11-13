@@ -1,0 +1,14 @@
+# The append-only audit log and its viewer (crates/audit).
+[module]
+name       = "audit"
+version    = "0.1.0"
+title      = { en = "Audit log", bn = "অডিট লগ" }
+category   = "core"
+core       = true
+depends_on = ["auth", "rbac"]
+
+[permissions]
+keys = ["admin.audit.read"]
+
+[ui]
+admin_nav = { group = "Access", order = 20, icon = "scroll-text" }

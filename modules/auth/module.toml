@@ -1,0 +1,7 @@
+# Sign-in, sessions, two-factor authentication (crates/modules/auth).
+[module]
+name     = "auth"
+version  = "0.1.0"
+title    = { en = "Sign-in and sessions", bn = "সাইন-ইন ও সেশন" }
+category = "core"
+core     = true

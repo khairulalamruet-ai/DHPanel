@@ -30,6 +30,7 @@ dhpanel-mod-admin.workspace = true
 dhpanel-mod-auth.workspace = true
 dhpanel-mod-nodes.workspace = true
 dhpanel-dispatcher.workspace = true
+dhpanel-kernel.workspace = true
 dhpanel-node-gateway.workspace = true
 dhpanel-operations.workspace = true
 dhpanel-observability.workspace = true
@@ -47,6 +48,8 @@ utoipa = "6"
 utoipa-scalar = { version = "0.4.0", features = ["axum"] }
 
 [dev-dependencies]
+# The manifest tests compare declared permission keys with the ones the code checks.
+dhpanel-rbac.workspace = true
 serde_json = "1"
 tower = { version = "0.5", features = ["util"] }
 

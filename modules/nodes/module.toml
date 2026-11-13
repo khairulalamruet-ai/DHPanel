@@ -1,0 +1,18 @@
+# Servers (nodes), their enrollment, and the operations sent to them
+# (crates/modules/nodes, crates/node-gateway, crates/operations, crates/dispatcher).
+[module]
+name       = "nodes"
+version    = "0.1.0"
+title      = { en = "Nodes", bn = "নোড" }
+category   = "core"
+core       = true
+depends_on = ["auth", "rbac", "audit"]
+
+[permissions]
+keys = ["admin.nodes.read", "admin.nodes.manage"]
+
+[ui]
+admin_nav = { group = "Infrastructure", order = 10, icon = "server" }
+
+[agent]
+operations = ["Ping", "ReportCapabilities"]

@@ -4,6 +4,7 @@
 //! telemetry, serve HTTP, shut down gracefully on SIGINT/SIGTERM.
 
 mod app;
+mod modules;
 mod openapi;
 
 use std::{process::ExitCode, sync::Arc};
@@ -46,6 +47,23 @@ async fn main() -> ExitCode {
             return ExitCode::from(EXIT_CONFIG);
         }
     };
+
+    // Module manifests are part of the build; a broken one is a build mistake
+    // that must not reach users half-working.
+    match modules::load() {
+        Ok(manifests) => tracing::info!(
+            modules = %manifests.iter().map(|m| m.module.name.as_str()).collect::<Vec<_>>().join(", "),
+            "module manifests valid"
+        ),
+        Err(errors) => {
+            for err in errors {
+                tracing::error!("{err}");
+                eprintln!("{SERVICE}: {err}");
+            }
+            telemetry.shutdown();
+            return ExitCode::from(EXIT_CONFIG);
+        }
+    }
 
     // Lazy pool: the API starts even if PostgreSQL is down; /ready reports it.
     let db = match config
