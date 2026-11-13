@@ -9,9 +9,9 @@ import { ThemeProvider, ToastProvider } from "@dhpanel/ui";
 import { SessionProvider, useSession, LoginPage, AccountSecurityPage } from "@dhpanel/auth";
 import { queryClient, QueryClientProvider } from "@dhpanel/api";
 import { AppShell, NotFoundPage, RouteErrorFallback } from "@dhpanel/shell";
-import { ClientDashboardPage, ClientDomainsPage, DnsEditorPage, SslPage, PhpManagementPage, ServicesPage, ClientDatabasesPage, FileManagerPage, DiskUsagePage, FtpAccountsPage, ClientBackupsPage, CronJobsPage, LogViewerPage, ClientUsagePage, ClientProcessesPage, ClientWafPage, ClientFirewallPage } from "@dhpanel/modules";
+import { ClientDashboardPage, ClientDomainsPage, DnsEditorPage, SslPage, PhpManagementPage, ServicesPage, ClientDatabasesPage, FileManagerPage, DiskUsagePage, FtpAccountsPage, ClientBackupsPage, CronJobsPage, LogViewerPage, ClientUsagePage, ClientProcessesPage, ClientWafPage, ClientFirewallPage, AppsPage } from "@dhpanel/modules";
 import { useTranslation } from "@dhpanel/i18n";
-import { LayoutDashboard, ShieldCheck, ShieldAlert, Globe, Lock, Database, Folder, Server, Archive, Clock, FileText, Activity, Terminal, Flame } from "lucide-react";
+import { LayoutDashboard, ShieldCheck, ShieldAlert, Globe, Lock, Database, Folder, Server, Archive, Clock, FileText, Activity, Terminal, Flame, Boxes } from "lucide-react";
 
 function AuthenticatedContent() {
   const { data: session, isLoading } = useSession();
@@ -101,6 +101,12 @@ function AuthenticatedContent() {
       labelKey: "firewall.nav",
       icon: <Flame className="h-4 w-4" />,
       href: "/firewall",
+    },
+    {
+      id: "apps",
+      labelKey: "apps.nav",
+      icon: <Boxes className="h-4 w-4" />,
+      href: "/apps",
     },
     {
       id: "security",
@@ -256,6 +262,12 @@ const firewallRoute = createRoute({
   component: ClientFirewallPage,
 });
 
+const appsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/apps",
+  component: AppsPage,
+});
+
 const securityRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/security",
@@ -276,7 +288,7 @@ const loginRoute = createRoute({
   },
 });
 
-const routeTree = rootRoute.addChildren([indexRoute, domainsRoute, dnsRoute, sslRoute, phpRoute, servicesRoute, databasesRoute, filesRoute, diskUsageRoute, ftpRoute, backupsRoute, cronRoute, logsRoute, usageRoute, processesRoute, wafRoute, firewallRoute, securityRoute, loginRoute]);
+const routeTree = rootRoute.addChildren([indexRoute, domainsRoute, dnsRoute, sslRoute, phpRoute, servicesRoute, databasesRoute, filesRoute, diskUsageRoute, ftpRoute, backupsRoute, cronRoute, logsRoute, usageRoute, processesRoute, wafRoute, firewallRoute, appsRoute, securityRoute, loginRoute]);
 
 export const router = createRouter({
   routeTree,

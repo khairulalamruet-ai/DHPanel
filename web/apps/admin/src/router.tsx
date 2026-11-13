@@ -52,6 +52,7 @@ import {
   ClientFirewallPage,
   AdminFirewallPage,
   AdminSecurityCenterPage,
+  AppsPage,
   filterNavItems,
   registeredFrontendModules,
 } from "@dhpanel/modules";
@@ -468,6 +469,19 @@ const adminSecurityCenterRoute = createRoute({
   component: AdminSecurityCenterPage,
 });
 
+// 41. Apps routes (T12.06)
+const adminAppsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/apps",
+  component: AppsPage,
+});
+
+const appsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/apps",
+  component: AppsPage,
+});
+
 // 18. Login route
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -538,6 +552,8 @@ const routeTree = rootRoute.addChildren([
   clientFirewallRoute,
   adminFirewallRoute,
   adminSecurityCenterRoute,
+  adminAppsRoute,
+  appsRoute,
   loginRoute,
 ]);
 

@@ -764,6 +764,36 @@ export const registeredFrontendModules: FrontendModule[] = [
   },
   {
     manifest: {
+      name: "apps",
+      title: { en: "Applications", bn: "অ্যাপ্লিকেশনসমূহ" },
+      category: "core",
+      core: true,
+      permissions: ["apps.read", "apps.install", "apps.manage"],
+      features: ["apps"],
+    },
+    clientNav: [
+      {
+        id: "apps",
+        labelKey: "apps.nav",
+        icon: <Boxes className="h-4 w-4" />,
+        href: "/apps",
+        order: 30,
+        permission: "apps.read",
+      },
+    ],
+    adminNav: [
+      {
+        id: "admin-apps",
+        labelKey: "apps.nav",
+        icon: <Boxes className="h-4 w-4" />,
+        href: "/admin/apps",
+        order: 55,
+        permission: "apps.read",
+      },
+    ],
+  },
+  {
+    manifest: {
       name: "users",
       title: { en: "Users", bn: "ব্যবহারকারী" },
       category: "core",
