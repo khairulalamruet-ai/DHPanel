@@ -49,6 +49,8 @@ import {
   AdminServerToolsPage,
   ClientWafPage,
   AdminWafPage,
+  NotificationBell,
+  NotificationPreferencesPage,
   filterNavItems,
   registeredFrontendModules,
 } from "@dhpanel/modules";
@@ -81,6 +83,7 @@ function AuthenticatedContent() {
     <AppShell
       title={t("common.adminTitle")}
       navItems={navItems}
+      headerActions={<NotificationBell settingsHref="/settings/notifications" />}
     >
       <Outlet />
     </AppShell>
@@ -445,6 +448,18 @@ const adminWafRoute = createRoute({
   component: AdminWafPage,
 });
 
+const adminNotificationsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/notifications",
+  component: NotificationPreferencesPage,
+});
+
+const settingsNotificationsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/settings/notifications",
+  component: NotificationPreferencesPage,
+});
+
 // 18. Login route
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -512,6 +527,8 @@ const routeTree = rootRoute.addChildren([
   adminServerToolsRoute,
   clientWafRoute,
   adminWafRoute,
+  adminNotificationsRoute,
+  settingsNotificationsRoute,
   loginRoute,
 ]);
 
