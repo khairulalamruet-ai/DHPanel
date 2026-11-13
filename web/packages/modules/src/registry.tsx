@@ -1,5 +1,5 @@
 import React from "react";
-import { LayoutDashboard, ShieldCheck, ShieldAlert, Sparkles, Puzzle, Globe, Users, Settings, FileText, Boxes, Server, Activity, Layers, Lock, FileCode2, Cpu, Database, Folder, Archive, Clock, Terminal, Wrench } from "lucide-react";
+import { LayoutDashboard, ShieldCheck, ShieldAlert, Sparkles, Puzzle, Globe, Users, Settings, FileText, Boxes, Server, Activity, Layers, Lock, FileCode2, Cpu, Database, Folder, Archive, Clock, Terminal, Wrench, KeyRound } from "lucide-react";
 
 export interface ModuleManifest {
   name: string;
@@ -747,6 +747,25 @@ export const registeredFrontendModules: FrontendModule[] = [
         href: "/settings",
         order: 80,
         permission: "admin.settings.read",
+      },
+    ],
+  },
+  {
+    manifest: {
+      name: "license",
+      title: { en: "License Authority", bn: "লাইসেন্স অথরিটি" },
+      category: "core",
+      core: true,
+      permissions: ["admin.settings.manage"],
+    },
+    adminNav: [
+      {
+        id: "license",
+        labelKey: "license.nav",
+        icon: <KeyRound className="h-4 w-4" />,
+        href: "/admin/license",
+        order: 68,
+        permission: "admin.settings.manage",
       },
     ],
   },

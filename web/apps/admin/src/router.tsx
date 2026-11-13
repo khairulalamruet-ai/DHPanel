@@ -49,6 +49,7 @@ import {
   AdminServerToolsPage,
   ClientWafPage,
   AdminWafPage,
+  LicensePage,
   filterNavItems,
   registeredFrontendModules,
 } from "@dhpanel/modules";
@@ -445,6 +446,18 @@ const adminWafRoute = createRoute({
   component: AdminWafPage,
 });
 
+const adminLicenseRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/license",
+  component: LicensePage,
+});
+
+const licenseRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/license",
+  component: LicensePage,
+});
+
 // 18. Login route
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -512,6 +525,8 @@ const routeTree = rootRoute.addChildren([
   adminServerToolsRoute,
   clientWafRoute,
   adminWafRoute,
+  adminLicenseRoute,
+  licenseRoute,
   loginRoute,
 ]);
 
