@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT p.id, p.name, p.description, p.feature_set_id, f.name AS feature_set_name,\n                  p.is_default, p.cpu_millis, p.memory_bytes, p.pids, p.disk_bytes, p.inodes,\n                  p.bandwidth_bytes, p.limits, p.isolation, p.built_in,\n                  0::bigint AS \"users!\",\n                  extract(epoch FROM p.created_at)::bigint AS \"created_at!\",\n                  extract(epoch FROM p.updated_at)::bigint AS \"updated_at!\"\n           FROM plans p JOIN feature_sets f ON f.id = p.feature_set_id\n           WHERE p.id = $1",
+  "query": "SELECT p.id, p.name, p.description, p.feature_set_id, f.name AS feature_set_name,\n                  p.is_default, p.cpu_millis, p.memory_bytes, p.pids, p.disk_bytes, p.inodes,\n                  p.bandwidth_bytes, p.limits, p.isolation, p.built_in,\n                  (SELECT count(*) FROM tenants t WHERE t.plan_id = p.id AND t.status <> 'deleting') AS \"users!\",\n                  extract(epoch FROM p.created_at)::bigint AS \"created_at!\",\n                  extract(epoch FROM p.updated_at)::bigint AS \"updated_at!\"\n           FROM plans p JOIN feature_sets f ON f.id = p.feature_set_id\n           WHERE p.id = $1",
   "describe": {
     "columns": [
       {
@@ -213,5 +213,5 @@
       null
     ]
   },
-  "hash": "5cd904eb47297cff0c816a818a825d52471722070d7b68b26af93d82c68e41c2"
+  "hash": "fc6a49098e9693eec35ba2f84049a492b46707a685a3fbcb7ce7f6600a3d636d"
 }

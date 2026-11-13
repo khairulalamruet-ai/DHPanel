@@ -58,7 +58,7 @@ impl ValidationError {
 }
 
 /// Names that would collide with system users, services or URL paths.
-const RESERVED_USERNAMES: &[&str] = &[
+pub(crate) const RESERVED_USERNAMES: &[&str] = &[
     "root",
     "admin",
     "administrator",

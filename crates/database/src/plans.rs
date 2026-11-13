@@ -149,7 +149,7 @@ pub async fn list(pool: &PgPool) -> Result<Vec<Plan>, sqlx::Error> {
         r#"SELECT p.id, p.name, p.description, p.feature_set_id, f.name AS feature_set_name,
                   p.is_default, p.cpu_millis, p.memory_bytes, p.pids, p.disk_bytes, p.inodes,
                   p.bandwidth_bytes, p.limits, p.isolation, p.built_in,
-                  0::bigint AS "users!",
+                  (SELECT count(*) FROM tenants t WHERE t.plan_id = p.id AND t.status <> 'deleting') AS "users!",
                   extract(epoch FROM p.created_at)::bigint AS "created_at!",
                   extract(epoch FROM p.updated_at)::bigint AS "updated_at!"
            FROM plans p JOIN feature_sets f ON f.id = p.feature_set_id
@@ -170,7 +170,7 @@ pub async fn get(pool: &PgPool, id: Uuid) -> Result<Option<Plan>, sqlx::Error> {
         r#"SELECT p.id, p.name, p.description, p.feature_set_id, f.name AS feature_set_name,
                   p.is_default, p.cpu_millis, p.memory_bytes, p.pids, p.disk_bytes, p.inodes,
                   p.bandwidth_bytes, p.limits, p.isolation, p.built_in,
-                  0::bigint AS "users!",
+                  (SELECT count(*) FROM tenants t WHERE t.plan_id = p.id AND t.status <> 'deleting') AS "users!",
                   extract(epoch FROM p.created_at)::bigint AS "created_at!",
                   extract(epoch FROM p.updated_at)::bigint AS "updated_at!"
            FROM plans p JOIN feature_sets f ON f.id = p.feature_set_id
@@ -292,8 +292,16 @@ pub async fn delete(conn: &mut PgConnection, id: Uuid) -> Result<DeleteOutcome, 
         None => Ok(DeleteOutcome::Unknown),
         Some(r) if r.built_in => Ok(DeleteOutcome::BuiltIn),
         Some(r) if r.is_default => Ok(DeleteOutcome::IsDefault),
-        // Accounts on a plan arrive with the tenants table (T04.05); until then no plan is in use.
         Some(_) => {
+            let in_use = sqlx::query_scalar!(
+                r#"SELECT EXISTS (SELECT 1 FROM tenants WHERE plan_id = $1) AS "in_use!""#,
+                id
+            )
+            .fetch_one(&mut *conn)
+            .await?;
+            if in_use {
+                return Ok(DeleteOutcome::InUse);
+            }
             sqlx::query!("DELETE FROM plans WHERE id = $1", id)
                 .execute(conn)
                 .await?;

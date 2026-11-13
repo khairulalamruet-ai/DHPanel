@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE tenants\n           SET status = $2,\n               deleted_at = CASE WHEN $3 THEN now() ELSE NULL END,\n               purge_after = CASE WHEN $3 THEN now() + make_interval(days => $4::int) ELSE NULL END\n           WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Bool",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8611e4789efd5de7f1b40d89336d4ef6f60efec30e6ffa1b13bdf57c1a4cebe2"
+}

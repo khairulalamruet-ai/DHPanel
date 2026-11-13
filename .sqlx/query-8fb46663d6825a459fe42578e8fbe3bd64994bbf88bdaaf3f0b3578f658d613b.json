@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT uid FROM tenants WHERE node_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "uid",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "tenants",
+            "name": "uid"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "8fb46663d6825a459fe42578e8fbe3bd64994bbf88bdaaf3f0b3578f658d613b"
+}
