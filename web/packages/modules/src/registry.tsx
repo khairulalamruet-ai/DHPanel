@@ -601,6 +601,37 @@ export const registeredFrontendModules: FrontendModule[] = [
   },
   {
     manifest: {
+      name: "usage",
+      title: { en: "Resource Usage", bn: "রিসোর্স ব্যবহার" },
+      category: "monitoring",
+      core: true,
+      permissions: ["usage.read", "admin.usage.read"],
+      features: ["usage"],
+    },
+    clientNav: [
+      {
+        id: "usage",
+        labelKey: "usage.nav",
+        icon: <Activity className="h-4 w-4" />,
+        href: "/usage",
+        order: 34,
+        permission: "usage.read",
+        feature: "usage",
+      },
+    ],
+    adminNav: [
+      {
+        id: "admin-usage",
+        labelKey: "adminUsage.nav",
+        icon: <Activity className="h-4 w-4" />,
+        href: "/admin/usage",
+        order: 60,
+        permission: "admin.usage.read",
+      },
+    ],
+  },
+  {
+    manifest: {
       name: "users",
       title: { en: "Users", bn: "ব্যবহারকারী" },
       category: "core",

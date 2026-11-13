@@ -6350,6 +6350,121 @@ export const handlers = [
                                 const logs = generateSystemLogs(service, node, level);
                                 return HttpResponse.json(logs);
                               }),
+
+                              // ==========================================
+                              // USAGE ANALYTICS (TODO(api:T10.09))
+                              // ==========================================
+                              ...(() => {
+                                const generateHistoryPoints = (range: string, isNode = false) => {
+                                  const points: any[] = [];
+                                  const count = range === "24h" ? 24 : range === "7d" ? 28 : 30;
+                                  const now = Date.now();
+                                  const stepMs =
+                                    range === "24h"
+                                      ? 3600 * 1000
+                                      : range === "7d"
+                                      ? (7 * 86400 * 1000) / count
+                                      : (30 * 86400 * 1000) / count;
+
+                                  for (let i = count - 1; i >= 0; i--) {
+                                    const time = new Date(now - i * stepMs);
+                                    const timeLabel =
+                                      range === "24h"
+                                        ? `${time.getHours().toString().padStart(2, "0")}:00`
+                                        : `${time.getMonth() + 1}/${time.getDate()}`;
+
+                                    const baseCpu = isNode ? 32 : 16;
+                                    const cpuNoise = Math.sin(i / 2) * 12 + (Math.random() * 8 - 4);
+                                    const cpu = Math.max(5, Math.min(95, Math.round((baseCpu + cpuNoise) * 10) / 10));
+
+                                    const baseRam = isNode ? 46 : 560;
+                                    const ramNoise = Math.cos(i / 3) * (isNode ? 5 : 80);
+                                    const ram = Math.max(10, Math.round(baseRam + ramNoise));
+
+                                    const baseDisk = isNode ? 820 : 3.5;
+                                    const diskGrowth = ((count - i) / count) * (isNode ? 25 : 0.4);
+                                    const disk = Math.round((baseDisk + diskGrowth) * 10) / 10;
+
+                                    const netIn = Math.round(180 + Math.sin(i) * 120 + Math.random() * 40);
+                                    const netOut = Math.round(240 + Math.cos(i) * 160 + Math.random() * 60);
+
+                                    points.push({
+                                      timestamp: time.toISOString(),
+                                      label: timeLabel,
+                                      cpu_percent: cpu,
+                                      ram_mb: isNode ? ram * 1024 : ram,
+                                      ram_percent: isNode ? Math.round((ram / 128) * 100) : Math.round((ram / 2048) * 100),
+                                      disk_gb: disk,
+                                      disk_percent: isNode ? Math.round((disk / 2000) * 100) : Math.round((disk / 10.0) * 100),
+                                      net_in_kbps: isNode ? netIn * 12 : netIn,
+                                      net_out_kbps: isNode ? netOut * 15 : netOut,
+                                    });
+                                  }
+
+                                  return points;
+                                };
+
+                                return [
+                                  // GET /api/v1/client/usage (TODO(api:T10.09))
+                                  http.get(/\/api\/v1\/client\/usage$/, ({ request }) => {
+                                    const url = new URL(request.url);
+                                    const range = (url.searchParams.get("range") || "24h") as "24h" | "7d" | "30d";
+                                    const history = generateHistoryPoints(range, false);
+
+                                    return HttpResponse.json({
+                                      range,
+                                      cpu: { current: 18.4, average: 14.2, peak: 45.6, limit: 2.0, unit: "%" },
+                                      ram: { current: 640, average: 580, peak: 1120, limit: 2048, unit: "MB" },
+                                      disk: { current: 3.8, average: 3.5, peak: 3.8, limit: 10.0, unit: "GB" },
+                                      bandwidth: { current: 24.5, average: 18.0, peak: 42.1, limit: 100.0, unit: "GB" },
+                                      history,
+                                    });
+                                  }),
+
+                                  // GET /api/v1/admin/usage (TODO(api:T10.09))
+                                  http.get(/\/api\/v1\/admin\/usage$/, ({ request }) => {
+                                    const url = new URL(request.url);
+                                    const node = url.searchParams.get("node") || "node-01";
+                                    const range = (url.searchParams.get("range") || "24h") as "24h" | "7d" | "30d";
+                                    const history = generateHistoryPoints(range, true);
+
+                                    return HttpResponse.json({
+                                      node_id: node,
+                                      node_name: node === "node-01" ? "node-01 (master)" : "node-02 (worker)",
+                                      range,
+                                      node_cpu: { current: 34.2, average: 28.5, peak: 68.4, limit: 32, unit: "%" },
+                                      node_ram: { current: 48, average: 44, peak: 56, limit: 128, unit: "GB" },
+                                      node_disk: { current: 840, average: 810, peak: 840, limit: 2000, unit: "GB" },
+                                      node_bandwidth: { current: 340, average: 280, peak: 620, limit: 1000, unit: "GB" },
+                                      history,
+                                      top_tenants_cpu: [
+                                        { tenant_id: "t_01", tenant_name: "acme-corp", plan: "Enterprise", cpu_percent: 78.4, ram_mb: 3400, ram_limit_mb: 4096, disk_gb: 42.1, disk_quota_gb: 50.0, bandwidth_30d_gb: 412, status: "warning" },
+                                        { tenant_id: "t_02", tenant_name: "demo", plan: "Standard", cpu_percent: 45.6, ram_mb: 1120, ram_limit_mb: 2048, disk_gb: 3.8, disk_quota_gb: 10.0, bandwidth_30d_gb: 24.5, status: "normal" },
+                                        { tenant_id: "t_03", tenant_name: "shopify-clone", plan: "Business", cpu_percent: 88.2, ram_mb: 7200, ram_limit_mb: 8192, disk_gb: 84.5, disk_quota_gb: 100.0, bandwidth_30d_gb: 620, status: "critical" },
+                                        { tenant_id: "t_04", tenant_name: "blog-network", plan: "Standard", cpu_percent: 22.1, ram_mb: 840, ram_limit_mb: 2048, disk_gb: 6.2, disk_quota_gb: 20.0, bandwidth_30d_gb: 88.0, status: "normal" },
+                                      ],
+                                      top_tenants_ram: [
+                                        { tenant_id: "t_03", tenant_name: "shopify-clone", plan: "Business", cpu_percent: 88.2, ram_mb: 7200, ram_limit_mb: 8192, disk_gb: 84.5, disk_quota_gb: 100.0, bandwidth_30d_gb: 620, status: "critical" },
+                                        { tenant_id: "t_01", tenant_name: "acme-corp", plan: "Enterprise", cpu_percent: 78.4, ram_mb: 3400, ram_limit_mb: 4096, disk_gb: 42.1, disk_quota_gb: 50.0, bandwidth_30d_gb: 412, status: "warning" },
+                                        { tenant_id: "t_02", tenant_name: "demo", plan: "Standard", cpu_percent: 45.6, ram_mb: 1120, ram_limit_mb: 2048, disk_gb: 3.8, disk_quota_gb: 10.0, bandwidth_30d_gb: 24.5, status: "normal" },
+                                        { tenant_id: "t_05", tenant_name: "analytics-api", plan: "Developer", cpu_percent: 15.0, ram_mb: 980, ram_limit_mb: 1024, disk_gb: 2.1, disk_quota_gb: 5.0, bandwidth_30d_gb: 140, status: "warning" },
+                                      ],
+                                      top_tenants_disk: [
+                                        { tenant_id: "t_03", tenant_name: "shopify-clone", plan: "Business", cpu_percent: 88.2, ram_mb: 7200, ram_limit_mb: 8192, disk_gb: 84.5, disk_quota_gb: 100.0, bandwidth_30d_gb: 620, status: "warning" },
+                                        { tenant_id: "t_01", tenant_name: "acme-corp", plan: "Enterprise", cpu_percent: 78.4, ram_mb: 3400, ram_limit_mb: 4096, disk_gb: 42.1, disk_quota_gb: 50.0, bandwidth_30d_gb: 412, status: "normal" },
+                                        { tenant_id: "t_06", tenant_name: "video-stream", plan: "Enterprise", cpu_percent: 32.0, ram_mb: 2100, ram_limit_mb: 4096, disk_gb: 38.5, disk_quota_gb: 40.0, bandwidth_30d_gb: 890, status: "critical" },
+                                        { tenant_id: "t_02", tenant_name: "demo", plan: "Standard", cpu_percent: 45.6, ram_mb: 1120, ram_limit_mb: 2048, disk_gb: 3.8, disk_quota_gb: 10.0, bandwidth_30d_gb: 24.5, status: "normal" },
+                                      ],
+                                      top_tenants_bandwidth: [
+                                        { tenant_id: "t_06", tenant_name: "video-stream", plan: "Enterprise", cpu_percent: 32.0, ram_mb: 2100, ram_limit_mb: 4096, disk_gb: 38.5, disk_quota_gb: 40.0, bandwidth_30d_gb: 890, status: "critical" },
+                                        { tenant_id: "t_03", tenant_name: "shopify-clone", plan: "Business", cpu_percent: 88.2, ram_mb: 7200, ram_limit_mb: 8192, disk_gb: 84.5, disk_quota_gb: 100.0, bandwidth_30d_gb: 620, status: "warning" },
+                                        { tenant_id: "t_01", tenant_name: "acme-corp", plan: "Enterprise", cpu_percent: 78.4, ram_mb: 3400, ram_limit_mb: 4096, disk_gb: 42.1, disk_quota_gb: 50.0, bandwidth_30d_gb: 412, status: "normal" },
+                                        { tenant_id: "t_05", tenant_name: "analytics-api", plan: "Developer", cpu_percent: 15.0, ram_mb: 980, ram_limit_mb: 1024, disk_gb: 2.1, disk_quota_gb: 5.0, bandwidth_30d_gb: 140, status: "normal" },
+                                      ],
+                                    });
+                                  }),
+                                ];
+                              })(),
                             ];
                           })(),
                         ];

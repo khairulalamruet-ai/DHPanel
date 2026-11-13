@@ -42,6 +42,8 @@ import {
   CronJobsPage,
   LogViewerPage,
   AdminSystemLogsPage,
+  ClientUsagePage,
+  AdminUsagePage,
   filterNavItems,
   registeredFrontendModules,
 } from "@dhpanel/modules";
@@ -380,6 +382,25 @@ const adminSystemLogsRoute = createRoute({
   component: AdminSystemLogsPage,
 });
 
+// 35. Usage routes (T10.10)
+const clientUsageRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/client/usage",
+  component: ClientUsagePage,
+});
+
+const usageRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/usage",
+  component: ClientUsagePage,
+});
+
+const adminUsageRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/usage",
+  component: AdminUsagePage,
+});
+
 // 18. Login route
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -438,6 +459,9 @@ const routeTree = rootRoute.addChildren([
   logsRoute,
   adminLogsRoute,
   adminSystemLogsRoute,
+  clientUsageRoute,
+  usageRoute,
+  adminUsageRoute,
   loginRoute,
 ]);
 
