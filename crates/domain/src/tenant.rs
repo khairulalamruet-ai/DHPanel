@@ -72,17 +72,17 @@ impl TenantUsername {
         if !(first_ok && rest_ok && (3..=32).contains(&s.len())) {
             return Err(TenantError::InvalidUsername);
         }
-        // Reserved names, and numbered families the system itself uses (`docker1`,
-        // `user1000`, `dh7`); a name of digits only would look like a numeric id.
+        // Reserved names, and the numbered families the system itself uses
+        // (`docker1`, `user1000`, `dh7`). A name that is only digits is already
+        // refused above: it has to start with a letter.
         let numbered = |prefix: &str| {
             s.strip_prefix(prefix)
                 .is_some_and(|rest| rest.chars().all(|c| c.is_ascii_digit()))
         };
         let reserved = RESERVED_USERNAMES.contains(&s.as_str())
-            || ["docker", "systemd", "dhpanel", "dh"]
+            || ["docker", "systemd", "dhpanel", "dh", "user"]
                 .iter()
-                .any(|p| numbered(p))
-            || s.chars().all(|c| c.is_ascii_digit());
+                .any(|p| numbered(p));
         if reserved {
             return Err(TenantError::ReservedUsername);
         }
@@ -338,7 +338,7 @@ mod tests {
         }
         for reserved in [
             "root", "www", "mysql", "postgres", "nobody", "docker", "docker1", "dhpanel2", "dh7",
-            "dh", "systemd", "user", "user1000", "12345", "mail", "ftp",
+            "dh0", "systemd", "user", "user1000", "mail", "ftp",
         ] {
             assert_eq!(
                 TenantUsername::parse(reserved),
@@ -347,9 +347,7 @@ mod tests {
             );
         }
         // Ordinary words that merely start like a reserved family are fine.
-        for ok in [
-            "userland", "docking", "shopdh", "dhaka", "dhall", "users", "user",
-        ] {
+        for ok in ["userland", "docking", "shopdh", "dhaka", "dhall", "users"] {
             assert!(TenantUsername::parse(ok).is_ok(), "{ok}");
         }
         assert_eq!(
