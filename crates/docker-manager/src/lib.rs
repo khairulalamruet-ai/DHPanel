@@ -33,8 +33,8 @@ use bollard::{
 use futures_util::StreamExt as _;
 
 pub use crate::spec::{
-    Capability, ContainerSpec, ImageRef, MANAGED_LABEL, Name, Network, PublishedPort, Restart,
-    SpecError, Tmpfs, VolumeMount,
+    Capability, ContainerSpec, ImageRef, MANAGED_LABEL, Name, Network, PublishedPort, ROLE_LABEL,
+    Restart, SpecError, TENANT_LABEL, Tmpfs, VolumeMount,
 };
 
 /// Longest a single API call may take (pulls have their own, longer limit).

@@ -25,6 +25,7 @@ members = [
     "crates/events",
     "crates/feature-gate",
     "crates/settings",
+    "crates/tenant-stack",
     "crates/docker-manager",
     "crates/pki",
     "crates/modules/auth",
@@ -69,6 +70,7 @@ dhpanel-dispatcher = { path = "crates/dispatcher" }
 dhpanel-events = { path = "crates/events" }
 dhpanel-feature-gate = { path = "crates/feature-gate" }
 dhpanel-settings = { path = "crates/settings" }
+dhpanel-tenant-stack = { path = "crates/tenant-stack" }
 dhpanel-docker-manager = { path = "crates/docker-manager" }
 
 # External crates shared by the agent and the control plane's agent port (T02.08).

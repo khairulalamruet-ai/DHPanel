@@ -1,0 +1,24 @@
+[package]
+name = "dhpanel-tenant-stack"
+description = "What runs for one tenant: the stack template, the image allow-list, and the container specs rendered from them."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+dhpanel-docker-manager.workspace = true
+dhpanel-domain.workspace = true
+serde = { version = "1", features = ["derive"] }
+thiserror = "2.0.21"
+toml = "1"
+uuid = "1"
+
+[dev-dependencies]
+bollard = { version = "0.21", default-features = false, features = ["pipe"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+uuid = { version = "1", features = ["v7"] }

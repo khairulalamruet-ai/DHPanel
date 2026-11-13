@@ -1,0 +1,21 @@
+# The images a tenant stack may be built from (T04.06).
+#
+# Only images listed here, pinned by digest, can ever be started for a tenant:
+# the stack renderer refuses anything else, and so does the docker-manager
+# crate (it does not accept tags). The first entry of a role is the one new
+# stacks use; older entries stay allowed so existing stacks keep working until
+# they are moved to the current one.
+#
+# To change an image: pull it, check it (scan, user, size), copy the digest
+# that `docker image inspect --format '{{index .RepoDigests 0}}'` prints, add it
+# here as the first entry of its role in a reviewed change.
+
+[[image]]
+role      = "web"
+reference = "nginxinc/nginx-unprivileged@sha256:7377697a821c131a924a7105fafbe7414db4e9fcc77a6f08f776f33f141ec3f8"
+note      = "nginx 1.28, unprivileged build (listens on 8080, runs as any user), Alpine"
+
+[[image]]
+role      = "php"
+reference = "php@sha256:511af6fa3ef55c4ea0c68bb47096ba4b81771ab4949bde7813807bf177efda11"
+note      = "PHP 8.4 FPM (listens on 9000), Alpine"

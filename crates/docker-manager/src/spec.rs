@@ -11,6 +11,10 @@ use bollard::models::{
 /// Label every object this crate creates carries. Actions refuse objects
 /// without it, so the agent can never touch a container it did not make.
 pub const MANAGED_LABEL: &str = "dhpanel.managed";
+/// Label naming the tenant a container belongs to.
+pub const TENANT_LABEL: &str = "dhpanel.tenant";
+/// Label naming the part a container plays in its stack.
+pub const ROLE_LABEL: &str = "dhpanel.role";
 /// Prefix reserved for our own labels.
 pub const LABEL_PREFIX: &str = "dhpanel.";
 
@@ -236,6 +240,12 @@ pub struct ContainerSpec {
     pub restart: Restart,
     /// Extra labels (not in the reserved `dhpanel.` space).
     pub labels: BTreeMap<String, String>,
+    /// The tenant the container belongs to, recorded as the reserved label
+    /// `dhpanel.tenant` (a UUID, so it needs no further checking).
+    pub tenant: Option<uuid::Uuid>,
+    /// The part the container plays in its stack (`web`, `php`, ...), recorded
+    /// as `dhpanel.role`: 1-32 characters of `a-z`, `0-9`, `_`.
+    pub role: Option<String>,
 }
 
 impl ContainerSpec {
@@ -260,6 +270,8 @@ impl ContainerSpec {
             cap_add: Vec::new(),
             restart: Restart::No,
             labels: BTreeMap::new(),
+            tenant: None,
+            role: None,
         }
     }
 
@@ -361,6 +373,16 @@ impl ContainerSpec {
         if self.labels.len() > 32 {
             return Err(invalid("labels", "at most 32 labels"));
         }
+        if let Some(role) = &self.role {
+            let ok = (1..=32).contains(&role.len())
+                && role.starts_with(|c: char| c.is_ascii_lowercase())
+                && role
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
+            if !ok {
+                return Err(invalid("role", "use 1-32 characters of a-z, 0-9 and `_`"));
+            }
+        }
         for (key, value) in &self.labels {
             let key_ok = !key.is_empty()
                 && key.len() <= 128
@@ -398,6 +420,12 @@ impl ContainerSpec {
         let mut labels: std::collections::HashMap<String, String> =
             self.labels.clone().into_iter().collect();
         labels.insert(MANAGED_LABEL.to_owned(), "true".to_owned());
+        if let Some(tenant) = self.tenant {
+            labels.insert(TENANT_LABEL.to_owned(), tenant.to_string());
+        }
+        if let Some(role) = &self.role {
+            labels.insert(ROLE_LABEL.to_owned(), role.clone());
+        }
 
         let mut mounts: Vec<Mount> = self
             .volumes
