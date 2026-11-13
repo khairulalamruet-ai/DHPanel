@@ -41,6 +41,7 @@ import {
   AdminBackupsPage,
   CronJobsPage,
   LogViewerPage,
+  AdminSystemLogsPage,
   filterNavItems,
   registeredFrontendModules,
 } from "@dhpanel/modules";
@@ -372,6 +373,13 @@ const adminLogsRoute = createRoute({
   component: LogViewerPage,
 });
 
+// 34. Admin System Logs route (T10.07)
+const adminSystemLogsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/system-logs",
+  component: AdminSystemLogsPage,
+});
+
 // 18. Login route
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -429,6 +437,7 @@ const routeTree = rootRoute.addChildren([
   clientLogsRoute,
   logsRoute,
   adminLogsRoute,
+  adminSystemLogsRoute,
   loginRoute,
 ]);
 

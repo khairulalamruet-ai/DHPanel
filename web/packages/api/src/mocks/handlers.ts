@@ -6235,6 +6235,123 @@ export const handlers = [
                             const logs = generateSeedLogs(domain, type);
                             return HttpResponse.json(logs);
                           }),
+
+                          // ==========================================
+                          // ADMIN SYSTEM LOGS (TODO(api:T10.07))
+                          // ==========================================
+                          ...(() => {
+                            const mockServiceStats = [
+                              {
+                                service: "control-plane",
+                                name: "Control Plane",
+                                lines_count: 1450,
+                                size_formatted: "14.2 MB",
+                                error_count: 2,
+                                last_entry_at: new Date().toISOString(),
+                              },
+                              {
+                                service: "agent",
+                                name: "Node Agent",
+                                lines_count: 3200,
+                                size_formatted: "28.5 MB",
+                                error_count: 1,
+                                last_entry_at: new Date().toISOString(),
+                              },
+                              {
+                                service: "caddy",
+                                name: "Caddy Server",
+                                lines_count: 8400,
+                                size_formatted: "64.1 MB",
+                                error_count: 8,
+                                last_entry_at: new Date().toISOString(),
+                              },
+                              {
+                                service: "auth",
+                                name: "Auth & Security",
+                                lines_count: 950,
+                                size_formatted: "4.8 MB",
+                                error_count: 0,
+                                last_entry_at: new Date().toISOString(),
+                              },
+                            ];
+
+                            const generateSystemLogs = (service: string, node: string, levelFilter: string) => {
+                              const entries: any[] = [];
+                              const baseTime = Date.now() - 3600 * 1000 * 6;
+
+                              const serviceMessages: Record<string, { level: string; component: string; msg: string }[]> = {
+                                "control-plane": [
+                                  { level: "info", component: "http", msg: "HTTP 200 OK GET /api/v1/admin/overview in 12ms" },
+                                  { level: "info", component: "db", msg: "PostgreSQL pool connected: 10 active connections" },
+                                  { level: "info", component: "worker", msg: "Queue job [SyncCronJobs] finished in 240ms" },
+                                  { level: "warn", component: "cache", msg: "Redis connection latency spike: 45ms" },
+                                  { level: "error", component: "backup", msg: "Backup job #14 failed: SFTP timeout on remote host" },
+                                  { level: "info", component: "auth", msg: "Session validated for admin UID 1" },
+                                ],
+                                agent: [
+                                  { level: "info", component: "cgroup", msg: "cgroup v2 stats collected for 16 tenant containers" },
+                                  { level: "info", component: "net", msg: "iptables NAT rules synchronized for external traffic" },
+                                  { level: "warn", component: "disk", msg: "Inodes usage exceeded 75% on /var/lib/docker" },
+                                  { level: "error", component: "container", msg: "Container demo_php74 exited with status 137 (OOM)" },
+                                  { level: "info", component: "runner", msg: "Cron runner executed job cron_01 successfully" },
+                                ],
+                                caddy: [
+                                  { level: "info", component: "tls", msg: "TLS certificate renewed successfully for *.dhpanel.test" },
+                                  { level: "info", component: "http", msg: "Handled request GET / HTTP/2.0 status=200 remote=192.168.1.10" },
+                                  { level: "warn", component: "proxy", msg: "Upstream backend 127.0.0.1:9000 took > 2500ms to respond" },
+                                  { level: "error", component: "tls", msg: "ACME challenge failed for invalid-domain.test: NXDOMAIN" },
+                                  { level: "info", component: "admin", msg: "Caddy configuration reload successful" },
+                                ],
+                                auth: [
+                                  { level: "info", component: "session", msg: "Admin user logged in successfully from 192.168.1.5" },
+                                  { level: "info", component: "rbac", msg: "Checked permission 'system.logs.read': GRANTED" },
+                                  { level: "warn", component: "ratelimit", msg: "Rate limit threshold reached for IP 192.168.1.99 (50 req/min)" },
+                                  { level: "info", component: "audit", msg: "Audit log entry created for user action: DOMAIN_ADD" },
+                                ],
+                              };
+
+                              const templates = serviceMessages[service] || serviceMessages["control-plane"];
+
+                              for (let i = 1; i <= 150; i++) {
+                                const tmpl = templates[i % templates.length];
+                                if (levelFilter !== "all" && tmpl.level !== levelFilter) {
+                                  continue;
+                                }
+
+                                const time = new Date(baseTime + i * 140000).toISOString();
+                                entries.push({
+                                  id: `sys_${service}_${i}`,
+                                  lineNumber: i,
+                                  timestamp: time,
+                                  service,
+                                  node,
+                                  level: tmpl.level,
+                                  component: tmpl.component,
+                                  message: tmpl.msg,
+                                  raw: `${time} [${node}] [${service}] [${tmpl.level.toUpperCase()}] [${tmpl.component}] ${tmpl.msg}`,
+                                });
+                              }
+
+                              return entries;
+                            };
+
+                            return [
+                              // GET /api/v1/admin/logs/system/stats (TODO(api:T10.07))
+                              http.get(/\/api\/v1\/admin\/logs\/system\/stats$/, () => {
+                                return HttpResponse.json(mockServiceStats);
+                              }),
+
+                              // GET /api/v1/admin/logs/system (TODO(api:T10.07))
+                              http.get(/\/api\/v1\/admin\/logs\/system$/, ({ request }) => {
+                                const url = new URL(request.url);
+                                const service = url.searchParams.get("service") || "control-plane";
+                                const node = url.searchParams.get("node") || "node-01";
+                                const level = url.searchParams.get("level") || "all";
+                                const logs = generateSystemLogs(service, node, level);
+                                return HttpResponse.json(logs);
+                              }),
+                            ];
+                          })(),
                         ];
                       })(),
                     ];

@@ -1723,5 +1723,24 @@
     "streamLive": "লাইভ স্ট্রিম সক্রিয়",
     "streamPaused": "লাইভ স্ট্রিম স্থগিত",
     "virtualized100MbMode": "ভার্চুয়ালাইজড ১০০MB স্ট্রেস টেস্ট"
+  },
+  "adminSystemLogs": {
+    "nav": "সিস্টেম লগ",
+    "title": "কন্ট্রোল প্লেন ও সিস্টেম লগ",
+    "description": "কন্ট্রোল প্লেন, নোড এজেন্ট, ওয়েব সার্ভার (Caddy) এবং প্রমাণীকরণ অডিট লগ",
+    "serviceControlPlane": "কন্ট্রোল প্লেন",
+    "serviceAgent": "নোড এজেন্ট",
+    "serviceCaddy": "Caddy সার্ভার",
+    "serviceAuth": "প্রমাণীকরণ ও নিরাপত্তা",
+    "levelAll": "সকল লেভেল",
+    "startLiveTail": "লাইভ ট্র্যাকিং",
+    "liveTailActive": "লাইভ চলছে...",
+    "downloadStarted": "{{name}}-এর ডাউনলোড শুরু হয়েছে",
+    "searchPlaceholder": "সিস্টেম লগ বার্তা, কম্পোনেন্ট বা ট্রেস দিয়ে খুঁজুন...",
+    "linesLoaded": "টি সিস্টেম লাইন লোড করা হয়েছে",
+    "fileSize": "লগ সাইজ",
+    "errorsDetected": "টি ত্রুটি রেকর্ড করা হয়েছে",
+    "streamLive": "সিস্টেম স্ট্রিম সক্রিয়",
+    "streamPaused": "স্ট্রিম স্থগিত"
   }
 }

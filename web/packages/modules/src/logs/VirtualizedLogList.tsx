@@ -1,8 +1,23 @@
 import React, { useRef, useState, useEffect, useMemo, useCallback } from "react";
-import { LogEntry } from "./types";
+
+export interface AnyLogEntry {
+  id: string;
+  lineNumber?: number;
+  timestamp: string;
+  domain?: string;
+  service?: string;
+  level?: "info" | "warn" | "error" | "debug" | "fatal";
+  status_code?: number;
+  method?: string;
+  path?: string;
+  ip?: string;
+  component?: string;
+  message: string;
+  raw: string;
+}
 
 interface VirtualizedLogListProps {
-  entries: LogEntry[];
+  entries: AnyLogEntry[];
   itemHeight?: number;
   searchQuery?: string;
   autoScrollBottom?: boolean;
@@ -90,8 +105,8 @@ export function VirtualizedLogList({
     }));
   }, [filteredEntries, startIndex, endIndex]);
 
-  const formatLineStatusColor = (entry: LogEntry) => {
-    if (entry.level === "error" || (entry.status_code && entry.status_code >= 500)) {
+  const formatLineStatusColor = (entry: AnyLogEntry) => {
+    if (entry.level === "fatal" || entry.level === "error" || (entry.status_code && entry.status_code >= 500)) {
       return "text-red-400 bg-red-950/20";
     }
     if (entry.level === "warn" || (entry.status_code && entry.status_code >= 400)) {
@@ -178,7 +193,9 @@ export function VirtualizedLogList({
                   {entry.level && (
                     <span
                       className={`font-semibold uppercase text-[10px] px-1.5 py-0.5 rounded mr-2 shrink-0 ${
-                        entry.level === "error"
+                        entry.level === "fatal"
+                          ? "bg-rose-600/30 text-rose-300 font-extrabold"
+                          : entry.level === "error"
                           ? "bg-red-500/20 text-red-400"
                           : entry.level === "warn"
                           ? "bg-amber-500/20 text-amber-400"
@@ -186,6 +203,13 @@ export function VirtualizedLogList({
                       }`}
                     >
                       {entry.level}
+                    </span>
+                  )}
+
+                  {/* Component tag if present */}
+                  {entry.component && (
+                    <span className="text-zinc-400 text-[11px] px-1.5 py-0.5 rounded bg-zinc-800/80 mr-2 shrink-0">
+                      [{entry.component}]
                     </span>
                   )}
 

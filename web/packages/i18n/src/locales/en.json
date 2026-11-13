@@ -1723,5 +1723,24 @@
     "streamLive": "Live Stream Active",
     "streamPaused": "Live Stream Paused",
     "virtualized100MbMode": "Virtualized 100MB Stress Test"
+  },
+  "adminSystemLogs": {
+    "nav": "System Logs",
+    "title": "Control Plane & System Logs",
+    "description": "Real-time control plane, node agent, web server (Caddy), and authentication audit logs",
+    "serviceControlPlane": "Control Plane",
+    "serviceAgent": "Node Agent",
+    "serviceCaddy": "Caddy Server",
+    "serviceAuth": "Auth & Security",
+    "levelAll": "All Levels",
+    "startLiveTail": "Live Tail",
+    "liveTailActive": "Live Tailing...",
+    "downloadStarted": "Download started for {{name}}",
+    "searchPlaceholder": "Search system log messages, components, or traces...",
+    "linesLoaded": "system lines loaded",
+    "fileSize": "log size",
+    "errorsDetected": "errors logged",
+    "streamLive": "System Stream Active",
+    "streamPaused": "Stream Paused"
   }
 }

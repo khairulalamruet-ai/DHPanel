@@ -32,3 +32,27 @@ export interface LogFilterOptions {
   search: string;
   level?: string;
 }
+
+export type SystemLogService = "control-plane" | "agent" | "caddy" | "auth";
+export type SystemLogLevel = "all" | "debug" | "info" | "warn" | "error" | "fatal";
+
+export interface SystemLogEntry {
+  id: string;
+  lineNumber: number;
+  timestamp: string;
+  service: SystemLogService;
+  node: string;
+  level: "debug" | "info" | "warn" | "error" | "fatal";
+  component?: string;
+  message: string;
+  raw: string;
+}
+
+export interface SystemLogServiceStats {
+  service: SystemLogService;
+  name: string;
+  lines_count: number;
+  size_formatted: string;
+  error_count: number;
+  last_entry_at: string;
+}

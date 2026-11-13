@@ -590,12 +590,12 @@ export const registeredFrontendModules: FrontendModule[] = [
     ],
     adminNav: [
       {
-        id: "admin-logs",
-        labelKey: "logs.nav",
+        id: "admin-system-logs",
+        labelKey: "adminSystemLogs.nav",
         icon: <FileText className="h-4 w-4" />,
-        href: "/admin/logs",
+        href: "/admin/system-logs",
         order: 58,
-        permission: "logs.read",
+        permission: "system.logs.read",
       },
     ],
   },
