@@ -769,6 +769,24 @@ export const registeredFrontendModules: FrontendModule[] = [
       },
     ],
   },
+  {
+    manifest: {
+      name: "support_report",
+      title: { en: "Support Report", bn: "সাপোর্ট রিপোর্ট" },
+      category: "core",
+      core: true,
+      permissions: ["admin.support.read", "admin.settings.manage", "*"],
+    },
+    adminNav: [
+      {
+        id: "support-report",
+        labelKey: "support.nav",
+        icon: <FileText className="h-4 w-4" />,
+        href: "/admin/support-report",
+        order: 90,
+      },
+    ],
+  },
 ];
 
 export const registeredModules: ModuleManifest[] = registeredFrontendModules.map((m) => m.manifest);

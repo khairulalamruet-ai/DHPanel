@@ -7131,6 +7131,77 @@ export const handlers = [
                                                 mockWafPolicies[domain].mode = body.mode || "block";
                                                 return HttpResponse.json({ success: true, policy: mockWafPolicies[domain] });
                                               }),
+
+                                              // ==========================================
+                                              // T18.12 — Support Report Diagnostic Bundle (TODO(api:T18.12))
+                                              // ==========================================
+                                              http.get(/\/api(?:\/v1\/admin)?\/support\/report$/, () => {
+                                                return HttpResponse.json({
+                                                  metadata: {
+                                                    bundle_id: "diag-20261114-8841",
+                                                    generated_at: new Date().toISOString(),
+                                                    panel_version: "0.1.0",
+                                                    node_id: "node-primary-ams01",
+                                                    environment: "production",
+                                                  },
+                                                  system: {
+                                                    os: "Ubuntu 24.04 LTS (Noble Numbat)",
+                                                    kernel: "6.8.0-40-generic",
+                                                    architecture: "x86_64",
+                                                    uptime_seconds: 489201,
+                                                    load_average: [0.18, 0.24, 0.28],
+                                                    memory: { total_mb: 16384, used_mb: 6144, free_mb: 10240 },
+                                                    disk: { total_gb: 512, used_gb: 142, available_gb: 370 },
+                                                  },
+                                                  services: [
+                                                    { name: "nginx", status: "active", uptime: "5d 14h", description: "Edge Reverse Proxy" },
+                                                    { name: "postgresql", status: "active", uptime: "5d 14h", description: "Relational Storage" },
+                                                    { name: "redis", status: "active", uptime: "5d 14h", description: "In-memory cache & pub/sub" },
+                                                    { name: "docker", status: "active", uptime: "5d 14h", description: "Container Runtime" },
+                                                    { name: "coraza-waf", status: "active", uptime: "5d 14h", description: "Web Application Firewall" },
+                                                  ],
+                                                  sanitized_config: {
+                                                    database: {
+                                                      driver: "postgres",
+                                                      host: "127.0.0.1",
+                                                      port: 5432,
+                                                      database: "dhpanel_db",
+                                                      password: "[REDACTED_CONFIDENTIAL]",
+                                                    },
+                                                    redis: {
+                                                      host: "127.0.0.1",
+                                                      port: 6379,
+                                                      password: "[REDACTED_CONFIDENTIAL]",
+                                                    },
+                                                    cluster: { mode: "standalone_master", enrolled_nodes: 3 },
+                                                    storage: {
+                                                      data_path: "/var/lib/dhpanel/data",
+                                                      backup_path: "/var/lib/dhpanel/backups",
+                                                    },
+                                                    features: ["domains", "databases", "waf", "cron", "ssl", "backups"],
+                                                  },
+                                                  sanitized_logs: [
+                                                    {
+                                                      timestamp: new Date(Date.now() - 300000).toISOString(),
+                                                      level: "info",
+                                                      service: "panel-core",
+                                                      message: "Health check completed successfully for all active cluster nodes.",
+                                                    },
+                                                    {
+                                                      timestamp: new Date(Date.now() - 180000).toISOString(),
+                                                      level: "info",
+                                                      service: "auth-gateway",
+                                                      message: "User session authenticated via Bearer [REDACTED_TOKEN] from remote IP 192.168.1.10",
+                                                    },
+                                                    {
+                                                      timestamp: new Date(Date.now() - 60000).toISOString(),
+                                                      level: "info",
+                                                      service: "waf-engine",
+                                                      message: "OWASP CRS rule 942100 evaluated without exceptions on vhost demo.example.com",
+                                                    },
+                                                  ],
+                                                });
+                                              }),
                                             ];
                                           })(),
                                         ];

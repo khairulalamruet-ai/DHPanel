@@ -1969,5 +1969,32 @@
     "disableReason": "Exclusion Reason",
     "disabledAt": "Disabled At",
     "reEnableRule": "Re-enable"
+  },
+  "support": {
+    "nav": "Support Report",
+    "title": "Support & Diagnostic Report",
+    "subtitle": "Generate exportable diagnostic bundle for troubleshooting. Strictly audited to guarantee zero secret leaks.",
+    "refresh": "Refresh Bundle",
+    "copyJson": "Copy JSON",
+    "downloadJson": "Download Bundle",
+    "zeroSecretsPolicy": "Zero Secrets Leak Policy (DoD Verified)",
+    "zeroSecretsDesc": "All database credentials, private keys, API secrets, and authorization bearer tokens are permanently stripped or masked before the diagnostic bundle is assembled.",
+    "metadataTitle": "Bundle Metadata",
+    "bundleId": "Bundle ID",
+    "panelVersion": "Panel Version",
+    "nodeId": "Node ID",
+    "environment": "Environment",
+    "systemHardware": "System Diagnostics",
+    "coreServices": "Core Services",
+    "sanitizedConfig": "Masked Platform Configuration",
+    "sanitizedConfigDesc": "Platform runtime settings with all credentials masked as [REDACTED_CONFIDENTIAL].",
+    "sanitizedLogs": "Sanitized Recent Log Slices",
+    "sanitizedLogsDesc": "Recent service events with authentication tokens and secrets scrubbed.",
+    "filterLogs": "Filter logs...",
+    "reportGenerated": "Report Generated",
+    "reportGeneratedDesc": "Diagnostic bundle refreshed with zero secrets.",
+    "copiedTitle": "Copied to Clipboard",
+    "copiedDesc": "Sanitized diagnostic bundle copied.",
+    "downloadStarted": "Download Started"
   }
 }
