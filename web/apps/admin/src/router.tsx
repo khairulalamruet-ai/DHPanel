@@ -9,48 +9,60 @@ import { ThemeProvider, ToastProvider } from "@dhpanel/ui";
 import { SessionProvider, useSession, LoginPage, AccountSecurityPage } from "@dhpanel/auth";
 import { queryClient, QueryClientProvider } from "@dhpanel/api";
 import { AppShell, NotFoundPage, RouteErrorFallback } from "@dhpanel/shell";
-import { DashboardPage, UiDemoPage, AuditViewerPage } from "@dhpanel/modules";
+import {
+  DashboardPage,
+  UiDemoPage,
+  AuditViewerPage,
+  DummyModulePage,
+  ModuleManagerPage,
+  NodesPage,
+  OperationsPage,
+  SettingsPage,
+  FeatureSetsPage,
+  PlansPage,
+  UsersPage,
+  UserCreateWizardPage,
+  UserDetailPage,
+  ClientDashboardPage,
+  ClientDomainsPage,
+  AdminDomainsPage,
+  DnsEditorPage,
+  SslPage,
+  VhostTemplatesPage,
+  PhpManagementPage,
+  ServicesPage,
+  ErrorPagesPage,
+  ClientDatabasesPage,
+  AdminDatabasesPage,
+  FileManagerPage,
+  DiskUsagePage,
+  FtpAccountsPage,
+  ClientBackupsPage,
+  AdminBackupsPage,
+  CronJobsPage,
+  LogViewerPage,
+  AdminSystemLogsPage,
+  ClientUsagePage,
+  AdminUsagePage,
+  ClientProcessesPage,
+  AdminProcessesPage,
+  AdminServerToolsPage,
+  ClientWafPage,
+  AdminWafPage,
+  filterNavItems,
+  registeredFrontendModules,
+} from "@dhpanel/modules";
 import { useTranslation } from "@dhpanel/i18n";
-import { LayoutDashboard, Sparkles, ShieldCheck, FileText } from "lucide-react";
 
 function AuthenticatedContent() {
-  const { data: session, isLoading, hasPermission } = useSession();
+  const { data: session, isLoading } = useSession();
   const { t } = useTranslation();
 
-  const navItems = [
-    {
-      id: "dashboard",
-      labelKey: "common.dashboard",
-      icon: <LayoutDashboard className="h-4 w-4" />,
-      href: "/",
-    },
-    {
-      id: "security",
-      labelKey: "security.nav",
-      icon: <ShieldCheck className="h-4 w-4" />,
-      href: "/security",
-    },
-    ...(hasPermission("admin.audit.read")
-      ? [
-          {
-            id: "audit",
-            labelKey: "audit.nav",
-            icon: <FileText className="h-4 w-4" />,
-            href: "/audit",
-          },
-        ]
-      : []),
-    {
-      id: "demo",
-      labelKey: "UI Foundation (T00.12)",
-      icon: <Sparkles className="h-4 w-4 text-primary" />,
-      href: "/demo",
-    },
-  ];
+  const navItems = filterNavItems(registeredFrontendModules, session, "admin");
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
+      <div className="flex h-screen w-screen items-center justify-center">
         <p className="text-sm text-muted-foreground">{t("common.loading")}</p>
       </div>
     );
@@ -66,24 +78,26 @@ function AuthenticatedContent() {
   }
 
   return (
-    <AppShell title={t("common.adminTitle")} navItems={navItems}>
+    <AppShell
+      title={t("common.adminTitle")}
+      navItems={navItems}
+    >
       <Outlet />
     </AppShell>
   );
 }
 
-// Root Component
 function RootLayout() {
   return (
-    <ThemeProvider defaultTheme="system" storageKey="dhpanel-admin-theme">
-      <QueryClientProvider client={queryClient}>
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider defaultTheme="system">
         <ToastProvider>
-          <SessionProvider bootstrapPath="/api/v1/auth/me">
+          <SessionProvider>
             <AuthenticatedContent />
           </SessionProvider>
         </ToastProvider>
-      </QueryClientProvider>
-    </ThemeProvider>
+      </ThemeProvider>
+    </QueryClientProvider>
   );
 }
 
@@ -122,7 +136,316 @@ const auditRoute = createRoute({
   component: AuditViewerPage,
 });
 
-// 6. Login route
+// 6. Dummy module route (T03.11 DoD)
+const dummyRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/dummy",
+  component: DummyModulePage,
+});
+
+// 7. Modules route (T03.12)
+const modulesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/modules",
+  component: ModuleManagerPage,
+});
+
+// 8. Nodes route (Cluster Nodes T02.16)
+const nodesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/nodes",
+  component: NodesPage,
+});
+
+// 9. Operations route (Operation Ledger T02.17)
+const operationsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/operations",
+  component: OperationsPage,
+});
+
+// 10. Settings route (T03.13)
+const settingsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/settings",
+  component: SettingsPage,
+});
+
+// 11. Feature Sets route (T04.02)
+const featureSetsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/feature-sets",
+  component: FeatureSetsPage,
+});
+
+// 12. Plans route (T04.04)
+const plansRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/plans",
+  component: PlansPage,
+});
+
+// 13. Users route (T04.15)
+const usersRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/users",
+  component: UsersPage,
+});
+
+// 14. User create wizard route (T04.16)
+const userWizardRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/users/new",
+  component: UserCreateWizardPage,
+});
+
+// 15. User detail route (T04.17)
+const userDetailRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/users/$id",
+  component: UserDetailPage,
+});
+
+// 16. Client dashboard route (T04.18)
+const clientRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/client",
+  component: ClientDashboardPage,
+});
+
+// 17. Client domains route (T05.05)
+const clientDomainsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/client/domains",
+  component: ClientDomainsPage,
+});
+
+// 18. Domains management route (T05.06)
+const domainsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/domains",
+  component: AdminDomainsPage,
+});
+
+// 19. DNS Zone Editor route (T05.11)
+const dnsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/dns",
+  component: DnsEditorPage,
+});
+
+// 20. SSL / TLS Certificate route (T05.19)
+const sslRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/ssl",
+  component: SslPage,
+});
+
+// 21. VHost Template Management route (T06.07)
+const vhostRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/vhost-templates",
+  component: VhostTemplatesPage,
+});
+
+// 22. PHP Runtime Management route (T06.11)
+const phpRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/php",
+  component: PhpManagementPage,
+});
+
+// 23. Web Services Management route (T06.12)
+const servicesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/services",
+  component: ServicesPage,
+});
+
+// 24. Error & Suspended Pages route (T06.13)
+const errorPagesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/error-pages",
+  component: ErrorPagesPage,
+});
+
+// 25. Databases route (T07.10)
+const clientDatabasesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/client/databases",
+  component: ClientDatabasesPage,
+});
+
+const databasesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/databases",
+  component: ClientDatabasesPage,
+});
+
+// 26. Admin Database Overview route (T07.11)
+const adminDatabasesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/databases",
+  component: AdminDatabasesPage,
+});
+
+// 27. File Manager route (T08.09)
+const clientFilesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/client/files",
+  component: FileManagerPage,
+});
+
+const filesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/files",
+  component: FileManagerPage,
+});
+
+// 28. Disk Usage route (T08.10)
+const clientDiskUsageRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/client/disk-usage",
+  component: DiskUsagePage,
+});
+
+const diskUsageRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/disk-usage",
+  component: DiskUsagePage,
+});
+
+// 29. FTP Accounts route (T08.13)
+const clientFtpRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/client/ftp",
+  component: FtpAccountsPage,
+});
+
+const ftpRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/ftp",
+  component: FtpAccountsPage,
+});
+
+// 30. Backups route (T09.09)
+const clientBackupsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/client/backups",
+  component: ClientBackupsPage,
+});
+
+const backupsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/backups",
+  component: ClientBackupsPage,
+});
+
+// 31. Admin Backups route (T09.10)
+const adminBackupsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/backups",
+  component: AdminBackupsPage,
+});
+
+// 32. Cron routes (T10.03)
+const clientCronRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/client/cron",
+  component: CronJobsPage,
+});
+
+const cronRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/cron",
+  component: CronJobsPage,
+});
+
+// 33. Log Viewer routes (T10.06)
+const clientLogsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/client/logs",
+  component: LogViewerPage,
+});
+
+const logsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/logs",
+  component: LogViewerPage,
+});
+
+const adminLogsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/logs",
+  component: LogViewerPage,
+});
+
+// 34. Admin System Logs route (T10.07)
+const adminSystemLogsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/system-logs",
+  component: AdminSystemLogsPage,
+});
+
+// 35. Usage routes (T10.10)
+const clientUsageRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/client/usage",
+  component: ClientUsagePage,
+});
+
+const usageRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/usage",
+  component: ClientUsagePage,
+});
+
+const adminUsageRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/usage",
+  component: AdminUsagePage,
+});
+
+// 36. Process routes (T10.14)
+const clientProcessesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/client/processes",
+  component: ClientProcessesPage,
+});
+
+const processesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/processes",
+  component: ClientProcessesPage,
+});
+
+const adminProcessesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/processes",
+  component: AdminProcessesPage,
+});
+
+// 37. Server Tools route (T10.15)
+const adminServerToolsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/server-tools",
+  component: AdminServerToolsPage,
+});
+
+// 38. WAF routes (T11.04)
+const clientWafRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/waf",
+  component: ClientWafPage,
+});
+
+const adminWafRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/waf",
+  component: AdminWafPage,
+});
+
+// 18. Login route
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/login",
@@ -137,10 +460,62 @@ const loginRoute = createRoute({
   },
 });
 
-// 7. Route Tree
-const routeTree = rootRoute.addChildren([indexRoute, demoRoute, securityRoute, auditRoute, loginRoute]);
+// 19. Route Tree
+const routeTree = rootRoute.addChildren([
+  indexRoute,
+  demoRoute,
+  securityRoute,
+  auditRoute,
+  dummyRoute,
+  modulesRoute,
+  nodesRoute,
+  operationsRoute,
+  settingsRoute,
+  featureSetsRoute,
+  plansRoute,
+  usersRoute,
+  userWizardRoute,
+  userDetailRoute,
+  clientRoute,
+  clientDomainsRoute,
+  domainsRoute,
+  dnsRoute,
+  sslRoute,
+  vhostRoute,
+  phpRoute,
+  servicesRoute,
+  errorPagesRoute,
+  clientDatabasesRoute,
+  databasesRoute,
+  adminDatabasesRoute,
+  clientFilesRoute,
+  filesRoute,
+  clientDiskUsageRoute,
+  diskUsageRoute,
+  clientFtpRoute,
+  ftpRoute,
+  clientBackupsRoute,
+  backupsRoute,
+  adminBackupsRoute,
+  clientCronRoute,
+  cronRoute,
+  clientLogsRoute,
+  logsRoute,
+  adminLogsRoute,
+  adminSystemLogsRoute,
+  clientUsageRoute,
+  usageRoute,
+  adminUsageRoute,
+  clientProcessesRoute,
+  processesRoute,
+  adminProcessesRoute,
+  adminServerToolsRoute,
+  clientWafRoute,
+  adminWafRoute,
+  loginRoute,
+]);
 
-// 6. Create Router
+// Create Router
 export const router = createRouter({
   routeTree,
   defaultPreload: "intent",

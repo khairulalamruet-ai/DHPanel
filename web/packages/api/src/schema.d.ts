@@ -113,6 +113,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/nodes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Add a node: creates a one-time enrollment token. */
+        post: operations["createNodeEnrollment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/nodes/enrollments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List recent enrollment tokens (never the tokens themselves). */
+        get: operations["listNodeEnrollments"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/nodes/enrollments/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Cancel a token that has not been used yet. */
+        delete: operations["revokeNodeEnrollment"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/logout": {
         parameters: {
             query?: never;
@@ -363,6 +414,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/public/nodes/enroll": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Exchange an enrollment token and a certificate request for a node certificate. */
+        post: operations["enrollNode"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/public/ready": {
         parameters: {
             query?: never;
@@ -536,6 +604,41 @@ export interface components {
              */
             username: string;
         };
+        /** @description Request to add a node. */
+        CreateEnrollment: {
+            /**
+             * @description Name for the new node: 2-63 characters, a-z, 0-9 and `-`, starting with a letter.
+             * @example eu-west-1
+             */
+            name: string;
+        };
+        /** @description A newly created enrollment token. **The token is shown only in this response.** */
+        CreatedEnrollment: {
+            /** @description Command to run on the new server. Absent when `agent.public_url` is not configured. */
+            enroll_command?: string | null;
+            /**
+             * Format: date-time
+             * @description When the token stops working (RFC 3339, UTC).
+             */
+            expires_at: string;
+            /**
+             * Format: int64
+             * @description Seconds until then.
+             */
+            expires_in: number;
+            /**
+             * Format: uuid
+             * @description Token id (use it to cancel the token).
+             */
+            id: string;
+            /** @description The node name this token is for. */
+            name: string;
+            /**
+             * @description The one-time token. It cannot be shown again.
+             * @example dhn_…
+             */
+            token: string;
+        };
         /** @description Result of ending sessions. */
         EndedSessions: {
             /**
@@ -543,6 +646,95 @@ export interface components {
              * @description Number of sessions ended.
              */
             revoked: number;
+        };
+        /** @description What an agent sends to enrol (plain HTTPS, before it has a certificate). */
+        EnrollRequest: {
+            /** @description Agent build version. */
+            agent_version?: string | null;
+            /**
+             * @description PEM certificate signing request made with a fresh ECDSA P-256 key that
+             *     never leaves the node.
+             */
+            csr_pem: string;
+            /** @description Host name of the server. */
+            hostname?: string | null;
+            /**
+             * @description The one-time token from the "add node" screen.
+             * @example dhn_…
+             */
+            token: string;
+        };
+        /** @description The node's new identity. */
+        EnrollResponse: {
+            /**
+             * @description The CA certificate (PEM) that signed it and that signs the control
+             *     plane's server certificate.
+             */
+            ca_certificate_pem: string;
+            /**
+             * @description SHA-256 fingerprint of the CA certificate (lowercase hex), to compare
+             *     with the one in the enrol command.
+             */
+            ca_fingerprint_sha256: string;
+            /** @description The node certificate (PEM): client authentication for the mTLS connection. */
+            certificate_pem: string;
+            /** @description The node's name. */
+            name: string;
+            /**
+             * Format: uuid
+             * @description The node's id.
+             */
+            node_id: string;
+            /**
+             * Format: date-time
+             * @description Certificate expiry (RFC 3339, UTC). The agent renews before this.
+             */
+            not_after: string;
+            /**
+             * Format: date-time
+             * @description Certificate validity start (RFC 3339, UTC).
+             */
+            not_before: string;
+            /**
+             * Format: int32
+             * @description Protocol version the control plane speaks.
+             */
+            protocol_version: number;
+        };
+        /** @description The most recent enrollment tokens. */
+        EnrollmentList: {
+            /** @description Newest first (at most 100). */
+            items: components["schemas"]["EnrollmentView"][];
+        };
+        /** @description An enrollment token as listed (without the token itself). */
+        EnrollmentView: {
+            /**
+             * Format: date-time
+             * @description Creation time (RFC 3339, UTC).
+             */
+            created_at: string;
+            /**
+             * Format: uuid
+             * @description Account that created it, if it still exists.
+             */
+            created_by?: string | null;
+            /**
+             * Format: date-time
+             * @description Expiry (RFC 3339, UTC).
+             */
+            expires_at: string;
+            /**
+             * Format: uuid
+             * @description Token id.
+             */
+            id: string;
+            /** @description The node name it is for. */
+            name: string;
+            /**
+             * @description `pending`, `expired`, `consumed` or `revoked`.
+             * @example pending
+             */
+            status: string;
         };
         /** @description One invalid input field (used with 422). */
         FieldError: {
@@ -1285,6 +1477,140 @@ export interface operations {
             };
         };
     };
+    createNodeEnrollment: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The session's csrf_token */
+                "X-CSRF-Token": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateEnrollment"];
+            };
+        };
+        responses: {
+            /** @description Token created; shown only now */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreatedEnrollment"];
+                };
+            };
+            /** @description `permission_denied` (needs admin.nodes.manage), `reauth_required`, `mfa_setup_required` or `csrf_failed` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `node_name_taken`: a node or a valid token already uses the name */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Invalid name */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    listNodeEnrollments: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Recent tokens, newest first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnrollmentList"];
+                };
+            };
+            /** @description `permission_denied` (needs admin.nodes.read) or `mfa_setup_required` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    revokeNodeEnrollment: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The session's csrf_token */
+                "X-CSRF-Token": string;
+            };
+            path: {
+                /** @description Token id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cancelled */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `permission_denied`, `reauth_required` or `csrf_failed` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such token */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `enrollment_not_pending`: already used, cancelled or expired */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
     logout: {
         parameters: {
             query?: never;
@@ -1809,6 +2135,77 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Liveness"];
+                };
+            };
+        };
+    };
+    enrollNode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EnrollRequest"];
+            };
+        };
+        responses: {
+            /** @description Enrolled; the token is used up */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnrollResponse"];
+                };
+            };
+            /** @description `invalid_enrollment_token`: unknown, used, cancelled or expired (deliberately indistinguishable) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `node_name_taken`: a node with that name appeared meanwhile; the token is still usable once the name is free */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Invalid certificate request or fields; the token is not used up */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Too many failed attempts from this address */
+            429: {
+                headers: {
+                    /** @description Seconds until the lock expires */
+                    "retry-after"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `enrollment_unavailable`: this control plane has no node CA yet (run `dhctl ca init`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
         };

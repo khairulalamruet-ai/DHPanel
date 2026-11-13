@@ -1,0 +1,87 @@
+import { HostingPlanOption, NodeOption } from "./types";
+
+export const HOSTING_PLANS: HostingPlanOption[] = [
+  {
+    id: "plan_starter",
+    name: "Starter Cloud",
+    description: "Ideal for personal websites, blogs, and starter portfolios",
+    cpu: 1,
+    memory_mb: 1024,
+    disk_gb: 10,
+    domains_limit: 1,
+    is_default: false,
+  },
+  {
+    id: "plan_standard",
+    name: "Standard Business",
+    description: "Balanced hosting for eCommerce, business sites, and apps",
+    cpu: 2,
+    memory_mb: 2048,
+    disk_gb: 25,
+    domains_limit: 5,
+    is_default: true,
+  },
+  {
+    id: "plan_pro",
+    name: "Pro Developer",
+    description: "High-performance stack with dedicated resources for heavy workloads",
+    cpu: 4,
+    memory_mb: 4096,
+    disk_gb: 50,
+    domains_limit: 20,
+    is_default: false,
+  },
+  {
+    id: "plan_enterprise",
+    name: "Enterprise Dedicated",
+    description: "Unmetered and uncapped resources for high-scale enterprise operations",
+    cpu: -1,
+    memory_mb: -1,
+    disk_gb: -1,
+    domains_limit: -1,
+    is_default: false,
+  },
+];
+
+export const CLUSTER_NODES: NodeOption[] = [
+  {
+    id: "node-sgp-01",
+    name: "node-sgp-01",
+    region: "Singapore (Asia East)",
+    cpu_usage_pct: 18,
+    memory_usage_pct: 32,
+    status: "healthy",
+  },
+  {
+    id: "node-fra-01",
+    name: "node-fra-01",
+    region: "Frankfurt (Europe West)",
+    cpu_usage_pct: 25,
+    memory_usage_pct: 44,
+    status: "healthy",
+  },
+  {
+    id: "node-nyc-01",
+    name: "node-nyc-01",
+    region: "New York (US East)",
+    cpu_usage_pct: 38,
+    memory_usage_pct: 55,
+    status: "healthy",
+  },
+];
+
+export const RESERVED_USERNAMES = new Set([
+  "admin",
+  "root",
+  "dhpanel",
+  "system",
+  "daemon",
+  "nobody",
+  "www-data",
+  "nginx",
+  "docker",
+  "mail",
+  "ftp",
+  "mysql",
+  "postgres",
+]);
