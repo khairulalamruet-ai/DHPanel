@@ -274,16 +274,30 @@ async fn main() -> ExitCode {
     };
 
     let handle = telemetry.prometheus_handle();
-    let app = app::router(
-        app::AppState {
-            metrics: Arc::new(move || handle.render()),
-            readiness,
-            trusted_proxies: config.trusted_proxies.clone().into(),
-        },
-        Some(auth),
-        Some(admin),
-        Some(nodes),
-    );
+    let trusted_proxies: Arc<[std::net::IpAddr]> = config.trusted_proxies.clone().into();
+    let base = app::base_router(app::AppState {
+        metrics: Arc::new(move || handle.render()),
+        readiness,
+        trusted_proxies: trusted_proxies.clone(),
+    });
+    // Module routes: core modules at once, the others as soon as the modules
+    // table can be read, and again whenever an administrator switches one.
+    let mount = match modules::mount(modules::States { auth, admin, nodes }, base) {
+        Ok(mount) => mount,
+        Err(messages) => {
+            for message in messages {
+                tracing::error!("{message}");
+            }
+            telemetry.shutdown();
+            return ExitCode::from(EXIT_CONFIG);
+        }
+    };
+    tokio::spawn(modules::follow_enabled(
+        db.clone(),
+        mount.clone(),
+        std::time::Duration::from_secs(15),
+    ));
+    let app = app::router(mount.service(), trusted_proxies);
 
     // One signal stops the API and the agent port.
     let (stop, stopped) = tokio::sync::watch::channel(false);

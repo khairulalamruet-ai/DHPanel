@@ -17,3 +17,8 @@ serde = { version = "1", features = ["derive"] }
 thiserror = "2.0.21"
 # Module manifests (`module.toml`) are TOML.
 toml = "1"
+# `oneshot` to hand a request to the currently mounted router.
+tower = { version = "0.5", features = ["util"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }

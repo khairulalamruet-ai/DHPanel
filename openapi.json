@@ -813,6 +813,128 @@
         ]
       }
     },
+    "/api/v1/admin/modules": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "List the modules of this installation.",
+        "operationId": "listModules",
+        "responses": {
+          "200": {
+            "description": "All modules, by name",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModuleList"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied` (needs admin.modules.read) or `mfa_setup_required`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/modules/{name}": {
+      "put": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Switch a module on or off. Takes effect at once, without a restart.",
+        "operationId": "setModule",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Module name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetModule"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Done (also when nothing had to change)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModuleChange"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied` (needs admin.modules.manage), `reauth_required` or `csrf_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such module in this build",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`module_is_core`; `module_has_dependents` (switching off: the detail names the modules that need it); `module_needs_dependencies` (switching on: the detail names the modules it needs). Repeat with `cascade` to switch those too.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/nodes": {
       "get": {
         "tags": [
@@ -2989,6 +3111,111 @@
           }
         }
       },
+      "ModuleChange": {
+        "type": "object",
+        "description": "What a switch changed.",
+        "required": [
+          "changed",
+          "active"
+        ],
+        "properties": {
+          "active": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Modules whose routes are being served after the change."
+          },
+          "changed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Modules whose switch changed, including the one asked for (empty when\nit already was in the requested state)."
+          }
+        }
+      },
+      "ModuleList": {
+        "type": "object",
+        "description": "All modules.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ModuleView"
+            },
+            "description": "By name."
+          }
+        }
+      },
+      "ModuleView": {
+        "type": "object",
+        "description": "A module as shown to administrators.",
+        "required": [
+          "name",
+          "title",
+          "version",
+          "category",
+          "core",
+          "enabled",
+          "present",
+          "active",
+          "depends_on",
+          "dependents"
+        ],
+        "properties": {
+          "active": {
+            "type": "boolean",
+            "description": "Its routes are being served right now (switched on, with everything it needs)."
+          },
+          "category": {
+            "type": "string",
+            "description": "`core`, `web`, `db`, `mail`, `files`, `security`, `system` or `apps`."
+          },
+          "core": {
+            "type": "boolean",
+            "description": "Cannot be switched off."
+          },
+          "dependents": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Modules that need it, directly or indirectly: switching it off stops these too."
+          },
+          "depends_on": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Modules it needs, directly."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Switched on by an administrator."
+          },
+          "name": {
+            "type": "string",
+            "description": "Module name.",
+            "example": "domains"
+          },
+          "present": {
+            "type": "boolean",
+            "description": "Part of the running build. A module that is not is listed for history\nand cannot be switched."
+          },
+          "title": {
+            "type": "object",
+            "description": "Display name by language code."
+          },
+          "version": {
+            "type": "string",
+            "description": "Version of the build."
+          }
+        }
+      },
       "NodeList": {
         "type": "object",
         "description": "The nodes.",
@@ -3383,6 +3610,24 @@
           }
         }
       },
+      "SetModule": {
+        "type": "object",
+        "description": "A change of a module's switch.",
+        "required": [
+          "enabled"
+        ],
+        "properties": {
+          "cascade": {
+            "type": "boolean",
+            "description": "Also switch what has to change with it: when switching off, the modules\nthat need this one; when switching on, the modules this one needs."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "On or off."
+          }
+        },
+        "additionalProperties": false
+      },
       "StatusInput": {
         "type": "string",
         "description": "Status an administrator can be set to.",
@@ -3510,6 +3755,10 @@
     {
       "name": "nodes",
       "description": "Add and manage servers (nodes)"
+    },
+    {
+      "name": "system",
+      "description": "Modules and settings"
     }
   ]
 }

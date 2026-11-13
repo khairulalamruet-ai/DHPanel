@@ -76,6 +76,14 @@ pub mod permissions {
         /// Add, change and remove nodes (create and revoke enrollment tokens).
         pub NodesManage = "admin.nodes.manage"
     );
+    crate::permission!(
+        /// See which modules exist and which are switched on.
+        pub ModulesRead = "admin.modules.read"
+    );
+    crate::permission!(
+        /// Switch modules on and off.
+        pub ModulesManage = "admin.modules.manage"
+    );
 }
 
 /// Name of the built-in role that grants everything.

@@ -904,6 +904,7 @@ dependencies = [
  "dhpanel-mod-admin",
  "dhpanel-mod-auth",
  "dhpanel-mod-nodes",
+ "dhpanel-mod-system",
  "dhpanel-node-gateway",
  "dhpanel-observability",
  "dhpanel-operations",
@@ -1019,7 +1020,9 @@ dependencies = [
  "axum",
  "serde",
  "thiserror",
+ "tokio",
  "toml 1.2.1+spec-1.1.0",
+ "tower",
 ]
 
 [[package]]
@@ -1102,6 +1105,29 @@ dependencies = [
  "utoipa",
  "uuid",
  "x509-parser",
+]
+
+[[package]]
+name = "dhpanel-mod-system"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "dhpanel-audit",
+ "dhpanel-cache",
+ "dhpanel-database",
+ "dhpanel-http-kit",
+ "dhpanel-kernel",
+ "dhpanel-rbac",
+ "dhpanel-session",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tokio",
+ "tower",
+ "tracing",
+ "utoipa",
+ "uuid",
 ]
 
 [[package]]

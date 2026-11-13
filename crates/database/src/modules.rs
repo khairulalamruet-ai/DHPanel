@@ -186,3 +186,50 @@ pub async fn enabled_names(pool: &PgPool) -> Result<Vec<String>, sqlx::Error> {
     .fetch_all(pool)
     .await
 }
+
+/// Takes the lock that serialises changes to the modules table for the rest of
+/// the transaction (the same lock [`sync`] uses).
+///
+/// # Errors
+/// Database errors.
+pub async fn lock(conn: &mut sqlx::PgConnection) -> Result<(), sqlx::Error> {
+    sqlx::query!("SELECT pg_advisory_xact_lock($1)", SYNC_LOCK)
+        .execute(conn)
+        .await?;
+    Ok(())
+}
+
+/// Names of present, switched-on modules, read inside a transaction.
+///
+/// # Errors
+/// Database errors.
+pub async fn enabled_names_in(conn: &mut sqlx::PgConnection) -> Result<Vec<String>, sqlx::Error> {
+    sqlx::query_scalar!(
+        "SELECT name FROM modules WHERE status = 'present' AND enabled ORDER BY name"
+    )
+    .fetch_all(conn)
+    .await
+}
+
+/// Switches present modules on or off. Returns the names that changed. Core
+/// modules cannot be switched off (the table refuses it).
+///
+/// # Errors
+/// Database errors.
+pub async fn set_enabled(
+    conn: &mut sqlx::PgConnection,
+    names: &[String],
+    enabled: bool,
+) -> Result<Vec<String>, sqlx::Error> {
+    let mut changed = sqlx::query_scalar!(
+        r#"UPDATE modules SET enabled = $2
+           WHERE name = ANY($1) AND status = 'present' AND enabled <> $2
+           RETURNING name"#,
+        names,
+        enabled,
+    )
+    .fetch_all(conn)
+    .await?;
+    changed.sort();
+    Ok(changed)
+}

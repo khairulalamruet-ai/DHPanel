@@ -6,7 +6,9 @@
 
 use std::sync::Arc;
 
-use dhpanel_kernel::{Manifest, ManifestError, ManifestOnly, Module, Registry};
+use dhpanel_kernel::{
+    Manifest, ManifestError, ManifestOnly, Module, ModuleMount, ModuleRoutes, Registry,
+};
 
 /// Directory name under `modules/` and the manifest text found there.
 const EMBEDDED: &[(&str, &str)] = &[
@@ -14,7 +16,138 @@ const EMBEDDED: &[(&str, &str)] = &[
     ("rbac", include_str!("../../../modules/rbac/module.toml")),
     ("audit", include_str!("../../../modules/audit/module.toml")),
     ("nodes", include_str!("../../../modules/nodes/module.toml")),
+    ("system", dhpanel_mod_system::MANIFEST),
 ];
+
+/// A module of this binary: its manifest and how to make its routes. The
+/// routes are made each time the set of mounted modules changes.
+struct Wired {
+    manifest: Manifest,
+    routes: Box<dyn Fn() -> ModuleRoutes + Send + Sync>,
+}
+
+impl Module for Wired {
+    fn manifest(&self) -> &Manifest {
+        &self.manifest
+    }
+
+    fn routes(&self) -> ModuleRoutes {
+        (self.routes)()
+    }
+}
+
+/// The state each module's routes need.
+pub struct States {
+    /// Sign-in and sessions (also carries what the audit viewer needs).
+    pub auth: dhpanel_mod_auth::AuthState,
+    /// Administrators and roles.
+    pub admin: dhpanel_mod_admin::AdminState,
+    /// Nodes and operations.
+    pub nodes: dhpanel_mod_nodes::NodesState,
+}
+
+/// Builds the registry of this binary with every module's routes attached,
+/// and the live mount that serves them. `base` holds the routes outside any
+/// module and the fallback for unknown paths.
+///
+/// # Errors
+/// The messages to show when a manifest or the module set is broken.
+pub fn mount(states: States, base: axum::Router) -> Result<ModuleMount, Vec<String>> {
+    let manifests = load_from(EMBEDDED)
+        .map_err(|errors| errors.iter().map(ToString::to_string).collect::<Vec<_>>())?;
+    // The system module's routes need the mount itself (to switch modules), which
+    // exists only after the registry does.
+    let late_mount: Arc<std::sync::OnceLock<ModuleMount>> = Arc::default();
+    let (db, sessions) = (states.auth.db.clone(), states.auth.sessions.clone());
+    let States { auth, admin, nodes } = states;
+    let modules = manifests
+        .into_iter()
+        .map(|manifest| {
+            let routes: Box<dyn Fn() -> ModuleRoutes + Send + Sync> =
+                match manifest.module.name.as_str() {
+                    "auth" => {
+                        let auth = auth.clone();
+                        Box::new(move || ModuleRoutes {
+                            public: Some(dhpanel_mod_auth::router().with_state(auth.clone())),
+                            ..ModuleRoutes::none()
+                        })
+                    }
+                    "rbac" => {
+                        let admin = admin.clone();
+                        Box::new(move || ModuleRoutes {
+                            admin: Some(dhpanel_mod_admin::router().with_state(admin.clone())),
+                            ..ModuleRoutes::none()
+                        })
+                    }
+                    "audit" => {
+                        let auth = auth.clone();
+                        Box::new(move || ModuleRoutes {
+                            admin: Some(
+                                dhpanel_audit::router::<dhpanel_mod_auth::AuthState>()
+                                    .with_state(auth.clone()),
+                            ),
+                            ..ModuleRoutes::none()
+                        })
+                    }
+                    "nodes" => {
+                        let nodes = nodes.clone();
+                        Box::new(move || ModuleRoutes {
+                            admin: Some(dhpanel_mod_nodes::router().with_state(nodes.clone())),
+                            ..ModuleRoutes::none()
+                        })
+                    }
+                    "system" => {
+                        let (db, sessions, late_mount) =
+                            (db.clone(), sessions.clone(), late_mount.clone());
+                        Box::new(move || match late_mount.get() {
+                            Some(mount) => ModuleRoutes {
+                                admin: Some(dhpanel_mod_system::router().with_state(
+                                    dhpanel_mod_system::SystemState {
+                                        db: db.clone(),
+                                        sessions: sessions.clone(),
+                                        mount: mount.clone(),
+                                    },
+                                )),
+                                ..ModuleRoutes::none()
+                            },
+                            None => ModuleRoutes::none(),
+                        })
+                    }
+                    // A manifest without code behind it has no routes.
+                    _ => Box::new(ModuleRoutes::none),
+                };
+            Arc::new(Wired { manifest, routes }) as Arc<dyn Module>
+        })
+        .collect();
+    let registry = Registry::build(modules).map_err(|err| vec![err.to_string()])?;
+    let mount = ModuleMount::new(registry, base);
+    let _ = late_mount.set(mount.clone());
+    mount.rebuild();
+    Ok(mount)
+}
+
+/// Keeps the served routes in step with the modules table: once as soon as the
+/// database answers, then every `every` (which also picks up a change made by
+/// another control plane instance).
+pub async fn follow_enabled(
+    db: dhpanel_database::sqlx::PgPool,
+    mount: ModuleMount,
+    every: std::time::Duration,
+) {
+    let mut tick = tokio::time::interval(every);
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        tick.tick().await;
+        match dhpanel_database::modules::enabled_names(&db).await {
+            Ok(names) => {
+                if mount.apply(&names.into_iter().collect()) {
+                    tracing::info!(active = ?mount.mounted(), "module routes follow the modules table");
+                }
+            }
+            Err(err) => tracing::debug!(error = %err, "could not read the modules table"),
+        }
+    }
+}
 
 /// Parses the embedded manifests.
 ///
@@ -152,14 +285,14 @@ mod tests {
             )
         });
         let names: Vec<_> = manifests.iter().map(|m| m.module.name.as_str()).collect();
-        assert_eq!(names, ["auth", "rbac", "audit", "nodes"]);
+        assert_eq!(names, ["auth", "rbac", "audit", "nodes", "system"]);
         // And they fit together: dependencies first.
         let registry = registry().unwrap_or_else(|e| panic!("{}", e.join("\n")));
         assert_eq!(
             registry.names().collect::<Vec<_>>(),
             ["auth", "rbac", "audit", "nodes"]
         );
-        assert_eq!(registry.dependents_of("rbac"), ["audit", "nodes"]);
+        assert_eq!(registry.dependents_of("rbac"), ["audit", "nodes", "system"]);
         // Every dependency names a module that exists.
         for m in &manifests {
             for dep in &m.module.depends_on {
@@ -188,6 +321,8 @@ mod tests {
             p::AuditRead::KEY,
             p::NodesRead::KEY,
             p::NodesManage::KEY,
+            p::ModulesRead::KEY,
+            p::ModulesManage::KEY,
         ] {
             assert!(declared.iter().any(|d| d == key), "{key} is in no manifest");
         }

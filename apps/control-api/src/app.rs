@@ -52,18 +52,10 @@ impl FromRef<AppState> for MetricsHandle {
     }
 }
 
-/// Builds the HTTP router.
-///
-/// Layer order, outermost first:
-/// correlation ID -> client address -> panic catcher -> metrics -> timeout -> body limit
-/// -> compression -> routes.
-/// Unknown routes answer with a Problem Details 404.
-pub fn router(
-    state: AppState,
-    auth: Option<dhpanel_mod_auth::AuthState>,
-    admin: Option<dhpanel_mod_admin::AdminState>,
-    nodes: Option<dhpanel_mod_nodes::NodesState>,
-) -> Router {
+/// The routes that belong to no module (health, readiness, the API
+/// description, metrics) and the Problem Details 404 for everything unknown.
+/// Module routes are merged onto this by the module mount.
+pub fn base_router(state: AppState) -> Router {
     let public = Router::new()
         .route("/health", get(health::liveness))
         .route("/ready", get(health::readiness));
@@ -80,26 +72,19 @@ pub fn router(
         router.merge(Scalar::with_url("/api/docs", crate::openapi::document()))
     };
 
-    let router = match nodes {
-        Some(nodes) => router.merge(dhpanel_mod_nodes::router().with_state(nodes)),
-        None => router,
-    };
-
-    let router = match admin {
-        Some(admin) => router.merge(dhpanel_mod_admin::router().with_state(admin)),
-        None => router,
-    };
-
-    let router = match auth {
-        Some(auth) => router
-            .merge(dhpanel_mod_auth::router().with_state(auth.clone()))
-            .merge(dhpanel_audit::router::<dhpanel_mod_auth::AuthState>().with_state(auth)),
-        None => router,
-    };
-
-    let trusted_proxies = state.trusted_proxies.clone();
     router
         .fallback(|| async { AppError::not_found("route") })
+        .with_state(state)
+}
+
+/// Builds the HTTP application around `routes` (the base router alone, or the
+/// module mount's live router).
+///
+/// Layer order, outermost first:
+/// correlation ID -> client address -> panic catcher -> metrics -> timeout -> body limit
+/// -> compression -> routes.
+pub fn router(routes: Router, trusted_proxies: Arc<[IpAddr]>) -> Router {
+    routes
         .layer(CompressionLayer::new())
         .layer(RequestBodyLimitLayer::new(BODY_LIMIT_BYTES))
         .layer(TimeoutLayer::with_status_code(
@@ -117,7 +102,6 @@ pub fn router(
         .layer(axum::middleware::from_fn(
             dhpanel_http_kit::request_id::correlation_id_layer,
         ))
-        .with_state(state)
 }
 
 async fn openapi_json() -> impl IntoResponse {
@@ -167,6 +151,12 @@ mod tests {
         }
     }
 
+    /// The application without any module.
+    fn plain(state: AppState) -> Router {
+        let proxies = state.trusted_proxies.clone();
+        router(base_router(state), proxies)
+    }
+
     async fn get_json(app: Router, uri: &str) -> (StatusCode, Value) {
         let res = app
             .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
@@ -182,11 +172,8 @@ mod tests {
 
     #[tokio::test]
     async fn health_is_ok_with_version() {
-        let (status, body) = get_json(
-            router(state(Readiness::default()), None, None, None),
-            "/api/v1/public/health",
-        )
-        .await;
+        let (status, body) =
+            get_json(plain(state(Readiness::default())), "/api/v1/public/health").await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["status"], "ok");
         assert!(body["version"].is_string());
@@ -196,11 +183,7 @@ mod tests {
     async fn ready_is_200_when_all_probes_pass() {
         let readiness =
             Readiness::default().with_probe("database", Arc::new(|| Box::pin(async { Ok(()) })));
-        let (status, body) = get_json(
-            router(state(readiness), None, None, None),
-            "/api/v1/public/ready",
-        )
-        .await;
+        let (status, body) = get_json(plain(state(readiness)), "/api/v1/public/ready").await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["status"], "ready");
         assert_eq!(body["checks"][0]["name"], "database");
@@ -213,11 +196,7 @@ mod tests {
             "database",
             Arc::new(|| Box::pin(async { Err("down".to_owned()) })),
         );
-        let (status, body) = get_json(
-            router(state(readiness), None, None, None),
-            "/api/v1/public/ready",
-        )
-        .await;
+        let (status, body) = get_json(plain(state(readiness)), "/api/v1/public/ready").await;
         assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(body["status"], "not_ready");
         assert_eq!(body["checks"][0]["status"], "failed");
@@ -225,11 +204,8 @@ mod tests {
 
     #[tokio::test]
     async fn openapi_endpoint_serves_the_document() {
-        let (status, body) = get_json(
-            router(state(Readiness::default()), None, None, None),
-            "/api/v1/openapi.json",
-        )
-        .await;
+        let (status, body) =
+            get_json(plain(state(Readiness::default())), "/api/v1/openapi.json").await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["info"]["title"], "DHPanel API");
         assert!(body["paths"]["/api/v1/public/health"].is_object());
@@ -237,7 +213,7 @@ mod tests {
 
     #[tokio::test]
     async fn metrics_endpoint_returns_prometheus_text() {
-        let res = router(state(Readiness::default()), None, None, None)
+        let res = plain(state(Readiness::default()))
             .oneshot(
                 Request::builder()
                     .uri("/metrics")
@@ -254,7 +230,7 @@ mod tests {
 
     #[tokio::test]
     async fn unknown_route_is_problem_json_with_correlation_id() {
-        let res = router(state(Readiness::default()), None, None, None)
+        let res = plain(state(Readiness::default()))
             .oneshot(
                 Request::builder()
                     .uri("/no/such/route")

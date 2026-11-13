@@ -1,0 +1,15 @@
+# The panel's own machinery: which modules are switched on (and, later,
+# settings and the bootstrap data for the interface). crates/modules/system.
+[module]
+name       = "system"
+version    = "0.1.0"
+title      = { en = "Modules and settings", bn = "মডিউল ও সেটিংস" }
+category   = "core"
+core       = true
+depends_on = ["auth", "rbac", "audit"]
+
+[permissions]
+keys = ["admin.modules.read", "admin.modules.manage"]
+
+[ui]
+admin_nav = { group = "System", order = 10, icon = "blocks" }

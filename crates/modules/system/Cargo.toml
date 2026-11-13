@@ -1,0 +1,32 @@
+[package]
+name = "dhpanel-mod-system"
+description = "System module: switch modules on and off (settings and bootstrap follow)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+dhpanel-audit.workspace = true
+dhpanel-database.workspace = true
+dhpanel-http-kit.workspace = true
+dhpanel-kernel.workspace = true
+dhpanel-rbac.workspace = true
+dhpanel-session.workspace = true
+axum = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1.44"
+utoipa = { version = "6", features = ["uuid"] }
+
+[dev-dependencies]
+dhpanel-cache.workspace = true
+secrecy = "0.10"
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "postgres", "macros", "uuid", "json", "migrate"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+tower = { version = "0.5", features = ["util"] }
+uuid = { version = "1", features = ["serde", "v7"] }
