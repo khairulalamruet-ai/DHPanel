@@ -1,0 +1,236 @@
+//! The `domains` table and the rules for adding to it (T05.02).
+//!
+//! One name is served by one tenant on the whole panel, and a tenant may only
+//! put a name below one of its own domains. The rules live here, in one function
+//! ([`add`]), so the client API, the admin API, bulk import and the command line
+//! cannot disagree about them.
+//!
+//! * A name that exists anywhere is taken ([`AddError::Taken`]).
+//! * `sub` and `alias` belong to a domain of the same tenant; a `sub` lies below
+//!   it. Naming somebody else's domain as parent is the same answer as naming a
+//!   domain that does not exist, so nobody can probe what others host.
+//! * A name below a domain that **another** tenant has ([`AddError::OwnedByOther`],
+//!   e.g. `shop.example.com` while another tenant has `example.com`) is refused,
+//!   unless the panel permits subdomain sharing (setting
+//!   `permit_subdomain_sharing`, off by default).
+//! * One `primary` per tenant.
+
+use dhpanel_domain::{Docroot, DomainKind, DomainStatus, Fqdn};
+use sqlx::{PgConnection, PgPool, types::Uuid};
+
+/// A domain row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Domain {
+    /// Id.
+    pub id: Uuid,
+    /// The tenant it belongs to.
+    pub tenant_id: Uuid,
+    /// The name, lower-case ASCII.
+    pub fqdn: String,
+    /// How it relates to its tenant.
+    pub kind: DomainKind,
+    /// The domain a `sub` or `alias` belongs to.
+    pub parent_domain_id: Option<Uuid>,
+    /// Files, relative to the tenant's web directory.
+    pub docroot: String,
+    /// Whether it is served.
+    pub status: DomainStatus,
+    /// Creation time (Unix seconds).
+    pub created_at: i64,
+}
+
+/// What to add.
+#[derive(Debug, Clone)]
+pub struct NewDomain<'a> {
+    /// The tenant.
+    pub tenant_id: Uuid,
+    /// The (validated) name.
+    pub fqdn: &'a Fqdn,
+    /// The kind.
+    pub kind: DomainKind,
+    /// The domain a `sub` or `alias` belongs to.
+    pub parent_domain_id: Option<Uuid>,
+    /// Files, relative to the tenant's web directory.
+    pub docroot: &'a Docroot,
+}
+
+/// Why [`add`] refused.
+#[derive(Debug, thiserror::Error)]
+pub enum AddError {
+    /// The name exists already (on this or another tenant).
+    #[error("this domain is already in use")]
+    Taken,
+    /// The name lies below a domain of another tenant.
+    #[error("this domain lies below a domain that belongs to someone else")]
+    OwnedByOther,
+    /// `sub` and `alias` need a parent, the other kinds must not have one.
+    #[error(
+        "a subdomain or alias needs the domain it belongs to, and other domains must not name one"
+    )]
+    ParentMismatch,
+    /// The parent does not exist, is not this tenant's, or is an alias.
+    #[error("the parent domain was not found")]
+    ParentNotFound,
+    /// A `sub` whose name is not below its parent's.
+    #[error("a subdomain must lie below its parent domain")]
+    NotBelowParent,
+    /// The tenant has a primary domain already.
+    #[error("this account already has a primary domain")]
+    PrimaryExists,
+    /// The tenant does not exist.
+    #[error("unknown tenant")]
+    UnknownTenant,
+    /// Any other database error.
+    #[error(transparent)]
+    Database(#[from] sqlx::Error),
+}
+
+struct Row {
+    id: Uuid,
+    tenant_id: Uuid,
+    fqdn: String,
+    kind: String,
+    parent_domain_id: Option<Uuid>,
+    docroot: String,
+    status: String,
+    created_at: i64,
+}
+
+impl From<Row> for Domain {
+    fn from(r: Row) -> Self {
+        Self {
+            id: r.id,
+            tenant_id: r.tenant_id,
+            fqdn: r.fqdn,
+            kind: DomainKind::parse(&r.kind).unwrap_or(DomainKind::Addon),
+            parent_domain_id: r.parent_domain_id,
+            docroot: r.docroot,
+            status: DomainStatus::parse(&r.status).unwrap_or(DomainStatus::Active),
+            created_at: r.created_at,
+        }
+    }
+}
+
+/// Advisory lock namespace for adding domains below one registrable name.
+const NAME_LOCK: i32 = 7_305_001;
+
+/// Adds a domain under the rules in the module documentation. Call it in a
+/// transaction: the work of two requests below the same registrable name is
+/// serialised until it ends.
+///
+/// # Errors
+/// [`AddError`].
+pub async fn add(
+    conn: &mut PgConnection,
+    new: &NewDomain<'_>,
+    permit_subdomain_sharing: bool,
+) -> Result<Domain, AddError> {
+    if new.kind.needs_parent() != new.parent_domain_id.is_some() {
+        return Err(AddError::ParentMismatch);
+    }
+    // Two requests for names below the same registrable name wait for each other,
+    // so the ownership check below cannot be raced.
+    sqlx::query!(
+        "SELECT pg_advisory_xact_lock($1, hashtext($2))",
+        NAME_LOCK,
+        new.fqdn.registrable(),
+    )
+    .execute(&mut *conn)
+    .await?;
+
+    if let Some(parent_id) = new.parent_domain_id {
+        let parent = sqlx::query!(
+            "SELECT fqdn, kind FROM domains WHERE id = $1 AND tenant_id = $2",
+            parent_id,
+            new.tenant_id,
+        )
+        .fetch_optional(&mut *conn)
+        .await?
+        .filter(|p| p.kind != "alias")
+        .ok_or(AddError::ParentNotFound)?;
+        if new.kind == DomainKind::Sub {
+            let below = Fqdn::parse(&parent.fqdn)
+                .map(|p| new.fqdn.is_below(&p))
+                .unwrap_or(false);
+            if !below {
+                return Err(AddError::NotBelowParent);
+            }
+        }
+    }
+
+    if !permit_subdomain_sharing {
+        // Is some ancestor of the new name (`a.b.example.com` -> `b.example.com`,
+        // `example.com`) a domain of another tenant?
+        let owned = sqlx::query_scalar!(
+            r#"SELECT EXISTS (
+                   SELECT 1 FROM domains
+                   WHERE tenant_id <> $1 AND $2 LIKE '%.' || fqdn
+               ) AS "owned!""#,
+            new.tenant_id,
+            new.fqdn.as_str(),
+        )
+        .fetch_one(&mut *conn)
+        .await?;
+        if owned {
+            return Err(AddError::OwnedByOther);
+        }
+    }
+
+    let row = sqlx::query_as!(
+        Row,
+        r#"INSERT INTO domains (tenant_id, fqdn, kind, parent_domain_id, docroot)
+           VALUES ($1, $2, $3, $4, $5)
+           RETURNING id, tenant_id, fqdn, kind, parent_domain_id, docroot, status,
+                     extract(epoch FROM created_at)::bigint AS "created_at!""#,
+        new.tenant_id,
+        new.fqdn.as_str(),
+        new.kind.as_str(),
+        new.parent_domain_id,
+        new.docroot.as_str(),
+    )
+    .fetch_one(&mut *conn)
+    .await
+    .map_err(
+        |err| match err.as_database_error().map(|e| (e.constraint(), e.code())) {
+            Some((Some("domains_fqdn_key"), _)) => AddError::Taken,
+            Some((Some("domains_one_primary_per_tenant"), _)) => AddError::PrimaryExists,
+            Some((Some("domains_tenant_id_fkey"), _)) => AddError::UnknownTenant,
+            _ => AddError::Database(err),
+        },
+    )?;
+    Ok(row.into())
+}
+
+/// One domain by id.
+///
+/// # Errors
+/// Database errors.
+pub async fn get(pool: &PgPool, id: Uuid) -> Result<Option<Domain>, sqlx::Error> {
+    let row = sqlx::query_as!(
+        Row,
+        r#"SELECT id, tenant_id, fqdn, kind, parent_domain_id, docroot, status,
+                  extract(epoch FROM created_at)::bigint AS "created_at!"
+           FROM domains WHERE id = $1"#,
+        id,
+    )
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(Domain::from))
+}
+
+/// The domain with this name, if any.
+///
+/// # Errors
+/// Database errors.
+pub async fn find(pool: &PgPool, fqdn: &Fqdn) -> Result<Option<Domain>, sqlx::Error> {
+    let row = sqlx::query_as!(
+        Row,
+        r#"SELECT id, tenant_id, fqdn, kind, parent_domain_id, docroot, status,
+                  extract(epoch FROM created_at)::bigint AS "created_at!"
+           FROM domains WHERE fqdn = $1"#,
+        fqdn.as_str(),
+    )
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(Domain::from))
+}
