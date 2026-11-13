@@ -23,6 +23,7 @@ pub mod plans;
 pub mod rbac;
 pub mod settings;
 pub mod tenants;
+pub mod users;
 
 use std::{future::Future, pin::Pin, time::Duration};
 

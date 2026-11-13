@@ -1,0 +1,34 @@
+[package]
+name = "dhpanel-mod-users"
+description = "Users module: client accounts and their tenants."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+dhpanel-audit.workspace = true
+dhpanel-auth-core.workspace = true
+dhpanel-database.workspace = true
+dhpanel-domain.workspace = true
+dhpanel-http-kit.workspace = true
+dhpanel-node-protocol.workspace = true
+dhpanel-rbac.workspace = true
+dhpanel-session.workspace = true
+axum = "0.8"
+secrecy = "0.10"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+utoipa = { version = "6", features = ["uuid"] }
+uuid = { version = "1", features = ["serde", "v7"] }
+
+[dev-dependencies]
+dhpanel-cache.workspace = true
+dhpanel-kernel.workspace = true
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "postgres", "macros", "uuid", "json", "migrate"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+tower = { version = "0.5", features = ["util"] }

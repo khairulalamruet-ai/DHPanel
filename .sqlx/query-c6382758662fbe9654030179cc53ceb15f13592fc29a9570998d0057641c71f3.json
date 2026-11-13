@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE accounts SET status = $2::text::account_status WHERE id = $1 AND kind = 'client'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c6382758662fbe9654030179cc53ceb15f13592fc29a9570998d0057641c71f3"
+}

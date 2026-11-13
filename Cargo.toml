@@ -33,6 +33,7 @@ members = [
     "crates/modules/nodes",
     "crates/modules/system",
     "crates/modules/plans",
+    "crates/modules/users",
 ]
 
 [workspace.package]
@@ -64,6 +65,7 @@ dhpanel-mod-admin = { path = "crates/modules/admin" }
 dhpanel-mod-nodes = { path = "crates/modules/nodes" }
 dhpanel-mod-system = { path = "crates/modules/system" }
 dhpanel-mod-plans = { path = "crates/modules/plans" }
+dhpanel-mod-users = { path = "crates/modules/users" }
 dhpanel-node-gateway = { path = "crates/node-gateway" }
 dhpanel-operations = { path = "crates/operations" }
 dhpanel-dispatcher = { path = "crates/dispatcher" }

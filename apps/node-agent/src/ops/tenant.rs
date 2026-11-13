@@ -287,6 +287,82 @@ pub async fn provision_tenant_stack(
     })
 }
 
+/// `set_up_tenant`: the three set-up steps in a row. Each step is repeatable, so
+/// a retry after a failure in the middle carries on where it stopped.
+///
+/// # Errors
+/// As the steps it runs.
+pub async fn set_up_tenant(
+    context: Arc<TenantContext>,
+    op: Operation,
+) -> Result<Output, AgentError> {
+    let Operation::SetUpTenant {
+        tenant_id,
+        username,
+        uid,
+        disk_bytes,
+        inodes,
+        cpu_millis,
+        memory_bytes,
+        pids,
+    } = op
+    else {
+        return Err(super::wrong_operation());
+    };
+    create_tenant(
+        context.clone(),
+        Operation::CreateTenant {
+            tenant_id,
+            username: username.clone(),
+            uid,
+        },
+    )
+    .await?;
+    let mut storage_quota = None;
+    if disk_bytes.is_some() || inodes.is_some() {
+        match set_storage_quota(
+            context.clone(),
+            Operation::SetStorageQuota {
+                tenant_id,
+                uid,
+                disk_bytes,
+                inodes,
+            },
+        )
+        .await
+        {
+            Ok(Output::StorageQuotaSet { backend }) => storage_quota = Some(backend),
+            Ok(_) => {}
+            // A node without project quotas runs the tenant without a disk limit;
+            // the control plane knows from the node's capabilities.
+            Err(e) if e.code == ErrorCode::UnsupportedOperation => {}
+            Err(e) => return Err(e),
+        }
+    }
+    let Output::StackProvisioned { containers } = provision_tenant_stack(
+        context,
+        Operation::ProvisionTenantStack {
+            tenant_id,
+            username,
+            uid,
+            cpu_millis,
+            memory_bytes,
+            pids,
+        },
+    )
+    .await?
+    else {
+        return Err(AgentError::new(
+            ErrorCode::Internal,
+            "unexpected answer while setting up a tenant",
+        ));
+    };
+    Ok(Output::TenantReady {
+        containers,
+        storage_quota,
+    })
+}
+
 /// How long a stopping container gets before it is killed.
 const STOP_GRACE: Duration = Duration::from_secs(20);
 /// Longest the file-deleting container may take.

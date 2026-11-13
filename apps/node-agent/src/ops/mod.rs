@@ -85,6 +85,10 @@ impl Registry {
                 let context = context.clone();
                 move |op| tenant::create_tenant(context.clone(), op)
             });
+            registry.register("set_up_tenant", {
+                let context = context.clone();
+                move |op| tenant::set_up_tenant(context.clone(), op)
+            });
             registry.register("suspend_tenant", {
                 let context = context.clone();
                 move |op| tenant::suspend_tenant(context.clone(), op)

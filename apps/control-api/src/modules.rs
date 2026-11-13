@@ -20,7 +20,13 @@ const EMBEDDED: &[(&str, &str)] = &[
     ("nodes", include_str!("../../../modules/nodes/module.toml")),
     ("system", dhpanel_mod_system::MANIFEST),
     ("plans", dhpanel_mod_plans::MANIFEST),
+    ("users", dhpanel_mod_users::MANIFEST),
 ];
+
+/// Days the data of a deleted user is kept before it is purged.
+// TODO(T04.12): make this a panel setting once the system module's schema has a
+// place for hosting policy.
+const PURGE_AFTER_DAYS: i32 = 7;
 
 /// A module of this binary: its manifest and how to make its routes. The
 /// routes are made each time the set of mounted modules changes.
@@ -180,6 +186,21 @@ pub fn mount(
                                 ..ModuleRoutes::none()
                             },
                             None => ModuleRoutes::none(),
+                        })
+                    }
+                    "users" => {
+                        let (db, sessions, hasher) =
+                            (db.clone(), sessions.clone(), admin.hasher.clone());
+                        Box::new(move || ModuleRoutes {
+                            admin: Some(dhpanel_mod_users::router().with_state(
+                                dhpanel_mod_users::UsersState {
+                                    db: db.clone(),
+                                    sessions: sessions.clone(),
+                                    hasher: hasher.clone(),
+                                    purge_after_days: PURGE_AFTER_DAYS,
+                                },
+                            )),
+                            ..ModuleRoutes::none()
                         })
                     }
                     // A manifest without code behind it has no routes.
@@ -396,16 +417,19 @@ mod tests {
             )
         });
         let names: Vec<_> = manifests.iter().map(|m| m.module.name.as_str()).collect();
-        assert_eq!(names, ["auth", "rbac", "audit", "nodes", "system", "plans"]);
+        assert_eq!(
+            names,
+            ["auth", "rbac", "audit", "nodes", "system", "plans", "users"]
+        );
         // And they fit together: dependencies first.
         let registry = registry().unwrap_or_else(|e| panic!("{}", e.join("\n")));
         assert_eq!(
             registry.names().collect::<Vec<_>>(),
-            ["auth", "rbac", "audit", "nodes", "system", "plans"]
+            ["auth", "rbac", "audit", "nodes", "system", "plans", "users"]
         );
         assert_eq!(
             registry.dependents_of("rbac"),
-            ["audit", "nodes", "system", "plans"]
+            ["audit", "nodes", "system", "plans", "users"]
         );
         // Every dependency names a module that exists.
         for m in &manifests {
@@ -441,12 +465,14 @@ mod tests {
             p::SettingsManage::KEY,
             p::PlansRead::KEY,
             p::PlansManage::KEY,
+            p::UsersRead::KEY,
+            p::UsersManage::KEY,
         ] {
             assert!(declared.iter().any(|d| d == key), "{key} is in no manifest");
         }
         assert_eq!(
             declared.len(),
-            13,
+            15,
             "a manifest declares a key the code does not know: {declared:?}"
         );
     }

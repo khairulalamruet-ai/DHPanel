@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*) AS \"n!\"\n           FROM accounts a LEFT JOIN tenants t ON t.owner_account_id = a.id\n           WHERE a.kind = 'client'\n             AND ($1::text IS NULL OR t.status = $1)\n             AND ($2::uuid IS NULL OR t.plan_id = $2)\n             AND ($3::uuid IS NULL OR t.node_id = $3)\n             AND ($4::text IS NULL OR a.username ILIKE $4 OR a.email ILIKE $4 OR t.username ILIKE $4)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "n!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "d9912c222dc17eb47c52c098d6da79fce914d7d407e8329f07db5e87b488a01a"
+}

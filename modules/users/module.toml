@@ -1,0 +1,15 @@
+# Client accounts: creating, changing, suspending and deleting the people who host sites
+# (crates/modules/users). Each client account owns one tenant on a node.
+[module]
+name       = "users"
+version    = "0.1.0"
+title      = { en = "Client accounts", bn = "ক্লায়েন্ট অ্যাকাউন্ট" }
+category   = "core"
+core       = true
+depends_on = ["auth", "rbac", "audit", "nodes", "plans"]
+
+[permissions]
+keys = ["admin.users.read", "admin.users.manage"]
+
+[ui]
+admin_nav = { group = "Hosting", order = 20, icon = "users" }

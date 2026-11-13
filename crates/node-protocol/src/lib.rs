@@ -162,6 +162,30 @@ pub enum Operation {
         /// Processes the plan gives the stack (`None` = unlimited).
         pids: Option<u32>,
     },
+    /// Everything a new tenant needs on its node, in one operation: directories,
+    /// network and volume ([`Operation::CreateTenant`]), the storage limits
+    /// ([`Operation::SetStorageQuota`], skipped when the plan has none or the node
+    /// cannot enforce them) and the containers
+    /// ([`Operation::ProvisionTenantStack`]). Safe to repeat. Answered with
+    /// [`Output::TenantReady`].
+    SetUpTenant {
+        /// The tenant's id.
+        tenant_id: Uuid,
+        /// The tenant's system name.
+        username: String,
+        /// The tenant's numeric user id on this node.
+        uid: u32,
+        /// Most bytes of storage (`None` = unlimited).
+        disk_bytes: Option<u64>,
+        /// Most files (`None` = unlimited).
+        inodes: Option<u64>,
+        /// CPU in thousandths of a core (`None` = unlimited).
+        cpu_millis: Option<u32>,
+        /// Memory in bytes (`None` = unlimited).
+        memory_bytes: Option<u64>,
+        /// Processes (`None` = unlimited).
+        pids: Option<u32>,
+    },
     /// Stop a tenant's containers; its files stay. Safe to repeat. Answered with
     /// [`Output::TenantSuspended`].
     SuspendTenant {
@@ -210,6 +234,7 @@ impl Operation {
         "set_storage_quota",
         "provision_tenant_stack",
         "set_resource_limits",
+        "set_up_tenant",
         "suspend_tenant",
         "resume_tenant",
         "delete_tenant",
@@ -225,6 +250,7 @@ impl Operation {
             Self::SetStorageQuota { .. } => "set_storage_quota",
             Self::ProvisionTenantStack { .. } => "provision_tenant_stack",
             Self::SetResourceLimits { .. } => "set_resource_limits",
+            Self::SetUpTenant { .. } => "set_up_tenant",
             Self::SuspendTenant { .. } => "suspend_tenant",
             Self::ResumeTenant { .. } => "resume_tenant",
             Self::DeleteTenant { .. } => "delete_tenant",
@@ -359,6 +385,13 @@ pub enum Output {
     StorageQuotaSet {
         /// How the node enforces it (`xfs`).
         backend: String,
+    },
+    /// Answer to [`Operation::SetUpTenant`].
+    TenantReady {
+        /// Names of the running containers, in start order.
+        containers: Vec<String>,
+        /// How storage limits are enforced (`xfs`), or `None` when they are not.
+        storage_quota: Option<String>,
     },
     /// Answer to [`Operation::SuspendTenant`].
     TenantSuspended {
@@ -1095,6 +1128,16 @@ mod tests {
                 memory_bytes: Some(1 << 30),
                 pids: Some(300),
             },
+            Operation::SetUpTenant {
+                tenant_id: id(),
+                username: "alice".into(),
+                uid: 10_000,
+                disk_bytes: Some(1 << 30),
+                inodes: None,
+                cpu_millis: Some(500),
+                memory_bytes: Some(256 << 20),
+                pids: Some(100),
+            },
             Operation::SuspendTenant {
                 username: "alice".into(),
             },
@@ -1114,7 +1157,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            9,
+            10,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }

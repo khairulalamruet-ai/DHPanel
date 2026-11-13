@@ -426,3 +426,69 @@ async fn suspend_keeps_the_files_resume_restores_the_site_and_delete_removes_eve
         .await
         .expect("purging twice is fine");
 }
+
+#[tokio::test]
+#[ignore = "needs the privileged helper running as root, Docker and registry access"]
+async fn one_operation_sets_a_tenant_up_and_repeating_it_is_fine() {
+    use dhpanel_node_agent::ops::tenant::{delete_tenant, set_up_tenant};
+    let (Some(helper_socket), Some(tenants_root)) = (
+        std::env::var_os("DHPANEL_TEST_HELPER_SOCKET"),
+        std::env::var_os("DHPANEL_TEST_TENANTS_ROOT"),
+    ) else {
+        eprintln!("skipped: no helper (see the live script)");
+        return;
+    };
+    let docker = DockerManager::connect(&docker_socket()).unwrap();
+    let context = Arc::new(TenantContext {
+        helper_socket: PathBuf::from(helper_socket),
+        tenants_root: PathBuf::from(tenants_root),
+        docker: docker.clone(),
+    });
+    let tenant_id = Uuid::now_v7();
+    let username = format!("s{}x", std::process::id());
+    let uid = 10_080;
+    let op = Operation::SetUpTenant {
+        tenant_id,
+        username: username.clone(),
+        uid,
+        // The box's disk has no project quotas: the limit is skipped, not an error.
+        disk_bytes: Some(1 << 30),
+        inodes: Some(100_000),
+        cpu_millis: Some(1000),
+        memory_bytes: Some(256 << 20),
+        pids: Some(100),
+    };
+    let output = set_up_tenant(context.clone(), op.clone())
+        .await
+        .expect("set up");
+    let Output::TenantReady {
+        containers,
+        storage_quota,
+    } = output.clone()
+    else {
+        panic!("unexpected output {output:?}")
+    };
+    assert_eq!(containers.len(), 2);
+    assert!(storage_quota.is_none() || storage_quota.as_deref() == Some("xfs"));
+    for name in &containers {
+        assert!(
+            docker
+                .inspect(&Name::parse(name).unwrap())
+                .await
+                .unwrap()
+                .running
+        );
+    }
+    assert_eq!(set_up_tenant(context.clone(), op).await.unwrap(), output);
+    delete_tenant(
+        context,
+        Operation::DeleteTenant {
+            tenant_id,
+            username,
+            uid,
+            purge_data: true,
+        },
+    )
+    .await
+    .unwrap();
+}

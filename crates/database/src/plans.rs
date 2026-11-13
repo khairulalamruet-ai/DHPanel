@@ -182,6 +182,20 @@ pub async fn get(pool: &PgPool, id: Uuid) -> Result<Option<Plan>, sqlx::Error> {
     Ok(row.map(Into::into))
 }
 
+/// The default plan.
+///
+/// # Errors
+/// Database errors.
+pub async fn get_default(pool: &PgPool) -> Result<Option<Plan>, sqlx::Error> {
+    let id = sqlx::query_scalar!("SELECT id FROM plans WHERE is_default")
+        .fetch_optional(pool)
+        .await?;
+    match id {
+        Some(id) => get(pool, id).await,
+        None => Ok(None),
+    }
+}
+
 /// Creates a plan and returns its id.
 ///
 /// # Errors

@@ -93,6 +93,14 @@ pub mod permissions {
         pub PlansManage = "admin.plans.manage"
     );
     crate::permission!(
+        /// See client accounts and their hosting.
+        pub UsersRead = "admin.users.read"
+    );
+    crate::permission!(
+        /// Create, change, suspend and delete client accounts.
+        pub UsersManage = "admin.users.manage"
+    );
+    crate::permission!(
         /// See the panel's settings.
         pub SettingsRead = "admin.settings.read"
     );

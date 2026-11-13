@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE accounts\n           SET email = COALESCE($2, email), locale = COALESCE($3, locale)\n           WHERE id = $1 AND kind = 'client'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5cb23ffee789424054b07d1acf3a96f2abec431b7bf6ab29a0e7ca7593c24157"
+}

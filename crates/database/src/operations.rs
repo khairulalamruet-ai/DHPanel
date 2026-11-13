@@ -202,6 +202,19 @@ impl From<Row> for Operation {
 /// [`EnqueueError::KeyReused`] when the key belongs to a different request,
 /// [`EnqueueError::UnknownNode`], or database errors.
 pub async fn enqueue(pool: &PgPool, new: &NewOperation<'_>) -> Result<Enqueued, EnqueueError> {
+    let mut conn = pool.acquire().await?;
+    enqueue_in(&mut conn, new).await
+}
+
+/// Like [`enqueue`], on a plain connection so it can run inside a transaction
+/// together with the change it belongs to (`&mut *tx`).
+///
+/// # Errors
+/// As [`enqueue`].
+pub async fn enqueue_in(
+    conn: &mut sqlx::PgConnection,
+    new: &NewOperation<'_>,
+) -> Result<Enqueued, EnqueueError> {
     let inserted = sqlx::query_as!(
         Row,
         r#"INSERT INTO operations
@@ -224,7 +237,7 @@ pub async fn enqueue(pool: &PgPool, new: &NewOperation<'_>) -> Result<Enqueued, 
         new.ttl_secs,
         new.max_attempts,
     )
-    .fetch_optional(pool)
+    .fetch_optional(&mut *conn)
     .await
     .map_err(|err| match err.as_database_error().and_then(|e| e.constraint()) {
         Some("operations_node_id_fkey") => EnqueueError::UnknownNode,
@@ -247,7 +260,7 @@ pub async fn enqueue(pool: &PgPool, new: &NewOperation<'_>) -> Result<Enqueued, 
         new.node_id,
         new.idempotency_key,
     )
-    .fetch_one(pool)
+    .fetch_one(&mut *conn)
     .await?;
     let existing = Operation::from(existing);
     if existing.kind == new.kind && existing.payload == *new.payload {

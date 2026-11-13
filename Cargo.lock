@@ -933,6 +933,7 @@ dependencies = [
  "dhpanel-mod-nodes",
  "dhpanel-mod-plans",
  "dhpanel-mod-system",
+ "dhpanel-mod-users",
  "dhpanel-node-gateway",
  "dhpanel-observability",
  "dhpanel-operations",
@@ -1213,6 +1214,31 @@ dependencies = [
  "tokio",
  "tower",
  "tracing",
+ "utoipa",
+ "uuid",
+]
+
+[[package]]
+name = "dhpanel-mod-users"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "dhpanel-audit",
+ "dhpanel-auth-core",
+ "dhpanel-cache",
+ "dhpanel-database",
+ "dhpanel-domain",
+ "dhpanel-http-kit",
+ "dhpanel-kernel",
+ "dhpanel-node-protocol",
+ "dhpanel-rbac",
+ "dhpanel-session",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tokio",
+ "tower",
  "utoipa",
  "uuid",
 ]

@@ -1,0 +1,186 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT a.id, a.username, a.email, a.locale, a.status::text AS \"account_status!\",\n                  extract(epoch FROM a.created_at)::bigint AS \"created_at!\",\n                  t.id AS \"tenant_id?\", t.username AS \"tenant_username?\", t.status AS \"tenant_status?\",\n                  t.plan_id AS \"plan_id?\", p.name AS \"plan_name?\",\n                  t.node_id AS \"node_id?\", n.name AS \"node_name?\", t.uid AS \"uid?\",\n                  extract(epoch FROM t.purge_after)::bigint AS \"purge_after?\"\n           FROM accounts a\n           LEFT JOIN tenants t ON t.owner_account_id = a.id\n           LEFT JOIN plans p ON p.id = t.plan_id\n           LEFT JOIN nodes n ON n.id = t.node_id\n           WHERE a.kind = 'client'\n             AND ($1::text IS NULL OR t.status = $1)\n             AND ($2::uuid IS NULL OR t.plan_id = $2)\n             AND ($3::uuid IS NULL OR t.node_id = $3)\n             AND ($4::text IS NULL OR a.username ILIKE $4 OR a.email ILIKE $4 OR t.username ILIKE $4)\n           ORDER BY a.created_at DESC, a.id DESC\n           LIMIT $5 OFFSET $6",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "accounts",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "username",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "accounts",
+            "name": "username"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "email",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "accounts",
+            "name": "email"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "locale",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "accounts",
+            "name": "locale"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "account_status!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 6,
+        "name": "tenant_id?",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "tenants",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "tenant_username?",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "tenants",
+            "name": "username"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "tenant_status?",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "tenants",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "plan_id?",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "tenants",
+            "name": "plan_id"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "plan_name?",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "plans",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "node_id?",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "tenants",
+            "name": "node_id"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "node_name?",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "nodes",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "uid?",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "tenants",
+            "name": "uid"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "purge_after?",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      null,
+      null,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "f681b00f4fa1e134fcbb1ce91bd2a7563b84e474f7688da0814aa27ecab197ea"
+}
