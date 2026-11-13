@@ -41,7 +41,9 @@ async fn the_four_presets_are_there_and_linked(pool: PgPool) {
             .contains(&"domains".to_owned())
     );
 
-    let plans: Vec<(String, String, Option<i32>, Option<i64>, serde_json::Value)> = sqlx::query_as(
+    /// Plan name, feature set name, CPU, bandwidth, limits.
+    type PlanRow = (String, String, Option<i32>, Option<i64>, serde_json::Value);
+    let plans: Vec<PlanRow> = sqlx::query_as(
         "SELECT p.name, f.name, p.cpu_millis, p.bandwidth_bytes, p.limits
          FROM plans p JOIN feature_sets f ON f.id = p.feature_set_id ORDER BY p.name",
     )
