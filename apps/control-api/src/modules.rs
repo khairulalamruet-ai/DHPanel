@@ -290,7 +290,7 @@ mod tests {
         let registry = registry().unwrap_or_else(|e| panic!("{}", e.join("\n")));
         assert_eq!(
             registry.names().collect::<Vec<_>>(),
-            ["auth", "rbac", "audit", "nodes"]
+            ["auth", "rbac", "audit", "nodes", "system"]
         );
         assert_eq!(registry.dependents_of("rbac"), ["audit", "nodes", "system"]);
         // Every dependency names a module that exists.
@@ -323,12 +323,14 @@ mod tests {
             p::NodesManage::KEY,
             p::ModulesRead::KEY,
             p::ModulesManage::KEY,
+            p::ModulesRead::KEY,
+            p::ModulesManage::KEY,
         ] {
             assert!(declared.iter().any(|d| d == key), "{key} is in no manifest");
         }
         assert_eq!(
             declared.len(),
-            7,
+            9,
             "a manifest declares a key the code does not know: {declared:?}"
         );
     }
