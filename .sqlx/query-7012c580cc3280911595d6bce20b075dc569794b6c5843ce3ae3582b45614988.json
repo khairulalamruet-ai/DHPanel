@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT p.key, p.module, p.status = 'present' AS \"present!\",\n                  m.manifest #> '{module,title}' AS module_title\n           FROM permissions p LEFT JOIN modules m ON m.name = p.module\n           ORDER BY p.module, p.key",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "permissions",
+            "name": "key"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "module",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "permissions",
+            "name": "module"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "present!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "module_title",
+        "type_info": "Jsonb",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "7012c580cc3280911595d6bce20b075dc569794b6c5843ce3ae3582b45614988"
+}

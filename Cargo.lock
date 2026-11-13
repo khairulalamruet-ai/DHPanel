@@ -928,6 +928,7 @@ name = "dhpanel-database"
 version = "0.1.0"
 dependencies = [
  "dhpanel-domain",
+ "dhpanel-rbac",
  "secrecy",
  "serde",
  "serde_json",

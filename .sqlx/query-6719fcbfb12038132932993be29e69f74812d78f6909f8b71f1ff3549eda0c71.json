@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE permissions SET module = $2, status = 'present' WHERE key = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6719fcbfb12038132932993be29e69f74812d78f6909f8b71f1ff3549eda0c71"
+}

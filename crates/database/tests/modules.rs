@@ -177,3 +177,131 @@ async fn the_table_refuses_nonsense_and_concurrent_syncs_agree(pool: PgPool) {
     assert_eq!(added, 2, "dns and ssl are added exactly once in total");
     assert_eq!(list(&pool).await.unwrap().len(), 3);
 }
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs PostgreSQL"]
+async fn permission_keys_follow_the_manifests_and_super_admin_gets_them_all(pool: PgPool) {
+    use dhpanel_database::{permissions, rbac::load_access};
+    let m = json!({"module": {"title": {"en": "Domains"}}});
+    sync(&pool, &[record("domains", "1.0.0", false, &m)])
+        .await
+        .unwrap();
+
+    let first = permissions::sync(
+        &pool,
+        &[("domains.read", "domains"), ("domains.create", "domains")],
+    )
+    .await
+    .unwrap();
+    assert_eq!(first.added, ["domains.read", "domains.create"]);
+    let listed = permissions::list(&pool).await.unwrap();
+    assert_eq!(
+        listed.iter().map(|e| e.key.as_str()).collect::<Vec<_>>(),
+        ["domains.create", "domains.read"],
+        "by module, then key"
+    );
+    assert_eq!(listed[0].module_title, Some(json!({"en": "Domains"})));
+    assert!(listed.iter().all(|e| e.present));
+    assert!(
+        permissions::sync(
+            &pool,
+            &[("domains.read", "domains"), ("domains.create", "domains")]
+        )
+        .await
+        .unwrap()
+        .is_empty()
+    );
+
+    // A new module's key shows up by itself, and the super administrator holds it
+    // without anyone granting it: `*` covers every key, old or new.
+    let account: sqlx::types::Uuid = sqlx::query_scalar(
+        "INSERT INTO accounts (kind, username, email, password_hash) VALUES ('admin', 'root', 'r@example.com', '$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHQ$aGFzaGhhc2hoYXNoaGFzaA') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    dhpanel_database::rbac::assign_role(&pool, account, "super_admin", None)
+        .await
+        .unwrap();
+    let report = permissions::sync(
+        &pool,
+        &[
+            ("domains.read", "domains"),
+            ("domains.create", "domains"),
+            ("ssl.issue", "ssl"),
+        ],
+    )
+    .await
+    .unwrap();
+    assert_eq!(report.added, ["ssl.issue"]);
+    let access = load_access(&pool, account).await.unwrap().unwrap();
+    let grants = dhpanel_rbac::PermissionSet::new(access.permissions);
+    assert!(grants.allows("ssl.issue") && grants.allows("domains.read"));
+    // An ordinary administrator does not get it.
+    let plain: sqlx::types::Uuid = sqlx::query_scalar(
+        "INSERT INTO accounts (kind, username, email, password_hash) VALUES ('admin', 'plain', 'p@example.com', '$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHQ$aGFzaGhhc2hoYXNoaGFzaA') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    dhpanel_database::rbac::assign_role(&pool, plain, "admin", None)
+        .await
+        .unwrap();
+    let access = load_access(&pool, plain).await.unwrap().unwrap();
+    assert!(!dhpanel_rbac::PermissionSet::new(access.permissions).allows("ssl.issue"));
+
+    // A key leaves the build: kept and marked, then restored, or moved to another module.
+    let report = permissions::sync(&pool, &[("domains.read", "domains"), ("ssl.issue", "ssl")])
+        .await
+        .unwrap();
+    assert_eq!(report.missing, ["domains.create"]);
+    assert!(
+        !permissions::list(&pool)
+            .await
+            .unwrap()
+            .iter()
+            .find(|e| e.key == "domains.create")
+            .unwrap()
+            .present
+    );
+    let report = permissions::sync(
+        &pool,
+        &[
+            ("domains.read", "domains"),
+            ("domains.create", "websites"),
+            ("ssl.issue", "ssl"),
+        ],
+    )
+    .await
+    .unwrap();
+    assert_eq!(report.restored, ["domains.create"]);
+    let entry = permissions::list(&pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|e| e.key == "domains.create")
+        .unwrap();
+    assert!(entry.present && entry.module == "websites");
+    let report = permissions::sync(
+        &pool,
+        &[
+            ("domains.read", "domains"),
+            ("domains.create", "domains"),
+            ("ssl.issue", "ssl"),
+        ],
+    )
+    .await
+    .unwrap();
+    assert_eq!(report.moved, ["domains.create"]);
+
+    for bad in ["no_dots", "Domains.read", "a.", "a.b*"] {
+        assert!(
+            sqlx::query("INSERT INTO permissions (key, module) VALUES ($1, 'domains')")
+                .bind(bad)
+                .execute(&pool)
+                .await
+                .is_err(),
+            "{bad}"
+        );
+    }
+}

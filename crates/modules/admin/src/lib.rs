@@ -47,7 +47,7 @@ use dhpanel_domain::{AccountKind, Email, Username};
 use dhpanel_http_kit::{AppError, FieldError, ProblemDetails};
 use dhpanel_rbac::{
     Principal, Require, RequireRecent,
-    permissions::{AdministratorsManage, AdministratorsRead},
+    permissions::{AdministratorsManage, AdministratorsRead, RolesRead},
 };
 use dhpanel_session::{RevokeReason, SessionStore, rfc3339};
 use secrecy::SecretString;
@@ -112,6 +112,7 @@ pub fn router() -> Router<AdminState> {
             "/api/v1/admin/administrators/{id}/sessions",
             axum::routing::delete(end_administrator_sessions),
         )
+        .route("/api/v1/admin/permissions", get(list_permissions))
 }
 
 // ------------------------------------------------------------------ types
@@ -870,17 +871,70 @@ pub async fn end_administrator_sessions(
     Ok(Json(EndedSessions { revoked }))
 }
 
+/// A permission key that modules declare.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct PermissionView {
+    /// The key, for example `domains.read`.
+    #[schema(example = "domains.read")]
+    pub key: String,
+    /// The module that declares it.
+    pub module: String,
+    /// That module's display name by language code.
+    #[schema(value_type = Object)]
+    pub module_title: serde_json::Value,
+    /// Declared by the running build. A key that is not stays listed, because
+    /// roles may still hold it, but grants nothing that exists.
+    pub present: bool,
+}
+
+/// The permission catalogue.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct PermissionList {
+    /// By module, then key.
+    pub items: Vec<PermissionView>,
+}
+
+/// List every permission key the installed modules declare, for the role editor.
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/permissions",
+    tag = "administrators",
+    operation_id = "listPermissions",
+    security(("session" = [])),
+    responses(
+        (status = 200, description = "The catalogue, grouped by module", body = PermissionList),
+        (status = 403, description = "`permission_denied` (needs admin.roles.read) or `mfa_setup_required`", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+pub async fn list_permissions(
+    State(state): State<AdminState>,
+    _who: Require<RolesRead>,
+) -> Result<Json<PermissionList>, AppError> {
+    let items = dhpanel_database::permissions::list(&state.db)
+        .await
+        .map_err(AppError::internal)?
+        .into_iter()
+        .map(|entry| PermissionView {
+            key: entry.key,
+            module: entry.module,
+            module_title: entry.module_title.unwrap_or_else(|| serde_json::json!({})),
+            present: entry.present,
+        })
+        .collect();
+    Ok(Json(PermissionList { items }))
+}
+
 /// OpenAPI fragment (full paths; merge into the root document).
 #[derive(OpenApi)]
 #[openapi(
     paths(
-        list_administrators, get_administrator, create_administrator, update_administrator,
+        list_permissions, list_administrators, get_administrator, create_administrator, update_administrator,
         delete_administrator, assign_administrator_role, revoke_administrator_role,
         reset_administrator_mfa, end_administrator_sessions
     ),
     components(schemas(
         AdministratorView, AdministratorList, CreateAdministrator, UpdateAdministrator,
-        StatusInput, EndedSessions
+        StatusInput, EndedSessions, PermissionView, PermissionList
     )),
     tags((name = "administrators", description = "Manage administrator accounts (super administrators)"))
 )]

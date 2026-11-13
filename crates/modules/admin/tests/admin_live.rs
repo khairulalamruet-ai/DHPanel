@@ -853,3 +853,54 @@ async fn an_administrator_who_must_use_2fa_is_blocked_until_enrolled(pool: PgPoo
         "enrolled: access is back"
     );
 }
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn the_permission_catalogue_is_listed_for_the_role_editor(pool: PgPool) {
+    let e = env(&pool, 600);
+    dhpanel_database::modules::sync(
+        &pool,
+        &[dhpanel_database::modules::ModuleRecord {
+            name: "domains",
+            version: "1.0.0",
+            category: "web",
+            core: false,
+            manifest: &json!({"module": {"title": {"en": "Domains", "bn": "ডোমেইন"}}}),
+        }],
+    )
+    .await
+    .unwrap();
+    dhpanel_database::permissions::sync(
+        &pool,
+        &[("domains.read", "domains"), ("domains.create", "domains")],
+    )
+    .await
+    .unwrap();
+    let root = account(&pool, "rootuser", "admin", &["super_admin"]).await;
+    let support = account(&pool, "helper", "admin", &["support"]).await;
+    let nobody = account(&pool, "norole", "admin", &[]).await;
+
+    let path = "/api/v1/admin/permissions";
+    assert_eq!(
+        e.call(None, "GET", path, None, false).await.0,
+        StatusCode::UNAUTHORIZED
+    );
+    for who in [support, nobody] {
+        let b = e.sign_in(who).await;
+        let (status, body) = e.call(Some(&b), "GET", path, None, false).await;
+        assert_eq!(
+            (status, code(&body)),
+            (StatusCode::FORBIDDEN, "permission_denied"),
+            "{who}"
+        );
+    }
+    let r = e.sign_in(root).await;
+    let (status, body) = e.call(Some(&r), "GET", path, None, false).await;
+    assert_eq!(status, StatusCode::OK);
+    let items = body["items"].as_array().unwrap();
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0]["key"], "domains.create");
+    assert_eq!(items[1]["module"], "domains");
+    assert_eq!(items[1]["module_title"]["bn"], "ডোমেইন");
+    assert_eq!(items[1]["present"], true);
+}

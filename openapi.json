@@ -1538,6 +1538,42 @@
         ]
       }
     },
+    "/api/v1/admin/permissions": {
+      "get": {
+        "tags": [
+          "administrators"
+        ],
+        "summary": "List every permission key the installed modules declare, for the role editor.",
+        "operationId": "listPermissions",
+        "responses": {
+          "200": {
+            "description": "The catalogue, grouped by module",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermissionList"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied` (needs admin.roles.read) or `mfa_setup_required`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/auth/logout": {
       "post": {
         "tags": [
@@ -3427,6 +3463,51 @@
             ],
             "format": "uuid",
             "description": "Tenant it is about."
+          }
+        }
+      },
+      "PermissionList": {
+        "type": "object",
+        "description": "The permission catalogue.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PermissionView"
+            },
+            "description": "By module, then key."
+          }
+        }
+      },
+      "PermissionView": {
+        "type": "object",
+        "description": "A permission key that modules declare.",
+        "required": [
+          "key",
+          "module",
+          "module_title",
+          "present"
+        ],
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "The key, for example `domains.read`.",
+            "example": "domains.read"
+          },
+          "module": {
+            "type": "string",
+            "description": "The module that declares it."
+          },
+          "module_title": {
+            "type": "object",
+            "description": "That module's display name by language code."
+          },
+          "present": {
+            "type": "boolean",
+            "description": "Declared by the running build. A key that is not stays listed, because\nroles may still hold it, but grants nothing that exists."
           }
         }
       },

@@ -238,11 +238,50 @@ pub async fn sync(
     dhpanel_database::modules::sync(db, &records).await
 }
 
+/// Writes the permission keys the manifests declare into the catalogue (T03.06).
+///
+/// # Errors
+/// Database errors.
+pub async fn sync_permissions(
+    db: &dhpanel_database::sqlx::PgPool,
+    registry: &Registry,
+) -> Result<dhpanel_database::permissions::SyncReport, dhpanel_database::sqlx::Error> {
+    let keys: Vec<(&str, &str)> = registry
+        .modules()
+        .iter()
+        .flat_map(|m| {
+            let manifest = m.manifest();
+            manifest
+                .permissions
+                .keys
+                .iter()
+                .map(|key| (key.as_str(), manifest.module.name.as_str()))
+        })
+        .collect();
+    dhpanel_database::permissions::sync(db, &keys).await
+}
+
 /// Runs [`sync`] until it succeeds once (the database may come up after the
 /// API does), logging what changed.
 pub async fn sync_until_done(db: dhpanel_database::sqlx::PgPool, registry: Registry) {
     let mut wait = std::time::Duration::from_secs(1);
     loop {
+        match sync_permissions(&db, &registry).await {
+            Ok(report) if !report.is_empty() => tracing::info!(
+                added = ?report.added,
+                restored = ?report.restored,
+                moved = ?report.moved,
+                missing = ?report.missing,
+                "permission catalogue synced with this build"
+            ),
+            Ok(_) => {}
+            Err(err) => {
+                tracing::warn!(error = %err, retry_in = ?wait, "could not sync the permission catalogue");
+                tokio::time::sleep(wait).await;
+                wait = (wait * 2).min(std::time::Duration::from_secs(30));
+                continue;
+            }
+        }
         match sync(&db, &registry).await {
             Ok(report) => {
                 if report.is_empty() {
