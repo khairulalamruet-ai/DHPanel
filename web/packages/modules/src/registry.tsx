@@ -536,6 +536,16 @@ export const registeredFrontendModules: FrontendModule[] = [
         feature: "backups",
       },
     ],
+    adminNav: [
+      {
+        id: "admin-backups",
+        labelKey: "adminBackups.nav",
+        icon: <Archive className="h-4 w-4" />,
+        href: "/admin/backups",
+        order: 55,
+        permission: "backups.manage",
+      },
+    ],
   },
   {
     manifest: {
