@@ -1180,6 +1180,7 @@ dependencies = [
  "dhpanel-kernel",
  "dhpanel-rbac",
  "dhpanel-session",
+ "dhpanel-settings",
  "secrecy",
  "serde",
  "serde_json",

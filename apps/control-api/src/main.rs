@@ -282,8 +282,8 @@ async fn main() -> ExitCode {
     });
     // Module routes: core modules at once, the others as soon as the modules
     // table can be read, and again whenever an administrator switches one.
-    let mount = match modules::mount(modules::States { auth, admin, nodes }, base) {
-        Ok(mount) => mount,
+    let (mount, settings) = match modules::mount(modules::States { auth, admin, nodes }, base) {
+        Ok(mounted) => mounted,
         Err(messages) => {
             for message in messages {
                 tracing::error!("{message}");
@@ -292,22 +292,10 @@ async fn main() -> ExitCode {
             return ExitCode::from(EXIT_CONFIG);
         }
     };
-    // The settings schemas of all modules must be usable (T03.08); the settings
-    // API (T03.09) will serve them.
-    match modules::settings(mount.registry()) {
-        Ok(settings) => tracing::info!(
-            modules = %settings.modules().map(|m| m.module.as_str()).collect::<Vec<_>>().join(", "),
-            "settings schemas valid"
-        ),
-        Err(messages) => {
-            for message in messages {
-                tracing::error!("{message}");
-                eprintln!("{SERVICE}: {message}");
-            }
-            telemetry.shutdown();
-            return ExitCode::from(EXIT_CONFIG);
-        }
-    }
+    tracing::info!(
+        modules = %settings.modules().map(|m| m.module.as_str()).collect::<Vec<_>>().join(", "),
+        "settings schemas valid"
+    );
     tokio::spawn(modules::follow_enabled(
         db.clone(),
         mount.clone(),

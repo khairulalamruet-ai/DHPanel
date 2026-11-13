@@ -4,6 +4,9 @@
 //! |---|---|---|
 //! | GET | `/api/v1/admin/modules` | `admin.modules.read` |
 //! | PUT | `/api/v1/admin/modules/{name}` | `admin.modules.manage`, sudo mode |
+//! | GET | `/api/v1/admin/settings` | `admin.settings.read` |
+//! | GET | `/api/v1/admin/settings/{module}` | `admin.settings.read` |
+//! | PUT | `/api/v1/admin/settings/{module}` | `admin.settings.manage`, sudo mode |
 //!
 //! Switching a module changes the database and, right after the commit, the
 //! routes the server answers ([`dhpanel_kernel::ModuleMount`]): no restart.
@@ -17,7 +20,7 @@
 //! * every module that changes is written to the audit log in the same
 //!   transaction.
 
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, sync::Arc};
 
 use axum::{
     Json, Router,
@@ -26,13 +29,14 @@ use axum::{
 };
 use dhpanel_audit::{AuditEntry, Outcome};
 use dhpanel_database::{modules as db, sqlx::PgPool};
-use dhpanel_http_kit::{AppError, ProblemDetails};
+use dhpanel_http_kit::{AppError, FieldError, ProblemDetails};
 use dhpanel_kernel::{Event, ModuleMount};
 use dhpanel_rbac::{
     Require, RequireRecent,
-    permissions::{ModulesManage, ModulesRead},
+    permissions::{ModulesManage, ModulesRead, SettingsManage, SettingsRead},
 };
 use dhpanel_session::SessionStore;
+use dhpanel_settings::{ModuleSettings, Scope, SettingsError, SettingsRegistry};
 use serde::{Deserialize, Serialize};
 use utoipa::{OpenApi, ToSchema};
 
@@ -51,6 +55,8 @@ pub struct SystemState {
     pub sessions: SessionStore,
     /// The live module routes; also knows the modules of this build.
     pub mount: ModuleMount,
+    /// The checked settings schemas of all modules.
+    pub settings: Arc<SettingsRegistry>,
 }
 
 impl FromRef<SystemState> for PgPool {
@@ -70,6 +76,11 @@ pub fn router() -> Router<SystemState> {
     Router::new()
         .route("/api/v1/admin/modules", get(list_modules))
         .route("/api/v1/admin/modules/{name}", put(set_module))
+        .route("/api/v1/admin/settings", get(list_settings))
+        .route(
+            "/api/v1/admin/settings/{module}",
+            get(get_settings).put(put_settings),
+        )
 }
 
 /// A module as shown to administrators.
@@ -323,11 +334,266 @@ pub async fn set_module(
     }))
 }
 
+// ----------------------------------------------------------------- settings
+
+/// A module's global settings: what they are and what they are now.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct SettingsView {
+    /// Module name.
+    #[schema(example = "system")]
+    pub module: String,
+    /// Display name by language code (falls back to the English `title`).
+    #[schema(value_type = Object)]
+    pub title: serde_json::Value,
+    /// Short description by language code.
+    #[schema(value_type = Object)]
+    pub description: serde_json::Value,
+    /// The settings as a JSON Schema: each property has `type`, `default`,
+    /// optional `enum`, limits, `title` / `x-title` and `description` /
+    /// `x-description`. Only the settings that apply to the whole panel.
+    #[schema(value_type = Object)]
+    pub schema: serde_json::Value,
+    /// Current values (the default where nothing was changed), by setting key.
+    #[schema(value_type = Object)]
+    pub values: serde_json::Value,
+}
+
+/// All modules that have settings.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct SettingsList {
+    /// By module name.
+    pub items: Vec<SettingsView>,
+}
+
+/// New values for some settings of a module.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PutSettings {
+    /// Setting key to new value. Settings not mentioned keep their value;
+    /// writing a setting's default puts it back to the default.
+    #[schema(value_type = Object, example = json!({"panel_name": "My Hosting"}))]
+    pub values: serde_json::Map<String, serde_json::Value>,
+}
+
+/// The outcome of a change.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct SettingsChange {
+    /// Current values of the module, by key.
+    #[schema(value_type = Object)]
+    pub values: serde_json::Value,
+    /// Keys whose value actually changed (empty if nothing did).
+    pub changed: Vec<String>,
+}
+
+/// Text in the schema's `x-<name>` (a language map), else its plain `<name>`
+/// as an English-only map.
+fn localized(schema: &serde_json::Value, name: &str) -> serde_json::Value {
+    schema
+        .get(format!("x-{name}"))
+        .filter(|v| v.is_object())
+        .cloned()
+        .or_else(|| {
+            schema
+                .get(name)
+                .and_then(|v| v.as_str())
+                .map(|text| serde_json::json!({ "en": text }))
+        })
+        .unwrap_or_else(|| serde_json::json!({}))
+}
+
+/// The schema as shown: only properties of the global scope.
+fn global_schema(settings: &ModuleSettings) -> serde_json::Value {
+    let mut schema = settings.schema.clone();
+    if let Some(properties) = schema
+        .get_mut("properties")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        properties.retain(|key, _| {
+            settings
+                .properties
+                .get(key)
+                .is_some_and(|p| p.scope == dhpanel_settings::ScopeKind::Global)
+        });
+    }
+    schema
+}
+
+fn has_global_settings(settings: &ModuleSettings) -> bool {
+    settings
+        .properties
+        .values()
+        .any(|p| p.scope == dhpanel_settings::ScopeKind::Global)
+}
+
+async fn view(state: &SystemState, settings: &ModuleSettings) -> Result<SettingsView, AppError> {
+    let mut conn = state.db.acquire().await.map_err(internal)?;
+    let values = dhpanel_settings::get(&state.settings, &mut conn, &settings.module, Scope::Global)
+        .await
+        .map_err(|e| internal(e.to_string()))?;
+    Ok(SettingsView {
+        module: settings.module.clone(),
+        title: localized(&settings.schema, "title"),
+        description: localized(&settings.schema, "description"),
+        schema: global_schema(settings),
+        values: serde_json::to_value(values).unwrap_or_default(),
+    })
+}
+
+fn settings_error(err: SettingsError) -> AppError {
+    match err {
+        SettingsError::UnknownModule(_) => AppError::not_found("settings"),
+        SettingsError::Invalid(problems) => AppError::validation(
+            problems
+                .into_iter()
+                .map(|p| FieldError::new(format!("values.{}", p.key), p.code, p.message))
+                .collect(),
+        ),
+        SettingsError::Database(e) => internal(e),
+    }
+}
+
+/// List the settings of every module that has some.
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/settings",
+    tag = "system",
+    operation_id = "listSettings",
+    security(("session" = [])),
+    responses(
+        (status = 200, description = "Modules with settings, their schemas and current values", body = SettingsList),
+        (status = 403, description = "`permission_denied` (needs admin.settings.read) or `mfa_setup_required`", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+pub async fn list_settings(
+    State(state): State<SystemState>,
+    _who: Require<SettingsRead>,
+) -> Result<Json<SettingsList>, AppError> {
+    let mut items = Vec::new();
+    for settings in state.settings.modules().filter(|m| has_global_settings(m)) {
+        items.push(view(&state, settings).await?);
+    }
+    Ok(Json(SettingsList { items }))
+}
+
+/// One module's settings.
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/settings/{module}",
+    tag = "system",
+    operation_id = "getSettings",
+    security(("session" = [])),
+    params(("module" = String, Path, description = "Module name")),
+    responses(
+        (status = 200, description = "Schema and current values", body = SettingsView),
+        (status = 403, description = "`permission_denied` (needs admin.settings.read)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 404, description = "The module has no settings", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+pub async fn get_settings(
+    State(state): State<SystemState>,
+    _who: Require<SettingsRead>,
+    Path(module): Path<String>,
+) -> Result<Json<SettingsView>, AppError> {
+    let settings = state
+        .settings
+        .module(&module)
+        .filter(|m| has_global_settings(m))
+        .ok_or_else(|| AppError::not_found("settings"))?;
+    Ok(Json(view(&state, settings).await?))
+}
+
+/// Change some settings of a module. All values are checked first; if one is
+/// not acceptable nothing is changed. The change, with the old and new value
+/// of every setting that differs, is written to the audit log.
+#[utoipa::path(
+    put,
+    path = "/api/v1/admin/settings/{module}",
+    tag = "system",
+    operation_id = "putSettings",
+    security(("session" = [])),
+    params(
+        ("module" = String, Path, description = "Module name"),
+        ("X-CSRF-Token" = String, Header, description = "The session's csrf_token")
+    ),
+    request_body = PutSettings,
+    responses(
+        (status = 200, description = "Saved (also when nothing differed)", body = SettingsChange),
+        (status = 403, description = "`permission_denied` (needs admin.settings.manage), `reauth_required` or `csrf_failed`", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 404, description = "The module has no settings", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 422, description = "Unknown setting, wrong scope, or a value that breaks the schema (one entry per problem, `values.<key>`)", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+pub async fn put_settings(
+    State(state): State<SystemState>,
+    RequireRecent(who, _): RequireRecent<SettingsManage>,
+    Path(module): Path<String>,
+    Json(body): Json<PutSettings>,
+) -> Result<Json<SettingsChange>, AppError> {
+    if !state
+        .settings
+        .module(&module)
+        .is_some_and(has_global_settings)
+    {
+        return Err(AppError::not_found("settings"));
+    }
+    let mut tx = state.db.begin().await.map_err(internal)?;
+    let change = dhpanel_settings::set(
+        &state.settings,
+        &mut tx,
+        &module,
+        Scope::Global,
+        &body.values,
+        Some(who.account_id()),
+    )
+    .await
+    .map_err(settings_error)?;
+    if !change.changed.is_empty() {
+        let diff: serde_json::Map<String, serde_json::Value> = change
+            .changed
+            .iter()
+            .map(|key| {
+                (
+                    key.clone(),
+                    serde_json::json!({
+                        "before": change.before.get(key),
+                        "after": change.after.get(key),
+                    }),
+                )
+            })
+            .collect();
+        dhpanel_audit::insert(
+            &mut *tx,
+            &AuditEntry::new("admin.settings_changed", Outcome::Success)
+                .actor(who.account_id())
+                .target("settings", &module)
+                .metadata(serde_json::json!({ "changed": diff })),
+        )
+        .await
+        .map_err(internal)?;
+        dhpanel_events::publish(
+            &mut tx,
+            &Event::SettingsChanged {
+                module: module.clone(),
+            },
+        )
+        .await
+        .map_err(internal)?;
+    }
+    tx.commit().await.map_err(internal)?;
+    Ok(Json(SettingsChange {
+        values: serde_json::to_value(&change.after).unwrap_or_default(),
+        changed: change.changed,
+    }))
+}
+
 /// OpenAPI fragment (full paths; merge into the root document).
 #[derive(OpenApi)]
 #[openapi(
-    paths(list_modules, set_module),
-    components(schemas(ModuleView, ModuleList, SetModule, ModuleChange)),
+    paths(list_modules, set_module, list_settings, get_settings, put_settings),
+    components(schemas(
+        ModuleView, ModuleList, SetModule, ModuleChange, SettingsView, SettingsList, PutSettings,
+        SettingsChange
+    )),
     tags((name = "system", description = "Modules and settings"))
 )]
 pub struct SystemApi;

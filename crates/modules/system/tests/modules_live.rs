@@ -16,6 +16,7 @@ use dhpanel_database::{modules as db, rbac::assign_role};
 use dhpanel_kernel::{Manifest, Module, ModuleMount, ModuleRoutes, Registry};
 use dhpanel_mod_system::{SystemState, router};
 use dhpanel_session::{CSRF_HEADER, NewSession, SessionConfig, SessionStore, set_cookie};
+use dhpanel_settings::SettingsRegistry;
 use secrecy::SecretString;
 use serde_json::{Value, json};
 use sqlx::PgPool;
@@ -87,16 +88,35 @@ async fn env(pool: &PgPool) -> Env {
     let redis = RedisHandle::new(&SecretString::from(url)).expect("valid REDIS_URL");
     let sessions = SessionStore::new(redis, pool.clone(), SessionConfig::default());
     let late: Arc<OnceLock<ModuleMount>> = Arc::default();
+    let settings = Arc::new(
+        SettingsRegistry::build(vec![(
+            "dns".to_owned(),
+            json!({
+                "type": "object",
+                "additionalProperties": false,
+                "title": "DNS",
+                "x-title": {"en": "DNS", "bn": "ডিএনএস"},
+                "properties": {
+                    "default_ttl": {"type": "integer", "minimum": 60, "maximum": 86400, "default": 3600, "title": "Default TTL"},
+                    "provider": {"type": "string", "enum": ["internal", "external"], "default": "internal"},
+                    "per_node_cache": {"type": "integer", "default": 5, "x-scope": "node"}
+                }
+            }),
+        )])
+        .unwrap(),
+    );
     let system = Arc::new(Fake {
         manifest: manifest("system", true, &[]),
         routes: Box::new({
             let (pool, sessions, late) = (pool.clone(), sessions.clone(), late.clone());
+            let settings = settings.clone();
             move || match late.get() {
                 Some(mount) => ModuleRoutes {
                     admin: Some(router().with_state(SystemState {
                         db: pool.clone(),
                         sessions: sessions.clone(),
                         mount: mount.clone(),
+                        settings: settings.clone(),
                     })),
                     ..ModuleRoutes::none()
                 },
@@ -478,4 +498,209 @@ async fn core_modules_strangers_and_bad_requests_are_refused(pool: PgPool) {
         .await
         .unwrap();
     assert_eq!(announced, 0, "refused requests announce nothing");
+}
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn settings_are_listed_validated_saved_and_audited_with_a_diff(pool: PgPool) {
+    let e = env(&pool).await;
+    let root = e
+        .sign_in(account(&pool, "rootuser", &["super_admin"]).await)
+        .await;
+    let plain = e
+        .sign_in(account(&pool, "plainadmin", &["admin"]).await)
+        .await;
+    let path = "/api/v1/admin/settings";
+
+    // Who may look.
+    assert_eq!(
+        e.call(None, "GET", path, None, false).await.0,
+        StatusCode::UNAUTHORIZED
+    );
+    let (status, body) = e.call(Some(&plain), "GET", path, None, false).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::FORBIDDEN, "permission_denied")
+    );
+
+    // The list: the schema (global settings only) and the defaults.
+    let (status, body) = e.call(Some(&root), "GET", path, None, false).await;
+    assert_eq!(status, StatusCode::OK);
+    let items = body["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["module"], "dns");
+    assert_eq!(items[0]["title"]["bn"], "ডিএনএস");
+    assert_eq!(
+        items[0]["values"],
+        json!({"default_ttl": 3600, "provider": "internal"})
+    );
+    let props = items[0]["schema"]["properties"].as_object().unwrap();
+    assert_eq!(
+        props.len(),
+        2,
+        "node-scoped settings are not shown: {props:?}"
+    );
+    assert_eq!(props["default_ttl"]["maximum"], 86400);
+
+    // A wrong type is refused with a field error and changes nothing (the DoD).
+    let put = |values: Value| (format!("{path}/dns"), Some(json!({"values": values})));
+    let (url, body) = put(json!({"default_ttl": "an hour", "provider": "internal"}));
+    let (status, body) = e.call(Some(&root), "PUT", &url, body, true).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["errors"][0]["field"], "values.default_ttl");
+    assert_eq!(body["errors"][0]["code"], "invalid_value");
+    let (url, b) = put(
+        json!({"default_ttl": 10, "provider": "carrier pigeon", "ghost": 1, "per_node_cache": 3}),
+    );
+    let (status, body) = e.call(Some(&root), "PUT", &url, b, true).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let mut fields: Vec<(String, String)> = body["errors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| {
+            (
+                f["field"].as_str().unwrap().to_owned(),
+                f["code"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect();
+    fields.sort();
+    assert_eq!(
+        fields,
+        [
+            ("values.default_ttl".to_owned(), "invalid_value".to_owned()),
+            ("values.ghost".to_owned(), "unknown_setting".to_owned()),
+            ("values.per_node_cache".to_owned(), "wrong_scope".to_owned()),
+            ("values.provider".to_owned(), "invalid_value".to_owned()),
+        ]
+    );
+    let stored: i64 = sqlx::query_scalar("SELECT count(*) FROM settings")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(stored, 0);
+
+    // A good change: saved, and the audit entry shows before and after.
+    let (url, b) = put(json!({"default_ttl": 600}));
+    let (status, body) = e.call(Some(&root), "PUT", &url, b, true).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["changed"], json!(["default_ttl"]));
+    assert_eq!(
+        body["values"],
+        json!({"default_ttl": 600, "provider": "internal"})
+    );
+    let (_, one) = e
+        .call(Some(&root), "GET", &format!("{path}/dns"), None, false)
+        .await;
+    assert_eq!(one["values"]["default_ttl"], 600);
+    let audit: Vec<(String, String, Value)> =
+        sqlx::query_as("SELECT action, target_id, metadata FROM audit_logs WHERE action = 'admin.settings_changed'")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(audit.len(), 1);
+    assert_eq!(audit[0].1, "dns");
+    assert_eq!(
+        audit[0].2,
+        json!({"changed": {"default_ttl": {"before": 3600, "after": 600}}}),
+        "the old and the new value"
+    );
+    let events: Vec<Value> =
+        sqlx::query_scalar("SELECT payload FROM outbox WHERE event_type = 'settings_changed'")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        events,
+        [json!({"type": "settings_changed", "module": "dns"})]
+    );
+
+    // Saving the same values again, or putting a value back to the default.
+    let (url, b) = put(json!({"default_ttl": 600}));
+    let (_, body) = e.call(Some(&root), "PUT", &url, b, true).await;
+    assert_eq!(body["changed"], json!([]));
+    let (url, b) = put(json!({"default_ttl": 3600}));
+    let (_, body) = e.call(Some(&root), "PUT", &url, b, true).await;
+    assert_eq!(body["changed"], json!(["default_ttl"]));
+    let audit_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_logs WHERE action = 'admin.settings_changed'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        audit_count, 2,
+        "a save that changes nothing leaves no trace"
+    );
+    let stored: i64 = sqlx::query_scalar("SELECT count(*) FROM settings")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(stored, 0, "back at the default: no row");
+}
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn changing_settings_needs_the_manage_permission_csrf_and_a_known_module(pool: PgPool) {
+    let e = env(&pool).await;
+    let root = e
+        .sign_in(account(&pool, "rootuser", &["super_admin"]).await)
+        .await;
+    let plain = e
+        .sign_in(account(&pool, "plainadmin", &["admin"]).await)
+        .await;
+    let body = Some(json!({"values": {"default_ttl": 120}}));
+    let url = "/api/v1/admin/settings/dns";
+
+    let (status, b) = e.call(Some(&plain), "PUT", url, body.clone(), true).await;
+    assert_eq!(
+        (status, code(&b)),
+        (StatusCode::FORBIDDEN, "permission_denied")
+    );
+    assert_eq!(
+        e.call(Some(&root), "PUT", url, body.clone(), false).await.0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        e.call(None, "PUT", url, body.clone(), true).await.0,
+        StatusCode::UNAUTHORIZED
+    );
+    // Unknown module, and a module that exists but has no settings.
+    for module in ["ghost", "ssl"] {
+        let (status, _) = e
+            .call(
+                Some(&root),
+                "PUT",
+                &format!("/api/v1/admin/settings/{module}"),
+                body.clone(),
+                true,
+            )
+            .await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{module}");
+        let (status, _) = e
+            .call(
+                Some(&root),
+                "GET",
+                &format!("/api/v1/admin/settings/{module}"),
+                None,
+                false,
+            )
+            .await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{module}");
+    }
+    // Not the right shape.
+    for bad in [
+        json!({"default_ttl": 120}),
+        json!({"values": {"default_ttl": 120}, "force": true}),
+        json!({"values": [1]}),
+    ] {
+        let (status, _) = e.call(Some(&root), "PUT", url, Some(bad), true).await;
+        assert!(status.is_client_error(), "{status}");
+    }
+    let stored: i64 = sqlx::query_scalar("SELECT count(*) FROM settings")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(stored, 0);
 }

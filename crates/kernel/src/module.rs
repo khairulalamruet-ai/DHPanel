@@ -85,6 +85,12 @@ pub enum Event {
         /// Its name.
         name: String,
     },
+    /// The settings of a module were changed. Modules that cache a setting
+    /// re-read it on this event.
+    SettingsChanged {
+        /// The module whose settings changed.
+        module: String,
+    },
     /// A tenant (hosting account) was created.
     TenantCreated {
         /// The tenant.
@@ -122,6 +128,7 @@ impl Event {
         match self {
             Self::ModuleEnabled { .. } => "module_enabled",
             Self::ModuleDisabled { .. } => "module_disabled",
+            Self::SettingsChanged { .. } => "settings_changed",
             Self::TenantCreated { .. } => "tenant_created",
             Self::TenantDeleted { .. } => "tenant_deleted",
             Self::DomainAdded { .. } => "domain_added",

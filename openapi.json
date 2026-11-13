@@ -1574,6 +1574,183 @@
         ]
       }
     },
+    "/api/v1/admin/settings": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "List the settings of every module that has some.",
+        "operationId": "listSettings",
+        "responses": {
+          "200": {
+            "description": "Modules with settings, their schemas and current values",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsList"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied` (needs admin.settings.read) or `mfa_setup_required`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/settings/{module}": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "One module's settings.",
+        "operationId": "getSettings",
+        "parameters": [
+          {
+            "name": "module",
+            "in": "path",
+            "description": "Module name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Schema and current values",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied` (needs admin.settings.read)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The module has no settings",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Change some settings of a module. All values are checked first; if one is\nnot acceptable nothing is changed. The change, with the old and new value\nof every setting that differs, is written to the audit log.",
+        "operationId": "putSettings",
+        "parameters": [
+          {
+            "name": "module",
+            "in": "path",
+            "description": "Module name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutSettings"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Saved (also when nothing differed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsChange"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied` (needs admin.settings.manage), `reauth_required` or `csrf_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The module has no settings",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unknown setting, wrong scope, or a value that breaks the schema (one entry per problem, `values.<key>`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/auth/logout": {
       "post": {
         "tags": [
@@ -3560,6 +3737,20 @@
           }
         }
       },
+      "PutSettings": {
+        "type": "object",
+        "description": "New values for some settings of a module.",
+        "required": [
+          "values"
+        ],
+        "properties": {
+          "values": {
+            "type": "object",
+            "description": "Setting key to new value. Settings not mentioned keep their value;\nwriting a setting's default puts it back to the default."
+          }
+        },
+        "additionalProperties": false
+      },
       "ReadinessReport": {
         "type": "object",
         "description": "Body of `/ready`.",
@@ -3708,6 +3899,77 @@
           }
         },
         "additionalProperties": false
+      },
+      "SettingsChange": {
+        "type": "object",
+        "description": "The outcome of a change.",
+        "required": [
+          "values",
+          "changed"
+        ],
+        "properties": {
+          "changed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Keys whose value actually changed (empty if nothing did)."
+          },
+          "values": {
+            "type": "object",
+            "description": "Current values of the module, by key."
+          }
+        }
+      },
+      "SettingsList": {
+        "type": "object",
+        "description": "All modules that have settings.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SettingsView"
+            },
+            "description": "By module name."
+          }
+        }
+      },
+      "SettingsView": {
+        "type": "object",
+        "description": "A module's global settings: what they are and what they are now.",
+        "required": [
+          "module",
+          "title",
+          "description",
+          "schema",
+          "values"
+        ],
+        "properties": {
+          "description": {
+            "type": "object",
+            "description": "Short description by language code."
+          },
+          "module": {
+            "type": "string",
+            "description": "Module name.",
+            "example": "system"
+          },
+          "schema": {
+            "type": "object",
+            "description": "The settings as a JSON Schema: each property has `type`, `default`,\noptional `enum`, limits, `title` / `x-title` and `description` /\n`x-description`. Only the settings that apply to the whole panel."
+          },
+          "title": {
+            "type": "object",
+            "description": "Display name by language code (falls back to the English `title`)."
+          },
+          "values": {
+            "type": "object",
+            "description": "Current values (the default where nothing was changed), by setting key."
+          }
+        }
       },
       "StatusInput": {
         "type": "string",

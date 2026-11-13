@@ -89,12 +89,17 @@ pub struct States {
 ///
 /// # Errors
 /// The messages to show when a manifest or the module set is broken.
-pub fn mount(states: States, base: axum::Router) -> Result<ModuleMount, Vec<String>> {
+pub fn mount(
+    states: States,
+    base: axum::Router,
+) -> Result<(ModuleMount, Arc<SettingsRegistry>), Vec<String>> {
     let manifests = load_from(EMBEDDED)
         .map_err(|errors| errors.iter().map(ToString::to_string).collect::<Vec<_>>())?;
     // The system module's routes need the mount itself (to switch modules), which
     // exists only after the registry does.
     let late_mount: Arc<std::sync::OnceLock<ModuleMount>> = Arc::default();
+    // Likewise the settings schemas come from the modules once they exist.
+    let late_settings: Arc<std::sync::OnceLock<Arc<SettingsRegistry>>> = Arc::default();
     let (db, sessions) = (states.auth.db.clone(), states.auth.sessions.clone());
     let States { auth, admin, nodes } = states;
     let modules = manifests
@@ -134,20 +139,25 @@ pub fn mount(states: States, base: axum::Router) -> Result<ModuleMount, Vec<Stri
                         })
                     }
                     "system" => {
-                        let (db, sessions, late_mount) =
-                            (db.clone(), sessions.clone(), late_mount.clone());
-                        Box::new(move || match late_mount.get() {
-                            Some(mount) => ModuleRoutes {
+                        let (db, sessions, late_mount, late_settings) = (
+                            db.clone(),
+                            sessions.clone(),
+                            late_mount.clone(),
+                            late_settings.clone(),
+                        );
+                        Box::new(move || match (late_mount.get(), late_settings.get()) {
+                            (Some(mount), Some(settings)) => ModuleRoutes {
                                 admin: Some(dhpanel_mod_system::router().with_state(
                                     dhpanel_mod_system::SystemState {
                                         db: db.clone(),
                                         sessions: sessions.clone(),
                                         mount: mount.clone(),
+                                        settings: settings.clone(),
                                     },
                                 )),
                                 ..ModuleRoutes::none()
                             },
-                            None => ModuleRoutes::none(),
+                            _ => ModuleRoutes::none(),
                         })
                     }
                     // A manifest without code behind it has no routes.
@@ -157,10 +167,13 @@ pub fn mount(states: States, base: axum::Router) -> Result<ModuleMount, Vec<Stri
         })
         .collect();
     let registry = Registry::build(modules).map_err(|err| vec![err.to_string()])?;
+    // The settings schemas of the modules must be usable before anything is served.
+    let settings = Arc::new(settings(&registry)?);
     let mount = ModuleMount::new(registry, base);
     let _ = late_mount.set(mount.clone());
+    let _ = late_settings.set(settings.clone());
     mount.rebuild();
-    Ok(mount)
+    Ok((mount, settings))
 }
 
 /// Keeps the served routes in step with the modules table: once as soon as the
@@ -399,14 +412,14 @@ mod tests {
             p::NodesManage::KEY,
             p::ModulesRead::KEY,
             p::ModulesManage::KEY,
-            p::ModulesRead::KEY,
-            p::ModulesManage::KEY,
+            p::SettingsRead::KEY,
+            p::SettingsManage::KEY,
         ] {
             assert!(declared.iter().any(|d| d == key), "{key} is in no manifest");
         }
         assert_eq!(
             declared.len(),
-            9,
+            11,
             "a manifest declares a key the code does not know: {declared:?}"
         );
     }

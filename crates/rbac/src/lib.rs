@@ -84,6 +84,14 @@ pub mod permissions {
         /// Switch modules on and off.
         pub ModulesManage = "admin.modules.manage"
     );
+    crate::permission!(
+        /// See the panel's settings.
+        pub SettingsRead = "admin.settings.read"
+    );
+    crate::permission!(
+        /// Change the panel's settings.
+        pub SettingsManage = "admin.settings.manage"
+    );
 }
 
 /// Name of the built-in role that grants everything.

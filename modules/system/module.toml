@@ -9,7 +9,12 @@ core       = true
 depends_on = ["auth", "rbac", "audit"]
 
 [permissions]
-keys = ["admin.modules.read", "admin.modules.manage"]
+keys = [
+    "admin.modules.read",
+    "admin.modules.manage",
+    "admin.settings.read",
+    "admin.settings.manage",
+]
 
 [ui]
 admin_nav = { group = "System", order = 10, icon = "blocks" }
