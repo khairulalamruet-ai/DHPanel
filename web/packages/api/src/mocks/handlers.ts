@@ -1817,6 +1817,36 @@ export const resetMockPageTemplates = () => {
   mockPageTemplates = getInitialPageTemplates();
 };
 
+interface MockPreviewLink {
+  domain_id: string;
+  target_domain: string;
+  enabled: boolean;
+  token: string;
+  url: string;
+  created_at: string;
+  expires_at: string;
+  ttl_hours: number;
+}
+
+const getInitialPreviewLinks = (): Record<string, MockPreviewLink> => ({
+  dom_02: {
+    domain_id: "dom_02",
+    target_domain: "blog.alpha-hosting.com",
+    enabled: true,
+    token: "exp_test_7890",
+    url: "https://exp_test_7890.preview.dhpanel.net",
+    created_at: new Date(Date.now() - 48 * 3600 * 1000).toISOString(),
+    expires_at: new Date(Date.now() - 24 * 3600 * 1000).toISOString(), // Expired
+    ttl_hours: 24,
+  },
+});
+
+let mockPreviewLinks = getInitialPreviewLinks();
+
+export const resetMockPreviewLinks = () => {
+  mockPreviewLinks = getInitialPreviewLinks();
+};
+
 
 const mockMe = {
   id: "00000000-0000-0000-0000-000000000001",
@@ -4342,5 +4372,112 @@ export const handlers = [
     tpl.updatedAt = new Date().toISOString();
 
     return HttpResponse.json(tpl);
+  }),
+
+  // Temporary Preview Link: Get status (GET /api/v1/client/domains/:id/preview-link)
+  // TODO(api:T06.14): Replace with real backend preview link status endpoint
+  http.get(/\/api\/v1\/client\/domains\/([^/]+)\/preview-link$/, ({ params }) => {
+    const domainId = (params.id || params[0]) as string;
+    const domain = mockClientDomains.find((d) => d.id === domainId);
+    if (!domain) {
+      return HttpResponse.json({ message: "Domain not found" }, { status: 404 });
+    }
+
+    const link = mockPreviewLinks[domainId];
+    if (!link || !link.enabled) {
+      return HttpResponse.json({
+        enabled: false,
+        domain_id: domainId,
+        target_domain: domain.name,
+      });
+    }
+
+    const isExpired = Date.now() > new Date(link.expires_at).getTime();
+    return HttpResponse.json({
+      ...link,
+      is_expired: isExpired,
+    });
+  }),
+
+  // Temporary Preview Link: Generate / Extend (POST /api/v1/client/domains/:id/preview-link)
+  // TODO(api:T06.14): Replace with real backend preview link generation endpoint
+  http.post(/\/api\/v1\/client\/domains\/([^/]+)\/preview-link$/, async ({ params, request }) => {
+    const domainId = (params.id || params[0]) as string;
+    const domain = mockClientDomains.find((d) => d.id === domainId);
+    if (!domain) {
+      return HttpResponse.json({ message: "Domain not found" }, { status: 404 });
+    }
+
+    const body = (await request.json().catch(() => ({}))) as { ttl_hours?: number };
+    const ttl = body.ttl_hours && body.ttl_hours > 0 ? body.ttl_hours : 24;
+
+    const token = `prv_${Math.random().toString(36).substring(2, 8)}`;
+    const now = Date.now();
+    const expiresAt = new Date(now + ttl * 3600 * 1000).toISOString();
+
+    const link: MockPreviewLink = {
+      domain_id: domainId,
+      target_domain: domain.name,
+      enabled: true,
+      token,
+      url: `https://${token}.preview.dhpanel.net`,
+      created_at: new Date(now).toISOString(),
+      expires_at: expiresAt,
+      ttl_hours: ttl,
+    };
+
+    mockPreviewLinks[domainId] = link;
+
+    return HttpResponse.json({
+      ...link,
+      is_expired: false,
+    });
+  }),
+
+  // Temporary Preview Link: Revoke (DELETE /api/v1/client/domains/:id/preview-link)
+  // TODO(api:T06.14): Replace with real backend preview link revocation endpoint
+  http.delete(/\/api\/v1\/client\/domains\/([^/]+)\/preview-link$/, ({ params }) => {
+    const domainId = (params.id || params[0]) as string;
+    const domain = mockClientDomains.find((d) => d.id === domainId);
+    if (!domain) {
+      return HttpResponse.json({ message: "Domain not found" }, { status: 404 });
+    }
+
+    if (mockPreviewLinks[domainId]) {
+      mockPreviewLinks[domainId].enabled = false;
+    }
+
+    return HttpResponse.json({
+      success: true,
+      message: "Preview link revoked",
+    });
+  }),
+
+  // Temporary Preview Link Proxy: Test / Access Link (GET /api/v1/preview/:token)
+  // TODO(api:T06.14): Replace with real backend preview proxy route
+  http.get(/\/api\/v1\/preview\/([^/]+)$/, ({ params }) => {
+    const token = (params.token || params[0]) as string;
+    const link = Object.values(mockPreviewLinks).find((l) => l.token === token && l.enabled);
+    if (!link) {
+      return HttpResponse.json({ message: "Preview link not found" }, { status: 404 });
+    }
+
+    // T06.14 DoD: Expired preview link must not work (returns HTTP 410 Gone)
+    const isExpired = Date.now() > new Date(link.expires_at).getTime();
+    if (isExpired) {
+      return HttpResponse.json(
+        {
+          error: "preview_link_expired",
+          message: "Preview link has expired and is no longer valid.",
+        },
+        { status: 410 }
+      );
+    }
+
+    return HttpResponse.json({
+      status: 200,
+      message: "Preview link active",
+      target_domain: link.target_domain,
+    });
   }),
 ];

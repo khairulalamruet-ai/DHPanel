@@ -50,6 +50,22 @@ export interface UpdateRedirectPayload {
   status_code: 301 | 302;
 }
 
+export interface PreviewLinkInfo {
+  enabled: boolean;
+  domain_id: string;
+  target_domain: string;
+  url?: string;
+  token?: string;
+  created_at?: string;
+  expires_at?: string;
+  is_expired?: boolean;
+  ttl_hours?: number;
+}
+
+export interface GeneratePreviewLinkPayload {
+  ttl_hours?: number;
+}
+
 export type DomainStatus = "active" | "suspended";
 
 export interface AdminDomainItem extends ClientDomainItem {

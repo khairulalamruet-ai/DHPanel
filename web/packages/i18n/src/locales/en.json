@@ -886,6 +886,27 @@
       "redirectUpdated": "Redirection updated successfully",
       "deletedSuccess": "Domain deleted successfully",
       "deleteFailed": "Failed to delete domain"
+    },
+    "preview": {
+      "actionTooltip": "Temporary Preview Link",
+      "dialogTitle": "Temporary Preview Link",
+      "status": "Link Status",
+      "active": "Active",
+      "expires": "Expires",
+      "previewUrl": "Preview URL",
+      "directRouting": "Direct Container Proxy",
+      "routingNote": "Requests to this preview URL proxy directly into your web application container without requiring global DNS propagation.",
+      "revoke": "Revoke Link",
+      "extend": "Extend Validity",
+      "expiredTitle": "Preview Link Expired",
+      "expiredDesc": "The temporary link has elapsed its validity period and requests are now rejected (HTTP 410 Gone). Generate a new link below to continue previewing.",
+      "intro": "Preview your site immediately before DNS nameservers or records propagate worldwide. A temporary URL (<hash>.preview.dhpanel.net) will be created with an automated expiration.",
+      "selectValidity": "Select Link Validity Period",
+      "generateBtn": "Generate Temporary Preview Link",
+      "toastGenerated": "Temporary preview link generated successfully",
+      "toastRevoked": "Preview link revoked successfully",
+      "errorGenerate": "Failed to generate preview link",
+      "errorRevoke": "Failed to revoke preview link"
     }
   },
   "adminDomains": {

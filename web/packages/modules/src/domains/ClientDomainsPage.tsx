@@ -54,6 +54,7 @@ import {
 import { AddDomainDialog } from "./AddDomainDialog";
 import { EditDocrootDialog } from "./EditDocrootDialog";
 import { ManageRedirectDialog } from "./ManageRedirectDialog";
+import { PreviewLinkDialog } from "./PreviewLinkDialog";
 
 export function ClientDomainsPage() {
   const { t } = useTranslation();
@@ -75,6 +76,7 @@ export function ClientDomainsPage() {
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [editingDocrootDomain, setEditingDocrootDomain] = useState<ClientDomainItem | null>(null);
   const [managingRedirectDomain, setManagingRedirectDomain] = useState<ClientDomainItem | null>(null);
+  const [previewLinkDomain, setPreviewLinkDomain] = useState<ClientDomainItem | null>(null);
   const [deletingDomain, setDeletingDomain] = useState<ClientDomainItem | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
@@ -497,6 +499,18 @@ export function ClientDomainsPage() {
                             <ArrowRightLeft className="h-4 w-4" />
                           </Button>
 
+                          {/* Temporary Preview Link Button (T06.14) */}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0 text-primary hover:text-primary hover:bg-primary/10"
+                            title={t("domains.preview.actionTooltip", "Temporary Preview Link")}
+                            onClick={() => setPreviewLinkDomain(domain)}
+                            data-testid={`btn-preview-link-${domain.id}`}
+                          >
+                            <Globe className="h-4 w-4" />
+                          </Button>
+
                           {/* Delete Button (disabled for primary domain) */}
                           <Button
                             variant="ghost"
@@ -596,6 +610,13 @@ export function ClientDomainsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Temporary Preview Link Dialog (T06.14) */}
+      <PreviewLinkDialog
+        open={!!previewLinkDomain}
+        onOpenChange={(open) => !open && setPreviewLinkDomain(null)}
+        domain={previewLinkDomain}
+      />
     </div>
   );
 }
