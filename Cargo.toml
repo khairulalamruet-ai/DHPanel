@@ -22,6 +22,7 @@ members = [
     "crates/node-gateway",
     "crates/operations",
     "crates/dispatcher",
+    "crates/docker-manager",
     "crates/pki",
     "crates/modules/auth",
     "crates/modules/admin",
@@ -58,6 +59,7 @@ dhpanel-mod-nodes = { path = "crates/modules/nodes" }
 dhpanel-node-gateway = { path = "crates/node-gateway" }
 dhpanel-operations = { path = "crates/operations" }
 dhpanel-dispatcher = { path = "crates/dispatcher" }
+dhpanel-docker-manager = { path = "crates/docker-manager" }
 
 # External crates shared by the agent and the control plane's agent port (T02.08).
 # TLS 1.3 only, `ring` backend (the one rcgen and ureq already use); the WebSocket

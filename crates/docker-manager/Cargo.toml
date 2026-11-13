@@ -1,0 +1,22 @@
+[package]
+name = "dhpanel-docker-manager"
+description = "The only way the node agent talks to Docker: a small set of typed, hardened actions."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# Docker Engine API client. Unix socket only (`pipe`): the daemon is local, so
+# no TLS, SSH or BuildKit features are pulled in.
+bollard = { version = "0.21", default-features = false, features = ["pipe"] }
+futures-util.workspace = true
+thiserror = "2.0.21"
+tokio = { version = "1", features = ["time"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
