@@ -13,3 +13,7 @@ workspace = true
 [dependencies]
 thiserror = "2.0.21"
 uuid = "1"
+# Domain names (T05.01): IDN to punycode, and the public suffix list (which names
+# a person may register under: `com` and `co.uk` are suffixes, `example.com` is not).
+idna = { version = "1.1.0", default-features = false, features = ["std", "compiled_data"] }
+psl = "2.1.253"
