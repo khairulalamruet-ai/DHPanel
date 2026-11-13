@@ -149,6 +149,11 @@ pub struct SessionData {
     /// have 0 and therefore always need re-authentication.
     #[serde(default)]
     pub auth_time: i64,
+    /// The administrator who opened this session "as" the account (login as
+    /// user). Such a session never counts as recently authenticated, so it
+    /// cannot do anything that asks for the account's own password.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub impersonator: Option<Uuid>,
 }
 
 impl SessionData {
@@ -285,6 +290,28 @@ fn secs(d: Duration) -> i64 {
     i64::try_from(d.as_secs()).unwrap_or(i64::MAX)
 }
 
+/// How long an impersonation token can be used after it is issued.
+pub const IMPERSONATION_TTL_SECS: u64 = 60;
+const IMPERSONATION_PREFIX: &str = "dhpanel:impersonation:";
+
+/// Who may open a session as whom, held until the token is spent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImpersonationGrant {
+    /// The administrator.
+    pub admin_id: Uuid,
+    /// The account they open a session as.
+    pub user_id: Uuid,
+}
+
+fn impersonation_key(hash: &[u8; 32]) -> String {
+    let mut key = String::with_capacity(IMPERSONATION_PREFIX.len() + 64);
+    key.push_str(IMPERSONATION_PREFIX);
+    for b in hash {
+        key.push_str(&format!("{b:02x}"));
+    }
+    key
+}
+
 /// Decodes a cookie value; anything that is not exactly 32 base64url bytes is rejected.
 fn decode_token(value: &str) -> Option<[u8; TOKEN_BYTES]> {
     if value.len() != 43 {
@@ -366,6 +393,27 @@ impl SessionStore {
         &self,
         new: NewSession,
     ) -> Result<(SessionToken, SessionData), SessionError> {
+        self.create_for(new, None).await
+    }
+
+    /// Creates a session for `new.account_id` on behalf of the administrator
+    /// `impersonator` (login as user, T04.13).
+    ///
+    /// # Errors
+    /// As [`SessionStore::create`].
+    pub async fn create_impersonated(
+        &self,
+        new: NewSession,
+        impersonator: Uuid,
+    ) -> Result<(SessionToken, SessionData), SessionError> {
+        self.create_for(new, Some(impersonator)).await
+    }
+
+    async fn create_for(
+        &self,
+        new: NewSession,
+        impersonator: Option<Uuid>,
+    ) -> Result<(SessionToken, SessionData), SessionError> {
         let mut raw = [0u8; TOKEN_BYTES];
         getrandom::fill(&mut raw).map_err(|_| SessionError::Rng)?;
         let hash = token_hash(&raw);
@@ -377,14 +425,15 @@ impl SessionStore {
             .user_agent
             .map(|ua| ua.chars().take(MAX_USER_AGENT).collect::<String>());
         let id = sqlx::query_scalar!(
-            r#"INSERT INTO sessions (account_id, token_sha256, ip, user_agent, expires_at)
-               VALUES ($1, $2, $3::text::inet, $4, to_timestamp($5::bigint))
+            r#"INSERT INTO sessions (account_id, token_sha256, ip, user_agent, expires_at, impersonator_id)
+               VALUES ($1, $2, $3::text::inet, $4, to_timestamp($5::bigint), $6)
                RETURNING id"#,
             new.account_id,
             &hash[..],
             new.ip.map(|ip| ip.to_string()),
             user_agent,
             absolute_expires_at,
+            impersonator,
         )
         .fetch_one(&self.db)
         .await?;
@@ -396,7 +445,9 @@ impl SessionStore {
             last_seen_at: now,
             absolute_expires_at,
             csrf_token: CsrfToken::generate()?,
-            auth_time: now,
+            // An impersonated session has not proven anything to the account.
+            auth_time: if impersonator.is_some() { 0 } else { now },
+            impersonator,
         };
         let payload = serde_json::to_string(&data).map_err(|_| SessionError::Corrupt)?;
         let ttl = self.ttl_from(now, absolute_expires_at);
@@ -407,6 +458,55 @@ impl SessionStore {
             SessionToken(SecretString::from(URL_SAFE_NO_PAD.encode(raw))),
             data,
         ))
+    }
+
+    /// Makes a one-time token with which the administrator `admin_id` can open a
+    /// session as `user_id` within [`IMPERSONATION_TTL_SECS`]. Only a hash of
+    /// the token is kept; it works once.
+    ///
+    /// # Errors
+    /// Redis failures.
+    pub async fn issue_impersonation(
+        &self,
+        admin_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<SecretString, SessionError> {
+        let mut raw = [0u8; TOKEN_BYTES];
+        getrandom::fill(&mut raw).map_err(|_| SessionError::Rng)?;
+        let payload = serde_json::to_string(&ImpersonationGrant { admin_id, user_id })
+            .map_err(|_| SessionError::Corrupt)?;
+        let mut conn = self.redis.connection().await?;
+        let () = conn
+            .set_ex(
+                impersonation_key(&token_hash(&raw)),
+                payload,
+                IMPERSONATION_TTL_SECS,
+            )
+            .await?;
+        Ok(SecretString::from(URL_SAFE_NO_PAD.encode(raw)))
+    }
+
+    /// Spends an impersonation token: the grant it was issued for, or `None`
+    /// when it is unknown, malformed, expired or already used. Spending is one
+    /// atomic step, so two requests with the same token cannot both succeed.
+    ///
+    /// # Errors
+    /// Redis failures or a corrupt grant.
+    pub async fn redeem_impersonation(
+        &self,
+        token: &str,
+    ) -> Result<Option<ImpersonationGrant>, SessionError> {
+        let Some(raw) = decode_token(token) else {
+            return Ok(None);
+        };
+        let mut conn = self.redis.connection().await?;
+        let payload: Option<String> = dhpanel_cache::redis::cmd("GETDEL")
+            .arg(impersonation_key(&token_hash(&raw)))
+            .query_async(&mut conn)
+            .await?;
+        payload
+            .map(|p| serde_json::from_str(&p).map_err(|_| SessionError::Corrupt))
+            .transpose()
     }
 
     /// Loads a session by cookie value, enforcing both timeouts and refreshing

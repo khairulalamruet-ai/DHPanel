@@ -47,7 +47,7 @@ use dhpanel_http_kit::{AppError, FieldError, ProblemDetails};
 use dhpanel_node_protocol::Operation as NodeOperation;
 use dhpanel_rbac::{
     Principal, Require, RequireRecent,
-    permissions::{UsersManage, UsersRead},
+    permissions::{UsersImpersonate, UsersManage, UsersRead},
 };
 use dhpanel_session::{RevokeReason, SessionStore, rfc3339};
 use secrecy::SecretString;
@@ -107,6 +107,7 @@ pub fn router() -> Router<UsersState> {
         .route("/api/v1/admin/users/{id}/unsuspend", post(unsuspend_user))
         .route("/api/v1/admin/users/{id}/password", post(reset_password))
         .route("/api/v1/admin/users/{id}/retry-setup", post(retry_setup))
+        .route("/api/v1/admin/users/{id}/impersonate", post(impersonate))
 }
 
 fn internal(err: impl Into<Box<dyn std::error::Error + Send + Sync + 'static>>) -> AppError {
@@ -1172,16 +1173,83 @@ async fn end_sessions(state: &UsersState, id: Uuid) {
     }
 }
 
+/// A one-time sign-in token for the client app.
+#[derive(Serialize, ToSchema)]
+pub struct ImpersonationToken {
+    /// Give it to the client app; it is shown once and works once.
+    pub token: String,
+    /// Seconds the token stays valid.
+    pub expires_in: u64,
+    /// Where the client app spends it: `POST` it as `{"token": ...}`.
+    pub redeem_path: &'static str,
+}
+
+/// Get a one-time token to sign in to the client app as this user ("login as
+/// user"). The session it opens shows who is behind it, never counts as
+/// recently authenticated, and both names are in the audit log.
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/users/{id}/impersonate",
+    tag = "users",
+    operation_id = "impersonateUser",
+    security(("session" = [])),
+    params(
+        ("id" = Uuid, Path, description = "User id"),
+        ("X-CSRF-Token" = String, Header, description = "The session's csrf_token")
+    ),
+    responses(
+        (status = 200, description = "The token", body = ImpersonationToken),
+        (status = 403, description = "`permission_denied` (needs admin.users.impersonate), `reauth_required` or `csrf_failed`", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 404, description = "No such user", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "`user_unavailable`: only an active user can be signed in as", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+pub async fn impersonate(
+    State(state): State<UsersState>,
+    RequireRecent(who, _): RequireRecent<UsersImpersonate>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<ImpersonationToken>, AppError> {
+    let user = load(&state, id).await?;
+    if user.account_status != "active"
+        || user
+            .tenant
+            .as_ref()
+            .is_some_and(|t| t.status == TenantStatus::Deleting)
+    {
+        return Err(AppError::conflict(
+            "user_unavailable",
+            "Only an active user can be signed in as.",
+        ));
+    }
+    let token = state
+        .sessions
+        .issue_impersonation(who.account_id(), id)
+        .await
+        .map_err(internal)?;
+    dhpanel_audit::insert(
+        &state.db,
+        &entry("admin.impersonation_issued", &who, id)
+            .metadata(serde_json::json!({ "user": user.username })),
+    )
+    .await
+    .map_err(internal)?;
+    Ok(Json(ImpersonationToken {
+        token: secrecy::ExposeSecret::expose_secret(&token).to_owned(),
+        expires_in: dhpanel_session::IMPERSONATION_TTL_SECS,
+        redeem_path: "/api/v1/public/auth/impersonate",
+    }))
+}
+
 /// OpenAPI fragment (full paths; merge into the root document).
 #[derive(OpenApi)]
 #[openapi(
     paths(
         list_users, get_user, create_user, update_user, change_plan, suspend_user,
-        unsuspend_user, delete_user, retry_setup, reset_password
+        unsuspend_user, delete_user, retry_setup, reset_password, impersonate
     ),
     components(schemas(
         TenantView, UserView, UserChange, UserList, CreateUser, UpdateUser, ChangePlan,
-        ResetPassword
+        ResetPassword, ImpersonationToken
     )),
     tags((name = "users", description = "Client accounts and their hosting"))
 )]

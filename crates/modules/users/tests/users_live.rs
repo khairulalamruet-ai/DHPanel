@@ -741,3 +741,67 @@ async fn users_are_listed_filtered_searched_updated_and_get_new_passwords(pool: 
     assert!(actions.contains(&"admin.user_updated".to_owned()));
     assert!(actions.contains(&"admin.user_password_reset".to_owned()));
 }
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn only_those_allowed_get_a_token_and_only_for_an_active_user(pool: PgPool) {
+    let e = env(&pool).await;
+    let root = e
+        .sign_in(account(&pool, "rootuser", &["super_admin"]).await)
+        .await;
+    let plain = e
+        .sign_in(account(&pool, "plainadmin", &["admin"]).await)
+        .await;
+    add_node(&pool, "node1", true).await;
+    let (_, body) = e
+        .call(Some(&root), "POST", USERS, Some(new_user("ivan")), true)
+        .await;
+    let id = body["user"]["id"].as_str().unwrap().to_owned();
+    let path = format!("{USERS}/{id}/impersonate");
+
+    let (status, b) = e.call(Some(&plain), "POST", &path, None, true).await;
+    assert_eq!(
+        (status, code(&b)),
+        (StatusCode::FORBIDDEN, "permission_denied")
+    );
+    let (status, b) = e.call(Some(&root), "POST", &path, None, true).await;
+    assert_eq!(status, StatusCode::OK, "{b}");
+    assert_eq!(b["expires_in"], 60);
+    assert_eq!(b["redeem_path"], "/api/v1/public/auth/impersonate");
+    assert_eq!(b["token"].as_str().unwrap().len(), 43);
+    // The token itself is never written to the log.
+    let logged: Vec<Value> = sqlx::query_scalar(
+        "SELECT metadata FROM audit_logs WHERE action = 'admin.impersonation_issued'",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(logged.len(), 1);
+    assert!(!logged[0].to_string().contains(b["token"].as_str().unwrap()));
+
+    // Suspended and deleted users cannot be signed in as.
+    finish(&pool, body["operation_id"].as_str().unwrap(), true).await;
+    e.call(
+        Some(&root),
+        "POST",
+        &format!("{USERS}/{id}/suspend"),
+        None,
+        true,
+    )
+    .await;
+    let (status, b) = e.call(Some(&root), "POST", &path, None, true).await;
+    assert_eq!(
+        (status, code(&b)),
+        (StatusCode::CONFLICT, "user_unavailable")
+    );
+    let (status, _) = e
+        .call(
+            Some(&root),
+            "POST",
+            &format!("{USERS}/{}/impersonate", Uuid::now_v7()),
+            None,
+            true,
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}

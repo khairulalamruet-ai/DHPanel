@@ -2940,6 +2940,83 @@
         ]
       }
     },
+    "/api/v1/admin/users/{id}/impersonate": {
+      "post": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Get a one-time token to sign in to the client app as this user (\"login as\nuser\"). The session it opens shows who is behind it, never counts as\nrecently authenticated, and both names are in the audit log.",
+        "operationId": "impersonateUser",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "User id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImpersonationToken"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied` (needs admin.users.impersonate), `reauth_required` or `csrf_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such user",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`user_unavailable`: only an active user can be signed in as",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/users/{id}/password": {
       "post": {
         "tags": [
@@ -3882,6 +3959,85 @@
             "session": []
           }
         ]
+      }
+    },
+    "/api/v1/public/auth/impersonate": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Open a session as a client with an administrator's one-time token.",
+        "operationId": "redeemImpersonation",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RedeemRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Session cookie set; `impersonated_by` names the administrator",
+            "headers": {
+              "set-cookie": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "__Host-dh_session=…; Path=/; Secure; HttpOnly; SameSite=Strict"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Me"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`invalid_token`: unknown, expired or already used",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_unavailable`: the account cannot be signed in to now",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Malformed body",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many invalid tokens from this address",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/public/auth/login": {
@@ -5196,6 +5352,50 @@
           }
         }
       },
+      "ImpersonationToken": {
+        "type": "object",
+        "description": "A one-time sign-in token for the client app.",
+        "required": [
+          "token",
+          "expires_in",
+          "redeem_path"
+        ],
+        "properties": {
+          "expires_in": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds the token stays valid.",
+            "minimum": 0
+          },
+          "redeem_path": {
+            "type": "string",
+            "description": "Where the client app spends it: `POST` it as `{\"token\": ...}`."
+          },
+          "token": {
+            "type": "string",
+            "description": "Give it to the client app; it is shown once and works once."
+          }
+        }
+      },
+      "Impersonator": {
+        "type": "object",
+        "description": "The administrator behind an impersonated session.",
+        "required": [
+          "id",
+          "username"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Administrator's account id."
+          },
+          "username": {
+            "type": "string",
+            "description": "Administrator's username."
+          }
+        }
+      },
       "LimitList": {
         "type": "object",
         "description": "Every limit of the installed modules.",
@@ -5321,6 +5521,17 @@
             "type": "string",
             "format": "uuid",
             "description": "Account id."
+          },
+          "impersonated_by": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Impersonator",
+                "description": "Set when an administrator opened this session as the account (login as\nuser): the client app shows a banner naming them."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "kind": {
             "type": "string",
@@ -6019,6 +6230,20 @@
             "example": "ready"
           }
         }
+      },
+      "RedeemRequest": {
+        "type": "object",
+        "description": "The token from the administrator.",
+        "required": [
+          "token"
+        ],
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "The one-time token."
+          }
+        },
+        "additionalProperties": false
       },
       "ResetPassword": {
         "type": "object",

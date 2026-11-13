@@ -467,12 +467,13 @@ mod tests {
             p::PlansManage::KEY,
             p::UsersRead::KEY,
             p::UsersManage::KEY,
+            p::UsersImpersonate::KEY,
         ] {
             assert!(declared.iter().any(|d| d == key), "{key} is in no manifest");
         }
         assert_eq!(
             declared.len(),
-            15,
+            16,
             "a manifest declares a key the code does not know: {declared:?}"
         );
     }

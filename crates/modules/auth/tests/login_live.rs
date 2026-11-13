@@ -1564,3 +1564,138 @@ async fn security_changes_are_audited_without_secrets(pool: PgPool) {
         );
     }
 }
+
+async fn client_account(
+    pool: &PgPool,
+    hasher: &PasswordHasher,
+    username: &str,
+    status: &str,
+) -> Uuid {
+    let hash = hasher
+        .hash(&SecretString::from(PASSWORD.to_owned()))
+        .unwrap();
+    sqlx::query_scalar(
+        "INSERT INTO accounts (kind, username, email, password_hash, status)
+         VALUES ('client', $1, $1 || '@example.com', $2, $3::account_status) RETURNING id",
+    )
+    .bind(username)
+    .bind(hash)
+    .bind(status)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn an_impersonation_token_opens_one_marked_session_and_only_once(pool: PgPool) {
+    let hasher = PasswordHasher::new(fast_params(2)).unwrap();
+    let st = state(&pool, hasher.clone());
+    let sessions = st.sessions.clone();
+    let app = app(st);
+    let admin = create_account(&pool, &hasher, "rootadmin", "active").await;
+    let client = client_account(&pool, &hasher, "alice", "active").await;
+    let redeem = |token: &str| {
+        send(
+            &app,
+            "POST",
+            "/api/v1/public/auth/impersonate",
+            None,
+            Some(json!({ "token": token })),
+        )
+    };
+
+    let token = sessions.issue_impersonation(admin, client).await.unwrap();
+    let token = secrecy::ExposeSecret::expose_secret(&token).to_owned();
+    let first = redeem(&token).await;
+    assert_eq!(first.status, StatusCode::OK, "{}", first.body);
+    assert_eq!(first.body["username"], "alice");
+    assert_eq!(first.body["kind"], "client");
+    assert_eq!(first.body["impersonated_by"]["username"], "rootadmin");
+    assert_eq!(first.body["impersonated_by"]["id"], admin.to_string());
+    let cookie = cookie_pair(first.set_cookie.as_deref().unwrap());
+
+    // The marker follows the session.
+    let me = send(&app, "GET", "/api/v1/auth/me", Some(&cookie), None).await;
+    assert_eq!(me.status, StatusCode::OK);
+    assert_eq!(me.body["impersonated_by"]["username"], "rootadmin");
+    // It is never "recently authenticated": nothing that wants the account's
+    // own password can be done in it.
+    let value = cookie.split_once('=').unwrap().1;
+    let data = sessions.load(value).await.unwrap().unwrap();
+    assert_eq!(data.impersonator, Some(admin));
+    assert_eq!(
+        data.sudo_remaining(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+                .try_into()
+                .unwrap(),
+            Duration::from_secs(600)
+        ),
+        None
+    );
+    let recorded: Option<Uuid> =
+        sqlx::query_scalar("SELECT impersonator_id FROM sessions WHERE account_id = $1")
+            .bind(client)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(recorded, Some(admin));
+
+    // A token works once.
+    let again = redeem(&token).await;
+    assert_eq!(again.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(again.body["code"], "invalid_token");
+    // Nothing else is accepted as a token.
+    for bad in ["", "nonsense", &"A".repeat(43)] {
+        assert_eq!(
+            redeem(bad).await.status,
+            StatusCode::UNAUTHORIZED,
+            "{bad:?}"
+        );
+    }
+
+    // The log names both people.
+    let (actor, target, meta): (Option<Uuid>, Option<String>, Value) = sqlx::query_as(
+        "SELECT actor_id, target_id, metadata FROM audit_logs WHERE action = 'auth.impersonation_started'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!((actor, target), (Some(admin), Some(client.to_string())));
+    assert_eq!(meta["administrator"], "rootadmin");
+    assert_eq!(meta["user"], "alice");
+
+    // A suspended client cannot be signed in to; the token is spent anyway.
+    let suspended = client_account(&pool, &hasher, "bob", "suspended").await;
+    let token = sessions
+        .issue_impersonation(admin, suspended)
+        .await
+        .unwrap();
+    let token = secrecy::ExposeSecret::expose_secret(&token).to_owned();
+    let denied = redeem(&token).await;
+    assert_eq!(denied.status, StatusCode::FORBIDDEN);
+    assert_eq!(denied.body["code"], "account_unavailable");
+    assert_eq!(redeem(&token).await.status, StatusCode::UNAUTHORIZED);
+
+    // An administrator suspended after the token was made cannot use it.
+    let token = sessions.issue_impersonation(admin, client).await.unwrap();
+    sqlx::query("UPDATE accounts SET status = 'suspended' WHERE id = $1")
+        .bind(admin)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let token = secrecy::ExposeSecret::expose_secret(&token).to_owned();
+    assert_eq!(redeem(&token).await.status, StatusCode::UNAUTHORIZED);
+
+    // A grant for an administrator's own account cannot be turned into a client session.
+    let other_admin = create_account(&pool, &hasher, "otheradmin", "active").await;
+    let token = sessions
+        .issue_impersonation(other_admin, other_admin)
+        .await
+        .unwrap();
+    let token = secrecy::ExposeSecret::expose_secret(&token).to_owned();
+    assert_eq!(redeem(&token).await.status, StatusCode::FORBIDDEN);
+}

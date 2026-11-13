@@ -9,7 +9,7 @@ core       = true
 depends_on = ["auth", "rbac", "audit", "nodes", "plans"]
 
 [permissions]
-keys = ["admin.users.read", "admin.users.manage"]
+keys = ["admin.users.read", "admin.users.manage", "admin.users.impersonate"]
 
 [ui]
 admin_nav = { group = "Hosting", order = 20, icon = "users" }

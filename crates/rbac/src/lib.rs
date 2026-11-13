@@ -101,6 +101,10 @@ pub mod permissions {
         pub UsersManage = "admin.users.manage"
     );
     crate::permission!(
+        /// Open a session as a client ("login as user").
+        pub UsersImpersonate = "admin.users.impersonate"
+    );
+    crate::permission!(
         /// See the panel's settings.
         pub SettingsRead = "admin.settings.read"
     );

@@ -31,6 +31,7 @@
 //! it has no session yet, accepts only `application/json` (which a cross-site
 //! form cannot send without a CORS preflight) and rotates any prior session.
 
+pub mod impersonate;
 pub mod mfa;
 pub mod sessions;
 
@@ -162,6 +163,7 @@ impl FromRef<AuthState> for SessionStore {
 pub fn router() -> Router<AuthState> {
     Router::new()
         .route("/api/v1/public/auth/login", post(login))
+        .route("/api/v1/public/auth/impersonate", post(impersonate::redeem))
         .route("/api/v1/auth/logout", post(logout))
         .route("/api/v1/auth/me", get(me))
         .merge(mfa::router())
@@ -218,6 +220,18 @@ pub struct Me {
     /// subtrees (`admin.*`) or `*` for everything. Use them to show or hide
     /// UI; the server enforces them on every request.
     pub permissions: Vec<String>,
+    /// Set when an administrator opened this session as the account (login as
+    /// user): the client app shows a banner naming them.
+    pub impersonated_by: Option<Impersonator>,
+}
+
+/// The administrator behind an impersonated session.
+#[derive(Serialize, ToSchema)]
+pub struct Impersonator {
+    /// Administrator's account id.
+    pub id: Uuid,
+    /// Administrator's username.
+    pub username: String,
 }
 
 impl std::fmt::Debug for Me {
@@ -231,7 +245,12 @@ impl std::fmt::Debug for Me {
 
 impl Me {
     /// Builds the response from the account's profile, session and access.
-    async fn load(db: &PgPool, p: AccountProfile, csrf: &CsrfToken) -> Result<Self, AppError> {
+    async fn load(
+        db: &PgPool,
+        p: AccountProfile,
+        csrf: &CsrfToken,
+        impersonator: Option<(Uuid, String)>,
+    ) -> Result<Self, AppError> {
         let access = dhpanel_database::rbac::load_access(db, p.id)
             .await
             .map_err(AppError::internal)?;
@@ -251,6 +270,7 @@ impl Me {
             mfa_setup_required: mfa_required && !mfa_enabled,
             roles,
             permissions,
+            impersonated_by: impersonator.map(|(id, username)| Impersonator { id, username }),
         })
     }
 }
@@ -539,7 +559,7 @@ pub(crate) async fn finish_login(
         .ok_or_else(|| {
             AppError::internal(std::io::Error::other("account vanished during login"))
         })?;
-    let me = Me::load(&state.db, profile, &session.csrf_token).await?;
+    let me = Me::load(&state.db, profile, &session.csrf_token, None).await?;
 
     let cookie = HeaderValue::from_str(&set_cookie(&token)).map_err(AppError::internal)?;
     let mut response = no_store_json(me);
@@ -608,9 +628,18 @@ pub async fn me(
         .await
         .map_err(AppError::internal)?;
     match profile {
-        Some(p) if p.status == DbAccountStatus::Active => Ok(no_store_json(
-            Me::load(&state.db, p, &session.csrf_token).await?,
-        )),
+        Some(p) if p.status == DbAccountStatus::Active => {
+            let impersonator = match session.impersonator {
+                Some(id) => accounts::find_profile(&state.db, id)
+                    .await
+                    .map_err(AppError::internal)?
+                    .map(|a| (a.id, a.username)),
+                None => None,
+            };
+            Ok(no_store_json(
+                Me::load(&state.db, p, &session.csrf_token, impersonator).await?,
+            ))
+        }
         _ => {
             // Account deleted or blocked after login: end the session.
             if let Some(value) = cookie_value(&headers) {
@@ -640,13 +669,13 @@ impl Modify for SessionCookieScheme {
 #[derive(OpenApi)]
 #[openapi(
     paths(
-        login, logout, me,
+        login, logout, me, impersonate::redeem,
         mfa::login_mfa, mfa::sudo, mfa::status, mfa::enroll_totp, mfa::confirm_totp,
         mfa::disable_totp, sessions::list, sessions::revoke, sessions::revoke_others,
         sessions::logout_all
     ),
     components(schemas(
-        LoginRequest, Me, mfa::MfaChallenge, mfa::MfaLoginRequest, mfa::MfaStatus,
+        LoginRequest, Me, Impersonator, impersonate::RedeemRequest, mfa::MfaChallenge, mfa::MfaLoginRequest, mfa::MfaStatus,
         mfa::SudoRequest, mfa::SudoStatus, mfa::TotpEnrollment, mfa::CodeRequest, mfa::BackupCodes, sessions::SessionView, sessions::SessionList,
         sessions::RevokedCount
     )),
