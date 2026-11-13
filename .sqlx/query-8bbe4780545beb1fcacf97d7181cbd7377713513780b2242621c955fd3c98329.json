@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, name, hostname, host(public_ip) AS public_ip, agent_version,\n                  CASE WHEN status = 'online'\n                        AND (last_seen_at IS NULL OR last_seen_at < now() - make_interval(secs => $2::int))\n                       THEN 'offline' ELSE status END AS \"status!\",\n                  extract(epoch FROM last_seen_at)::bigint AS last_seen_at,\n                  extract(epoch FROM created_at)::bigint AS \"created_at!\"\n           FROM nodes\n           ORDER BY created_at DESC, id DESC\n           LIMIT $1",
+  "query": "SELECT id, name, hostname, host(public_ip) AS public_ip, agent_version,\n                  CASE WHEN status = 'online'\n                        AND (last_seen_at IS NULL OR last_seen_at < now() - make_interval(secs => $2::int))\n                       THEN 'offline' ELSE status END AS \"status!\",\n                  extract(epoch FROM last_seen_at)::bigint AS last_seen_at,\n                  extract(epoch FROM created_at)::bigint AS \"created_at!\",\n                  capabilities,\n                  extract(epoch FROM capabilities_at)::bigint AS capabilities_at\n           FROM nodes\n           ORDER BY created_at DESC, id DESC\n           LIMIT $1",
   "describe": {
     "columns": [
       {
@@ -70,6 +70,23 @@
         "name": "created_at!",
         "type_info": "Int8",
         "origin": "Expression"
+      },
+      {
+        "ordinal": 8,
+        "name": "capabilities",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "nodes",
+            "name": "capabilities"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "capabilities_at",
+        "type_info": "Int8",
+        "origin": "Expression"
       }
     ],
     "parameters": {
@@ -86,8 +103,10 @@
       true,
       null,
       null,
+      null,
+      false,
       null
     ]
   },
-  "hash": "3e3eaefe2e9fcc939844297704ced8f970eb06d87ee01a6e4f38679f80c59f42"
+  "hash": "8bbe4780545beb1fcacf97d7181cbd7377713513780b2242621c955fd3c98329"
 }

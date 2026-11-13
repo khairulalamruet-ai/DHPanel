@@ -235,6 +235,10 @@ pub struct NodeSummary {
     pub last_seen_at: Option<i64>,
     /// Enrollment time (Unix seconds).
     pub created_at: i64,
+    /// The node's latest capability report (`{}` until the first one).
+    pub capabilities: serde_json::Value,
+    /// When that report arrived (Unix seconds).
+    pub capabilities_at: Option<i64>,
 }
 
 /// The newest `limit` nodes. `liveness_secs` is how long a heartbeat counts as
@@ -253,7 +257,9 @@ pub async fn list_nodes(
                         AND (last_seen_at IS NULL OR last_seen_at < now() - make_interval(secs => $2::int))
                        THEN 'offline' ELSE status END AS "status!",
                   extract(epoch FROM last_seen_at)::bigint AS last_seen_at,
-                  extract(epoch FROM created_at)::bigint AS "created_at!"
+                  extract(epoch FROM created_at)::bigint AS "created_at!",
+                  capabilities,
+                  extract(epoch FROM capabilities_at)::bigint AS capabilities_at
            FROM nodes
            ORDER BY created_at DESC, id DESC
            LIMIT $1"#,
@@ -273,6 +279,8 @@ pub async fn list_nodes(
             agent_version: r.agent_version,
             last_seen_at: r.last_seen_at,
             created_at: r.created_at,
+            capabilities: r.capabilities,
+            capabilities_at: r.capabilities_at,
         })
         .collect())
 }
@@ -334,4 +342,46 @@ pub async fn status_of(pool: &sqlx::PgPool, id: Uuid) -> Result<Option<String>, 
     sqlx::query_scalar!("SELECT status FROM nodes WHERE id = $1", id)
         .fetch_optional(pool)
         .await
+}
+
+// -------------------------------------------------------------- capabilities
+
+/// Stores a node's capability report (a JSON object, at most 16 KiB).
+///
+/// # Errors
+/// Database errors, including the size and shape checks of the column.
+pub async fn set_capabilities(
+    pool: &sqlx::PgPool,
+    id: Uuid,
+    capabilities: &serde_json::Value,
+) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        "UPDATE nodes SET capabilities = $2, capabilities_at = now() WHERE id = $1",
+        id,
+        capabilities,
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Which of `ids` have no capability report newer than `max_age_secs`.
+///
+/// # Errors
+/// Database errors.
+pub async fn needing_capabilities(
+    pool: &sqlx::PgPool,
+    ids: &[Uuid],
+    max_age_secs: i32,
+) -> Result<Vec<Uuid>, sqlx::Error> {
+    sqlx::query_scalar!(
+        r#"SELECT id FROM nodes
+           WHERE id = ANY($1) AND status <> 'revoked'
+             AND (capabilities_at IS NULL
+                  OR capabilities_at < now() - make_interval(secs => $2::int))"#,
+        ids,
+        max_age_secs,
+    )
+    .fetch_all(pool)
+    .await
 }

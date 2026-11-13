@@ -198,7 +198,11 @@ async fn wait_for_status(pool: &PgPool, id: Uuid, wanted: &str, within: Duration
 
 fn test_executor() -> Arc<dhpanel_node_agent::ops::Executor> {
     use dhpanel_node_agent::ops::{Executor, Registry, cache::ResultCache};
-    Executor::new(Registry::builtin(), ResultCache::in_memory().unwrap(), 8)
+    Executor::new(
+        Registry::builtin(&std::env::temp_dir()),
+        ResultCache::in_memory().unwrap(),
+        8,
+    )
 }
 
 /// Starts the real agent loop; the returned sender stops it.

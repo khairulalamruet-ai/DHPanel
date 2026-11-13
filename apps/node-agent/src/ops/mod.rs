@@ -21,6 +21,7 @@
 //! run time.
 
 pub mod cache;
+pub mod capabilities;
 
 use std::{
     collections::{HashMap, HashSet},
@@ -62,10 +63,23 @@ impl Registry {
         Self::default()
     }
 
-    /// The handlers every agent has.
+    /// The handlers every agent has. `data_dir` is the agent's data directory
+    /// (disk figures in the capability report are for its filesystem).
     #[must_use]
-    pub fn builtin() -> Self {
+    pub fn builtin(data_dir: &std::path::Path) -> Self {
         let mut registry = Self::new();
+        let sources = capabilities::Sources::system(data_dir);
+        registry.register("report_capabilities", move |op| {
+            let sources = sources.clone();
+            async move {
+                match op {
+                    Operation::ReportCapabilities => capabilities::collect(&sources)
+                        .await
+                        .map(Output::Capabilities),
+                    _ => Err(wrong_operation()),
+                }
+            }
+        });
         registry.register("ping", |op| async move {
             match op {
                 Operation::Ping { nonce } => Ok(Output::Pong { nonce }),
@@ -523,6 +537,9 @@ mod tests {
 
     #[test]
     fn the_builtin_registry_only_knows_typed_operations() {
-        assert_eq!(Registry::builtin().types(), ["ping"]);
+        assert_eq!(
+            Registry::builtin(std::path::Path::new("/")).types(),
+            ["ping", "report_capabilities"]
+        );
     }
 }

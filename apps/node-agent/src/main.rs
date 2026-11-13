@@ -385,7 +385,7 @@ fn open_executor(state_dir: &std::path::Path) -> std::sync::Arc<Executor> {
             }
         }
     };
-    Executor::new(Registry::builtin(), cache, DEFAULT_MAX_PARALLEL)
+    Executor::new(Registry::builtin(state_dir), cache, DEFAULT_MAX_PARALLEL)
 }
 
 fn main() -> ExitCode {

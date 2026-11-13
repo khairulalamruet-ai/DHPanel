@@ -39,6 +39,8 @@ fn dispatch_settings() -> Settings {
         operation_timeout: Duration::from_secs(1),
         retry_base: Duration::from_secs(1),
         retry_cap: Duration::from_secs(2),
+        capabilities_check: Duration::from_millis(200),
+        capabilities_max_age: Duration::from_secs(3600),
     }
 }
 
@@ -135,7 +137,7 @@ impl TestNode {
 }
 
 async fn make_node(p: &Plane, pool: &PgPool, name: &str) -> TestNode {
-    make_node_with(p, pool, name, Registry::builtin()).await
+    make_node_with(p, pool, name, Registry::builtin(&std::env::temp_dir())).await
 }
 
 async fn make_node_with(p: &Plane, pool: &PgPool, name: &str, registry: Registry) -> TestNode {
@@ -295,10 +297,12 @@ async fn an_operation_for_an_offline_node_waits_and_is_sent_when_it_connects(poo
 async fn an_operation_the_agent_cannot_run_fails_for_good_without_retries(pool: PgPool) {
     let p = plane(&pool).await;
     p.start_dispatcher();
-    let node = make_node(&p, &pool, "gamma").await;
+    // An agent build without the capability handler (like an older agent).
+    let mut registry = Registry::new();
+    registry.register("ping", |_| async { Ok(Output::Pong { nonce: 0 }) });
+    let node = make_node_with(&p, &pool, "gamma", registry).await;
     let (agent_stop, agent) = node.start_agent(p.addr);
     wait_connected(&p, node.id).await;
-    // The agent build does not run this one yet (T02.13).
     let id = p
         .ops
         .enqueue(&Request::new(
@@ -528,6 +532,53 @@ async fn a_slow_operation_that_is_sent_again_still_runs_only_once(pool: PgPool) 
     );
     tokio::time::sleep(Duration::from_millis(500)).await;
     assert_eq!(runs.load(Ordering::SeqCst), 1, "sent twice, run once");
+
+    agent_stop.send(true).unwrap();
+    agent.await.unwrap();
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs PostgreSQL"]
+async fn a_connected_node_is_asked_for_its_capabilities_and_they_are_stored(pool: PgPool) {
+    let p = plane(&pool).await;
+    p.start_dispatcher();
+    let node = make_node(&p, &pool, "caps").await;
+    let before = nodes::list_nodes(&pool, 10, 60).await.unwrap();
+    assert_eq!(before[0].capabilities, serde_json::json!({}));
+    assert!(before[0].capabilities_at.is_none());
+
+    let (agent_stop, agent) = node.start_agent(p.addr);
+    // Nobody asks by hand: connecting is enough.
+    let mut stored = None;
+    for _ in 0..100 {
+        let listed = nodes::list_nodes(&pool, 10, 60).await.unwrap();
+        if listed[0].capabilities_at.is_some() {
+            stored = Some(listed[0].clone());
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let stored = stored.expect("capabilities stored within 10 s");
+    let caps = &stored.capabilities;
+    assert_eq!(caps["agent_version"], dhpanel_node_agent::AGENT_VERSION);
+    assert!(caps["cpu_cores"].as_u64().unwrap() >= 1);
+    assert!(caps["memory_bytes"].as_u64().unwrap() > 0);
+    assert!(
+        caps["disk_total_bytes"].as_u64().unwrap() >= caps["disk_free_bytes"].as_u64().unwrap()
+    );
+    assert!(!caps["kernel"].as_str().unwrap().is_empty());
+    assert!(caps["cgroup_v2"].is_boolean() && caps["seccomp"].is_boolean());
+
+    // Asked once per time slot, however often the check runs.
+    tokio::time::sleep(Duration::from_millis(900)).await;
+    let asked: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM operations WHERE node_id = $1 AND kind = 'report_capabilities'",
+    )
+    .bind(node.id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(asked, 1);
 
     agent_stop.send(true).unwrap();
     agent.await.unwrap();

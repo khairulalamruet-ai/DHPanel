@@ -42,6 +42,10 @@ pub struct Settings {
     pub retry_base: Duration,
     /// Longest wait between retries.
     pub retry_cap: Duration,
+    /// How often connected nodes are checked for a missing or old capability report.
+    pub capabilities_check: Duration,
+    /// How old a capability report may get before a new one is requested.
+    pub capabilities_max_age: Duration,
 }
 
 impl Default for Settings {
@@ -52,6 +56,8 @@ impl Default for Settings {
             operation_timeout: Duration::from_secs(60),
             retry_base: Duration::from_secs(2),
             retry_cap: Duration::from_secs(60),
+            capabilities_check: Duration::from_secs(30),
+            capabilities_max_age: Duration::from_secs(3600),
         }
     }
 }
@@ -114,13 +120,55 @@ impl Dispatcher {
     ) {
         let mut tick = tokio::time::interval(self.settings.poll);
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut capabilities = tokio::time::interval(self.settings.capabilities_check);
+        capabilities.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             tokio::select! {
                 () = stopped(&mut shutdown) => return,
                 _ = tick.tick() => { self.tick().await; }
+                _ = capabilities.tick() => { self.request_capabilities().await; }
                 Some(report) = results.recv() => self.handle_result(report).await,
             }
         }
+    }
+
+    /// Asks connected nodes whose capability report is missing or old for a new
+    /// one. Returns how many were asked. The idempotency key carries the time
+    /// slot, so however often this runs a node is asked once per slot.
+    pub async fn request_capabilities(&self) -> usize {
+        let nodes = self.gateway.connected_nodes();
+        if nodes.is_empty() {
+            return 0;
+        }
+        let max_age = self.settings.capabilities_max_age.as_secs().max(1);
+        let needing = match dhpanel_database::nodes::needing_capabilities(
+            self.ops.db(),
+            &nodes,
+            i32::try_from(max_age).unwrap_or(i32::MAX),
+        )
+        .await
+        {
+            Ok(ids) => ids,
+            Err(err) => {
+                tracing::warn!(error = %err, "could not check capability reports");
+                return 0;
+            }
+        };
+        let slot = u64::try_from(unix_now()).unwrap_or(0) / max_age;
+        let mut asked = 0;
+        for node in needing {
+            let request = dhpanel_operations::Request::new(
+                node,
+                dhpanel_node_protocol::Operation::ReportCapabilities,
+                format!("capabilities:{slot}"),
+            );
+            match self.ops.enqueue(&request).await {
+                Ok(dhpanel_operations::Enqueued::Created(_)) => asked += 1,
+                Ok(dhpanel_operations::Enqueued::Existing(_)) => {}
+                Err(err) => tracing::warn!(%node, error = %err, "could not request capabilities"),
+            }
+        }
+        asked
     }
 
     /// One pass; see the module documentation.
@@ -236,6 +284,9 @@ impl Dispatcher {
         };
         match status {
             ResultStatus::Succeeded => {
+                if let Some(dhpanel_node_protocol::Output::Capabilities(report)) = &output {
+                    self.store_capabilities(node_id, report).await;
+                }
                 let output = output
                     .and_then(|o| serde_json::to_value(o).ok())
                     .unwrap_or_else(|| serde_json::json!({}));
@@ -254,6 +305,29 @@ impl Dispatcher {
                 self.finish_failed(op_id, node_id, &error_json(), Some(wait))
                     .await;
             }
+        }
+    }
+
+    /// Keeps a node's capability report. The report was parsed into the typed
+    /// form on arrival, so only known fields are stored; free text is clipped.
+    async fn store_capabilities(
+        &self,
+        node_id: Uuid,
+        report: &dhpanel_node_protocol::Capabilities,
+    ) {
+        let clip =
+            |s: &str| -> String { s.chars().filter(|c| !c.is_control()).take(128).collect() };
+        let mut report = report.clone();
+        report.agent_version = clip(&report.agent_version);
+        report.kernel = clip(&report.kernel);
+        report.docker_version = report.docker_version.as_deref().map(clip);
+        let Ok(json) = serde_json::to_value(&report) else {
+            return;
+        };
+        if let Err(err) =
+            dhpanel_database::nodes::set_capabilities(self.ops.db(), node_id, &json).await
+        {
+            tracing::warn!(%node_id, error = %err, "could not store the capability report");
         }
     }
 

@@ -536,9 +536,28 @@ async fn the_node_list_shows_live_status_to_readers_only(pool: PgPool) {
     assert_eq!(fresh["public_ip"], "203.0.113.9");
     assert_eq!(fresh["agent_version"], "0.1.0");
     assert!(fresh["last_seen_at"].as_str().unwrap().ends_with('Z'));
+    // No report yet: an empty object and no time, not a missing field.
+    assert_eq!(fresh["capabilities"], json!({}));
+    assert!(fresh["capabilities_at"].is_null());
+    sqlx::query(
+        "UPDATE nodes SET capabilities = '{\"cpu_cores\": 4, \"docker_mode\": \"rootless\"}', capabilities_at = now()
+         WHERE name = 'fresh-online'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (_, body, _) = e.call(Some(&r), "GET", BASE, None, false).await;
+    let fresh = body["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|n| n["name"] == "fresh-online")
+        .unwrap();
+    assert_eq!(fresh["capabilities"]["cpu_cores"], 4);
+    assert_eq!(fresh["capabilities"]["docker_mode"], "rootless");
+    assert!(fresh["capabilities_at"].as_str().unwrap().ends_with('Z'));
     // Nothing secret about a node is listed.
-    let text = body.to_string();
-    assert!(!text.contains("capabilities") && !text.contains("fingerprint"));
+    assert!(!body.to_string().contains("fingerprint"));
 }
 
 #[sqlx::test(migrations = "../../../migrations")]

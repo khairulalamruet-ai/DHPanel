@@ -119,6 +119,12 @@ impl Operations {
         Self { db }
     }
 
+    /// The database pool the ledger uses.
+    #[must_use]
+    pub fn db(&self) -> &PgPool {
+        &self.db
+    }
+
     /// Adds the operation to the ledger as `pending`, or returns the row from
     /// an earlier identical request.
     ///

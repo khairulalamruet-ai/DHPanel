@@ -256,6 +256,16 @@ pub struct NodeView {
     /// Enrollment time (RFC 3339, UTC).
     #[schema(format = DateTime)]
     pub created_at: String,
+    /// What the server reported about itself: `cpu_cores`, `memory_bytes`,
+    /// `disk_total_bytes`, `disk_free_bytes`, `kernel`, `docker_version`,
+    /// `docker_mode` (`rootless`/`rootful`), `cgroup_v2`, `seccomp`,
+    /// `apparmor`, `user_namespaces`, `agent_version`. Empty until the first
+    /// report, which is requested when the node connects and then hourly.
+    #[schema(value_type = Object)]
+    pub capabilities: serde_json::Value,
+    /// When that report arrived (RFC 3339, UTC).
+    #[schema(format = DateTime)]
+    pub capabilities_at: Option<String>,
 }
 
 impl From<NodeSummary> for NodeView {
@@ -269,6 +279,8 @@ impl From<NodeSummary> for NodeView {
             agent_version: n.agent_version,
             last_seen_at: n.last_seen_at.map(rfc3339),
             created_at: rfc3339(n.created_at),
+            capabilities: n.capabilities,
+            capabilities_at: n.capabilities_at.map(rfc3339),
         }
     }
 }

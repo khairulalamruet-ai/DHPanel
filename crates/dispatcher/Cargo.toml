@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 dhpanel-cache.workspace = true
+dhpanel-database.workspace = true
 dhpanel-node-gateway.workspace = true
 dhpanel-node-protocol.workspace = true
 dhpanel-operations.workspace = true
@@ -21,7 +22,6 @@ tracing = "0.1.44"
 uuid = { version = "1", features = ["serde"] }
 
 [dev-dependencies]
-dhpanel-database.workspace = true
 dhpanel-pki.workspace = true
 dhpanel-node-agent = { path = "../../apps/node-agent" }
 secrecy = "0.10"

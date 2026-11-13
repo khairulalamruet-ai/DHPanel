@@ -3012,7 +3012,8 @@
           "id",
           "name",
           "status",
-          "created_at"
+          "created_at",
+          "capabilities"
         ],
         "properties": {
           "agent_version": {
@@ -3021,6 +3022,18 @@
               "null"
             ],
             "description": "Agent build version."
+          },
+          "capabilities": {
+            "type": "object",
+            "description": "What the server reported about itself: `cpu_cores`, `memory_bytes`,\n`disk_total_bytes`, `disk_free_bytes`, `kernel`, `docker_version`,\n`docker_mode` (`rootless`/`rootful`), `cgroup_v2`, `seccomp`,\n`apparmor`, `user_namespaces`, `agent_version`. Empty until the first\nreport, which is requested when the node connects and then hourly."
+          },
+          "capabilities_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When that report arrived (RFC 3339, UTC)."
           },
           "created_at": {
             "type": "string",

@@ -35,7 +35,7 @@ sha2 = "0.11"
 thiserror = "2.0.21"
 time = { version = "0.3", features = ["formatting"] }
 # `run` waits for a shutdown signal; the control-plane connection (T02.08) will use the same runtime.
-tokio = { version = "1", features = ["rt", "macros", "signal", "time", "net", "sync"] }
+tokio = { version = "1", features = ["rt", "macros", "signal", "time", "net", "sync", "io-util"] }
 # The only network call the agent makes before it has a certificate: one HTTPS
 # POST to enrol. `ureq` is blocking and small; it uses rustls with the `ring`
 # backend (the same one rcgen uses) and the bundled Mozilla root certificates.

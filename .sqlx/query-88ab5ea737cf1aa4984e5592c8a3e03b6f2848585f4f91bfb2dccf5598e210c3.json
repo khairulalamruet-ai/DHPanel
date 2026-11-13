@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id FROM nodes\n           WHERE id = ANY($1) AND status <> 'revoked'\n             AND (capabilities_at IS NULL\n                  OR capabilities_at < now() - make_interval(secs => $2::int))",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "nodes",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "88ab5ea737cf1aa4984e5592c8a3e03b6f2848585f4f91bfb2dccf5598e210c3"
+}
