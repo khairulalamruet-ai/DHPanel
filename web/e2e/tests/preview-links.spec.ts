@@ -58,16 +58,19 @@ test.describe("Client Temporary Preview Link UI (T06.14)", () => {
     await expect(page.getByTestId("btn-preview-link-dom_01")).toBeVisible();
     await page.getByTestId("btn-preview-link-dom_01").click();
 
-    // Generate link if not active
+    await expect(page.getByRole("dialog")).toBeVisible();
     const generateBtn = page.getByTestId("btn-generate-preview-link");
+    const revokeBtn = page.getByTestId("btn-revoke-preview-link");
+    await expect(generateBtn.or(revokeBtn)).toBeVisible({ timeout: 10000 });
+
     if (await generateBtn.isVisible()) {
       await generateBtn.click();
     }
 
-    await expect(page.getByTestId("btn-revoke-preview-link")).toBeVisible({ timeout: 10000 });
-    await page.getByTestId("btn-revoke-preview-link").click();
+    await expect(revokeBtn).toBeVisible({ timeout: 10000 });
+    await revokeBtn.click();
 
     // Returns to initial generate state
-    await expect(page.getByTestId("btn-generate-preview-link")).toBeVisible();
+    await expect(generateBtn).toBeVisible();
   });
 });

@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "generate:api": "pnpm --filter @dhpanel/api generate:api",
     "test": "vitest run",
-    "test:e2e": "pnpm --filter @dhpanel/e2e test"
+    "test:e2e": "pnpm --filter @dhpanel/e2e test",
+    "check:i18n": "node packages/i18n/scripts/check-translations.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.20.0",
