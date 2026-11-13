@@ -1063,6 +1063,7 @@ dependencies = [
  "futures-util",
  "rcgen",
  "redb",
+ "rustix",
  "rustls",
  "secrecy",
  "serde",

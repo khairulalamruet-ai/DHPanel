@@ -45,6 +45,9 @@ uuid = { version = "1", features = ["serde"] }
 # again (lost answer, control plane restart) is answered, not run twice (T02.12).
 # Embedded, pure Rust, crash-safe; chosen in ADR 0004.
 redb = "4"
+# Free and total disk space (statvfs) for the capability report, through a safe
+# API: this workspace forbids `unsafe`, so no direct libc calls (T02.13).
+rustix = { version = "1", default-features = false, features = ["std", "fs"] }
 
 [dev-dependencies]
 dhpanel-node-gateway.workspace = true
