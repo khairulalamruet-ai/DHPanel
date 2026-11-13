@@ -1,5 +1,5 @@
 import React from "react";
-import { LayoutDashboard, ShieldCheck, ShieldAlert, Sparkles, Puzzle, Globe, Users, Settings, FileText, Boxes, Server, Activity, Layers, Lock, FileCode2, Cpu, Database, Folder, Archive, Clock, Terminal, Wrench, Flame } from "lucide-react";
+import { LayoutDashboard, ShieldCheck, ShieldAlert, Sparkles, Puzzle, Globe, Users, Settings, FileText, Boxes, Server, Activity, Layers, Lock, FileCode2, Cpu, Database, Folder, Archive, Clock, Terminal, Wrench, Flame, Mail } from "lucide-react";
 
 export interface ModuleManifest {
   name: string;
@@ -789,6 +789,36 @@ export const registeredFrontendModules: FrontendModule[] = [
         href: "/admin/apps",
         order: 55,
         permission: "apps.read",
+      },
+    ],
+  },
+  {
+    manifest: {
+      name: "email",
+      title: { en: "Email", bn: "ইমেইল" },
+      category: "core",
+      core: true,
+      permissions: ["email.read", "email.manage", "admin.email.manage"],
+      features: ["email"],
+    },
+    clientNav: [
+      {
+        id: "email",
+        labelKey: "email.nav",
+        icon: <Mail className="h-4 w-4" />,
+        href: "/email",
+        order: 35,
+        permission: "email.read",
+      },
+    ],
+    adminNav: [
+      {
+        id: "admin-email",
+        labelKey: "email.adminNav",
+        icon: <Mail className="h-4 w-4" />,
+        href: "/admin/mail",
+        order: 56,
+        permission: "admin.email.manage",
       },
     ],
   },

@@ -53,6 +53,8 @@ import {
   AdminFirewallPage,
   AdminSecurityCenterPage,
   AppsPage,
+  ClientEmailPage,
+  AdminMailQueuePage,
   filterNavItems,
   registeredFrontendModules,
 } from "@dhpanel/modules";
@@ -482,6 +484,19 @@ const appsRoute = createRoute({
   component: AppsPage,
 });
 
+// 42. Email routes (T13.12, T13.10, T13.11)
+const adminMailRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/mail",
+  component: AdminMailQueuePage,
+});
+
+const clientEmailRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/email",
+  component: ClientEmailPage,
+});
+
 // 18. Login route
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -554,6 +569,8 @@ const routeTree = rootRoute.addChildren([
   adminSecurityCenterRoute,
   adminAppsRoute,
   appsRoute,
+  adminMailRoute,
+  clientEmailRoute,
   loginRoute,
 ]);
 

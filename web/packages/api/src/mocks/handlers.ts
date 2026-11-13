@@ -7785,6 +7785,266 @@ export const handlers = [
                                                          }
                                                          return HttpResponse.json({ success: true, staging_url: stagingUrl });
                                                        }),
+...(() => {
+                                                         // Email Handlers (T13.12, T13.05, T13.06, T13.10, T13.11)
+                                                         let mockMailboxes = [
+                                                           {
+                                                             id: "mb-1",
+                                                             email: "info@example.com",
+                                                             username: "info",
+                                                             domain: "example.com",
+                                                             quota_mb: 2048,
+                                                             used_bytes: 524288000,
+                                                             created_at: new Date(Date.now() - 30 * 86400000).toISOString(),
+                                                             webmail_url: "https://webmail.example.com",
+                                                           },
+                                                           {
+                                                             id: "mb-2",
+                                                             email: "support@example.com",
+                                                             username: "support",
+                                                             domain: "example.com",
+                                                             quota_mb: 5120,
+                                                             used_bytes: 4294967296,
+                                                             created_at: new Date(Date.now() - 60 * 86400000).toISOString(),
+                                                             webmail_url: "https://webmail.example.com",
+                                                           },
+                                                           {
+                                                             id: "mb-3",
+                                                             email: "admin@mysite.org",
+                                                             username: "admin",
+                                                             domain: "mysite.org",
+                                                             quota_mb: 1024,
+                                                             used_bytes: 104857600,
+                                                             created_at: new Date(Date.now() - 10 * 86400000).toISOString(),
+                                                             webmail_url: "https://webmail.mysite.org",
+                                                           },
+                                                         ];
+
+                                                         let mockForwarders = [
+                                                           {
+                                                             id: "fwd-1",
+                                                             source: "sales@example.com",
+                                                             destination: "sales-team@external-crm.com",
+                                                             domain: "example.com",
+                                                             created_at: new Date(Date.now() - 15 * 86400000).toISOString(),
+                                                           },
+                                                           {
+                                                             id: "fwd-2",
+                                                             source: "billing@example.com",
+                                                             destination: "accounting@finance-corp.com",
+                                                             domain: "example.com",
+                                                             created_at: new Date(Date.now() - 25 * 86400000).toISOString(),
+                                                           },
+                                                         ];
+
+                                                         let mockAutoresponders = [
+                                                           {
+                                                             id: "ar-1",
+                                                             email: "support@example.com",
+                                                             domain: "example.com",
+                                                             subject: "We received your ticket",
+                                                             body: "Thank you for contacting support. Our team will review your inquiry within 24 hours.",
+                                                             is_active: true,
+                                                           },
+                                                         ];
+
+                                                         let mockMailQueue = [
+                                                           {
+                                                             id: "4YZ8Q91024B",
+                                                             sender: "notifications@example.com",
+                                                             recipient: "user123@remote-domain.com",
+                                                             status: "deferred" as "queued" | "deferred" | "bounced",
+                                                             error_message: "Connection timed out (port 25)",
+                                                             queued_at: new Date(Date.now() - 1200000).toISOString(),
+                                                             retries: 3,
+                                                             size_bytes: 45020,
+                                                           },
+                                                           {
+                                                             id: "4YZ8T58291A",
+                                                             sender: "info@example.com",
+                                                             recipient: "client@gmail.com",
+                                                             status: "queued" as "queued" | "deferred" | "bounced",
+                                                             queued_at: new Date(Date.now() - 60000).toISOString(),
+                                                             retries: 0,
+                                                             size_bytes: 12850,
+                                                           },
+                                                         ];
+
+                                                         const mockDeliverability = [
+                                                           {
+                                                             domain: "example.com",
+                                                             spf_status: "pass" as const,
+                                                             dkim_status: "pass" as const,
+                                                             dmarc_status: "pass" as const,
+                                                             mx_status: "pass" as const,
+                                                             rbl_blacklisted: false,
+                                                             rbl_listings: [],
+                                                             recommendations: [
+                                                               "DKIM selector dhpanel is active with 2048-bit RSA key.",
+                                                               "DMARC policy is currently set to p=quarantine.",
+                                                             ],
+                                                           },
+                                                           {
+                                                             domain: "mysite.org",
+                                                             spf_status: "pass" as const,
+                                                             dkim_status: "fail" as const,
+                                                             dmarc_status: "missing" as const,
+                                                             mx_status: "pass" as const,
+                                                             rbl_blacklisted: false,
+                                                             rbl_listings: [],
+                                                             recommendations: [
+                                                               "Add a TXT record for _dmarc.mysite.org with v=DMARC1; p=none;.",
+                                                               "Sign outgoing mail with DKIM key to improve delivery.",
+                                                             ],
+                                                           },
+                                                         ];
+
+                                                         return [
+                                                           // GET /api/v1/email/mailboxes (TODO(api:T13.05))
+                                                           http.get(/\/api\/v1\/email\/mailboxes$/, ({ request }) => {
+                                                             const url = new URL(request.url);
+                                                             const domain = url.searchParams.get("domain");
+                                                             const filtered = domain
+                                                               ? mockMailboxes.filter((m) => m.domain === domain)
+                                                               : mockMailboxes;
+                                                             return HttpResponse.json(filtered);
+                                                           }),
+
+                                                           // POST /api/v1/email/mailboxes (TODO(api:T13.05))
+                                                           http.post(/\/api\/v1\/email\/mailboxes$/, async ({ request }) => {
+                                                             const body = (await request.json().catch(() => ({}))) as any;
+                                                             const newMailbox = {
+                                                               id: `mb-${Date.now()}`,
+                                                               email: `${body.username}@${body.domain}`,
+                                                               username: body.username,
+                                                               domain: body.domain,
+                                                               quota_mb: Number(body.quota_mb) || 1024,
+                                                               used_bytes: 0,
+                                                               created_at: new Date().toISOString(),
+                                                               webmail_url: `https://webmail.${body.domain}`,
+                                                             };
+                                                             mockMailboxes.push(newMailbox);
+                                                             return HttpResponse.json(newMailbox, { status: 201 });
+                                                           }),
+
+                                                           // DELETE /api/v1/email/mailboxes/:id (TODO(api:T13.05))
+                                                           http.delete(/\/api\/v1\/email\/mailboxes\/([^/]+)$/, ({ params }) => {
+                                                             const id = String(params[0]);
+                                                             mockMailboxes = mockMailboxes.filter((m) => m.id !== id);
+                                                             return new HttpResponse(null, { status: 204 });
+                                                           }),
+
+                                                           // POST /api/v1/email/mailboxes/:id/password (TODO(api:T13.05))
+                                                           http.post(/\/api\/v1\/email\/mailboxes\/([^/]+)\/password$/, () => {
+                                                             return HttpResponse.json({ success: true });
+                                                           }),
+
+                                                           // GET /api/v1/email/forwarders (TODO(api:T13.06))
+                                                           http.get(/\/api\/v1\/email\/forwarders$/, ({ request }) => {
+                                                             const url = new URL(request.url);
+                                                             const domain = url.searchParams.get("domain");
+                                                             const filtered = domain
+                                                               ? mockForwarders.filter((f) => f.domain === domain)
+                                                               : mockForwarders;
+                                                             return HttpResponse.json(filtered);
+                                                           }),
+
+                                                           // POST /api/v1/email/forwarders (TODO(api:T13.06))
+                                                           http.post(/\/api\/v1\/email\/forwarders$/, async ({ request }) => {
+                                                             const body = (await request.json().catch(() => ({}))) as any;
+                                                             const newFwd = {
+                                                               id: `fwd-${Date.now()}`,
+                                                               source: body.source,
+                                                               destination: body.destination,
+                                                               domain: body.domain,
+                                                               created_at: new Date().toISOString(),
+                                                             };
+                                                             mockForwarders.push(newFwd);
+                                                             return HttpResponse.json(newFwd, { status: 201 });
+                                                           }),
+
+                                                           // DELETE /api/v1/email/forwarders/:id (TODO(api:T13.06))
+                                                           http.delete(/\/api\/v1\/email\/forwarders\/([^/]+)$/, ({ params }) => {
+                                                             const id = String(params[0]);
+                                                             mockForwarders = mockForwarders.filter((f) => f.id !== id);
+                                                             return new HttpResponse(null, { status: 204 });
+                                                           }),
+
+                                                           // GET /api/v1/email/autoresponders (TODO(api:T13.06))
+                                                           http.get(/\/api\/v1\/email\/autoresponders$/, ({ request }) => {
+                                                             const url = new URL(request.url);
+                                                             const domain = url.searchParams.get("domain");
+                                                             const filtered = domain
+                                                               ? mockAutoresponders.filter((a) => a.domain === domain)
+                                                               : mockAutoresponders;
+                                                             return HttpResponse.json(filtered);
+                                                           }),
+
+                                                           // POST /api/v1/email/autoresponders (TODO(api:T13.06))
+                                                           http.post(/\/api\/v1\/email\/autoresponders$/, async ({ request }) => {
+                                                             const body = (await request.json().catch(() => ({}))) as any;
+                                                             const newAr = {
+                                                               id: `ar-${Date.now()}`,
+                                                               email: body.email,
+                                                               domain: body.domain,
+                                                               subject: body.subject,
+                                                               body: body.body,
+                                                               is_active: true,
+                                                               start_date: body.start_date,
+                                                               end_date: body.end_date,
+                                                             };
+                                                             mockAutoresponders.push(newAr);
+                                                             return HttpResponse.json(newAr, { status: 201 });
+                                                           }),
+
+                                                           // DELETE /api/v1/email/autoresponders/:id (TODO(api:T13.06))
+                                                           http.delete(/\/api\/v1\/email\/autoresponders\/([^/]+)$/, ({ params }) => {
+                                                             const id = String(params[0]);
+                                                             mockAutoresponders = mockAutoresponders.filter((a) => a.id !== id);
+                                                             return new HttpResponse(null, { status: 204 });
+                                                           }),
+
+                                                           // GET /api/v1/email/config (TODO(api:T13.12))
+                                                           http.get(/\/api\/v1\/email\/config$/, ({ request }) => {
+                                                             const url = new URL(request.url);
+                                                             const domain = url.searchParams.get("domain") || "example.com";
+                                                             return HttpResponse.json({
+                                                               incoming_server: `mail.${domain}`,
+                                                               incoming_imap_port: 993,
+                                                               incoming_pop3_port: 995,
+                                                               incoming_security: "SSL/TLS",
+                                                               outgoing_server: `mail.${domain}`,
+                                                               outgoing_smtp_port: 465,
+                                                               outgoing_submission_port: 587,
+                                                               outgoing_security: "SSL/TLS (or STARTTLS)",
+                                                               auth_required: true,
+                                                             });
+                                                           }),
+
+                                                           // GET /api/v1/admin/email/queue (TODO(api:T13.10))
+                                                           http.get(/\/api\/v1\/admin\/email\/queue$/, () => {
+                                                             return HttpResponse.json(mockMailQueue);
+                                                           }),
+
+                                                           // POST /api/v1/admin/email/queue/flush (TODO(api:T13.10))
+                                                           http.post(/\/api\/v1\/admin\/email\/queue\/flush$/, () => {
+                                                             mockMailQueue = [];
+                                                             return HttpResponse.json({ success: true, count: 2 });
+                                                           }),
+
+                                                           // DELETE /api/v1/admin/email/queue/:id (TODO(api:T13.10))
+                                                           http.delete(/\/api\/v1\/admin\/email\/queue\/([^/]+)$/, ({ params }) => {
+                                                             const id = String(params[0]);
+                                                             mockMailQueue = mockMailQueue.filter((q) => q.id !== id);
+                                                             return new HttpResponse(null, { status: 204 });
+                                                           }),
+
+                                                           // GET /api/v1/admin/email/deliverability (TODO(api:T13.11))
+                                                           http.get(/\/api\/v1\/admin\/email\/deliverability$/, () => {
+                                                             return HttpResponse.json(mockDeliverability);
+                                                           }),
+                                                         ];
+                                                       })(),
                                                      ];
                                                    })(),
                                                 ];
