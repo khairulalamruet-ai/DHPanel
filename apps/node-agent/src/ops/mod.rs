@@ -22,6 +22,7 @@
 
 pub mod cache;
 pub mod capabilities;
+pub mod tenant;
 
 use std::{
     collections::{HashMap, HashSet},
@@ -67,7 +68,24 @@ impl Registry {
     /// (disk figures in the capability report are for its filesystem).
     #[must_use]
     pub fn builtin(data_dir: &std::path::Path) -> Self {
+        Self::builtin_with(data_dir, None)
+    }
+
+    /// [`Registry::builtin`] plus the tenant operations, when the agent has a
+    /// Docker and a privileged helper to run them with.
+    #[must_use]
+    pub fn builtin_with(
+        data_dir: &std::path::Path,
+        tenants: Option<tenant::TenantContext>,
+    ) -> Self {
         let mut registry = Self::new();
+        if let Some(context) = tenants {
+            let context = Arc::new(context);
+            registry.register("create_tenant", move |op| {
+                let context = context.clone();
+                tenant::create_tenant(context, op)
+            });
+        }
         let sources = capabilities::Sources::system(data_dir);
         registry.register("report_capabilities", move |op| {
             let sources = sources.clone();

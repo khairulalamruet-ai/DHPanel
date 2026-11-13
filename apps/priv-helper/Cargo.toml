@@ -24,7 +24,7 @@ serde_json = "1"
 thiserror = "2.0.21"
 # Safe wrapper for SO_PEERCRED (who is on the other end of the socket); the
 # workspace forbids `unsafe`.
-rustix = { version = "1", default-features = false, features = ["std", "net"] }
+rustix = { version = "1", default-features = false, features = ["std", "net", "process"] }
 
 [lints]
 workspace = true

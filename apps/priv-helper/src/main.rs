@@ -10,17 +10,19 @@
 
 use std::{path::PathBuf, process::ExitCode, sync::atomic::AtomicBool};
 
-use dhpanel_priv_helper::server::{
-    Config, DEFAULT_SOCKET, Log as _, StderrLog, bind, lookup_system_user, serve,
+use dhpanel_priv_helper::{
+    server::{Config, DEFAULT_SOCKET, Log as _, StderrLog, bind, lookup_system_user, serve},
+    tenant::TenantEnv,
 };
 
-const USAGE: &str = "usage: dhpanel-priv-helper [--socket PATH] [--agent-user NAME | --agent-uid UID --agent-gid GID]";
+const USAGE: &str = "usage: dhpanel-priv-helper [--socket PATH] [--tenants-root DIR] [--agent-user NAME | --agent-uid UID --agent-gid GID]";
 
 #[allow(clippy::print_stdout)]
 fn main() -> ExitCode {
     let log = StderrLog;
     let mut socket = PathBuf::from(DEFAULT_SOCKET);
     let mut user = String::from("dhpanel-agent");
+    let mut tenants_root = PathBuf::from("/srv/tenants");
     let (mut uid, mut gid) = (None::<u32>, None::<u32>);
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -28,6 +30,7 @@ fn main() -> ExitCode {
         let parsed = match arg.as_str() {
             "--socket" => value().map(|v| socket = v.into()),
             "--agent-user" => value().map(|v| user = v),
+            "--tenants-root" => value().map(|v| tenants_root = v.into()),
             "--agent-uid" => value().and_then(|v| v.parse().ok()).map(|v| uid = Some(v)),
             "--agent-gid" => value().and_then(|v| v.parse().ok()).map(|v| gid = Some(v)),
             "--version" => {
@@ -66,6 +69,12 @@ fn main() -> ExitCode {
         socket,
         agent_uid,
         agent_gid,
+        tenants: TenantEnv {
+            root: tenants_root,
+            agent_name: user.clone(),
+            subuid_file: "/etc/subuid".into(),
+            agent_gid,
+        },
     };
     let listener = match bind(&config) {
         Ok(listener) => listener,

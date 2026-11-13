@@ -253,6 +253,22 @@ fn name(tenant: &TenantUsername, suffix: &str) -> Result<Name, SpecError> {
     Name::parse(&format!("dh-{tenant}-{suffix}"))
 }
 
+/// Name of a tenant's private network.
+///
+/// # Errors
+/// [`SpecError`] (cannot happen for a valid tenant name).
+pub fn network_name(tenant: &TenantUsername) -> Result<Name, SpecError> {
+    name(tenant, "net")
+}
+
+/// Name of a tenant's files volume.
+///
+/// # Errors
+/// [`SpecError`] (cannot happen for a valid tenant name).
+pub fn files_volume_name(tenant: &TenantUsername) -> Result<Name, SpecError> {
+    name(tenant, "www")
+}
+
 /// Renders the web + PHP stack for a tenant from the allow-list.
 ///
 /// # Errors
@@ -266,8 +282,8 @@ pub fn render(tenant: &Tenant<'_>, allowlist: &Allowlist) -> Result<Stack, Stack
         .unwrap_or(UNLIMITED_MEMORY_BYTES);
     let pids = tenant.resources.pids.unwrap_or(UNLIMITED_PIDS);
 
-    let network = name(tenant.username, "net")?;
-    let files = name(tenant.username, "www")?;
+    let network = network_name(tenant.username)?;
+    let files = files_volume_name(tenant.username)?;
     let user = Some((tenant.uid.get(), tenant.uid.get()));
     let mut services = Vec::new();
     // PHP first, so the web server never starts without its backend.

@@ -80,6 +80,9 @@ if [ -n "$helper" ]; then
   mv -f "$HELPER_DST.new" "$HELPER_DST"
   install -m 0644 -o root -g root "$HERE/dhpanel-priv-helper.service" "$HELPER_UNIT"
   systemctl daemon-reload
+  # Where tenants live. It must exist before the unit starts (the unit's sandbox
+  # lists it as writable); only root may create things in it.
+  install -d -m 0755 -o root -g root /srv/tenants
   say "starting dhpanel-priv-helper"
   systemctl enable dhpanel-priv-helper >/dev/null 2>&1
   systemctl restart dhpanel-priv-helper

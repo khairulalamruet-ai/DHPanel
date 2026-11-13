@@ -75,6 +75,30 @@ fi
 if [ "$what" = deny ] || [ "$what" = all ]; then
     step deny cargo deny check
 fi
+# Every edit leaves a new copy of our own crates and test programs in the shared
+# target directory (different hash, same name). Keep the newest of each so a long
+# session does not fill the disk; third-party crates are never touched.
+python3 - <<'PRUNE'
+import collections, os, re
+deps = os.path.join(os.environ["CARGO_TARGET_DIR"], "debug", "deps")
+groups = collections.defaultdict(list)
+for name in os.listdir(deps):
+    m = re.match(r"^(lib)?(.+?)-([0-9a-f]{16})(\.[a-z]+)?$", name)
+    if not m:
+        continue
+    stem = (m.group(1) or "") + m.group(2)
+    if "dhpanel_" in stem or "_live" in stem or stem.endswith("_schema"):
+        groups[(stem, m.group(4) or "")].append((os.path.getmtime(os.path.join(deps, name)), name))
+freed = 0
+for items in groups.values():
+    items.sort(reverse=True)
+    for _, name in items[1:]:
+        path = os.path.join(deps, name)
+        freed += os.path.getsize(path)
+        os.remove(path)
+print(f"build cache: removed stale copies of our own crates, freed {freed / 1e9:.2f} GB")
+PRUNE
+df -h "$HOME" | awk 'NR==2 {print "disk: " $4 " free (" $5 " used)"}'
 exit $rc
 REMOTE
 }

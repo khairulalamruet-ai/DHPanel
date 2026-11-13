@@ -19,7 +19,7 @@ use dhpanel_node_agent::{
     enroll::{self, EnrollError, Options},
     identity::{DEFAULT_STATE_DIR, StateDir, StateError},
     ops::{
-        DEFAULT_MAX_PARALLEL, Executor, Registry,
+        self, DEFAULT_MAX_PARALLEL, Executor, Registry,
         cache::{CACHE_FILE, ResultCache},
     },
     stream,
@@ -357,6 +357,24 @@ fn run_command(state_dir: PathBuf, stream_url: Option<String>) -> ExitCode {
     })
 }
 
+/// The tenant operations need Docker (from `DOCKER_HOST`, which the systemd
+/// unit points at the agent's rootless daemon) and the privileged helper's
+/// socket. Without Docker they are not offered, and the control plane gets
+/// "unsupported operation" instead of an error later.
+fn tenant_context() -> Option<ops::tenant::TenantContext> {
+    let socket = std::env::var("DOCKER_HOST")
+        .ok()
+        .and_then(|host| host.strip_prefix("unix://").map(PathBuf::from))?;
+    let docker = dhpanel_docker_manager::DockerManager::connect(&socket).ok()?;
+    Some(ops::tenant::TenantContext {
+        helper_socket: std::env::var_os("DHPANEL_AGENT_HELPER_SOCKET")
+            .map_or_else(|| "/run/dhpanel/priv-helper.sock".into(), PathBuf::from),
+        tenants_root: std::env::var_os("DHPANEL_AGENT_TENANTS_ROOT")
+            .map_or_else(|| "/srv/tenants".into(), PathBuf::from),
+        docker,
+    })
+}
+
 /// Opens the operation result cache in the state directory. A cache file that
 /// cannot be used is set aside (never deleted) and a fresh one is started: the
 /// node stays manageable, at the price of not recognising operations it ran
@@ -385,7 +403,11 @@ fn open_executor(state_dir: &std::path::Path) -> std::sync::Arc<Executor> {
             }
         }
     };
-    Executor::new(Registry::builtin(state_dir), cache, DEFAULT_MAX_PARALLEL)
+    Executor::new(
+        Registry::builtin_with(state_dir, tenant_context()),
+        cache,
+        DEFAULT_MAX_PARALLEL,
+    )
 }
 
 fn main() -> ExitCode {

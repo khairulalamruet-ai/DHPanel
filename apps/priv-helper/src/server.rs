@@ -12,7 +12,10 @@ use std::{
     time::Duration,
 };
 
-use crate::protocol::{Action, ErrorCode, MAX_REQUEST_BYTES, Response, parse_request};
+use crate::{
+    protocol::{Action, ErrorCode, MAX_REQUEST_BYTES, Response, parse_request},
+    tenant::{self, TenantEnv},
+};
 
 /// Default socket path (the systemd unit creates `/run/dhpanel`).
 pub const DEFAULT_SOCKET: &str = "/run/dhpanel/priv-helper.sock";
@@ -44,6 +47,8 @@ pub struct Config {
     pub agent_uid: u32,
     /// The group that owns the socket file (not used for access: mode is 0600).
     pub agent_gid: u32,
+    /// Where tenant directories live and how their ids map to the host.
+    pub tenants: TenantEnv,
 }
 
 /// Creates the socket: owned by the agent, mode 0600. A stale socket file from
@@ -155,7 +160,7 @@ fn handle(stream: UnixStream, config: &Config, log: &dyn Log) -> io::Result<()> 
             return answer(&stream, &rejected.response);
         }
     };
-    let response = match execute(&request.action) {
+    let response = match execute(&request.action, config) {
         Ok(()) => {
             log.line(&format!(
                 "DONE uid={peer_uid} id={} action={}",
@@ -178,9 +183,12 @@ fn handle(stream: UnixStream, config: &Config, log: &dyn Log) -> io::Result<()> 
 
 /// Carries out an action. Each arm validates its own arguments: the helper
 /// never relies on what the agent checked.
-fn execute(action: &Action) -> Result<(), (ErrorCode, &'static str)> {
+fn execute(action: &Action, config: &Config) -> Result<(), (ErrorCode, &'static str)> {
     match action {
         Action::Noop => Ok(()),
+        Action::PrepareTenant { tenant_id, uid } => {
+            tenant::prepare(&config.tenants, tenant_id, *uid)
+        }
     }
 }
 
@@ -231,6 +239,15 @@ mod tests {
         }
     }
 
+    fn test_tenants(gid: u32) -> TenantEnv {
+        TenantEnv {
+            root: std::env::temp_dir().join(format!("dhph-srv-tenants-{}", std::process::id())),
+            agent_name: "dhpanel-agent".into(),
+            subuid_file: "/nonexistent".into(),
+            agent_gid: gid,
+        }
+    }
+
     fn own_ids() -> (u32, u32) {
         use std::os::unix::fs::MetadataExt as _;
         let meta = std::fs::metadata(std::env::temp_dir()).unwrap();
@@ -264,6 +281,7 @@ mod tests {
                 socket: socket.clone(),
                 agent_uid: uid,
                 agent_gid: gid,
+                tenants: test_tenants(gid),
             };
             let listener = bind(&bind_config).unwrap();
             let config = Config {
@@ -389,6 +407,52 @@ mod tests {
     }
 
     #[test]
+    fn prepare_tenant_is_validated_by_the_helper_itself() {
+        let helper = Running::start("tenant", None);
+        let ask = |json: &str| helper.ask(json.as_bytes());
+        // Bad ids and ids outside the tenant range are refused before anything is touched.
+        for bad in [
+            r#"{"id":"t1","action":{"type":"prepare_tenant","tenant_id":"../../etc","uid":10000}}"#,
+            r#"{"id":"t2","action":{"type":"prepare_tenant","tenant_id":"0190b6a2-0000-7000-8000-000000000001","uid":0}}"#,
+            r#"{"id":"t3","action":{"type":"prepare_tenant","tenant_id":"0190b6a2-0000-7000-8000-000000000001","uid":99999}}"#,
+        ] {
+            let response = ask(bad);
+            assert_eq!(
+                response.error.unwrap().code,
+                ErrorCode::InvalidArguments,
+                "{bad}"
+            );
+        }
+        // Extra fields and missing ones are refused as bad arguments, never guessed.
+        let extra = ask(
+            r#"{"id":"t4","action":{"type":"prepare_tenant","tenant_id":"0190b6a2-0000-7000-8000-000000000001","uid":10000,"path":"/etc"}}"#,
+        );
+        assert_eq!(extra.error.unwrap().code, ErrorCode::InvalidArguments);
+        let missing = ask(r#"{"id":"t5","action":{"type":"prepare_tenant","uid":10000}}"#);
+        assert_eq!(missing.error.unwrap().code, ErrorCode::InvalidArguments);
+        // A well-formed request on a machine without the agent's subordinate range fails clearly.
+        let unreadable = ask(
+            r#"{"id":"t6","action":{"type":"prepare_tenant","tenant_id":"0190b6a2-0000-7000-8000-000000000001","uid":10000}}"#,
+        );
+        assert_eq!(unreadable.error.unwrap().code, ErrorCode::Failed);
+        assert!(
+            !helper.config.tenants.root.exists(),
+            "no refused request created anything"
+        );
+        let log = helper.log();
+        assert!(
+            log.iter().all(|l| !l.contains("etc")),
+            "arguments are not logged: {log:?}"
+        );
+        assert!(
+            log.iter()
+                .filter(|l| l.contains("action=prepare_tenant"))
+                .count()
+                >= 5
+        );
+    }
+
+    #[test]
     fn a_stale_socket_is_replaced_but_other_files_are_left_alone() {
         let (uid, gid) = own_ids();
         let path = std::env::temp_dir().join(format!("dhph-{}-stale.sock", std::process::id()));
@@ -396,6 +460,7 @@ mod tests {
             socket: path.clone(),
             agent_uid: uid,
             agent_gid: gid,
+            tenants: test_tenants(gid),
         };
         drop(bind(&config).unwrap()); // leaves the socket file behind
         assert!(path.exists());

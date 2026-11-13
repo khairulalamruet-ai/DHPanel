@@ -20,5 +20,6 @@
 
 pub mod protocol;
 pub mod server;
+pub mod tenant;
 
 pub use protocol::{Action, ErrorCode, Request, Response};

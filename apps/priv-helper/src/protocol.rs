@@ -12,6 +12,14 @@ pub const MAX_REQUEST_BYTES: usize = 64 * 1024;
 pub enum Action {
     /// Does nothing; proves that the channel and the permission check work.
     Noop,
+    /// Creates a tenant's directories, owned by the tenant's host id
+    /// (see [`crate::tenant`]).
+    PrepareTenant {
+        /// The tenant's id (a lower-case UUID).
+        tenant_id: String,
+        /// The tenant's numeric id inside the user namespace (10000..59999).
+        uid: u32,
+    },
 }
 
 impl Action {
@@ -20,6 +28,7 @@ impl Action {
     pub fn name(&self) -> &'static str {
         match self {
             Self::Noop => "noop",
+            Self::PrepareTenant { .. } => "prepare_tenant",
         }
     }
 }
@@ -109,6 +118,7 @@ fn valid_id(id: &str) -> bool {
 fn allowed_fields(action: &str) -> Option<&'static [&'static str]> {
     match action {
         "noop" => Some(&["type"]),
+        "prepare_tenant" => Some(&["type", "tenant_id", "uid"]),
         _ => None,
     }
 }

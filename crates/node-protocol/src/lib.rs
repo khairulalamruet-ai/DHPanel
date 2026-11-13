@@ -120,11 +120,23 @@ pub enum Operation {
     },
     /// Ask the node to describe itself; answered with [`Output::Capabilities`].
     ReportCapabilities,
+    /// Prepare a node for a new tenant: its directories (owned by its id), its
+    /// private network and its files volume. Safe to repeat. Answered with
+    /// [`Output::TenantCreated`].
+    CreateTenant {
+        /// The tenant's id (also its directory name).
+        tenant_id: Uuid,
+        /// The tenant's system name (`a-z`, `0-9`, 3-32 characters).
+        username: String,
+        /// The tenant's numeric user id (10000..59999) on this node.
+        uid: u32,
+    },
 }
 
 impl Operation {
     /// Wire names of every operation this build knows, in declaration order.
-    pub const TYPE_NAMES: &'static [&'static str] = &["ping", "report_capabilities"];
+    pub const TYPE_NAMES: &'static [&'static str] =
+        &["ping", "report_capabilities", "create_tenant"];
 
     /// The operation's wire name.
     #[must_use]
@@ -132,6 +144,7 @@ impl Operation {
         match self {
             Self::Ping { .. } => "ping",
             Self::ReportCapabilities => "report_capabilities",
+            Self::CreateTenant { .. } => "create_tenant",
         }
     }
 }
@@ -255,6 +268,15 @@ pub enum Output {
     },
     /// Answer to [`Operation::ReportCapabilities`].
     Capabilities(Capabilities),
+    /// Answer to [`Operation::CreateTenant`].
+    TenantCreated {
+        /// The tenant's directory on the node.
+        root: String,
+        /// Name of its private network.
+        network: String,
+        /// Name of its files volume.
+        volume: String,
+    },
 }
 
 /// How an operation ended.
@@ -927,14 +949,22 @@ mod tests {
 
     #[test]
     fn operation_names_match_the_wire_and_the_list() {
-        for op in [Operation::Ping { nonce: 1 }, Operation::ReportCapabilities] {
+        for op in [
+            Operation::Ping { nonce: 1 },
+            Operation::ReportCapabilities,
+            Operation::CreateTenant {
+                tenant_id: id(),
+                username: "alice".into(),
+                uid: 10_000,
+            },
+        ] {
             let wire = serde_json::to_value(&op).unwrap();
             assert_eq!(wire["type"], op.type_name());
             assert!(Operation::TYPE_NAMES.contains(&op.type_name()));
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            2,
+            3,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }

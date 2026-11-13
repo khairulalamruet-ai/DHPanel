@@ -346,6 +346,64 @@ impl DockerManager {
             .map_err(map_error)
     }
 
+    /// Creates a named volume whose data lives in a host directory (the
+    /// tenant's directory, prepared by the privileged helper). The directory
+    /// must be an absolute, plain path *below* `allowed_root` (a path with
+    /// `..`, a symlink-looking trick or anything outside the root is refused),
+    /// so a request can never make Docker expose an arbitrary host path.
+    /// Creating one that already exists with the same directory is fine.
+    ///
+    /// # Errors
+    /// [`DockerError::Invalid`] for a path outside the root,
+    /// [`DockerError::NotManaged`] or [`DockerError::Conflict`] if the volume
+    /// exists but is not ours or points somewhere else.
+    pub async fn create_bind_volume(
+        &self,
+        name: &Name,
+        host_dir: &Path,
+        allowed_root: &Path,
+    ) -> Result<(), DockerError> {
+        let device = bind_device(host_dir, allowed_root)?;
+        match self.docker.inspect_volume(name.as_str()).await {
+            Ok(existing) => {
+                if existing.labels.get(MANAGED_LABEL).map(String::as_str) != Some("true") {
+                    return Err(DockerError::NotManaged);
+                }
+                return if existing.options.get("device").map(String::as_str)
+                    == Some(device.as_str())
+                {
+                    Ok(())
+                } else {
+                    Err(DockerError::Conflict(
+                        "the volume points to another directory".into(),
+                    ))
+                };
+            }
+            Err(err) => match map_error(err) {
+                DockerError::NotFound => {}
+                other => return Err(other),
+            },
+        }
+        self.docker
+            .create_volume(VolumeCreateRequest {
+                name: Some(name.as_str().to_owned()),
+                driver: Some("local".to_owned()),
+                driver_opts: Some(
+                    [
+                        ("type".to_owned(), "none".to_owned()),
+                        ("o".to_owned(), "bind".to_owned()),
+                        ("device".to_owned(), device),
+                    ]
+                    .into(),
+                ),
+                labels: Some([(MANAGED_LABEL.to_owned(), "true".to_owned())].into()),
+                ..Default::default()
+            })
+            .await
+            .map(|_| ())
+            .map_err(map_error)
+    }
+
     /// Removes a named volume we created, with its data.
     ///
     /// # Errors
@@ -386,6 +444,34 @@ impl DockerManager {
             .await
             .map(|_| ())
             .map_err(map_error)
+    }
+
+    /// Creates the network unless it already exists and is ours.
+    ///
+    /// # Errors
+    /// [`DockerError::NotManaged`] if a network of that name exists that we did
+    /// not create.
+    pub async fn ensure_network(&self, name: &Name, internal: bool) -> Result<(), DockerError> {
+        match self.docker.inspect_network(name.as_str(), None).await {
+            Ok(existing) => {
+                let ours = existing
+                    .labels
+                    .as_ref()
+                    .and_then(|l| l.get(MANAGED_LABEL))
+                    .map(String::as_str)
+                    == Some("true");
+                return if ours {
+                    Ok(())
+                } else {
+                    Err(DockerError::NotManaged)
+                };
+            }
+            Err(err) => match map_error(err) {
+                DockerError::NotFound => {}
+                other => return Err(other),
+            },
+        }
+        self.create_network(name, internal).await
     }
 
     /// Removes a network we created.
@@ -440,5 +526,63 @@ impl DockerManager {
             exit_code: (!running).then_some(state.exit_code).flatten(),
             labels,
         })
+    }
+}
+
+/// Checks that `dir` is an absolute path strictly below `root`, made of plain
+/// components only, and returns it as text for Docker.
+fn bind_device(dir: &Path, root: &Path) -> Result<String, DockerError> {
+    use std::path::Component;
+    let plain = |p: &Path| {
+        p.is_absolute()
+            && p.components()
+                .all(|c| matches!(c, Component::RootDir | Component::Normal(_)))
+    };
+    let bad = |reason: &str| {
+        DockerError::Invalid(SpecError {
+            field: "host_dir",
+            reason: reason.to_owned(),
+        })
+    };
+    if !plain(dir) || !plain(root) {
+        return Err(bad("must be an absolute path without `.` or `..`"));
+    }
+    if dir == root || !dir.starts_with(root) {
+        return Err(bad("must be inside the allowed directory"));
+    }
+    let text = dir.to_str().ok_or_else(|| bad("must be valid UTF-8"))?;
+    if text.chars().any(|c| c.is_control() || c == ',' || c == '=') {
+        return Err(bad("contains a character Docker options cannot carry"));
+    }
+    Ok(text.to_owned())
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bind_directories_must_be_plain_paths_inside_the_root() {
+        let root = Path::new("/srv/tenants");
+        assert_eq!(
+            bind_device(Path::new("/srv/tenants/0190b6a2/www"), root).unwrap(),
+            "/srv/tenants/0190b6a2/www"
+        );
+        for bad in [
+            "/srv/tenants",
+            "/srv",
+            "/etc",
+            "/srv/tenants/../etc",
+            "/srv/tenants/./x",
+            "srv/tenants/x",
+            "/srv/tenantsX/x",
+            "/srv/tenants/a,b",
+            "/srv/tenants/a=b",
+            "/srv/tenants/a\nb",
+        ] {
+            assert!(bind_device(Path::new(bad), root).is_err(), "{bad:?}");
+        }
+        assert!(bind_device(Path::new("/srv/tenants/x"), Path::new("/srv/../etc")).is_err());
     }
 }
