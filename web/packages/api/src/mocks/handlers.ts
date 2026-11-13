@@ -6463,6 +6463,266 @@ export const handlers = [
                                       ],
                                     });
                                   }),
+
+                                  // ==========================================
+                                  // PROCESS MANAGER (TODO(api:T10.14))
+                                  // ==========================================
+                                  ...(() => {
+                                    interface MockProcess {
+                                      pid: number;
+                                      ppid: number;
+                                      user: string;
+                                      cpu_percent: number;
+                                      mem_percent: number;
+                                      mem_rss_mb: number;
+                                      vsz_mb: number;
+                                      stat: string;
+                                      start_time: string;
+                                      cpu_time: string;
+                                      command: string;
+                                      is_killable: boolean;
+                                      tenant?: string;
+                                      node?: string;
+                                    }
+
+                                    const mockClientProcesses: MockProcess[] = [
+                                      {
+                                        pid: 1,
+                                        ppid: 0,
+                                        user: "root",
+                                        cpu_percent: 0.1,
+                                        mem_percent: 0.8,
+                                        mem_rss_mb: 16.2,
+                                        vsz_mb: 42.0,
+                                        stat: "Ss",
+                                        start_time: "Nov10",
+                                        cpu_time: "0:02.14",
+                                        command: "php-fpm: master process (/etc/php/8.2/fpm/php-fpm.conf)",
+                                        is_killable: false,
+                                      },
+                                      {
+                                        pid: 14,
+                                        ppid: 1,
+                                        user: "demo",
+                                        cpu_percent: 14.2,
+                                        mem_percent: 2.3,
+                                        mem_rss_mb: 48.5,
+                                        vsz_mb: 120.4,
+                                        stat: "R",
+                                        start_time: "10:14",
+                                        cpu_time: "0:18.40",
+                                        command: "php-fpm: pool www",
+                                        is_killable: true,
+                                      },
+                                      {
+                                        pid: 15,
+                                        ppid: 1,
+                                        user: "demo",
+                                        cpu_percent: 4.8,
+                                        mem_percent: 2.1,
+                                        mem_rss_mb: 42.1,
+                                        vsz_mb: 118.0,
+                                        stat: "S",
+                                        start_time: "10:14",
+                                        cpu_time: "0:05.12",
+                                        command: "php-fpm: pool www",
+                                        is_killable: true,
+                                      },
+                                      {
+                                        pid: 88,
+                                        ppid: 1,
+                                        user: "demo",
+                                        cpu_percent: 2.4,
+                                        mem_percent: 4.1,
+                                        mem_rss_mb: 84.0,
+                                        vsz_mb: 210.0,
+                                        stat: "S",
+                                        start_time: "Nov10",
+                                        cpu_time: "1:42.10",
+                                        command: "mysqld: tenant socket proxy",
+                                        is_killable: true,
+                                      },
+                                      {
+                                        pid: 142,
+                                        ppid: 1,
+                                        user: "demo",
+                                        cpu_percent: 18.5,
+                                        mem_percent: 3.2,
+                                        mem_rss_mb: 64.2,
+                                        vsz_mb: 145.0,
+                                        stat: "R",
+                                        start_time: "09:30",
+                                        cpu_time: "2:15.30",
+                                        command: "python3 /home/demo/scripts/feed_worker.py",
+                                        is_killable: true,
+                                      },
+                                      {
+                                        pid: 204,
+                                        ppid: 1,
+                                        user: "demo",
+                                        cpu_percent: 0.1,
+                                        mem_percent: 0.6,
+                                        mem_rss_mb: 12.0,
+                                        vsz_mb: 32.0,
+                                        stat: "S",
+                                        start_time: "02:00",
+                                        cpu_time: "0:00.45",
+                                        command: "/usr/sbin/cron -f",
+                                        is_killable: true,
+                                      },
+                                    ];
+
+                                    const mockAdminProcesses: MockProcess[] = [
+                                      {
+                                        pid: 1,
+                                        ppid: 0,
+                                        user: "root",
+                                        cpu_percent: 0.2,
+                                        mem_percent: 0.4,
+                                        mem_rss_mb: 24.0,
+                                        vsz_mb: 180.0,
+                                        stat: "Ss",
+                                        start_time: "Nov01",
+                                        cpu_time: "12:40.12",
+                                        command: "/sbin/init splash",
+                                        is_killable: false,
+                                        tenant: undefined,
+                                        node: "node-01",
+                                      },
+                                      {
+                                        pid: 412,
+                                        ppid: 1,
+                                        user: "root",
+                                        cpu_percent: 1.8,
+                                        mem_percent: 1.2,
+                                        mem_rss_mb: 148.0,
+                                        vsz_mb: 840.0,
+                                        stat: "S",
+                                        start_time: "Nov01",
+                                        cpu_time: "48:12.30",
+                                        command: "/usr/bin/dockerd -H fd://",
+                                        is_killable: true,
+                                        tenant: undefined,
+                                        node: "node-01",
+                                      },
+                                      {
+                                        pid: 580,
+                                        ppid: 1,
+                                        user: "caddy",
+                                        cpu_percent: 3.4,
+                                        mem_percent: 0.9,
+                                        mem_rss_mb: 112.0,
+                                        vsz_mb: 420.0,
+                                        stat: "S",
+                                        start_time: "Nov01",
+                                        cpu_time: "32:10.45",
+                                        command: "caddy run --config /etc/caddy/Caddyfile",
+                                        is_killable: true,
+                                        tenant: undefined,
+                                        node: "node-01",
+                                      },
+                                      {
+                                        pid: 1400,
+                                        ppid: 1,
+                                        user: "demo",
+                                        cpu_percent: 14.2,
+                                        mem_percent: 2.3,
+                                        mem_rss_mb: 48.5,
+                                        vsz_mb: 120.4,
+                                        stat: "R",
+                                        start_time: "10:14",
+                                        cpu_time: "0:18.40",
+                                        command: "container(demo): php-fpm: pool www",
+                                        is_killable: true,
+                                        tenant: "demo",
+                                        node: "node-01",
+                                      },
+                                      {
+                                        pid: 2200,
+                                        ppid: 1,
+                                        user: "acme",
+                                        cpu_percent: 42.1,
+                                        mem_percent: 8.5,
+                                        mem_rss_mb: 420.0,
+                                        vsz_mb: 980.0,
+                                        stat: "R",
+                                        start_time: "08:12",
+                                        cpu_time: "14:20.10",
+                                        command: "container(acme): node /var/www/acme/server.js",
+                                        is_killable: true,
+                                        tenant: "acme",
+                                        node: "node-01",
+                                      },
+                                    ];
+
+                                    return [
+                                      // GET /api/v1/client/processes (TODO(api:T10.14))
+                                      http.get(/\/api\/v1\/client\/processes$/, () => {
+                                        return HttpResponse.json(mockClientProcesses);
+                                      }),
+
+                                      // GET /api/v1/client/processes/stats (TODO(api:T10.14))
+                                      http.get(/\/api\/v1\/client\/processes\/stats$/, () => {
+                                        const totalCpu = mockClientProcesses.reduce((acc, p) => acc + p.cpu_percent, 0);
+                                        const totalMem = mockClientProcesses.reduce((acc, p) => acc + p.mem_rss_mb, 0);
+                                        return HttpResponse.json({
+                                          total_processes: mockClientProcesses.length,
+                                          running_processes: mockClientProcesses.filter((p) => p.stat.startsWith("R")).length,
+                                          sleeping_processes: mockClientProcesses.filter((p) => p.stat.startsWith("S")).length,
+                                          zombie_processes: mockClientProcesses.filter((p) => p.stat.startsWith("Z")).length,
+                                          total_cpu_percent: Math.round(totalCpu * 10) / 10,
+                                          total_mem_rss_mb: Math.round(totalMem * 10) / 10,
+                                        });
+                                      }),
+
+                                      // POST /api/v1/client/processes/:id/kill (TODO(api:T10.14))
+                                      http.post(/\/api\/v1\/client\/processes\/([^/]+)\/kill$/, ({ params }) => {
+                                        const pid = Number(params[0] || params.id);
+                                        const idx = mockClientProcesses.findIndex((p) => p.pid === pid);
+                                        if (idx !== -1) {
+                                          mockClientProcesses.splice(idx, 1);
+                                        }
+                                        return HttpResponse.json({ success: true, message: `Process ${pid} terminated` });
+                                      }),
+
+                                      // GET /api/v1/admin/processes (TODO(api:T10.14))
+                                      http.get(/\/api\/v1\/admin\/processes$/, ({ request }) => {
+                                        const url = new URL(request.url);
+                                        const tenant = url.searchParams.get("tenant") || "all";
+                                        let filtered = mockAdminProcesses;
+                                        if (tenant === "host") {
+                                          filtered = filtered.filter((p) => !p.tenant);
+                                        } else if (tenant !== "all") {
+                                          filtered = filtered.filter((p) => p.tenant === tenant);
+                                        }
+                                        return HttpResponse.json(filtered);
+                                      }),
+
+                                      // GET /api/v1/admin/processes/stats (TODO(api:T10.14))
+                                      http.get(/\/api\/v1\/admin\/processes\/stats$/, () => {
+                                        const totalCpu = mockAdminProcesses.reduce((acc, p) => acc + p.cpu_percent, 0);
+                                        const totalMem = mockAdminProcesses.reduce((acc, p) => acc + p.mem_rss_mb, 0);
+                                        return HttpResponse.json({
+                                          total_processes: mockAdminProcesses.length + 180,
+                                          running_processes: 6,
+                                          sleeping_processes: 178,
+                                          zombie_processes: 1,
+                                          total_cpu_percent: Math.round(totalCpu * 10) / 10,
+                                          total_mem_rss_mb: Math.round(totalMem * 10) / 10,
+                                        });
+                                      }),
+
+                                      // POST /api/v1/admin/processes/:id/kill (TODO(api:T10.14))
+                                      http.post(/\/api\/v1\/admin\/processes\/([^/]+)\/kill$/, ({ params }) => {
+                                        const pid = Number(params[0] || params.id);
+                                        const idx = mockAdminProcesses.findIndex((p) => p.pid === pid);
+                                        if (idx !== -1) {
+                                          mockAdminProcesses.splice(idx, 1);
+                                        }
+                                        return HttpResponse.json({ success: true, message: `Admin signal sent to ${pid}` });
+                                      }),
+                                    ];
+                                  })(),
                                 ];
                               })(),
                             ];

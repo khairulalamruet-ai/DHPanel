@@ -44,6 +44,8 @@ import {
   AdminSystemLogsPage,
   ClientUsagePage,
   AdminUsagePage,
+  ClientProcessesPage,
+  AdminProcessesPage,
   filterNavItems,
   registeredFrontendModules,
 } from "@dhpanel/modules";
@@ -401,6 +403,25 @@ const adminUsageRoute = createRoute({
   component: AdminUsagePage,
 });
 
+// 36. Process routes (T10.14)
+const clientProcessesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/client/processes",
+  component: ClientProcessesPage,
+});
+
+const processesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/processes",
+  component: ClientProcessesPage,
+});
+
+const adminProcessesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/processes",
+  component: AdminProcessesPage,
+});
+
 // 18. Login route
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -462,6 +483,9 @@ const routeTree = rootRoute.addChildren([
   clientUsageRoute,
   usageRoute,
   adminUsageRoute,
+  clientProcessesRoute,
+  processesRoute,
+  adminProcessesRoute,
   loginRoute,
 ]);
 

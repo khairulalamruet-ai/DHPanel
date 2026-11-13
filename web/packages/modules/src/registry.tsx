@@ -1,5 +1,5 @@
 import React from "react";
-import { LayoutDashboard, ShieldCheck, Sparkles, Puzzle, Globe, Users, Settings, FileText, Boxes, Server, Activity, Layers, Lock, FileCode2, Cpu, Database, Folder, Archive, Clock } from "lucide-react";
+import { LayoutDashboard, ShieldCheck, Sparkles, Puzzle, Globe, Users, Settings, FileText, Boxes, Server, Activity, Layers, Lock, FileCode2, Cpu, Database, Folder, Archive, Clock, Terminal } from "lucide-react";
 
 export interface ModuleManifest {
   name: string;
@@ -627,6 +627,37 @@ export const registeredFrontendModules: FrontendModule[] = [
         href: "/admin/usage",
         order: 60,
         permission: "admin.usage.read",
+      },
+    ],
+  },
+  {
+    manifest: {
+      name: "processes",
+      title: { en: "Process Manager", bn: "প্রসেস ম্যানেজার" },
+      category: "tools",
+      core: true,
+      permissions: ["processes.read", "processes.manage", "admin.processes.manage"],
+      features: ["processes"],
+    },
+    clientNav: [
+      {
+        id: "processes",
+        labelKey: "processes.nav",
+        icon: <Terminal className="h-4 w-4" />,
+        href: "/processes",
+        order: 36,
+        permission: "processes.read",
+        feature: "processes",
+      },
+    ],
+    adminNav: [
+      {
+        id: "admin-processes",
+        labelKey: "adminProcesses.nav",
+        icon: <Terminal className="h-4 w-4" />,
+        href: "/admin/processes",
+        order: 62,
+        permission: "admin.processes.manage",
       },
     ],
   },

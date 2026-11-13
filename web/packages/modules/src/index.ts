@@ -30,4 +30,5 @@ export * from "./backups";
 export * from "./cron";
 export * from "./logs";
 export * from "./usage";
+export * from "./processes";
 export type { SslStatus } from "./domains";
