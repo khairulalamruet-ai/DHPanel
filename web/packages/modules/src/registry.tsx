@@ -745,6 +745,25 @@ export const registeredFrontendModules: FrontendModule[] = [
   },
   {
     manifest: {
+      name: "security_center",
+      title: { en: "Security Center", bn: "নিরাপত্তা কেন্দ্র" },
+      category: "core",
+      core: true,
+      permissions: ["admin.security.read"],
+    },
+    adminNav: [
+      {
+        id: "admin-security-center",
+        labelKey: "securityCenter.nav",
+        icon: <ShieldAlert className="h-4 w-4" />,
+        href: "/admin/security",
+        order: 66,
+        permission: "admin.security.read",
+      },
+    ],
+  },
+  {
+    manifest: {
       name: "users",
       title: { en: "Users", bn: "ব্যবহারকারী" },
       category: "core",

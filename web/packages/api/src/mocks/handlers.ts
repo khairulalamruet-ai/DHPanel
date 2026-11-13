@@ -7256,7 +7256,7 @@ export const handlers = [
                                                       protocol: body.protocol || "tcp",
                                                       service_name: body.service_name || "Custom Port",
                                                       is_system_protected: false,
-                                                      status: "open" as const,
+                                                       status: "open" as const,
                                                     };
                                                     mockAdminFirewallOverview.active_ports.push(newPort);
                                                     return HttpResponse.json({ success: true, port: newPort });
@@ -7305,6 +7305,164 @@ export const handlers = [
                                                     mockAdminFirewallOverview.rate_limit_rps = Number(body.rate_limit_rps || 50);
                                                     return HttpResponse.json({ success: true, enabled: mockAdminFirewallOverview.rate_limit_enabled, rate_limit_rps: mockAdminFirewallOverview.rate_limit_rps });
                                                   }),
+
+                                                   ...(() => {
+                                                     const mockSecurityOverview = {
+                                                       stats: {
+                                                         score: 78,
+                                                         grade: "B" as const,
+                                                         critical_count: 2,
+                                                         warning_count: 4,
+                                                         info_count: 0,
+                                                         resolved_count: 4,
+                                                         login_failures_24h: 14,
+                                                         waf_blocks_24h: 8,
+                                                         malware_detected: 1,
+                                                         admins_without_2fa: 2,
+                                                         expiring_ssl_certs: 1,
+                                                         outdated_images: 3,
+                                                       },
+                                                       issues: [
+                                                         {
+                                                           id: "sec-issue-auth-failures",
+                                                           category: "auth" as const,
+                                                           severity: "critical" as const,
+                                                           title: "Brute-Force SSH/Panel Login Attempts Detected",
+                                                           title_bn: "ব্রুট-ফোর্স SSH ও প্যানেল লগইন চেষ্টা শনাক্ত হয়েছে",
+                                                           description: "14 consecutive failed login attempts detected from IP 203.0.113.88 targeting admin accounts.",
+                                                           description_bn: "IP 203.0.113.88 থেকে অ্যাডমিন অ্যাকাউন্টে ১৪ বার ধারাবাহিক ব্যর্থ লগইন চেষ্টা শনাক্ত হয়েছে।",
+                                                           timestamp: new Date(Date.now() - 15 * 60 * 1000).toISOString(),
+                                                           resource: "203.0.113.88 (fail2ban/panel-auth)",
+                                                           fix_action: {
+                                                             label_key: "securityCenter.fixBanIp",
+                                                             default_label: "Ban IP in Firewall",
+                                                             type: "modal_action" as const,
+                                                             action_id: "ban_ip",
+                                                           },
+                                                           status: "open" as "open" | "resolved",
+                                                         },
+                                                         {
+                                                           id: "sec-issue-malware-eicar",
+                                                           category: "malware" as const,
+                                                           severity: "critical" as const,
+                                                           title: "Suspicious Webshell / Malware Detected",
+                                                           title_bn: "সন্দেহভাজন ওয়েবশেল বা ম্যালওয়্যার শনাক্ত হয়েছে",
+                                                           description: "ClamAV scan flagged /var/www/site1/public/backdoor.php as PHP.Trojan.WebShell-1.",
+                                                           description_bn: "ClamAV স্ক্যানে /var/www/site1/public/backdoor.php ফাইলটি ম্যালওয়্যার হিসেবে ধরা পড়েছে।",
+                                                           timestamp: new Date(Date.now() - 45 * 60 * 1000).toISOString(),
+                                                           resource: "/var/www/site1/public/backdoor.php",
+                                                           fix_action: {
+                                                             label_key: "securityCenter.fixQuarantineFile",
+                                                             default_label: "Quarantine Malware File",
+                                                             type: "modal_action" as const,
+                                                             action_id: "quarantine_file",
+                                                           },
+                                                           status: "open" as "open" | "resolved",
+                                                         },
+                                                         {
+                                                           id: "sec-issue-waf-attacks",
+                                                           category: "waf" as const,
+                                                           severity: "warning" as const,
+                                                           title: "Coraza WAF Triggered on Domain client-store.com",
+                                                           title_bn: "ক্লায়েন্ট ডোমেইনে Coraza WAF ব্লকিং ট্রিগার হয়েছে",
+                                                           description: "Multiple SQL Injection (OWASP-942100) payloads detected on /api/search endpoint.",
+                                                           description_bn: "/api/search এন্ডপয়েন্টে একাধিক SQL ইনজেকশন পে-লোড শনাক্ত ও ব্লক করা হয়েছে।",
+                                                           timestamp: new Date(Date.now() - 2 * 3600 * 1000).toISOString(),
+                                                           resource: "client-store.com (WAF Core Ruleset)",
+                                                           fix_action: {
+                                                             label_key: "securityCenter.fixReviewWaf",
+                                                             default_label: "Review WAF Events",
+                                                             type: "link" as const,
+                                                             target_url: "/admin/waf",
+                                                           },
+                                                           status: "open" as "open" | "resolved",
+                                                         },
+                                                         {
+                                                           id: "sec-issue-admins-no-2fa",
+                                                           category: "auth" as const,
+                                                           severity: "warning" as const,
+                                                           title: "Admin Accounts Missing Two-Factor Authentication",
+                                                           title_bn: "অ্যাডমিন অ্যাকাউন্টে টু-ফ্যাক্টর অথেনটিকেশন (2FA) চালু নেই",
+                                                           description: "2 superadmin/operator accounts have not enrolled TOTP or WebAuthn hardware keys.",
+                                                           description_bn: "২ জন অ্যাডমিনের অ্যাকাউন্টে কোনো TOTP বা নিরাপত্তা চাবি কনফিগার করা নেই।",
+                                                           timestamp: new Date(Date.now() - 12 * 3600 * 1000).toISOString(),
+                                                           resource: "admin_user_2, ops_admin",
+                                                           fix_action: {
+                                                             label_key: "securityCenter.fixEnforce2fa",
+                                                             default_label: "Enforce 2FA on Admins",
+                                                             type: "modal_action" as const,
+                                                             action_id: "enforce_2fa",
+                                                           },
+                                                           status: "open" as "open" | "resolved",
+                                                         },
+                                                         {
+                                                           id: "sec-issue-ssl-expiring",
+                                                           category: "ssl" as const,
+                                                           severity: "warning" as const,
+                                                           title: "SSL/TLS Certificate Expiring Soon",
+                                                           title_bn: "SSL/TLS সনদের মেয়াদ দ্রুত শেষ হতে চলেছে",
+                                                           description: "Let's Encrypt certificate for billing.example.com will expire in 3 days.",
+                                                           description_bn: "billing.example.com ডোমেইনের SSL সার্টিফিকেটের মেয়াদ আগামী ৩ দিনের মধ্যে শেষ হবে।",
+                                                           timestamp: new Date(Date.now() - 18 * 3600 * 1000).toISOString(),
+                                                           resource: "billing.example.com",
+                                                           fix_action: {
+                                                             label_key: "securityCenter.fixRenewSsl",
+                                                             default_label: "Renew SSL Certificate",
+                                                             type: "link" as const,
+                                                             target_url: "/ssl",
+                                                           },
+                                                           status: "open" as "open" | "resolved",
+                                                         },
+                                                         {
+                                                           id: "sec-issue-outdated-image",
+                                                           category: "container" as const,
+                                                           severity: "warning" as const,
+                                                           title: "Outdated Base Docker Image with Known CVEs",
+                                                           title_bn: "পরিচিত নিরাপত্তা ত্রুটিসহ পুরনো ডকার ইমেজ শনাক্ত",
+                                                           description: "Container image php:8.2-fpm has 4 high-severity vulnerabilities in libxml2 and curl.",
+                                                           description_bn: "php:8.2-fpm ইমেজে libxml2 ও curl-এ ৪টি হাই-সিভিয়ারিটি CVE পাওয়া গেছে।",
+                                                           timestamp: new Date(Date.now() - 24 * 3600 * 1000).toISOString(),
+                                                           resource: "docker.io/library/php:8.2-fpm",
+                                                           fix_action: {
+                                                             label_key: "securityCenter.fixPullImage",
+                                                             default_label: "Update Container Image",
+                                                             type: "modal_action" as const,
+                                                             action_id: "update_image",
+                                                           },
+                                                           status: "open" as "open" | "resolved",
+                                                         },
+                                                       ],
+                                                     };
+
+                                                     return [
+                                                       // GET /api/v1/admin/security/overview (TODO(api:T11.11))
+                                                       http.get(/\/api\/v1\/admin\/security\/overview$/, () => {
+                                                         return HttpResponse.json(mockSecurityOverview);
+                                                       }),
+
+                                                       // POST /api/v1/admin/security/scan (TODO(api:T11.11))
+                                                       http.post(/\/api\/v1\/admin\/security\/scan$/, () => {
+                                                         return HttpResponse.json(mockSecurityOverview);
+                                                       }),
+
+                                                       // POST /api/v1/admin/security/issues/:id/fix (TODO(api:T11.11))
+                                                       http.post(/\/api\/v1\/admin\/security\/issues\/([^/]+)\/fix$/, ({ params }) => {
+                                                         const id = String(params[0] || params.id);
+                                                         const issue = mockSecurityOverview.issues.find((i) => i.id === id);
+                                                         if (issue) {
+                                                           issue.status = "resolved";
+                                                           mockSecurityOverview.stats.resolved_count += 1;
+                                                           if (issue.severity === "critical") {
+                                                             mockSecurityOverview.stats.critical_count = Math.max(0, mockSecurityOverview.stats.critical_count - 1);
+                                                           } else if (issue.severity === "warning") {
+                                                             mockSecurityOverview.stats.warning_count = Math.max(0, mockSecurityOverview.stats.warning_count - 1);
+                                                           }
+                                                           mockSecurityOverview.stats.score = Math.min(100, mockSecurityOverview.stats.score + 5);
+                                                         }
+                                                         return HttpResponse.json({ success: true, issue });
+                                                       }),
+                                                     ];
+                                                   })(),
                                                 ];
                                               })(),
                                             ];
