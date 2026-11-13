@@ -49,6 +49,7 @@ import {
   AdminServerToolsPage,
   ClientWafPage,
   AdminWafPage,
+  BrandingPage,
   filterNavItems,
   registeredFrontendModules,
 } from "@dhpanel/modules";
@@ -445,6 +446,18 @@ const adminWafRoute = createRoute({
   component: AdminWafPage,
 });
 
+const adminBrandingRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/branding",
+  component: BrandingPage,
+});
+
+const brandingRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/branding",
+  component: BrandingPage,
+});
+
 // 18. Login route
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -512,6 +525,8 @@ const routeTree = rootRoute.addChildren([
   adminServerToolsRoute,
   clientWafRoute,
   adminWafRoute,
+  adminBrandingRoute,
+  brandingRoute,
   loginRoute,
 ]);
 
