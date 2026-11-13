@@ -551,6 +551,15 @@ fn bind_device(dir: &Path, root: &Path) -> Result<String, DockerError> {
         return Err(bad("must be inside the allowed directory"));
     }
     let text = dir.to_str().ok_or_else(|| bad("must be valid UTF-8"))?;
+    // `Path` quietly drops `.` and repeated or trailing slashes when it walks the
+    // components; what Docker receives is the text, so the text must already be
+    // in its plain form.
+    let normal: std::path::PathBuf = dir.components().collect();
+    if normal.to_str() != Some(text) {
+        return Err(bad(
+            "must be written plainly (no `.`, `//` or trailing `/`)",
+        ));
+    }
     if text.chars().any(|c| c.is_control() || c == ',' || c == '=') {
         return Err(bad("contains a character Docker options cannot carry"));
     }

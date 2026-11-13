@@ -180,7 +180,8 @@ mod tests {
         Arc::new(TenantContext {
             helper_socket: "/nonexistent/helper.sock".into(),
             tenants_root: "/nonexistent/tenants".into(),
-            docker: DockerManager::connect(Path::new("/nonexistent/docker.sock")).unwrap(),
+            // Docker is only contacted after the helper, so any existing path will do.
+            docker: DockerManager::connect(Path::new("/")).unwrap(),
         })
     }
 
