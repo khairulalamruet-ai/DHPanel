@@ -31,6 +31,7 @@ import {
   VhostTemplatesPage,
   PhpManagementPage,
   ServicesPage,
+  ErrorPagesPage,
   filterNavItems,
   registeredFrontendModules,
 } from "@dhpanel/modules";
@@ -244,6 +245,13 @@ const servicesRoute = createRoute({
   component: ServicesPage,
 });
 
+// 24. Error & Suspended Pages route (T06.13)
+const errorPagesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/error-pages",
+  component: ErrorPagesPage,
+});
+
 // 18. Login route
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -283,6 +291,7 @@ const routeTree = rootRoute.addChildren([
   vhostRoute,
   phpRoute,
   servicesRoute,
+  errorPagesRoute,
   loginRoute,
 ]);
 

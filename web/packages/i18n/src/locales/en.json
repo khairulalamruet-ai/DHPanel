@@ -1182,5 +1182,55 @@
       "restartFailed": "Failed to restart service",
       "rateLimited": "Too many restart requests. You can restart this service at most 3 times per minute."
     }
+  },
+  "errorPages": {
+    "title": "Error & Suspended Page Templates",
+    "subtitle": "Customize HTML error responses and suspension notices served to visitors across all managed web services.",
+    "nav": "Error & Suspended Pages",
+    "editor": {
+      "htmlSource": "HTML Document Source",
+      "unsavedChanges": "Unsaved Changes",
+      "customized": "Customized",
+      "defaultTemplate": "Default",
+      "availableVariables": "Available Variables",
+      "clickToInsert": "click to copy / insert"
+    },
+    "actions": {
+      "saveTemplate": "Save Template",
+      "resetDefault": "Reset to Default",
+      "confirmReset": "Confirm Reset"
+    },
+    "preview": {
+      "title": "Live Preview",
+      "desktop": "Desktop (100%)",
+      "tablet": "Tablet (768px)",
+      "mobile": "Mobile (375px)",
+      "customizeVars": "Test Variables",
+      "hideVars": "Hide Variables",
+      "previewVariables": "Preview Variables Override",
+      "openExternal": "Open in New Tab",
+      "openTab": "Preview in Tab"
+    },
+    "layout": {
+      "splitView": "Side-by-side split view",
+      "tabbedView": "Tabbed view",
+      "split": "Split View",
+      "tabs": "Tabbed",
+      "editor": "Source Editor",
+      "livePreview": "Live Preview"
+    },
+    "dialog": {
+      "resetTitle": "Reset Template to Default",
+      "resetDescription": "Are you sure you want to revert {{template}} to system default HTML? Any custom styles or text will be permanently lost."
+    },
+    "toast": {
+      "templateSaved": "{{name}} template saved successfully",
+      "templateReset": "{{name}} template reverted to default"
+    },
+    "errors": {
+      "fetchFailed": "Failed to load error page templates",
+      "saveFailed": "Failed to save template changes",
+      "resetFailed": "Failed to reset template to default"
+    }
   }
 }

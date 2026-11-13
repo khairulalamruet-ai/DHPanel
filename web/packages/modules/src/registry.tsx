@@ -364,6 +364,25 @@ export const registeredFrontendModules: FrontendModule[] = [
   },
   {
     manifest: {
+      name: "error-pages",
+      title: { en: "Error & Suspended Pages", bn: "এরর ও সাসপেন্ডেড পেজ" },
+      category: "webserver",
+      core: true,
+      permissions: ["admin.templates.manage"],
+    },
+    adminNav: [
+      {
+        id: "error-pages",
+        labelKey: "errorPages.nav",
+        icon: <FileText className="h-4 w-4" />,
+        href: "/error-pages",
+        order: 37,
+        permission: "admin.templates.manage",
+      },
+    ],
+  },
+  {
+    manifest: {
       name: "php",
       title: { en: "PHP Runtime", bn: "পিএইচপি রানটাইম" },
       category: "webserver",

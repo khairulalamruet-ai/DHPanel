@@ -1613,6 +1613,210 @@ export const resetMockServices = () => {
   };
 };
 
+interface MockPageTemplate {
+  id: string;
+  type: "suspended_domain" | "suspended_user" | "error_404" | "error_502";
+  title: string;
+  description: string;
+  statusCode: number;
+  content: string;
+  defaultContent: string;
+  updatedAt: string;
+  isCustomized: boolean;
+  variables: { name: string; description: string; sample: string }[];
+}
+
+const defaultSuspendedDomainHtml = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Domain Suspended - {{domain}}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: sans-serif; background-color: #0f172a; color: #f8fafc; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 1.5rem; }
+    .card { background: #1e293b; border: 1px solid #334155; border-radius: 1rem; max-width: 540px; width: 100%; padding: 2.5rem; text-align: center; }
+    .badge { display: inline-block; padding: 0.35rem 0.85rem; border-radius: 9999px; font-size: 0.85rem; font-weight: 600; background: #7f1d1d; color: #fecaca; margin-bottom: 1.25rem; }
+    h1 { font-size: 1.75rem; font-weight: 700; color: #f1f5f9; margin-bottom: 0.75rem; }
+    p { color: #94a3b8; font-size: 0.95rem; line-height: 1.6; margin-bottom: 1.5rem; }
+    .domain-box { background: #0f172a; border: 1px solid #334155; border-radius: 0.5rem; padding: 0.85rem; font-family: monospace; color: #38bdf8; font-size: 1rem; margin-bottom: 1.5rem; }
+    .reason-box { background: rgba(239, 68, 68, 0.1); border-left: 3px solid #ef4444; padding: 0.75rem 1rem; text-align: left; border-radius: 0.25rem; color: #fca5a5; font-size: 0.875rem; margin-bottom: 1.75rem; }
+    .btn { display: inline-block; background: #2563eb; color: #ffffff; text-decoration: none; font-weight: 600; padding: 0.75rem 1.5rem; border-radius: 0.5rem; }
+    .footer { margin-top: 2rem; font-size: 0.75rem; color: #64748b; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="badge">Notice</div>
+    <h1>Domain Suspended</h1>
+    <p>This domain name has been suspended and its services are temporarily disabled.</p>
+    <div class="domain-box">{{domain}}</div>
+    <div class="reason-box"><strong>Reason:</strong> {{reason}}</div>
+    <a href="mailto:{{contact_email}}" class="btn">Contact Administrator</a>
+    <div class="footer">&copy; {{year}} {{panel_name}}. All rights reserved.</div>
+  </div>
+</body>
+</html>`;
+
+const defaultSuspendedUserHtml = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Account Suspended</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: sans-serif; background-color: #0f172a; color: #f8fafc; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 1.5rem; }
+    .card { background: #1e293b; border: 1px solid #334155; border-radius: 1rem; max-width: 540px; width: 100%; padding: 2.5rem; text-align: center; }
+    h1 { font-size: 1.75rem; font-weight: 700; color: #f1f5f9; margin-bottom: 0.75rem; }
+    p { color: #94a3b8; font-size: 0.95rem; line-height: 1.6; margin-bottom: 1.5rem; }
+    .btn { display: inline-block; background: #2563eb; color: #ffffff; text-decoration: none; font-weight: 600; padding: 0.75rem 1.5rem; border-radius: 0.5rem; }
+    .footer { margin-top: 2rem; font-size: 0.75rem; color: #64748b; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Account Suspended</h1>
+    <p>The hosting account associated with this site is currently suspended.</p>
+    <a href="mailto:{{contact_email}}" class="btn">Contact Support</a>
+    <div class="footer">&copy; {{year}} {{panel_name}}. All rights reserved.</div>
+  </div>
+</body>
+</html>`;
+
+const defaultError404Html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>404 - Page Not Found</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: sans-serif; background-color: #0b0f19; color: #f3f4f6; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 1.5rem; }
+    .container { text-align: center; max-width: 500px; width: 100%; }
+    .code { font-size: 6rem; font-weight: 900; line-height: 1; color: #38bdf8; margin-bottom: 0.5rem; }
+    h1 { font-size: 1.75rem; font-weight: 700; margin-bottom: 0.75rem; color: #f9fafb; }
+    p { color: #9ca3af; font-size: 1rem; line-height: 1.6; margin-bottom: 1.75rem; }
+    .path-box { display: inline-block; background: #1f2937; border-radius: 0.375rem; padding: 0.35rem 0.75rem; font-family: monospace; color: #e5e7eb; font-size: 0.875rem; margin-bottom: 1.5rem; }
+    .footer { margin-top: 2.5rem; font-size: 0.75rem; color: #4b5563; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="code">404</div>
+    <h1>Page Not Found</h1>
+    <p>The page or resource you requested could not be located on this server.</p>
+    <div class="path-box">{{path}}</div>
+    <div class="footer">&copy; {{year}} {{panel_name}} Web Services</div>
+  </div>
+</body>
+</html>`;
+
+const defaultError502Html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>502 - Bad Gateway</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: sans-serif; background-color: #0b0f19; color: #f3f4f6; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 1.5rem; }
+    .card { background: #111827; border: 1px solid #1f2937; border-radius: 0.75rem; max-width: 580px; width: 100%; padding: 2.5rem; text-align: center; }
+    .code { font-size: 4rem; font-weight: 800; color: #f87171; line-height: 1; margin-bottom: 0.5rem; }
+    h1 { font-size: 1.5rem; font-weight: 700; color: #f9fafb; margin-bottom: 0.75rem; }
+    p { color: #9ca3af; font-size: 0.95rem; line-height: 1.6; margin-bottom: 1.5rem; }
+    .footer { font-size: 0.75rem; color: #6b7280; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="code">502</div>
+    <h1>Bad Gateway</h1>
+    <p>The web server received an invalid response while acting as a gateway or proxy to the upstream PHP application ({{service}}).</p>
+    <div class="footer">&copy; {{year}} {{panel_name}} Web Services</div>
+  </div>
+</body>
+</html>`;
+
+const getInitialPageTemplates = (): MockPageTemplate[] => [
+  {
+    id: "tpl_suspended_domain",
+    type: "suspended_domain",
+    title: "Domain Suspended",
+    description: "Served when a specific domain is suspended by the administrator.",
+    statusCode: 451,
+    content: defaultSuspendedDomainHtml,
+    defaultContent: defaultSuspendedDomainHtml,
+    updatedAt: new Date(Date.now() - 30 * 86400 * 1000).toISOString(),
+    isCustomized: false,
+    variables: [
+      { name: "{{domain}}", description: "Suspended domain name", sample: "example.com" },
+      { name: "{{reason}}", description: "Reason for domain suspension", sample: "Terms of service review" },
+      { name: "{{contact_email}}", description: "Support or admin contact email", sample: "admin@dhpanel.net" },
+      { name: "{{panel_name}}", description: "Platform / branding name", sample: "DHPanel" },
+      { name: "{{year}}", description: "Current calendar year", sample: "2026" },
+    ],
+  },
+  {
+    id: "tpl_suspended_user",
+    type: "suspended_user",
+    title: "Account Suspended",
+    description: "Served for all sites belonging to a suspended tenant user account.",
+    statusCode: 403,
+    content: defaultSuspendedUserHtml,
+    defaultContent: defaultSuspendedUserHtml,
+    updatedAt: new Date(Date.now() - 30 * 86400 * 1000).toISOString(),
+    isCustomized: false,
+    variables: [
+      { name: "{{username}}", description: "Suspended user account name", sample: "tenant_user" },
+      { name: "{{domain}}", description: "Domain name being accessed", sample: "client-site.com" },
+      { name: "{{contact_email}}", description: "Administrative support email", sample: "support@dhpanel.net" },
+      { name: "{{panel_name}}", description: "Platform / branding name", sample: "DHPanel" },
+      { name: "{{year}}", description: "Current calendar year", sample: "2026" },
+    ],
+  },
+  {
+    id: "tpl_error_404",
+    type: "error_404",
+    title: "404 Not Found",
+    description: "Custom 404 page displayed when requested route or file does not exist.",
+    statusCode: 404,
+    content: defaultError404Html,
+    defaultContent: defaultError404Html,
+    updatedAt: new Date(Date.now() - 30 * 86400 * 1000).toISOString(),
+    isCustomized: false,
+    variables: [
+      { name: "{{domain}}", description: "Host domain name", sample: "my-app.net" },
+      { name: "{{path}}", description: "Missing request path", sample: "/old-missing-page" },
+      { name: "{{panel_name}}", description: "Platform / branding name", sample: "DHPanel" },
+      { name: "{{year}}", description: "Current calendar year", sample: "2026" },
+    ],
+  },
+  {
+    id: "tpl_error_502",
+    type: "error_502",
+    title: "502 Bad Gateway",
+    description: "Custom 502 error page displayed when upstream backend or PHP-FPM daemon fails.",
+    statusCode: 502,
+    content: defaultError502Html,
+    defaultContent: defaultError502Html,
+    updatedAt: new Date(Date.now() - 30 * 86400 * 1000).toISOString(),
+    isCustomized: false,
+    variables: [
+      { name: "{{domain}}", description: "Host domain name", sample: "api-server.org" },
+      { name: "{{service}}", description: "Failing upstream daemon name", sample: "php-fpm-8.3" },
+      { name: "{{panel_name}}", description: "Platform / branding name", sample: "DHPanel" },
+      { name: "{{year}}", description: "Current calendar year", sample: "2026" },
+    ],
+  },
+];
+
+let mockPageTemplates = getInitialPageTemplates();
+
+export const resetMockPageTemplates = () => {
+  mockPageTemplates = getInitialPageTemplates();
+};
+
 
 const mockMe = {
   id: "00000000-0000-0000-0000-000000000001",
@@ -4083,5 +4287,60 @@ export const handlers = [
         restarts_count_this_minute: recent.length,
       },
     });
+  }),
+
+  // Error & Suspended Page Templates: List all (GET /api/v1/admin/templates/pages)
+  // TODO(api:T06.13): Replace with real backend error page templates endpoint
+  http.get(/\/api\/v1\/admin\/templates\/pages$/, () => {
+    return HttpResponse.json({
+      items: mockPageTemplates,
+      total: mockPageTemplates.length,
+    });
+  }),
+
+  // Error & Suspended Page Templates: Get single (GET /api/v1/admin/templates/pages/:type)
+  // TODO(api:T06.13): Replace with real backend template detail endpoint
+  http.get(/\/api\/v1\/admin\/templates\/pages\/([^/]+)$/, ({ params }) => {
+    const type = (params.type || params[0]) as string;
+    const tpl = mockPageTemplates.find((t) => t.type === type || t.id === type);
+    if (!tpl) {
+      return HttpResponse.json({ message: "Page template not found" }, { status: 404 });
+    }
+    return HttpResponse.json(tpl);
+  }),
+
+  // Error & Suspended Page Templates: Update template (PUT /api/v1/admin/templates/pages/:type)
+  // TODO(api:T06.13): Replace with real backend template update endpoint
+  http.put(/\/api\/v1\/admin\/templates\/pages\/([^/]+)$/, async ({ params, request }) => {
+    const type = (params.type || params[0]) as string;
+    const tpl = mockPageTemplates.find((t) => t.type === type || t.id === type);
+    if (!tpl) {
+      return HttpResponse.json({ message: "Page template not found" }, { status: 404 });
+    }
+
+    const body = (await request.json()) as { content?: string };
+    if (typeof body.content === "string") {
+      tpl.content = body.content;
+      tpl.isCustomized = true;
+      tpl.updatedAt = new Date().toISOString();
+    }
+
+    return HttpResponse.json(tpl);
+  }),
+
+  // Error & Suspended Page Templates: Reset template (POST /api/v1/admin/templates/pages/:type/reset)
+  // TODO(api:T06.13): Replace with real backend template reset endpoint
+  http.post(/\/api\/v1\/admin\/templates\/pages\/([^/]+)\/reset$/, ({ params }) => {
+    const type = (params.type || params[0]) as string;
+    const tpl = mockPageTemplates.find((t) => t.type === type || t.id === type);
+    if (!tpl) {
+      return HttpResponse.json({ message: "Page template not found" }, { status: 404 });
+    }
+
+    tpl.content = tpl.defaultContent;
+    tpl.isCustomized = false;
+    tpl.updatedAt = new Date().toISOString();
+
+    return HttpResponse.json(tpl);
   }),
 ];
