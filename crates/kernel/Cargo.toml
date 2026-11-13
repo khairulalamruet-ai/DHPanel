@@ -9,3 +9,9 @@ publish.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+thiserror = "2.0.21"
+# Module manifests (`module.toml`) are TOML.
+toml = "1"
