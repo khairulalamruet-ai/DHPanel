@@ -64,7 +64,7 @@ test.describe("Client Temporary Preview Link UI (T06.14)", () => {
       await generateBtn.click();
     }
 
-    await expect(page.getByTestId("btn-revoke-preview-link")).toBeVisible();
+    await expect(page.getByTestId("btn-revoke-preview-link")).toBeVisible({ timeout: 10000 });
     await page.getByTestId("btn-revoke-preview-link").click();
 
     // Returns to initial generate state

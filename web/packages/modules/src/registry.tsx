@@ -1,5 +1,5 @@
 import React from "react";
-import { LayoutDashboard, ShieldCheck, Sparkles, Puzzle, Globe, Users, Settings, FileText, Boxes, Server, Activity, Layers, Lock, FileCode2, Cpu, Database } from "lucide-react";
+import { LayoutDashboard, ShieldCheck, Sparkles, Puzzle, Globe, Users, Settings, FileText, Boxes, Server, Activity, Layers, Lock, FileCode2, Cpu, Database, Folder } from "lucide-react";
 
 export interface ModuleManifest {
   name: string;
@@ -471,6 +471,27 @@ export const registeredFrontendModules: FrontendModule[] = [
         href: "/admin/databases",
         order: 29,
         permission: "databases.read",
+      },
+    ],
+  },
+  {
+    manifest: {
+      name: "files",
+      title: { en: "File Manager", bn: "ফাইল ম্যানেজার" },
+      category: "files",
+      core: true,
+      permissions: ["files.read", "files.manage"],
+      features: ["files"],
+    },
+    clientNav: [
+      {
+        id: "files",
+        labelKey: "files.nav",
+        icon: <Folder className="h-4 w-4" />,
+        href: "/files",
+        order: 26,
+        permission: "files.read",
+        feature: "files",
       },
     ],
   },

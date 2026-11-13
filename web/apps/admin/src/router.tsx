@@ -34,6 +34,7 @@ import {
   ErrorPagesPage,
   ClientDatabasesPage,
   AdminDatabasesPage,
+  FileManagerPage,
   filterNavItems,
   registeredFrontendModules,
 } from "@dhpanel/modules";
@@ -274,6 +275,19 @@ const adminDatabasesRoute = createRoute({
   component: AdminDatabasesPage,
 });
 
+// 27. File Manager route (T08.09)
+const clientFilesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/client/files",
+  component: FileManagerPage,
+});
+
+const filesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/files",
+  component: FileManagerPage,
+});
+
 // 18. Login route
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -317,6 +331,8 @@ const routeTree = rootRoute.addChildren([
   clientDatabasesRoute,
   databasesRoute,
   adminDatabasesRoute,
+  clientFilesRoute,
+  filesRoute,
   loginRoute,
 ]);
 
