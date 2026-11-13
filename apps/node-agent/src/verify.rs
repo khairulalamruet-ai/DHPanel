@@ -281,6 +281,7 @@ mod tests {
                 not_before: String::new(),
                 not_after: String::new(),
                 protocol_version: 1,
+                stream_url: None,
             }
         }
 
@@ -351,6 +352,7 @@ mod tests {
             not_before: String::new(),
             not_after: String::new(),
             protocol_version: 1,
+            stream_url: None,
         };
         let v = verify_enrollment(
             &response,

@@ -70,6 +70,7 @@ fn env(pool: &PgPool, with_ca: bool) -> Env {
             db: pool.clone(),
             sessions: sessions.clone(),
             public_url: Some(Arc::from("https://panel.example.com:8443")),
+            stream_url: None,
             token_ttl: Duration::from_secs(900),
             ca: ca.clone(),
             limiter,

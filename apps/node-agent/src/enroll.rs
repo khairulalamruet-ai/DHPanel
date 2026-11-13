@@ -283,6 +283,10 @@ pub fn enroll(options: &Options) -> Result<Enrolled, EnrollError> {
             .unwrap_or_default(),
         certificate_not_after: verified.not_after,
         protocol_version: answer.protocol_version,
+        stream_url: answer
+            .stream_url
+            .clone()
+            .filter(|url| crate::stream::valid_stream_url(url)),
     };
     state.save(
         &Material {

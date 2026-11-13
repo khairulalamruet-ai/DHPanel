@@ -9,6 +9,7 @@
 
 pub mod enroll;
 pub mod identity;
+pub mod stream;
 pub mod verify;
 
 /// Version of this agent build, reported to the control plane.

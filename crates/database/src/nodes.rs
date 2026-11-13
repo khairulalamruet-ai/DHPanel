@@ -94,3 +94,185 @@ pub async fn insert_node_certificate(
     .await?;
     Ok(())
 }
+
+// ------------------------------------------------------------------ sessions
+
+/// A node whose certificate may open a session.
+#[derive(Debug, Clone)]
+pub struct SessionNode {
+    /// Node id.
+    pub id: Uuid,
+    /// Node name.
+    pub name: String,
+}
+
+/// Finds the node a presented certificate belongs to, if the certificate may
+/// still be used: known to the CA, not revoked, inside its validity window, and
+/// the node itself not revoked. The fingerprint is the SHA-256 of the DER
+/// certificate (64 lowercase hex digits).
+///
+/// # Errors
+/// Database errors.
+pub async fn node_for_certificate(
+    pool: &sqlx::PgPool,
+    fingerprint_sha256: &str,
+) -> Result<Option<SessionNode>, sqlx::Error> {
+    let row = sqlx::query!(
+        r#"SELECT n.id, n.name
+           FROM node_certificates c
+           JOIN nodes n ON n.id = c.node_id
+           WHERE c.fingerprint_sha256 = $1
+             AND c.revoked_at IS NULL
+             AND c.not_before <= now()
+             AND c.not_after > now()
+             AND n.status <> 'revoked'"#,
+        fingerprint_sha256,
+    )
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(|r| SessionNode {
+        id: r.id,
+        name: r.name,
+    }))
+}
+
+/// Records that the node's agent connected. A draining node stays draining.
+/// `ip` is the address the connection came from, as text.
+///
+/// # Errors
+/// Database errors.
+pub async fn mark_online(
+    pool: &sqlx::PgPool,
+    id: Uuid,
+    agent_version: &str,
+    ip: Option<&str>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        r#"UPDATE nodes
+           SET status = CASE WHEN status = 'draining' THEN status ELSE 'online' END,
+               last_seen_at = now(),
+               agent_version = left($2, 64),
+               public_ip = COALESCE($3::text::inet, public_ip)
+           WHERE id = $1 AND status <> 'revoked'"#,
+        id,
+        agent_version,
+        ip,
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Heartbeat: the agent answered recently.
+///
+/// # Errors
+/// Database errors.
+pub async fn touch_seen(pool: &sqlx::PgPool, id: Uuid) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        "UPDATE nodes SET last_seen_at = now() WHERE id = $1 AND status IN ('online', 'draining')",
+        id,
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// The session ended.
+///
+/// # Errors
+/// Database errors.
+pub async fn mark_offline(pool: &sqlx::PgPool, id: Uuid) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        "UPDATE nodes SET status = 'offline' WHERE id = $1 AND status = 'online'",
+        id,
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Marks `online` nodes that have not been heard from for `silent_secs` as
+/// `offline`; catches sessions lost without a goodbye, and nodes left `online`
+/// by a control plane that was stopped. Returns how many changed.
+///
+/// # Errors
+/// Database errors.
+pub async fn mark_silent_offline(
+    pool: &sqlx::PgPool,
+    silent_secs: i32,
+) -> Result<u64, sqlx::Error> {
+    let done = sqlx::query!(
+        r#"UPDATE nodes SET status = 'offline'
+           WHERE status = 'online'
+             AND (last_seen_at IS NULL OR last_seen_at < now() - make_interval(secs => $1::int))"#,
+        silent_secs,
+    )
+    .execute(pool)
+    .await?;
+    Ok(done.rows_affected())
+}
+
+// ------------------------------------------------------------------- listing
+
+/// A node as shown in the admin list.
+#[derive(Debug, Clone)]
+pub struct NodeSummary {
+    /// Node id.
+    pub id: Uuid,
+    /// Node name.
+    pub name: String,
+    /// Host name the agent reported.
+    pub hostname: Option<String>,
+    /// Address the agent last connected from.
+    pub public_ip: Option<String>,
+    /// `online`, `offline`, `draining` or `revoked`. A node stored as `online`
+    /// whose last heartbeat is older than the liveness window shows `offline`,
+    /// even before the background sweep has caught up.
+    pub status: String,
+    /// Agent build version.
+    pub agent_version: Option<String>,
+    /// Last heartbeat (Unix seconds).
+    pub last_seen_at: Option<i64>,
+    /// Enrollment time (Unix seconds).
+    pub created_at: i64,
+}
+
+/// The newest `limit` nodes. `liveness_secs` is how long a heartbeat counts as
+/// recent.
+///
+/// # Errors
+/// Database errors.
+pub async fn list_nodes(
+    pool: &sqlx::PgPool,
+    limit: i64,
+    liveness_secs: i32,
+) -> Result<Vec<NodeSummary>, sqlx::Error> {
+    let rows = sqlx::query!(
+        r#"SELECT id, name, hostname, host(public_ip) AS public_ip, agent_version,
+                  CASE WHEN status = 'online'
+                        AND (last_seen_at IS NULL OR last_seen_at < now() - make_interval(secs => $2::int))
+                       THEN 'offline' ELSE status END AS "status!",
+                  extract(epoch FROM last_seen_at)::bigint AS last_seen_at,
+                  extract(epoch FROM created_at)::bigint AS "created_at!"
+           FROM nodes
+           ORDER BY created_at DESC, id DESC
+           LIMIT $1"#,
+        limit,
+        liveness_secs,
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| NodeSummary {
+            id: r.id,
+            name: r.name,
+            hostname: r.hostname,
+            public_ip: r.public_ip,
+            status: r.status,
+            agent_version: r.agent_version,
+            last_seen_at: r.last_seen_at,
+            created_at: r.created_at,
+        })
+        .collect())
+}

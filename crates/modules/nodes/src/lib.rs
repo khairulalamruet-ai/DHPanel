@@ -2,6 +2,7 @@
 //!
 //! | Method | Path | Needs |
 //! |---|---|---|
+//! | GET    | `/api/v1/admin/nodes` | `admin.nodes.read` |
 //! | POST   | `/api/v1/admin/nodes` | `admin.nodes.manage`, sudo mode |
 //! | GET    | `/api/v1/admin/nodes/enrollments` | `admin.nodes.read` |
 //! | DELETE | `/api/v1/admin/nodes/enrollments/{id}` | `admin.nodes.manage`, sudo mode |
@@ -37,6 +38,7 @@ use dhpanel_cache::{
 };
 use dhpanel_database::{
     node_enrollments::{self, EnrollmentToken, RevokeOutcome},
+    nodes::{self, NodeSummary},
     sqlx::PgPool,
 };
 use dhpanel_http_kit::{AppError, FieldError, ProblemDetails};
@@ -64,6 +66,9 @@ pub struct NodesState {
     /// How agents reach the control plane (`agent.public_url`); used for the
     /// enrol command. Validated at startup to be safe in a shell command.
     pub public_url: Option<Arc<str>>,
+    /// Where agents open their long-lived connection (`agent.stream_url`);
+    /// handed to a node when it enrols. `None` while the agent port is off.
+    pub stream_url: Option<Arc<str>>,
     /// How long a new token stays valid.
     pub token_ttl: Duration,
     /// The node CA. Without it enrollment answers 503 `enrollment_unavailable`.
@@ -113,7 +118,7 @@ pub fn router() -> Router<NodesState> {
     Router::new()
         .route(
             "/api/v1/admin/nodes",
-            axum::routing::post(create_enrollment),
+            get(list_nodes).post(create_enrollment),
         )
         .route("/api/v1/admin/nodes/enrollments", get(list_enrollments))
         .route(
@@ -201,6 +206,53 @@ impl From<EnrollmentToken> for EnrollmentView {
 pub struct EnrollmentList {
     /// Newest first (at most 100).
     pub items: Vec<EnrollmentView>,
+}
+
+/// A node as listed.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct NodeView {
+    /// Node id.
+    pub id: Uuid,
+    /// Node name.
+    pub name: String,
+    /// Host name the agent reported.
+    pub hostname: Option<String>,
+    /// Address the agent last connected from.
+    pub public_ip: Option<String>,
+    /// `online`, `offline`, `draining` or `revoked`. `online` means the agent
+    /// answered a heartbeat within the last 45 seconds.
+    #[schema(example = "online")]
+    pub status: String,
+    /// Agent build version.
+    pub agent_version: Option<String>,
+    /// Last heartbeat (RFC 3339, UTC).
+    #[schema(format = DateTime)]
+    pub last_seen_at: Option<String>,
+    /// Enrollment time (RFC 3339, UTC).
+    #[schema(format = DateTime)]
+    pub created_at: String,
+}
+
+impl From<NodeSummary> for NodeView {
+    fn from(n: NodeSummary) -> Self {
+        Self {
+            id: n.id,
+            name: n.name,
+            hostname: n.hostname,
+            public_ip: n.public_ip,
+            status: n.status,
+            agent_version: n.agent_version,
+            last_seen_at: n.last_seen_at.map(rfc3339),
+            created_at: rfc3339(n.created_at),
+        }
+    }
+}
+
+/// The nodes.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct NodeList {
+    /// Newest first (at most 100).
+    pub items: Vec<NodeView>,
 }
 
 fn internal(err: impl Into<Box<dyn std::error::Error + Send + Sync + 'static>>) -> AppError {
@@ -299,6 +351,32 @@ pub async fn create_enrollment(
     Ok(response)
 }
 
+/// List the enrolled nodes with their live status.
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/nodes",
+    tag = "nodes",
+    operation_id = "listNodes",
+    security(("session" = [])),
+    responses(
+        (status = 200, description = "Nodes, newest first", body = NodeList),
+        (status = 403, description = "`permission_denied` (needs admin.nodes.read) or `mfa_setup_required`", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+pub async fn list_nodes(
+    State(state): State<NodesState>,
+    _who: Require<NodesRead>,
+) -> Result<Json<NodeList>, AppError> {
+    let liveness = i32::try_from(dhpanel_node_protocol::LIVENESS_TIMEOUT_SECS).unwrap_or(45);
+    let items = nodes::list_nodes(&state.db, LIST_LIMIT, liveness)
+        .await
+        .map_err(internal)?
+        .into_iter()
+        .map(NodeView::from)
+        .collect();
+    Ok(Json(NodeList { items }))
+}
+
 /// List recent enrollment tokens (never the tokens themselves).
 #[utoipa::path(
     get,
@@ -379,9 +457,9 @@ pub async fn revoke_enrollment(
 /// OpenAPI fragment (full paths; merge into the root document).
 #[derive(OpenApi)]
 #[openapi(
-    paths(create_enrollment, list_enrollments, revoke_enrollment, enroll::enroll_node),
+    paths(list_nodes, create_enrollment, list_enrollments, revoke_enrollment, enroll::enroll_node),
     components(schemas(
-        CreateEnrollment, CreatedEnrollment, EnrollmentView, EnrollmentList,
+        CreateEnrollment, CreatedEnrollment, EnrollmentView, EnrollmentList, NodeView, NodeList,
         enroll::EnrollRequest, enroll::EnrollResponse
     )),
     tags((name = "nodes", description = "Add and manage servers (nodes)"))

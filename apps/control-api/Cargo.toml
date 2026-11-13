@@ -29,6 +29,7 @@ dhpanel-http-kit.workspace = true
 dhpanel-mod-admin.workspace = true
 dhpanel-mod-auth.workspace = true
 dhpanel-mod-nodes.workspace = true
+dhpanel-node-gateway.workspace = true
 dhpanel-observability.workspace = true
 dhpanel-pki.workspace = true
 dhpanel-session.workspace = true

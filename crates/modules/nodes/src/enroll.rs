@@ -282,6 +282,7 @@ pub async fn enroll_node(
         not_before: format_rfc3339(issued.not_before),
         not_after: format_rfc3339(issued.not_after),
         protocol_version: PROTOCOL_VERSION,
+        stream_url: state.stream_url.as_deref().map(str::to_owned),
     };
     let mut response = (StatusCode::CREATED, Json(body)).into_response();
     response

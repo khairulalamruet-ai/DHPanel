@@ -1,0 +1,24 @@
+[package]
+name = "dhpanel-node-gateway"
+description = "The control plane's agent port: mutual-TLS WebSocket sessions with node agents."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+dhpanel-database.workspace = true
+dhpanel-node-protocol.workspace = true
+rustls.workspace = true
+tokio-rustls.workspace = true
+tokio-tungstenite.workspace = true
+futures-util.workspace = true
+sha2 = "0.11"
+thiserror = "2.0.21"
+tokio = { version = "1", features = ["macros", "rt", "net", "time", "sync"] }
+tracing = "0.1.44"
+uuid = { version = "1", features = ["serde"] }

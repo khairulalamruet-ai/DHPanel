@@ -78,3 +78,8 @@ ca_dir = "/etc/dhpanel/secrets"
 # public_url = "https://panel.example.com:8443"
 # How long a new node's enrollment token stays valid, in minutes (1..=60).
 enrollment_token_minutes = 15
+# The agent port: agents connect here with their node certificate (mutual TLS,
+# TLS 1.3). Needs server.crt and server.key next to the CA (`dhctl ca issue-server
+# --out <pki.ca_dir>`). Set both or neither. Open this port to your nodes only.
+# stream_listen = "0.0.0.0:8444"
+# stream_url = "https://panel.example.com:8444"

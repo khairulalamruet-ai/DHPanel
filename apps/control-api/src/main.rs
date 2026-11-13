@@ -173,10 +173,51 @@ async fn main() -> ExitCode {
             return ExitCode::from(EXIT_CONFIG);
         }
     };
+    // The agent port: mutual TLS, only with a CA and a server certificate.
+    let gateway = match (config.agent.stream_listen, &ca) {
+        (None, _) => None,
+        (Some(_), None) => {
+            tracing::error!(
+                "agent.stream_listen is set but there is no node CA: run `dhctl ca init`"
+            );
+            telemetry.shutdown();
+            return ExitCode::from(EXIT_CONFIG);
+        }
+        (Some(addr), Some(ca)) => {
+            let tls = match dhpanel_node_gateway::tls::load_server_config(
+                ca.certificate_pem(),
+                &config.pki.ca_dir,
+            ) {
+                Ok(tls) => tls,
+                Err(err) => {
+                    tracing::error!(error = %err, "agent port TLS unusable: create the server certificate with `dhctl ca issue-server`");
+                    telemetry.shutdown();
+                    return ExitCode::from(EXIT_CONFIG);
+                }
+            };
+            let listener = match dhpanel_node_gateway::bind(addr).await {
+                Ok(l) => l,
+                Err(err) => {
+                    tracing::error!(%addr, error = %err, "failed to bind the agent port");
+                    return ExitCode::FAILURE;
+                }
+            };
+            tracing::info!(%addr, "agent port listening (mutual TLS)");
+            Some((
+                dhpanel_node_gateway::Gateway::new(
+                    db.clone(),
+                    tls,
+                    dhpanel_node_gateway::Settings::default(),
+                ),
+                listener,
+            ))
+        }
+    };
     let nodes = dhpanel_mod_nodes::NodesState {
         db: db.clone(),
         sessions: sessions.clone(),
         public_url: config.agent.public_url.as_deref().map(Into::into),
+        stream_url: config.agent.stream_url.as_deref().map(Into::into),
         token_ttl: std::time::Duration::from_secs(
             u64::from(config.agent.enrollment_token_minutes) * 60,
         ),
@@ -217,6 +258,15 @@ async fn main() -> ExitCode {
         Some(nodes),
     );
 
+    // One signal stops the API and the agent port.
+    let (stop, stopped) = tokio::sync::watch::channel(false);
+    tokio::spawn(async move {
+        shutdown_signal().await;
+        let _ = stop.send(true);
+    });
+    let gateway_task =
+        gateway.map(|(gateway, listener)| tokio::spawn(gateway.serve(listener, stopped.clone())));
+
     let addr = config.listen;
     let listener = match tokio::net::TcpListener::bind(addr).await {
         Ok(l) => l,
@@ -232,8 +282,16 @@ async fn main() -> ExitCode {
         listener,
         app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
     )
-    .with_graceful_shutdown(shutdown_signal())
+    .with_graceful_shutdown({
+        let mut stopped = stopped.clone();
+        async move {
+            let _ = stopped.wait_for(|stop| *stop).await;
+        }
+    })
     .await;
+    if let Some(task) = gateway_task {
+        let _ = task.await;
+    }
 
     db.close().await;
     telemetry.shutdown();

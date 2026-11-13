@@ -32,6 +32,20 @@ pub const MAX_ENVELOPE_LIFETIME_SECS: i64 = 3600;
 /// How far in the future `issued_at` may be before the agent distrusts it.
 pub const MAX_CLOCK_SKEW_SECS: i64 = 300;
 
+/// How often the control plane pings an agent, in seconds. The agent answers
+/// with a pong; a ping also tells the agent the control plane is alive.
+pub const HEARTBEAT_INTERVAL_SECS: u64 = 15;
+/// A session that has sent nothing (no pong, no message) for this long (three
+/// missed pings) is dead: the control plane closes it and the node shows as
+/// offline. The check runs on each ping tick, so a node that vanishes without a
+/// goodbye is offline within this plus one interval: at most 60 seconds.
+pub const LIVENESS_TIMEOUT_SECS: u64 = 45;
+/// An agent that has heard nothing from the control plane for this long
+/// (three missed pings) drops the connection and reconnects.
+pub const AGENT_SILENCE_TIMEOUT_SECS: u64 = 45;
+/// Path of the agent port's WebSocket endpoint (the only one it serves).
+pub const STREAM_PATH: &str = "/agent/v1/stream";
+
 /// The protocol version to speak with a peer announcing `peer`, or `None`
 /// when the peer is too old.
 #[must_use]
@@ -392,6 +406,10 @@ pub struct EnrollResponse {
     pub not_after: String,
     /// Protocol version the control plane speaks.
     pub protocol_version: u16,
+    /// Where the agent opens its long-lived mutual-TLS connection
+    /// (`https://host:port`), when the control plane has the agent port switched on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stream_url: Option<String>,
 }
 
 // ----------------------------------------------------------------- framing
@@ -716,6 +734,7 @@ mod tests {
             not_before: "2026-01-01T00:00:00Z".into(),
             not_after: "2026-04-01T00:00:00Z".into(),
             protocol_version: 1,
+            stream_url: None,
         };
         let json = serde_json::to_string(&response).unwrap();
         assert_eq!(
@@ -723,6 +742,17 @@ mod tests {
             format!(
                 r#"{{"node_id":"{ID}","name":"n1","certificate_pem":"cert","ca_certificate_pem":"ca","ca_fingerprint_sha256":"ab","not_before":"2026-01-01T00:00:00Z","not_after":"2026-04-01T00:00:00Z","protocol_version":1}}"#
             )
+        );
+        // An older control plane omits the field; it reads back as absent.
+        let with_url = EnrollResponse {
+            stream_url: Some("https://panel.example.com:8444".into()),
+            ..response.clone()
+        };
+        let json_with_url = serde_json::to_string(&with_url).unwrap();
+        assert!(json_with_url.ends_with(r#""stream_url":"https://panel.example.com:8444"}"#));
+        assert_eq!(
+            serde_json::from_str::<EnrollResponse>(&json_with_url).unwrap(),
+            with_url
         );
         assert_eq!(
             serde_json::from_str::<EnrollResponse>(&json).unwrap(),

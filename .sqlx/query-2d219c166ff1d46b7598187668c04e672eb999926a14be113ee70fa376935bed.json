@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE nodes\n           SET status = CASE WHEN status = 'draining' THEN status ELSE 'online' END,\n               last_seen_at = now(),\n               agent_version = left($2, 64),\n               public_ip = COALESCE($3::text::inet, public_ip)\n           WHERE id = $1 AND status <> 'revoked'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2d219c166ff1d46b7598187668c04e672eb999926a14be113ee70fa376935bed"
+}

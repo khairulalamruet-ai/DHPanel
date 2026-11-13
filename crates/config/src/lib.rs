@@ -74,6 +74,15 @@ pub struct AgentConfig {
     pub public_url: Option<String>,
     /// Minutes an enrollment token stays valid (1..=60).
     pub enrollment_token_minutes: u32,
+    /// Address the agent port (mutual TLS, WebSocket) listens on, e.g.
+    /// `0.0.0.0:8444`. Without it the port is off and agents cannot connect.
+    /// Needs the node CA and `server.crt`/`server.key` in `pki.ca_dir`
+    /// (`dhctl ca issue-server`).
+    pub stream_listen: Option<std::net::SocketAddr>,
+    /// Address agents use to reach the agent port, e.g.
+    /// `https://panel.example.com:8444`; handed to a node when it enrols and
+    /// must match a name in the server certificate. `https` only.
+    pub stream_url: Option<String>,
 }
 
 /// Whether `url` is safe to paste into a shell command and points where agents
@@ -228,6 +237,8 @@ impl Default for ControlConfig {
             agent: AgentConfig {
                 public_url: None,
                 enrollment_token_minutes: 15,
+                stream_listen: None,
+                stream_url: None,
             },
             pki: PkiConfig {
                 ca_dir: PathBuf::from("/etc/dhpanel/secrets"),
@@ -409,6 +420,21 @@ impl ControlConfig {
             return Err(ConfigError::Invalid {
                 key: "agent.public_url",
                 reason: "must be https://host[:port] (http only for localhost) without a trailing slash, query or special characters".to_owned(),
+            });
+        }
+        if let Some(url) = &self.agent.stream_url
+            && !(url.starts_with("https://") && valid_agent_url(url))
+        {
+            return Err(ConfigError::Invalid {
+                key: "agent.stream_url",
+                reason: "must be https://host[:port] without a trailing slash, query or special characters".to_owned(),
+            });
+        }
+        if self.agent.stream_listen.is_some() != self.agent.stream_url.is_some() {
+            return Err(ConfigError::Invalid {
+                key: "agent.stream_url",
+                reason: "agent.stream_listen and agent.stream_url go together: set both or neither"
+                    .to_owned(),
             });
         }
         let issuer = self.auth.totp_issuer.trim();

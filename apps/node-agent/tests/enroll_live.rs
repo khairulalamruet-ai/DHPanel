@@ -59,6 +59,7 @@ async fn control_plane(pool: &PgPool) -> Control {
         db: pool.clone(),
         sessions: SessionStore::new(redis.clone(), pool.clone(), SessionConfig::default()),
         public_url: None,
+        stream_url: None,
         token_ttl: Duration::from_secs(900),
         ca: Some(ca.clone()),
         limiter: FailureLimiter::new(

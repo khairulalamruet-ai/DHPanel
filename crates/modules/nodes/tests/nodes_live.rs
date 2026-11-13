@@ -52,6 +52,7 @@ fn env(pool: &PgPool, public_url: Option<&str>, sudo_secs: u64) -> Env {
             db: pool.clone(),
             sessions: sessions.clone(),
             public_url: public_url.map(Arc::from),
+            stream_url: None,
             token_ttl: Duration::from_secs(900),
             ca: None,
             limiter: dhpanel_mod_nodes::enrollment_limiter(redis_for_limiter),
@@ -476,4 +477,64 @@ async fn creating_and_cancelling_are_audited_without_the_token(pool: PgPool) {
         (actor, target),
         (Some(root), format!("node_enrollment:{id}"))
     );
+}
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn the_node_list_shows_live_status_to_readers_only(pool: PgPool) {
+    let e = env(&pool, None, 600);
+    let root = account(&pool, "rootuser", &["super_admin"]).await;
+    let nobody = account(&pool, "norole", &[]).await;
+    for (name, status, silent_secs) in [
+        ("fresh-online", "online", 0_i32),
+        ("stale-online", "online", 300),
+        ("quiet", "offline", 86_400),
+    ] {
+        sqlx::query(
+            "INSERT INTO nodes (name, status, last_seen_at, hostname, agent_version, public_ip)
+             VALUES ($1, $2, now() - make_interval(secs => $3), 'box', '0.1.0', '203.0.113.9')",
+        )
+        .bind(name)
+        .bind(status)
+        .bind(silent_secs)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    let (status, _, _) = e.call(None, "GET", BASE, None, false).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let n = e.sign_in(nobody).await;
+    let (status, body, _) = e.call(Some(&n), "GET", BASE, None, false).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::FORBIDDEN, "permission_denied")
+    );
+
+    let r = e.sign_in(root).await;
+    let (status, body, _) = e.call(Some(&r), "GET", BASE, None, false).await;
+    assert_eq!(status, StatusCode::OK);
+    let by_name = |name: &str| {
+        body["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|n| n["name"] == name)
+            .unwrap_or_else(|| panic!("{name} missing"))
+            .clone()
+    };
+    assert_eq!(by_name("fresh-online")["status"], "online");
+    assert_eq!(
+        by_name("stale-online")["status"],
+        "offline",
+        "no heartbeat for minutes is not online, whatever the stored value says"
+    );
+    assert_eq!(by_name("quiet")["status"], "offline");
+    let fresh = by_name("fresh-online");
+    assert_eq!(fresh["public_ip"], "203.0.113.9");
+    assert_eq!(fresh["agent_version"], "0.1.0");
+    assert!(fresh["last_seen_at"].as_str().unwrap().ends_with('Z'));
+    // Nothing secret about a node is listed.
+    let text = body.to_string();
+    assert!(!text.contains("capabilities") && !text.contains("fingerprint"));
 }

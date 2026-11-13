@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE nodes SET last_seen_at = now() WHERE id = $1 AND status IN ('online', 'draining')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6e1cb8679876e93979b10ab0117a8c2940043ea2258bd21763713bee1a342d10"
+}

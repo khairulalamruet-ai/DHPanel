@@ -814,6 +814,40 @@
       }
     },
     "/api/v1/admin/nodes": {
+      "get": {
+        "tags": [
+          "nodes"
+        ],
+        "summary": "List the enrolled nodes with their live status.",
+        "operationId": "listNodes",
+        "responses": {
+          "200": {
+            "description": "Nodes, newest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeList"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied` (needs admin.nodes.read) or `mfa_setup_required`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
       "post": {
         "tags": [
           "nodes"
@@ -2302,6 +2336,13 @@
             "format": "int32",
             "description": "Protocol version the control plane speaks.",
             "minimum": 0
+          },
+          "stream_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where the agent opens its long-lived mutual-TLS connection\n(`https://host:port`), when the control plane has the agent port switched on."
           }
         }
       },
@@ -2559,6 +2600,82 @@
           "totp_enabled": {
             "type": "boolean",
             "description": "TOTP is enabled (enrolment confirmed)."
+          }
+        }
+      },
+      "NodeList": {
+        "type": "object",
+        "description": "The nodes.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NodeView"
+            },
+            "description": "Newest first (at most 100)."
+          }
+        }
+      },
+      "NodeView": {
+        "type": "object",
+        "description": "A node as listed.",
+        "required": [
+          "id",
+          "name",
+          "status",
+          "created_at"
+        ],
+        "properties": {
+          "agent_version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Agent build version."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Enrollment time (RFC 3339, UTC)."
+          },
+          "hostname": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Host name the agent reported."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Node id."
+          },
+          "last_seen_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Last heartbeat (RFC 3339, UTC)."
+          },
+          "name": {
+            "type": "string",
+            "description": "Node name."
+          },
+          "public_ip": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Address the agent last connected from."
+          },
+          "status": {
+            "type": "string",
+            "description": "`online`, `offline`, `draining` or `revoked`. `online` means the agent\nanswered a heartbeat within the last 45 seconds.",
+            "example": "online"
           }
         }
       },

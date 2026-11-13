@@ -50,6 +50,10 @@ pub struct Identity {
     pub certificate_not_after: i64,
     /// Protocol version announced at enrolment.
     pub protocol_version: u16,
+    /// Where the agent opens its long-lived connection (`https://host:port`).
+    /// Absent when the control plane did not say; `run --stream-url` supplies it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stream_url: Option<String>,
 }
 
 /// What enrolment hands to [`StateDir::save`].
@@ -334,6 +338,7 @@ mod tests {
             enrolled_at: "2026-11-12T10:00:00Z".into(),
             certificate_not_after: 1_800_000_000,
             protocol_version: 1,
+            stream_url: Some("https://panel.example.com:8444".into()),
         }
     }
 

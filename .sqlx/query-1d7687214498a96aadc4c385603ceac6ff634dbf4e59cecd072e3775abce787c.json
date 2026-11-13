@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE nodes SET status = 'offline'\n           WHERE status = 'online'\n             AND (last_seen_at IS NULL OR last_seen_at < now() - make_interval(secs => $1::int))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1d7687214498a96aadc4c385603ceac6ff634dbf4e59cecd072e3775abce787c"
+}

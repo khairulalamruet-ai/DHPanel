@@ -18,6 +18,7 @@ use dhpanel_node_agent::{
     AGENT_VERSION,
     enroll::{self, EnrollError, Options},
     identity::{DEFAULT_STATE_DIR, StateDir, StateError},
+    stream,
     verify::VerifyError,
 };
 use secrecy::SecretString;
@@ -76,7 +77,12 @@ enum Command {
     /// Show this node's identity and certificate lifetime.
     Status,
     /// Run the agent (what the systemd service does).
-    Run,
+    Run {
+        /// Where to connect (`https://host:port`), when the control plane did
+        /// not say at enrolment.
+        #[arg(long, env = "DHPANEL_AGENT_STREAM_URL")]
+        stream_url: Option<String>,
+    },
 }
 
 fn fail(code: u8, message: &str) -> ExitCode {
@@ -243,7 +249,7 @@ fn status_command(state_dir: PathBuf) -> ExitCode {
     }
 }
 
-fn run_command(state_dir: PathBuf) -> ExitCode {
+fn run_command(state_dir: PathBuf, stream_url: Option<String>) -> ExitCode {
     let loaded = match StateDir::new(&state_dir).load() {
         Ok(l) => l,
         Err(err) => {
@@ -260,12 +266,33 @@ fn run_command(state_dir: PathBuf) -> ExitCode {
             "this node's certificate has expired; enrol again with a new token",
         );
     }
+    let Some(address) = stream_url.or(id.stream_url.clone()) else {
+        return fail(
+            EXIT_CONFIG,
+            "the control plane did not say where to connect (its agent port is probably off); \
+             give the address with --stream-url https://host:port",
+        );
+    };
+    if !stream::valid_stream_url(&address) {
+        return fail(
+            EXIT_CONFIG,
+            &format!("`{address}` is not a valid stream address: expected https://host[:port]"),
+        );
+    }
+    let read = |path: &std::path::Path| {
+        std::fs::read_to_string(path).map_err(|e| format!("cannot read {}: {e}", path.display()))
+    };
+    let (ca_pem, cert_pem, key_pem) = match (
+        read(&loaded.ca_path),
+        read(&loaded.cert_path),
+        read(&loaded.key_path),
+    ) {
+        (Ok(ca), Ok(cert), Ok(key)) => (ca, cert, SecretString::from(key)),
+        (Err(e), _, _) | (_, Err(e), _) | (_, _, Err(e)) => return fail(EXIT_IOERR, &e),
+    };
     println!(
-        "dhpanel-agent {AGENT_VERSION}: node '{}' ({})",
+        "dhpanel-agent {AGENT_VERSION}: node '{}' ({}), control plane {address}",
         id.name, id.node_id
-    );
-    println!(
-        "the control-plane connection is not part of this version yet; waiting for a stop signal"
     );
     let runtime = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -280,12 +307,34 @@ fn run_command(state_dir: PathBuf) -> ExitCode {
                 Ok(s) => s,
                 Err(err) => return fail(70, &format!("cannot listen for signals: {err}")),
             };
-        tokio::select! {
-            _ = terminate.recv() => {}
-            _ = tokio::signal::ctrl_c() => {}
+        let (stop, stopped) = tokio::sync::watch::channel(false);
+        let stream = stream::run(
+            stream::Params {
+                address,
+                ca_pem,
+                cert_pem,
+                key_pem,
+            },
+            stopped,
+        );
+        tokio::pin!(stream);
+        let outcome = tokio::select! {
+            r = &mut stream => Some(r),
+            _ = terminate.recv() => None,
+            _ = tokio::signal::ctrl_c() => None,
+        };
+        match outcome {
+            // The stream only returns early on a configuration problem.
+            Some(Err(err)) => fail(EXIT_CONFIG, &err.to_string()),
+            Some(Ok(())) => ExitCode::SUCCESS,
+            None => {
+                println!("stopping");
+                let _ = stop.send(true);
+                // Let the connection say goodbye (bounded).
+                let _ = tokio::time::timeout(std::time::Duration::from_secs(5), &mut stream).await;
+                ExitCode::SUCCESS
+            }
         }
-        println!("stopping");
-        ExitCode::SUCCESS
     })
 }
 
@@ -294,7 +343,7 @@ fn main() -> ExitCode {
     match cli.command {
         Command::Enroll(args) => enroll_command(cli.state_dir, args),
         Command::Status => status_command(cli.state_dir),
-        Command::Run => run_command(cli.state_dir),
+        Command::Run { stream_url } => run_command(cli.state_dir, stream_url),
     }
 }
 
