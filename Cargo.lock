@@ -1012,6 +1012,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "dhpanel-feature-gate"
+version = "0.1.0"
+dependencies = [
+ "dhpanel-cache",
+ "dhpanel-http-kit",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "dhpanel-http-kit"
 version = "0.1.0"
 dependencies = [
