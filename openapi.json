@@ -1988,6 +1988,374 @@
         ]
       }
     },
+    "/api/v1/admin/plan-limits": {
+      "get": {
+        "tags": [
+          "plans"
+        ],
+        "summary": "List the numeric limits the installed modules declare (for the plan form).",
+        "operationId": "listPlanLimits",
+        "responses": {
+          "200": {
+            "description": "The limit catalogue",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LimitList"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied` (needs admin.plans.read)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/plans": {
+      "get": {
+        "tags": [
+          "plans"
+        ],
+        "summary": "List the plans.",
+        "operationId": "listPlans",
+        "responses": {
+          "200": {
+            "description": "All plans, by name",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanList"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied` (needs admin.plans.read)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "plans"
+        ],
+        "summary": "Create a plan.",
+        "operationId": "createPlan",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlanInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied`, `reauth_required` or `csrf_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`plan_name_taken`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid fields, an unknown feature set, or `exceeds_node_capacity`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/plans/{id}": {
+      "get": {
+        "tags": [
+          "plans"
+        ],
+        "summary": "One plan.",
+        "operationId": "getPlan",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Plan id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The plan",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied` (needs admin.plans.read)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such plan",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "plans"
+        ],
+        "summary": "Replace a plan's contents.",
+        "operationId": "updatePlan",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Plan id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlanInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied`, `reauth_required` or `csrf_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such plan",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`plan_name_taken` or `plan_is_default` (the default plan cannot stop being the default; make another plan the default instead)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid fields, an unknown feature set, or `exceeds_node_capacity`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "plans"
+        ],
+        "summary": "Delete a plan that no account is on.",
+        "operationId": "deletePlan",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Plan id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "403": {
+            "description": "`permission_denied`, `reauth_required` or `csrf_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such plan",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`plan_built_in`, `plan_is_default` or `plan_in_use`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/settings": {
       "get": {
         "tags": [
@@ -3942,6 +4310,62 @@
           }
         }
       },
+      "LimitList": {
+        "type": "object",
+        "description": "Every limit of the installed modules.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LimitView"
+            },
+            "description": "By category, module, then key."
+          }
+        }
+      },
+      "LimitView": {
+        "type": "object",
+        "description": "A numeric limit a module declares.",
+        "required": [
+          "key",
+          "module",
+          "module_title",
+          "category",
+          "default",
+          "unlimited_allowed"
+        ],
+        "properties": {
+          "category": {
+            "type": "string",
+            "description": "The module's category."
+          },
+          "default": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The value a new plan gets."
+          },
+          "key": {
+            "type": "string",
+            "description": "The key, for example `max_domains`.",
+            "example": "max_domains"
+          },
+          "module": {
+            "type": "string",
+            "description": "The module that declares it."
+          },
+          "module_title": {
+            "type": "object",
+            "description": "That module's display name by language code."
+          },
+          "unlimited_allowed": {
+            "type": "boolean",
+            "description": "Whether `-1` (unlimited) is allowed."
+          }
+        }
+      },
       "Liveness": {
         "type": "object",
         "description": "Body of `/health`.",
@@ -4479,6 +4903,152 @@
           }
         }
       },
+      "PlanInput": {
+        "type": "object",
+        "description": "What a plan is made of (create and replace).",
+        "required": [
+          "name",
+          "feature_set_id",
+          "resources"
+        ],
+        "properties": {
+          "description": {
+            "type": "string",
+            "description": "Description (at most 255 characters)."
+          },
+          "feature_set_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The feature set."
+          },
+          "is_default": {
+            "type": "boolean",
+            "description": "Make this the default plan for new accounts."
+          },
+          "isolation": {
+            "type": "string",
+            "description": "`standard` or `strict`."
+          },
+          "limits": {
+            "type": "object",
+            "description": "Module limits by key: `-1` (unlimited) or zero and more. Declared limits\nleft out get their default."
+          },
+          "name": {
+            "type": "string",
+            "description": "Unique name: 2-32 characters of `a-z`, `0-9` and `_`, starting with a\nletter. Ignored when updating a built-in plan.",
+            "example": "starter"
+          },
+          "resources": {
+            "$ref": "#/components/schemas/Resources",
+            "description": "Container resources."
+          }
+        },
+        "additionalProperties": false
+      },
+      "PlanList": {
+        "type": "object",
+        "description": "All plans.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlanView"
+            },
+            "description": "By name."
+          }
+        }
+      },
+      "PlanView": {
+        "type": "object",
+        "description": "A plan.",
+        "required": [
+          "id",
+          "name",
+          "description",
+          "feature_set_id",
+          "feature_set_name",
+          "is_default",
+          "users_count",
+          "resources",
+          "limits",
+          "unknown_limits",
+          "isolation",
+          "built_in",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "built_in": {
+            "type": "boolean",
+            "description": "Created by the installation: cannot be renamed or deleted."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Creation time (RFC 3339, UTC)."
+          },
+          "description": {
+            "type": "string",
+            "description": "Description."
+          },
+          "feature_set_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The feature set."
+          },
+          "feature_set_name": {
+            "type": "string",
+            "description": "Its name."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Id."
+          },
+          "is_default": {
+            "type": "boolean",
+            "description": "New accounts get this plan unless told otherwise."
+          },
+          "isolation": {
+            "type": "string",
+            "description": "`standard` or `strict`.",
+            "example": "standard"
+          },
+          "limits": {
+            "type": "object",
+            "description": "Module limits by key; `-1` is unlimited."
+          },
+          "name": {
+            "type": "string",
+            "description": "Unique name.",
+            "example": "basic"
+          },
+          "resources": {
+            "$ref": "#/components/schemas/Resources",
+            "description": "Container resources."
+          },
+          "unknown_limits": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Limit keys that no installed module declares: kept, but they limit nothing."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Last change (RFC 3339, UTC)."
+          },
+          "users_count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Accounts on this plan."
+          }
+        }
+      },
       "ProblemDetails": {
         "type": "object",
         "description": "Wire format (RFC 9457 + DHPanel extensions `code`, `correlation_id`, `errors`).",
@@ -4563,6 +5133,53 @@
             "example": "ready"
           }
         }
+      },
+      "Resources": {
+        "type": "object",
+        "description": "The resources of a plan's containers. `-1` means unlimited.",
+        "required": [
+          "cpu_millis",
+          "memory_mb",
+          "disk_mb",
+          "pids"
+        ],
+        "properties": {
+          "bandwidth_mb": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Transfer per month in megabytes; 0 or more."
+          },
+          "cpu_millis": {
+            "type": "integer",
+            "format": "int64",
+            "description": "CPU in thousandths of a core (1000 = one core); 10 to 256000.",
+            "example": 1000
+          },
+          "disk_mb": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Disk space in megabytes; 1 or more.",
+            "example": 5120
+          },
+          "inodes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Most files and folders; 1000 to 1000000000."
+          },
+          "memory_mb": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Memory in megabytes; 6 to 1048576.",
+            "example": 512
+          },
+          "pids": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Most processes; 1 to 32768.",
+            "example": 128
+          }
+        },
+        "additionalProperties": false
       },
       "RevokedCount": {
         "type": "object",

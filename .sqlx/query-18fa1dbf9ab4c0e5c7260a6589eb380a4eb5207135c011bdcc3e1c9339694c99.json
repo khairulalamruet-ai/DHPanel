@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT built_in, is_default FROM plans WHERE id = $1 FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "built_in",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "plans",
+            "name": "built_in"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "is_default",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "plans",
+            "name": "is_default"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "18fa1dbf9ab4c0e5c7260a6589eb380a4eb5207135c011bdcc3e1c9339694c99"
+}

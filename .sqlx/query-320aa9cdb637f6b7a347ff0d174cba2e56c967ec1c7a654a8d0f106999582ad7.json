@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE plans\n           SET name = CASE WHEN built_in THEN name ELSE $2 END,\n               description = $3, feature_set_id = $4, cpu_millis = $5, memory_bytes = $6,\n               pids = $7, disk_bytes = $8, inodes = $9, bandwidth_bytes = $10,\n               limits = $11, isolation = $12\n           WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Uuid",
+        "Int4",
+        "Int8",
+        "Int4",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Jsonb",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "320aa9cdb637f6b7a347ff0d174cba2e56c967ec1c7a654a8d0f106999582ad7"
+}

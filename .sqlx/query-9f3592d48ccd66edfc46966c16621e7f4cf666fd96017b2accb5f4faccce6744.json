@@ -1,0 +1,215 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT p.id, p.name, p.description, p.feature_set_id, f.name AS feature_set_name,\n                  p.is_default, p.cpu_millis, p.memory_bytes, p.pids, p.disk_bytes, p.inodes,\n                  p.bandwidth_bytes, p.limits, p.isolation, p.built_in,\n                  0::bigint AS \"users!\",\n                  extract(epoch FROM p.created_at)::bigint AS \"created_at!\",\n                  extract(epoch FROM p.updated_at)::bigint AS \"updated_at!\"\n           FROM plans p JOIN feature_sets f ON f.id = p.feature_set_id\n           ORDER BY p.name",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "plans",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "plans",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "description",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "plans",
+            "name": "description"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "feature_set_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "plans",
+            "name": "feature_set_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "feature_set_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "feature_sets",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "is_default",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "plans",
+            "name": "is_default"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "cpu_millis",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "plans",
+            "name": "cpu_millis"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "memory_bytes",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "plans",
+            "name": "memory_bytes"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "pids",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "plans",
+            "name": "pids"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "disk_bytes",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "plans",
+            "name": "disk_bytes"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "inodes",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "plans",
+            "name": "inodes"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "bandwidth_bytes",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "plans",
+            "name": "bandwidth_bytes"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "limits",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "plans",
+            "name": "limits"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "isolation",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "plans",
+            "name": "isolation"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "built_in",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "plans",
+            "name": "built_in"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "users!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 16,
+        "name": "created_at!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 17,
+        "name": "updated_at!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "9f3592d48ccd66edfc46966c16621e7f4cf666fd96017b2accb5f4faccce6744"
+}

@@ -9,6 +9,8 @@
 //! | PUT    | `/api/v1/admin/feature-sets/{id}` | `admin.plans.manage`, sudo mode |
 //! | DELETE | `/api/v1/admin/feature-sets/{id}` | `admin.plans.manage`, sudo mode |
 //!
+//! Plans (`/plan-limits`, `/plans`) are in [`plans`].
+//!
 //! A **feature** is a key a module declares in its manifest (`[features]`). A
 //! **feature set** is a named list of them, or "all features". The catalogue
 //! (`/features`) is what the installed modules declare, grouped by module and
@@ -20,6 +22,8 @@
 //! Built-in sets (the presets) can be edited but not renamed or deleted; a set
 //! that a plan uses cannot be deleted. Every change is audited in the same
 //! transaction.
+
+pub mod plans;
 
 use std::collections::BTreeSet;
 
@@ -75,6 +79,17 @@ impl FromRef<PlansState> for SessionStore {
 pub fn router() -> Router<PlansState> {
     Router::new()
         .route("/api/v1/admin/features", get(list_features))
+        .route("/api/v1/admin/plan-limits", get(plans::list_limits))
+        .route(
+            "/api/v1/admin/plans",
+            get(plans::list_plans).post(plans::create_plan),
+        )
+        .route(
+            "/api/v1/admin/plans/{id}",
+            get(plans::get_plan)
+                .put(plans::update_plan)
+                .delete(plans::delete_plan),
+        )
         .route(
             "/api/v1/admin/feature-sets",
             get(list_feature_sets).post(create_feature_set),
@@ -557,9 +572,14 @@ pub async fn delete_feature_set(
 #[openapi(
     paths(
         list_features, list_feature_sets, get_feature_set, create_feature_set,
-        update_feature_set, delete_feature_set
+        update_feature_set, delete_feature_set, plans::list_limits, plans::list_plans,
+        plans::get_plan, plans::create_plan, plans::update_plan, plans::delete_plan
     ),
-    components(schemas(FeatureView, FeatureList, FeatureSetView, FeatureSetList, FeatureSetInput)),
+    components(schemas(
+        FeatureView, FeatureList, FeatureSetView, FeatureSetList, FeatureSetInput,
+        plans::LimitView, plans::LimitList, plans::Resources, plans::PlanView, plans::PlanList,
+        plans::PlanInput
+    )),
     tags((name = "plans", description = "Feature sets and hosting plans"))
 )]
 pub struct PlansApi;

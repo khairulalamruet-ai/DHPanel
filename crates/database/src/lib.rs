@@ -19,6 +19,7 @@ pub mod nodes;
 pub mod operations;
 pub mod outbox;
 pub mod permissions;
+pub mod plans;
 pub mod rbac;
 pub mod settings;
 
