@@ -7151,6 +7151,202 @@ export const handlers = [
           })(),
         ];
       })(),
-    ];
-  })(),
+    // License Authority (LA) Handlers (T17.06) TODO(api:T17.06)
+    ...(() => {
+      const mockLaLicenses: any[] = [
+        {
+          id: "lic_01",
+          license_key: "DHP-ENT-2026-A1B2-C3D4",
+          customer_id: "cust_01",
+          customer_name: "Acme Global Hosting",
+          customer_email: "billing@acme.com",
+          plan_tier: "enterprise",
+          status: "active",
+          max_nodes: 10,
+          max_tenants: 500,
+          activations_count: 2,
+          max_activations: 5,
+          created_at: new Date(Date.now() - 30 * 86400 * 1000).toISOString(),
+          expires_at: new Date(Date.now() + 335 * 86400 * 1000).toISOString(),
+          revoked_at: null,
+          revoke_reason: null,
+        },
+        {
+          id: "lic_02",
+          license_key: "DHP-BUS-2026-F9E8-D7C6",
+          customer_id: "cust_02",
+          customer_name: "Nordic Cloud Services",
+          customer_email: "admin@nordiccloud.se",
+          plan_tier: "business",
+          status: "active",
+          max_nodes: 5,
+          max_tenants: 100,
+          activations_count: 1,
+          max_activations: 2,
+          created_at: new Date(Date.now() - 60 * 86400 * 1000).toISOString(),
+          expires_at: new Date(Date.now() + 305 * 86400 * 1000).toISOString(),
+          revoked_at: null,
+          revoke_reason: null,
+        },
+        {
+          id: "lic_03",
+          license_key: "DHP-STR-2026-X1Y2-Z3W4",
+          customer_id: "cust_03",
+          customer_name: "Apex DevOps Lab",
+          customer_email: "support@apexdev.io",
+          plan_tier: "starter",
+          status: "revoked",
+          max_nodes: 2,
+          max_tenants: 25,
+          activations_count: 0,
+          max_activations: 1,
+          created_at: new Date(Date.now() - 90 * 86400 * 1000).toISOString(),
+          expires_at: new Date(Date.now() + 275 * 86400 * 1000).toISOString(),
+          revoked_at: new Date(Date.now() - 5 * 86400 * 1000).toISOString(),
+          revoke_reason: "Payment default or chargeback",
+        },
+      ];
+
+      const mockLaCustomers: any[] = [
+        {
+          id: "cust_01",
+          name: "Acme Global Hosting",
+          email: "billing@acme.com",
+          company: "Acme Corp",
+          created_at: new Date(Date.now() - 100 * 86400 * 1000).toISOString(),
+          licenses_count: 1,
+        },
+        {
+          id: "cust_02",
+          name: "Nordic Cloud Services",
+          email: "admin@nordiccloud.se",
+          company: "Nordic Cloud AB",
+          created_at: new Date(Date.now() - 80 * 86400 * 1000).toISOString(),
+          licenses_count: 1,
+        },
+        {
+          id: "cust_03",
+          name: "Apex DevOps Lab",
+          email: "support@apexdev.io",
+          company: "Apex Technologies LLC",
+          created_at: new Date(Date.now() - 95 * 86400 * 1000).toISOString(),
+          licenses_count: 1,
+        },
+      ];
+
+      const mockLaActivations: any[] = [
+        {
+          id: "act_01",
+          license_id: "lic_01",
+          license_key: "DHP-ENT-2026-A1B2-C3D4",
+          installation_id: "00000000-0000-0000-0000-0000000000aa",
+          server_ip: "167.104.101.81",
+          hostname: "cp1.dhpanel.net",
+          last_heartbeat_at: new Date().toISOString(),
+          status: "active",
+        },
+        {
+          id: "act_02",
+          license_id: "lic_01",
+          license_key: "DHP-ENT-2026-A1B2-C3D4",
+          installation_id: "00000000-0000-0000-0000-0000000000bb",
+          server_ip: "167.104.101.82",
+          hostname: "worker2.dhpanel.net",
+          last_heartbeat_at: new Date(Date.now() - 120 * 1000).toISOString(),
+          status: "active",
+        },
+      ];
+
+      return [
+        // Overview (GET /api/v1/la/overview)
+        http.get(/\/api\/v1\/la\/overview$/, () => {
+          return HttpResponse.json({
+            total_licenses: mockLaLicenses.length,
+            active_licenses: mockLaLicenses.filter((l) => l.status === "active").length,
+            revoked_licenses: mockLaLicenses.filter((l) => l.status === "revoked").length,
+            total_customers: mockLaCustomers.length,
+            active_activations: mockLaActivations.filter((a) => a.status === "active").length,
+          });
+        }),
+
+        // List Licenses (GET /api/v1/la/licenses)
+        http.get(/\/api\/v1\/la\/licenses$/, () => {
+          return HttpResponse.json({
+            items: mockLaLicenses,
+            total: mockLaLicenses.length,
+          });
+        }),
+
+        // Issue License (POST /api/v1/la/licenses) (DoD T17.06)
+        http.post(/\/api\/v1\/la\/licenses$/, async ({ request }) => {
+          const body = (await request.json().catch(() => ({}))) as any;
+          const randomPart = Math.random().toString(36).substring(2, 6).toUpperCase();
+          const randomPart2 = Math.random().toString(36).substring(2, 6).toUpperCase();
+          const tierCode = (body.plan_tier || "ENT").substring(0, 3).toUpperCase();
+          const licenseKey = `DHP-${tierCode}-2026-${randomPart}-${randomPart2}`;
+
+          const newLicense = {
+            id: `lic_${Date.now()}`,
+            license_key: licenseKey,
+            customer_id: `cust_${Date.now()}`,
+            customer_name: body.customer_name || "New Customer",
+            customer_email: body.customer_email || "billing@customer.com",
+            plan_tier: body.plan_tier || "enterprise",
+            status: "active",
+            max_nodes: Number(body.max_nodes) || 5,
+            max_tenants: Number(body.max_tenants) || 100,
+            activations_count: 0,
+            max_activations: Number(body.max_activations) || 1,
+            created_at: new Date().toISOString(),
+            expires_at: body.validity_days
+              ? new Date(Date.now() + body.validity_days * 86400 * 1000).toISOString()
+              : new Date(Date.now() + 3650 * 86400 * 1000).toISOString(),
+            revoked_at: null,
+            revoke_reason: null,
+          };
+
+          mockLaLicenses.unshift(newLicense);
+          return HttpResponse.json({ success: true, license: newLicense }, { status: 201 });
+        }),
+
+        // Revoke License (POST /api/v1/la/licenses/:id/revoke) (DoD T17.06)
+        http.post(/\/api\/v1\/la\/licenses\/([^/]+)\/revoke$/, async ({ params, request }) => {
+          const { 0: id } = params as any;
+          const body = (await request.json().catch(() => ({}))) as any;
+          const target = mockLaLicenses.find((l) => l.id === id || l.license_key === id);
+
+          if (!target) {
+            return HttpResponse.json({ error: "license_not_found", message: "License not found" }, { status: 404 });
+          }
+
+          target.status = "revoked";
+          target.revoked_at = new Date().toISOString();
+          target.revoke_reason = body.reason || "Administrative revocation";
+
+          return HttpResponse.json({
+            success: true,
+            license: target,
+            message: "License revoked successfully",
+          });
+        }),
+
+        // List Activations (GET /api/v1/la/activations)
+        http.get(/\/api\/v1\/la\/activations$/, () => {
+          return HttpResponse.json({
+            items: mockLaActivations,
+            total: mockLaActivations.length,
+          });
+        }),
+
+        // List Customers (GET /api/v1/la/customers)
+        http.get(/\/api\/v1\/la\/customers$/, () => {
+          return HttpResponse.json({
+            items: mockLaCustomers,
+            total: mockLaCustomers.length,
+          });
+        }),
+      ];
+    })(),
+  ];
+})(),
 ];

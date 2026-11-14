@@ -1969,5 +1969,92 @@
     "disableReason": "Exclusion Reason",
     "disabledAt": "Disabled At",
     "reEnableRule": "Re-enable"
+  },
+  "la": {
+    "nav": "License Authority",
+    "title": "License Authority (LA) Console",
+    "desc": "Manage cryptographically issued licenses, hardware node activations, and customer entitlements",
+    "issueBtn": "Issue License",
+    "revokeBtn": "Revoke",
+    "empty": "No licenses found.",
+    "metrics": {
+      "totalLicenses": "Total Licenses",
+      "activeLicenses": "Active Licenses",
+      "revokedLicenses": "Revoked Licenses",
+      "activeActivations": "Active Activations"
+    },
+    "tabs": {
+      "licenses": "Issued Licenses",
+      "activations": "Node Activations",
+      "customers": "Customer Directory"
+    },
+    "table": {
+      "licenseKey": "License Key",
+      "customer": "Customer",
+      "tier": "Tier",
+      "limits": "Limits",
+      "status": "Status",
+      "activations": "Activations",
+      "actions": "Actions",
+      "installationId": "Installation ID",
+      "serverIp": "Server IP",
+      "hostname": "Hostname",
+      "lastHeartbeat": "Last Heartbeat"
+    },
+    "activations": {
+      "empty": "No hardware node activations registered."
+    },
+    "customers": {
+      "name": "Customer Name",
+      "email": "Email Address",
+      "company": "Company",
+      "licensesCount": "Licenses",
+      "registered": "Registered",
+      "empty": "No customers found."
+    },
+    "status": {
+      "active": "Active",
+      "revoked": "Revoked",
+      "suspended": "Suspended",
+      "expired": "Expired"
+    },
+    "plan": {
+      "starter": "Starter Cloud",
+      "business": "Business Pro",
+      "enterprise": "Enterprise Cluster",
+      "unlimited": "Unlimited Partner"
+    },
+    "validity": {
+      "30days": "30 Days (Evaluation)",
+      "1year": "1 Year (Commercial)",
+      "lifetime": "Lifetime Perpetual"
+    },
+    "issue": {
+      "title": "Issue New Customer License",
+      "desc": "Generate cryptographically signed license keys and assign tenant/node quotas",
+      "nameLabel": "Customer / Organization Name",
+      "emailLabel": "Billing Email Address",
+      "companyLabel": "Company (Optional)",
+      "planTierLabel": "Product Tier",
+      "validityLabel": "License Validity Period",
+      "maxNodesLabel": "Max Nodes",
+      "maxTenantsLabel": "Max Tenants",
+      "maxActivationsLabel": "Max Activations",
+      "submitBtn": "Issue License Key",
+      "successToast": "License key issued and registered successfully."
+    },
+    "revoke": {
+      "title": "Revoke Customer License",
+      "desc": "Revoking this license immediately halts new provisioning and restricts instance management",
+      "reasonLabel": "Revocation Justification",
+      "submitBtn": "Confirm Revocation",
+      "successToast": "License revoked successfully.",
+      "reasons": {
+        "tos": "Terms of service violation",
+        "payment": "Payment default or chargeback",
+        "cancellation": "Customer requested cancellation",
+        "compromise": "Cryptographic key compromise"
+      }
+    }
   }
 }
