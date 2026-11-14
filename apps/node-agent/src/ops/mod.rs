@@ -23,6 +23,7 @@
 pub mod cache;
 pub mod capabilities;
 pub mod db;
+pub mod sqlexport;
 pub mod sqlimport;
 pub mod sqlsplit;
 pub mod tenant;
@@ -140,6 +141,10 @@ impl Registry {
             registry.register("import_sql", {
                 let context = context.clone();
                 move |op| sqlimport::import_sql(context.clone(), op)
+            });
+            registry.register("export_sql", {
+                let context = context.clone();
+                move |op| sqlexport::export_sql(context.clone(), op)
             });
             registry.register("report_import_progress", {
                 let context = context.clone();

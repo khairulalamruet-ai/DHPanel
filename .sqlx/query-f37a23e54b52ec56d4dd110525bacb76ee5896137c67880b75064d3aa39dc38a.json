@@ -1,0 +1,151 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT e.id, e.tenant_id, e.database_id, d.name AS database, e.status,\n                  e.received_bytes, e.next_chunk, e.size_bytes, e.sha256, e.error,\n                  extract(epoch FROM e.created_at)::bigint AS \"created_at!\",\n                  extract(epoch FROM e.expires_at)::bigint AS expires_at\n           FROM db_exports e JOIN databases d ON d.id = e.database_id\n           WHERE e.tenant_id = $1 AND e.id = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "db_exports",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "db_exports",
+            "name": "tenant_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "database_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "db_exports",
+            "name": "database_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "database",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "databases",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "db_exports",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "received_bytes",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "db_exports",
+            "name": "received_bytes"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "next_chunk",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "db_exports",
+            "name": "next_chunk"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "size_bytes",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "db_exports",
+            "name": "size_bytes"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "sha256",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "db_exports",
+            "name": "sha256"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "error",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "db_exports",
+            "name": "error"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "created_at!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 11,
+        "name": "expires_at",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      null,
+      null
+    ]
+  },
+  "hash": "f37a23e54b52ec56d4dd110525bacb76ee5896137c67880b75064d3aa39dc38a"
+}

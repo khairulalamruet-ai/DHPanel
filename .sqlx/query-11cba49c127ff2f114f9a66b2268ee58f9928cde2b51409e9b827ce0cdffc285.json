@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE db_exports SET status = 'expired', link_hash = NULL, link_expires_at = NULL,\n                               updated_at = now()\n         WHERE id = $1 AND status = 'ready'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "11cba49c127ff2f114f9a66b2268ee58f9928cde2b51409e9b827ce0cdffc285"
+}

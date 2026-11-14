@@ -547,6 +547,23 @@ pub enum Operation {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         token: Option<DbPassword>,
     },
+    /// Dumps one database (structure, data, views, triggers, routines, events),
+    /// gzip-compresses it and sends it to the control plane in chunks of at most
+    /// 8 MiB (`PUT {url}/chunks/{n}`, then `POST {url}/complete`), all with the
+    /// token as a Bearer credential. Answered with [`Output::SqlExported`].
+    ExportSql {
+        /// The tenant's system name.
+        username: String,
+        /// The database's whole name.
+        database: String,
+        /// This export's id.
+        export_id: Uuid,
+        /// Where the dump goes (`https`, or `http` for loopback).
+        url: String,
+        /// The credential for the upload; absent in the ledger, present on the wire.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        token: Option<DbPassword>,
+    },
     /// How far an import has come. Answered with [`Output::ImportProgress`].
     ReportImportProgress {
         /// The import.
@@ -725,6 +742,7 @@ impl Operation {
         "create_database",
         "drop_database",
         "import_sql",
+        "export_sql",
         "report_import_progress",
         "report_db_sizes",
         "upsert_db_user",
@@ -764,6 +782,7 @@ impl Operation {
             Self::CreateDatabase { .. } => "create_database",
             Self::DropDatabase { .. } => "drop_database",
             Self::ImportSql { .. } => "import_sql",
+            Self::ExportSql { .. } => "export_sql",
             Self::ReportImportProgress { .. } => "report_import_progress",
             Self::ReportDbSizes => "report_db_sizes",
             Self::UpsertDbUser { .. } => "upsert_db_user",
@@ -950,6 +969,11 @@ pub enum Output {
     SqlImported {
         /// How many statements ran.
         statements: u64,
+    },
+    /// Answer to [`Operation::ExportSql`].
+    SqlExported {
+        /// Size of the compressed dump that was sent.
+        size_bytes: u64,
     },
     /// Answer to [`Operation::ReportImportProgress`].
     ImportProgress {
@@ -1863,6 +1887,13 @@ mod tests {
                 gzip: false,
                 token: None,
             },
+            Operation::ExportSql {
+                username: "alice".into(),
+                database: "alice_shop".into(),
+                export_id: id(),
+                url: "https://panel.example.com/api/v1/public/exports/x".into(),
+                token: None,
+            },
             Operation::ReportImportProgress { import_id: id() },
             Operation::CreateDatabase {
                 name: "alice_shop".into(),
@@ -1924,7 +1955,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            33,
+            34,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }

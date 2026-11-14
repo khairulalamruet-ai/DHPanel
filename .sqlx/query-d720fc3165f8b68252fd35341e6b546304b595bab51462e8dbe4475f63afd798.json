@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT upload_token_hash, received_bytes, next_chunk FROM db_exports\n         WHERE id = $1 AND status IN ('queued', 'running')",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "upload_token_hash",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "db_exports",
+            "name": "upload_token_hash"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "received_bytes",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "db_exports",
+            "name": "received_bytes"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "next_chunk",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "db_exports",
+            "name": "next_chunk"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "d720fc3165f8b68252fd35341e6b546304b595bab51462e8dbe4475f63afd798"
+}

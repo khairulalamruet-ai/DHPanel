@@ -234,6 +234,11 @@ async fn dumps_are_downloaded_checked_and_run_with_the_rights_of_one_database() 
         return;
     }
     let docker = DockerManager::connect(&socket).unwrap();
+    // Another live test may have left the server behind with its own root password.
+    let _ = docker.remove(&Name::parse(CONTAINER).unwrap(), true).await;
+    let _ = docker
+        .remove_volume(&Name::parse("dh-db-data").unwrap())
+        .await;
     let root_dir = std::env::temp_dir().join(format!("dh-import-live-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root_dir);
     std::fs::create_dir_all(&root_dir).unwrap();
@@ -340,6 +345,33 @@ async fn dumps_are_downloaded_checked_and_run_with_the_rights_of_one_database() 
         .await
         .unwrap();
     assert!(leftovers.is_empty(), "{leftovers:?}");
+    // What the dump defined belongs to the database's own locked account, so it
+    // keeps working after the import (and the dump's `DEFINER=` clauses are not needed).
+    let definers: Vec<String> = admin
+        .query(
+            "SELECT DEFINER FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA = 'imptest_shop'",
+        )
+        .await
+        .unwrap();
+    assert_eq!(definers, ["dhdef-imptest_shop@%"]);
+    admin
+        .query_drop("INSERT INTO imptest_shop.items (id, note) VALUES (7, 'later')")
+        .await
+        .unwrap();
+    let later: Option<i32> = admin
+        .query_first("SELECT seen FROM imptest_shop.items WHERE id = 7")
+        .await
+        .unwrap();
+    assert_eq!(
+        later,
+        Some(14),
+        "the trigger still works once the import is over"
+    );
+    let locked: Option<(String,)> = admin
+        .query_first("SELECT JSON_VALUE(Priv, '$.account_locked') FROM mysql.global_priv WHERE User = 'dhdef-imptest_shop'")
+        .await
+        .unwrap();
+    assert_eq!(locked, Some(("1".to_owned(),)), "nobody can log in as it");
     // Unknown imports are reported as unknown.
     let unknown = report_import_progress(
         context.clone(),

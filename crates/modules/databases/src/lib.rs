@@ -10,6 +10,7 @@
 //! | DELETE | `/api/v1/client/db-users/{id}` | the owner |
 //! | GET, PUT | `/api/v1/client/db-users/{id}/remote-hosts` | the owner; the `db_remote` feature to change |
 //! | POST, GET, PUT | `.../databases/{id}/imports`, `/api/v1/client/imports...` | SQL imports, see [`imports`] |
+//! | POST, GET, DELETE | `.../databases/{id}/exports`, `/api/v1/client/exports...` | SQL exports, see [`exports`] |
 //!
 //! Names start with the account's system name and an underscore (the setting
 //! `require_prefix`). The plan limits how many databases (`max_databases`) and
@@ -19,6 +20,7 @@
 //! changed (a given password is checked; without one a strong one is made); it
 //! is kept sealed only until the node has it and never in the ledger or the log.
 
+pub mod exports;
 pub mod imports;
 
 use std::{path::PathBuf, sync::Arc};
@@ -111,11 +113,12 @@ pub fn client_router() -> Router<DatabasesState> {
             get(get_remote).put(set_remote),
         )
         .merge(imports::client_router())
+        .merge(exports::client_router())
 }
 
 /// Routes without a session (the node fetching an SQL dump with its token).
 pub fn public_router() -> Router<DatabasesState> {
-    imports::public_router()
+    imports::public_router().merge(exports::public_router())
 }
 
 /// Routes for administrators (the overview arrives with T07.11).
@@ -1204,12 +1207,15 @@ pub async fn set_remote(
         list_databases, create_database, delete_database, list_users, create_user,
         change_password, delete_user, set_grant, remove_grant, get_remote, set_remote,
         imports::start_import, imports::list_imports, imports::get_import,
-        imports::put_chunk, imports::complete_import, imports::cancel_import
+        imports::put_chunk, imports::complete_import, imports::cancel_import,
+        exports::start_export, exports::list_exports, exports::get_export,
+        exports::make_link, exports::delete_export
     ),
     components(schemas(
         GrantView, DatabaseView, DatabaseList, UserGrantView, DbUserView, DbUserList,
         DbUserCreated, AddDatabase, AddDbUser, NewPassword, SetAccess, RemoteHosts,
-        imports::ImportView, imports::ImportList, imports::StartImport
+        imports::ImportView, imports::ImportList, imports::StartImport,
+        exports::ExportView, exports::ExportList, exports::DownloadLink
     )),
     tags((name = "databases", description = "Databases, their users and grants"))
 )]

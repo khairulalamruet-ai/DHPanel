@@ -17,6 +17,7 @@ pub mod dns;
 pub mod domain_policies;
 pub mod domains;
 pub mod error_pages;
+pub mod exports;
 pub mod feature_sets;
 pub mod imports;
 pub mod mfa;

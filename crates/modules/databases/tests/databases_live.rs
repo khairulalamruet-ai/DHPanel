@@ -1276,3 +1276,335 @@ async fn a_dump_is_uploaded_in_chunks_checked_and_handed_to_the_node_once(pool: 
     assert_eq!(list["max_size_mb"], 1024);
     let _ = std::fs::remove_dir_all(&e.spool);
 }
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn an_export_is_made_by_the_node_and_downloaded_with_a_five_minute_link(pool: PgPool) {
+    let e = env(&pool).await;
+    let (alice, tenant) = client(&pool, "alice", 10_000).await;
+    let (bobby, _) = client(&pool, "bobby", 10_001).await;
+    let (a, b) = (e.sign_in(alice).await, e.sign_in(bobby).await);
+    let database = ready_database(&pool, tenant, "alice_shop").await;
+    let starter = format!("/api/v1/client/databases/{database}/exports");
+
+    let (status, _) = e.call(&b, "POST", &starter, None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "someone else's database");
+    let (status, export) = e.call(&a, "POST", &starter, None).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{export}");
+    assert_eq!(export["status"], "queued");
+    let id = export["id"].as_str().unwrap().to_owned();
+    let uuid: Uuid = id.parse().unwrap();
+    let (status, again) = e.call(&a, "POST", &starter, None).await;
+    assert_eq!(
+        (status, code(&again)),
+        (StatusCode::CONFLICT, "export_active")
+    );
+    let (status, _) = e
+        .call(&b, "GET", &format!("/api/v1/client/exports/{id}"), None)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // The operation: the upload address, and no token in the ledger.
+    let (op_id, payload): (Uuid, Value) =
+        sqlx::query_as("SELECT id, payload FROM operations WHERE kind = 'export_sql'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(payload["database"], "alice_shop");
+    assert_eq!(
+        payload["url"],
+        format!("https://panel.example.com:8443/api/v1/public/exports/{id}")
+    );
+    assert!(payload.get("token").is_none_or(Value::is_null), "{payload}");
+    let sealed: Vec<u8> = sqlx::query_scalar("SELECT sealed_token FROM db_exports WHERE id = $1")
+        .bind(uuid)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let token = String::from_utf8(
+        MasterKey::from_bytes(&KEY)
+            .open(&dhpanel_database::exports::token_context(uuid), &sealed)
+            .unwrap(),
+    )
+    .unwrap();
+    let bearer = format!("Bearer {token}");
+    sqlx::query("UPDATE operations SET status = 'dispatched', attempts = 1 WHERE id = $1")
+        .bind(op_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (_, now) = e
+        .call(&a, "GET", &format!("/api/v1/client/exports/{id}"), None)
+        .await;
+    assert_eq!(now["status"], "running", "{now}");
+
+    // The node uploads: only with its token, in order.
+    let dump: Vec<u8> = (0..3000u32).flat_map(|i| i.to_le_bytes()).collect();
+    let chunk = |n: i32| format!("/api/v1/public/exports/{id}/chunks/{n}");
+    let (status, _, _) = e
+        .raw(None, "PUT", &chunk(0), &[], dump[..100].to_vec())
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, _, _) = e
+        .raw(
+            None,
+            "PUT",
+            &chunk(0),
+            &[("authorization", "Bearer nope")],
+            dump[..100].to_vec(),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, _, _) = e
+        .raw(
+            None,
+            "PUT",
+            &chunk(1),
+            &[("authorization", &bearer)],
+            dump[..100].to_vec(),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let (status, _, _) = e
+        .raw(
+            None,
+            "PUT",
+            &chunk(0),
+            &[("authorization", &bearer)],
+            dump[..5000].to_vec(),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _, _) = e
+        .raw(
+            None,
+            "PUT",
+            &chunk(1),
+            &[("authorization", &bearer)],
+            dump[5000..].to_vec(),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, now) = e
+        .call(&a, "GET", &format!("/api/v1/client/exports/{id}"), None)
+        .await;
+    assert_eq!(now["received_bytes"], dump.len());
+    // No link before it is ready.
+    let link_path = format!("/api/v1/client/exports/{id}/link");
+    let (status, got) = e.call(&a, "POST", &link_path, None).await;
+    assert_eq!((status, code(&got)), (StatusCode::CONFLICT, "not_ready"));
+    // A wrong size or checksum ends it.
+    let done = format!("/api/v1/public/exports/{id}/complete");
+    let said = json!({"size_bytes": dump.len(), "sha256": sha256_hex(&dump)});
+    let (status, _, _) = e
+        .raw(
+            None,
+            "POST",
+            &done,
+            &[
+                ("authorization", &bearer),
+                ("content-type", "application/json"),
+            ],
+            json!({"size_bytes": dump.len(), "sha256": sha256_hex(b"other")})
+                .to_string()
+                .into_bytes(),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (_, now) = e
+        .call(&a, "GET", &format!("/api/v1/client/exports/{id}"), None)
+        .await;
+    assert_eq!(
+        now["status"], "failed",
+        "a dump that does not match ends the export: {now}"
+    );
+
+    // Again, rightly this time.
+    let (status, export) = e.call(&a, "POST", &starter, None).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{export}");
+    let id = export["id"].as_str().unwrap().to_owned();
+    let uuid: Uuid = id.parse().unwrap();
+    let sealed: Vec<u8> = sqlx::query_scalar("SELECT sealed_token FROM db_exports WHERE id = $1")
+        .bind(uuid)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let token = String::from_utf8(
+        MasterKey::from_bytes(&KEY)
+            .open(&dhpanel_database::exports::token_context(uuid), &sealed)
+            .unwrap(),
+    )
+    .unwrap();
+    let bearer = format!("Bearer {token}");
+    let (status, _, _) = e
+        .raw(
+            None,
+            "PUT",
+            &format!("/api/v1/public/exports/{id}/chunks/0"),
+            &[("authorization", &bearer)],
+            dump.clone(),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _, _) = e
+        .raw(
+            None,
+            "POST",
+            &format!("/api/v1/public/exports/{id}/complete"),
+            &[
+                ("authorization", &bearer),
+                ("content-type", "application/json"),
+            ],
+            said.to_string().into_bytes(),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, now) = e
+        .call(&a, "GET", &format!("/api/v1/client/exports/{id}"), None)
+        .await;
+    assert_eq!(
+        (now["status"].clone(), now["size_bytes"].clone()),
+        (json!("ready"), json!(dump.len()))
+    );
+    assert!(now["expires_at"].is_string());
+    let left: Option<Vec<u8>> =
+        sqlx::query_scalar("SELECT sealed_token FROM db_exports WHERE id = $1")
+            .bind(uuid)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(left.is_none(), "the node's token goes with the upload");
+    let (status, _, _) = e
+        .raw(
+            None,
+            "PUT",
+            &format!("/api/v1/public/exports/{id}/chunks/1"),
+            &[("authorization", &bearer)],
+            b"late".to_vec(),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "no more uploads once it is ready"
+    );
+
+    // The link: someone else cannot ask, it works for the file, not for anything else.
+    let link_path = format!("/api/v1/client/exports/{id}/link");
+    let (status, _) = e.call(&b, "POST", &link_path, None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, link) = e.call(&a, "POST", &link_path, None).await;
+    assert_eq!(status, StatusCode::OK, "{link}");
+    let url = link["url"].as_str().unwrap().to_owned();
+    let (status, headers, body) = e
+        .raw(
+            None,
+            "GET",
+            &url,
+            &[("accept-encoding", "gzip")],
+            Vec::new(),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, dump);
+    assert_eq!(
+        headers["content-disposition"],
+        "attachment; filename=\"alice_shop.sql.gz\""
+    );
+    let (status, _, body) = e
+        .raw(None, "GET", &url, &[("range", "bytes=8000-")], Vec::new())
+        .await;
+    assert_eq!(
+        (status, body),
+        (StatusCode::PARTIAL_CONTENT, dump[8000..].to_vec())
+    );
+    let wrong = url.replace("token=", "token=x");
+    let (status, _, _) = e.raw(None, "GET", &wrong, &[], Vec::new()).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    // Five minutes on, it no longer works.
+    sqlx::query(
+        "UPDATE db_exports SET link_expires_at = now() - interval '1 second' WHERE id = $1",
+    )
+    .bind(uuid)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (status, _, _) = e.raw(None, "GET", &url, &[], Vec::new()).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "the link has run out");
+    let (status, link) = e.call(&a, "POST", &link_path, None).await;
+    assert_eq!(status, StatusCode::OK, "a new one can be asked for: {link}");
+    let (status, _, _) = e
+        .raw(None, "GET", link["url"].as_str().unwrap(), &[], Vec::new())
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Removed by its owner, or by time: the file goes.
+    let file = e.spool.join(format!("{}.sql.gz", id.replace('-', "")));
+    assert!(file.exists());
+    let (status, _) = e
+        .call(&a, "DELETE", &format!("/api/v1/client/exports/{id}"), None)
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert!(!file.exists());
+    let (status, got) = e.call(&a, "POST", &link_path, None).await;
+    assert_eq!((status, code(&got)), (StatusCode::CONFLICT, "not_ready"));
+    let (_, list) = e.call(&a, "GET", "/api/v1/client/exports", None).await;
+    assert_eq!(list["items"].as_array().unwrap().len(), 2);
+
+    // An export that is not picked up in time expires and its file is swept.
+    let (_, export) = e.call(&a, "POST", &starter, None).await;
+    let id2: Uuid = export["id"].as_str().unwrap().parse().unwrap();
+    sqlx::query("UPDATE db_exports SET status = 'ready', expires_at = now() - interval '1 minute' WHERE id = $1")
+        .bind(id2)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let stale = e.spool.join(format!("{}.sql.gz", id2.simple()));
+    std::fs::write(&stale, b"x").unwrap();
+    dhpanel_mod_databases::imports::sweep(&pool, &e.spool)
+        .await
+        .unwrap();
+    assert!(!stale.exists());
+    let status: String = sqlx::query_scalar("SELECT status FROM db_exports WHERE id = $1")
+        .bind(id2)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(status, "expired");
+    // The node's own failure is told.
+    let (_, export) = e.call(&a, "POST", &starter, None).await;
+    let failing = export["id"].as_str().unwrap().to_owned();
+    let op: Uuid = sqlx::query_scalar(
+        "SELECT id FROM operations WHERE kind = 'export_sql' AND idempotency_key = $1",
+    )
+    .bind(format!("export:{failing}"))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE operations SET status = 'dispatched', attempts = 1 WHERE id = $1")
+        .bind(op)
+        .execute(&pool)
+        .await
+        .unwrap();
+    dhpanel_database::operations::fail(
+        &pool,
+        op,
+        &json!({"code": "internal", "message": "the dump failed (exit 2): no", "retryable": false}),
+        None,
+    )
+    .await
+    .unwrap();
+    let (_, now) = e
+        .call(
+            &a,
+            "GET",
+            &format!("/api/v1/client/exports/{failing}"),
+            None,
+        )
+        .await;
+    assert_eq!(
+        (now["status"].clone(), now["error"].clone()),
+        (json!("failed"), json!("the dump failed (exit 2): no"))
+    );
+    let _ = std::fs::remove_dir_all(&e.spool);
+}

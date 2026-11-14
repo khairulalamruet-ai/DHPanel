@@ -7489,6 +7489,83 @@
         ]
       }
     },
+    "/api/v1/client/databases/{id}/exports": {
+      "post": {
+        "tags": [
+          "databases"
+        ],
+        "summary": "Dump a database to a `.sql.gz` file.",
+        "operationId": "clientStartExport",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Database id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Queued; follow `status` until `ready`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExportView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only`, `csrf_failed` or `feature_disabled`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such database",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`export_active`, `database_not_ready`, `imports_unavailable` or `tenant_not_running`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/client/databases/{id}/grants/{user_id}": {
       "put": {
         "tags": [
@@ -10179,6 +10256,215 @@
         ]
       }
     },
+    "/api/v1/client/exports": {
+      "get": {
+        "tags": [
+          "databases"
+        ],
+        "summary": "The exports of the account.",
+        "operationId": "clientListExports",
+        "responses": {
+          "200": {
+            "description": "The exports",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExportList"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/exports/{id}": {
+      "get": {
+        "tags": [
+          "databases"
+        ],
+        "summary": "One export.",
+        "operationId": "clientGetExport",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Export id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The export",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExportView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such export (or it is not yours)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "databases"
+        ],
+        "summary": "Remove a finished export (or give up one that is being made).",
+        "operationId": "clientDeleteExport",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Export id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed; the file goes at once"
+          },
+          "404": {
+            "description": "No such export",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`already_ended`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/exports/{id}/link": {
+      "post": {
+        "tags": [
+          "databases"
+        ],
+        "summary": "A link to download the finished file; it works for five minutes.",
+        "operationId": "clientExportLink",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Export id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The link (a new one replaces the last)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DownloadLink"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such export",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`not_ready`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/client/imports": {
       "get": {
         "tags": [
@@ -12484,6 +12770,26 @@
           }
         }
       },
+      "DownloadLink": {
+        "type": "object",
+        "description": "A download link.",
+        "required": [
+          "url",
+          "expires_at"
+        ],
+        "properties": {
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Until when the link works (RFC 3339, UTC)."
+          },
+          "url": {
+            "type": "string",
+            "description": "Where to download from (a path on this panel); the file is `<database>.sql.gz`.",
+            "example": "/api/v1/public/exports/0190.../download?token=..."
+          }
+        }
+      },
       "EndedSessions": {
         "type": "object",
         "description": "Result of ending sessions.",
@@ -12650,6 +12956,88 @@
             "type": "string",
             "description": "`pending`, `expired`, `consumed` or `revoked`.",
             "example": "pending"
+          }
+        }
+      },
+      "ExportList": {
+        "type": "object",
+        "description": "The exports of an account.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExportView"
+            },
+            "description": "Newest first (the last 50)."
+          }
+        }
+      },
+      "ExportView": {
+        "type": "object",
+        "description": "An export.",
+        "required": [
+          "id",
+          "database_id",
+          "database",
+          "status",
+          "received_bytes",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it was asked for (RFC 3339, UTC)."
+          },
+          "database": {
+            "type": "string",
+            "description": "The database's name.",
+            "example": "alice_shop"
+          },
+          "database_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The database dumped."
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it failed."
+          },
+          "expires_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the file goes (RFC 3339, UTC); while `ready`."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Id."
+          },
+          "received_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "While it is being made: bytes of the compressed dump that have arrived."
+          },
+          "size_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Size of the finished `.sql.gz` file, in bytes."
+          },
+          "status": {
+            "type": "string",
+            "description": "`queued`, `running`, `ready`, `failed` or `expired`."
           }
         }
       },

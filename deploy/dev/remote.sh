@@ -68,6 +68,10 @@ if [ "$what" = lint ] || [ "$what" = all ]; then
     step clippy-otel cargo clippy --workspace --all-targets --locked --features dhpanel-control-api/otel -- -D warnings
 fi
 if [ "$what" = test ] || [ "$what" = all ]; then
+    # Live tests make Docker networks; a run that dies leaves them behind, and a few
+    # dozen use up Docker's address pools ("all predefined address pools have been
+    # fully subnetted"). Unused networks are of no use to anyone: remove them first.
+    docker network prune -f > /dev/null 2>&1 || true
     step test cargo test --workspace --locked --no-fail-fast -- --include-ignored
     grep "test result" "$HOME/test.log" | awk '{p+=$4; f+=$6} END {print "tests: passed=" p " failed=" f}'
     grep -E "^test .* FAILED|panicked at" "$HOME/test.log" | head -20

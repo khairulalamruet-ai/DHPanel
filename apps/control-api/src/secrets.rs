@@ -87,6 +87,35 @@ pub fn operation_secrets(
                         )),
                     });
                 }
+                // The same for the upload credential of an SQL export.
+                Operation::ExportSql {
+                    username,
+                    database,
+                    export_id,
+                    url,
+                    token: None,
+                } => {
+                    let sealed = dhpanel_database::exports::sealed_token_of(&db, export_id)
+                        .await
+                        .map_err(|_| "could not read an export token".to_owned())?
+                        .ok_or_else(|| "this export has ended".to_owned())?;
+                    let bytes = master_key
+                        .open(
+                            &dhpanel_database::exports::token_context(export_id),
+                            &sealed,
+                        )
+                        .map_err(|_| "an export token does not open".to_owned())?;
+                    return Ok(Operation::ExportSql {
+                        username,
+                        database,
+                        export_id,
+                        url,
+                        token: Some(dhpanel_node_protocol::DbPassword(
+                            String::from_utf8(bytes)
+                                .map_err(|_| "an export token is not text".to_owned())?,
+                        )),
+                    });
+                }
                 other => return Ok(other),
             };
             let mut filled = Vec::with_capacity(items.len());

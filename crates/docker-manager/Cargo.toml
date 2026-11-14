@@ -17,7 +17,7 @@ bollard = { version = "0.21", default-features = false, features = ["pipe"] }
 futures-util.workspace = true
 thiserror = "2.0.21"
 uuid = "1"
-tokio = { version = "1", features = ["time"] }
+tokio = { version = "1", features = ["time", "sync"] }
 
 [dev-dependencies]
 bollard = { version = "0.21", default-features = false, features = ["pipe"] }

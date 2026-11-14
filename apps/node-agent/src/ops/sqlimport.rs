@@ -69,15 +69,15 @@ fn update(id: Uuid, f: impl FnOnce(&mut Progress)) {
 }
 
 /// Where downloads are kept: next to the other state the agent owns.
-fn imports_dir(context: &TenantContext) -> PathBuf {
+pub(super) fn imports_dir(context: &TenantContext) -> PathBuf {
     context.vhosts_root.with_file_name("imports")
 }
 
-fn invalid(m: &str) -> AgentError {
+pub(super) fn invalid(m: &str) -> AgentError {
     AgentError::new(ErrorCode::InvalidArguments, m.to_owned())
 }
 
-fn failed(what: &str) -> AgentError {
+pub(super) fn failed(what: &str) -> AgentError {
     AgentError::new(ErrorCode::Internal, what.to_owned())
 }
 
@@ -198,7 +198,7 @@ fn download(
     Ok(())
 }
 
-fn sha256_of(path: &Path) -> std::io::Result<String> {
+pub(super) fn sha256_of(path: &Path) -> std::io::Result<String> {
     let mut file = std::fs::File::open(path)?;
     let mut hasher = Sha256::new();
     let mut buf = vec![0u8; 1 << 20];
@@ -217,7 +217,7 @@ fn sha256_of(path: &Path) -> std::io::Result<String> {
 }
 
 /// What the server said, clipped and on one line.
-fn server_words(err: &mysql_async::Error) -> String {
+pub(super) fn server_words(err: &mysql_async::Error) -> String {
     match err {
         mysql_async::Error::Server(e) => {
             let text: String = e
@@ -233,7 +233,7 @@ fn server_words(err: &mysql_async::Error) -> String {
 }
 
 /// A random password for the temporary account.
-fn random_password() -> std::io::Result<String> {
+pub(super) fn random_password() -> std::io::Result<String> {
     let mut bytes = [0u8; 24];
     std::fs::File::open("/dev/urandom")?.read_exact(&mut bytes)?;
     // Letters, digits and a symbol, so it passes the server's own policy if any.
@@ -391,7 +391,11 @@ async fn run_with_file(
     db::ensure_server(context).await?;
     let password =
         random_password().map_err(|e| failed(&format!("cannot make a password: {}", e.kind())))?;
-    let account = format!("dhimport_{}", &import_id.simple().to_string()[..12]);
+    // One account per database that stays (locked) after the import: the triggers,
+    // views and routines of the dump are defined by it, and they must keep working
+    // when the import is over. A hyphen cannot be in a name a client chooses, so
+    // no client's own user can be this account.
+    let account = definer_account(database);
     let quoted_db = format!("`{database}`");
     {
         let mut admin = db::root_connection(context).await?;
@@ -405,12 +409,14 @@ async fn run_with_file(
             })
             .ok_or_else(|| failed("the database server gave no password hash"))?;
         admin
-            .query_drop(format!("DROP USER IF EXISTS '{account}'@'%'"))
+            .query_drop(format!(
+                "CREATE USER IF NOT EXISTS '{account}'@'%' IDENTIFIED BY PASSWORD '{hash}' WITH MAX_USER_CONNECTIONS 2"
+            ))
             .await
             .map_err(|e| failed(&server_words(&e)))?;
         admin
             .query_drop(format!(
-                "CREATE USER '{account}'@'%' IDENTIFIED BY PASSWORD '{hash}' WITH MAX_USER_CONNECTIONS 2"
+                "ALTER USER '{account}'@'%' IDENTIFIED BY PASSWORD '{hash}' ACCOUNT UNLOCK"
             ))
             .await
             .map_err(|e| failed(&server_words(&e)))?;
@@ -447,13 +453,139 @@ async fn run_with_file(
         .await
         .unwrap_or_else(|_| Err(failed("the import was cancelled")))
     };
+    // Locked again with a password nobody knows; the account stays as the definer.
     if let Ok(mut admin) = db::root_connection(context).await {
-        let _ = admin
-            .query_drop(format!("DROP USER IF EXISTS '{account}'@'%'"))
-            .await;
+        let unknown = random_password().unwrap_or_default();
+        let hash: Option<String> = admin
+            .exec_first("SELECT PASSWORD(?)", (&unknown,))
+            .await
+            .ok()
+            .flatten();
+        if let Some(hash) = hash.filter(|h| h.len() == 41 && h.starts_with('*')) {
+            let _ = admin
+                .query_drop(format!(
+                    "ALTER USER '{account}'@'%' IDENTIFIED BY PASSWORD '{hash}' ACCOUNT LOCK"
+                ))
+                .await;
+        } else {
+            let _ = admin
+                .query_drop(format!("ALTER USER '{account}'@'%' ACCOUNT LOCK"))
+                .await;
+        }
         let _ = admin.disconnect().await;
     }
     ran
+}
+
+/// The account that defines the triggers, views and routines of a database's dump
+/// (see [`strip_definer`]). `database` is a checked plain identifier.
+#[must_use]
+pub fn definer_account(database: &str) -> String {
+    format!("dhdef-{database}")
+}
+
+/// Takes the `DEFINER=user@host` clause out of a `CREATE` statement (plain, or
+/// inside a `/*!50017 ... */` version comment, as `mysqldump` writes it), so that
+/// the object is defined by the account that runs the import; a dump may name
+/// any user, and naming one needs a right the import account must not have.
+/// Anything that is not such a clause is returned as it was.
+#[must_use]
+pub fn strip_definer(statement: &str) -> std::borrow::Cow<'_, str> {
+    let head_len = statement
+        .char_indices()
+        .nth(400)
+        .map_or(statement.len(), |(i, _)| i);
+    let head = &statement[..head_len];
+    let lower = head.to_ascii_lowercase();
+    let Some(at) = lower.find("definer") else {
+        return std::borrow::Cow::Borrowed(statement);
+    };
+    // Before it only the words of the start of a `CREATE` (no quotes, no
+    // parentheses): the word is not part of a body or a value.
+    let before = &lower[..at];
+    let plain = before.chars().all(|c| {
+        c.is_ascii_alphanumeric() || c.is_whitespace() || matches!(c, '=' | '/' | '*' | '!' | '_')
+    });
+    let trimmed = before.trim_start_matches(|c: char| c.is_whitespace());
+    let starts = trimmed.starts_with("create")
+        || (trimmed.starts_with("/*!") && trimmed.contains("create"))
+        || trimmed.starts_with("alter");
+    if !plain || !starts {
+        return std::borrow::Cow::Borrowed(statement);
+    }
+    let rest = &statement[at + "definer".len()..];
+    let bytes = rest.as_bytes();
+    let mut i = 0;
+    let skip_ws = |i: &mut usize| {
+        while *i < bytes.len() && bytes[*i].is_ascii_whitespace() {
+            *i += 1;
+        }
+    };
+    skip_ws(&mut i);
+    if bytes.get(i) != Some(&b'=') {
+        return std::borrow::Cow::Borrowed(statement);
+    }
+    i += 1;
+    skip_ws(&mut i);
+    // A name: quoted with `, ' or ", or a plain word.
+    let name = |i: &mut usize| -> bool {
+        match bytes.get(*i) {
+            Some(&q @ (b'`' | b'\'' | b'"')) => {
+                *i += 1;
+                while *i < bytes.len() {
+                    if bytes[*i] == q {
+                        if bytes.get(*i + 1) == Some(&q) {
+                            *i += 2;
+                            continue;
+                        }
+                        *i += 1;
+                        return true;
+                    }
+                    *i += 1;
+                }
+                false
+            }
+            Some(_) => {
+                let start = *i;
+                while *i < bytes.len()
+                    && (bytes[*i].is_ascii_alphanumeric()
+                        || matches!(bytes[*i], b'_' | b'-' | b'.' | b'%' | b'$'))
+                {
+                    *i += 1;
+                }
+                *i > start
+            }
+            None => false,
+        }
+    };
+    let current = rest[i..].to_ascii_lowercase();
+    if current.starts_with("current_user") {
+        i += "current_user".len();
+        skip_ws(&mut i);
+        if bytes.get(i) == Some(&b'(') {
+            i += 1;
+            skip_ws(&mut i);
+            if bytes.get(i) == Some(&b')') {
+                i += 1;
+            }
+        }
+    } else {
+        if !name(&mut i) {
+            return std::borrow::Cow::Borrowed(statement);
+        }
+        skip_ws(&mut i);
+        if bytes.get(i) == Some(&b'@') {
+            i += 1;
+            skip_ws(&mut i);
+            if !name(&mut i) {
+                return std::borrow::Cow::Borrowed(statement);
+            }
+        }
+    }
+    let mut out = String::with_capacity(statement.len());
+    out.push_str(&statement[..at]);
+    out.push_str(&rest[i..]);
+    std::borrow::Cow::Owned(out)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -498,7 +630,9 @@ fn execute(
                 match splitter.next_statement() {
                     Ok(Some(statement)) => {
                         count.set(count.get() + 1);
-                        if let Err(e) = handle.block_on(conn.query_drop(statement)) {
+                        if let Err(e) =
+                            handle.block_on(conn.query_drop(strip_definer(&statement).as_ref()))
+                        {
                             return Err(failed(&format!(
                                 "statement {}: {}",
                                 count.get(),
@@ -539,6 +673,7 @@ fn split_error(e: &SplitError, after: u64) -> AgentError {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
@@ -547,5 +682,48 @@ mod tests {
         let p = random_password().unwrap();
         assert!(dhpanel_domain::databases::check_password(&p).is_ok(), "{p}");
         assert_ne!(p, random_password().unwrap());
+    }
+
+    #[test]
+    fn definers_are_taken_out_of_create_statements_only() {
+        let cases = [
+            (
+                "CREATE DEFINER=`root`@`%` TRIGGER t BEFORE INSERT ON x FOR EACH ROW SET NEW.a = 1",
+                "CREATE  TRIGGER t BEFORE INSERT ON x FOR EACH ROW SET NEW.a = 1",
+            ),
+            (
+                "CREATE ALGORITHM=UNDEFINED DEFINER = 'bob'@'localhost' SQL SECURITY DEFINER VIEW v AS SELECT 1",
+                "CREATE ALGORITHM=UNDEFINED  SQL SECURITY DEFINER VIEW v AS SELECT 1",
+            ),
+            (
+                "/*!50003 CREATE*/ /*!50017 DEFINER=`root`@`localhost`*/ /*!50003 TRIGGER t BEFORE INSERT ON x FOR EACH ROW SET NEW.a = 1*/",
+                "/*!50003 CREATE*/ /*!50017 */ /*!50003 TRIGGER t BEFORE INSERT ON x FOR EACH ROW SET NEW.a = 1*/",
+            ),
+            (
+                "create definer=current_user() procedure p() select 1",
+                "create  procedure p() select 1",
+            ),
+            (
+                "CREATE DEFINER=CURRENT_USER FUNCTION f() RETURNS int RETURN 1",
+                "CREATE FUNCTION f() RETURNS int RETURN 1",
+            ),
+            (
+                "CREATE DEFINER=`a``b`@`h-1.example` EVENT e ON SCHEDULE EVERY 1 DAY DO SELECT 1",
+                "CREATE  EVENT e ON SCHEDULE EVERY 1 DAY DO SELECT 1",
+            ),
+        ];
+        for (before, after) in cases {
+            assert_eq!(strip_definer(before), after, "{before}");
+        }
+        // Not a clause: a value, a body, another statement.
+        for same in [
+            "INSERT INTO t VALUES ('create definer=x@y')",
+            "SELECT 'DEFINER=root@%'",
+            "CREATE TABLE definer (a int)",
+            "CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW SET NEW.a = 'definer=a@b'",
+            "GRANT SELECT ON a.* TO definer",
+        ] {
+            assert_eq!(strip_definer(same), same, "{same}");
+        }
     }
 }

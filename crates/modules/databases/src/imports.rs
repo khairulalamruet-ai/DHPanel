@@ -67,7 +67,10 @@ pub fn client_router() -> Router<DatabasesState> {
             "/api/v1/client/imports/{id}",
             get(get_import).delete(cancel_import),
         )
-        .route("/api/v1/client/imports/{id}/chunks/{n}", put(put_chunk))
+        .route(
+            "/api/v1/client/imports/{id}/chunks/{n}",
+            put(put_chunk).layer(DefaultBodyLimit::max(MAX_CHUNK_BYTES)),
+        )
         .route(
             "/api/v1/client/imports/{id}/complete",
             post(complete_import),
@@ -390,9 +393,13 @@ pub async fn put_chunk(
             "More data than the file was said to have.",
         )]));
     }
-    write_chunk(&state.spool_dir, id, import.received_bytes, &body)
-        .await
-        .map_err(internal)?;
+    write_chunk(
+        &spool_path(&state.spool_dir, id),
+        import.received_bytes,
+        &body,
+    )
+    .await
+    .map_err(internal)?;
     let mut conn = state.db.acquire().await.map_err(internal)?;
     if !store::chunk_written(&mut conn, id, n, new_total)
         .await
@@ -408,25 +415,23 @@ pub async fn put_chunk(
 
 /// Appends a chunk at `offset` (anything past it, a half-written earlier try,
 /// is cut off first).
-async fn write_chunk(
-    dir: &FsPath,
-    id: Uuid,
+pub(crate) async fn write_chunk(
+    path: &FsPath,
     offset: i64,
     data: &[u8],
 ) -> Result<(), std::io::Error> {
-    tokio::fs::create_dir_all(dir).await?;
+    if let Some(dir) = path.parent() {
+        tokio::fs::create_dir_all(dir).await?;
+    }
     let mut file = tokio::fs::OpenOptions::new()
         .create(true)
         .write(true)
         .truncate(false)
-        .open(spool_path(dir, id))
+        .open(path)
         .await?;
-    file.set_len(u64::try_from(offset).unwrap_or(0)).await?;
-    tokio::io::AsyncSeekExt::seek(
-        &mut file,
-        std::io::SeekFrom::Start(u64::try_from(offset).unwrap_or(0)),
-    )
-    .await?;
+    let at = u64::try_from(offset).unwrap_or(0);
+    file.set_len(at).await?;
+    tokio::io::AsyncSeekExt::seek(&mut file, std::io::SeekFrom::Start(at)).await?;
     file.write_all(data).await?;
     file.sync_data().await
 }
@@ -600,7 +605,7 @@ pub async fn cancel_import(
 }
 
 /// SHA-256 of a file, as hex.
-async fn checksum(path: PathBuf) -> Result<String, std::io::Error> {
+pub(crate) async fn checksum(path: PathBuf) -> Result<String, std::io::Error> {
     tokio::task::spawn_blocking(move || {
         use std::io::Read as _;
         let mut file = std::fs::File::open(path)?;
@@ -626,6 +631,18 @@ async fn checksum(path: PathBuf) -> Result<String, std::io::Error> {
     .map_err(std::io::Error::other)?
 }
 
+/// Whether `given` is the token whose SHA-256 is `wanted` (compared without
+/// stopping at the first difference).
+pub(crate) fn token_matches(given: &str, wanted: &[u8]) -> bool {
+    let given = Sha256::digest(given.as_bytes());
+    given.len() == wanted.len()
+        && given
+            .iter()
+            .zip(wanted)
+            .fold(0u8, |acc, (a, b)| acc | (a ^ b))
+            == 0
+}
+
 /// The node fetches the dump (`Authorization: Bearer <token>`; ranges work, so a
 /// cut download goes on where it stopped).
 pub async fn download(
@@ -644,15 +661,7 @@ pub async fn download(
         .await
         .map_err(internal)?
         .ok_or_else(denied)?;
-    let given = Sha256::digest(given.as_bytes());
-    // Same length always; compared without stopping at the first difference.
-    let same = given.len() == wanted.len()
-        && given
-            .iter()
-            .zip(&wanted)
-            .fold(0u8, |acc, (a, b)| acc | (a ^ b))
-            == 0;
-    if !same {
+    if !token_matches(given, &wanted) {
         return Err(denied());
     }
     // Serving a file cannot fail as a service: a missing file is a 404 response.
@@ -673,8 +682,9 @@ pub async fn download(
 
 // -------------------------------------------------------------------- sweep
 
-/// Cancels uploads that were left alone and removes spool files nobody needs
-/// any more (an import that has ended, or that does not exist). Run now and then.
+/// Cancels uploads that were left alone, expires exports whose time is up and
+/// removes spool files nobody needs any more (an import or export that has ended,
+/// or that does not exist). Run now and then.
 ///
 /// # Errors
 /// Database or file errors.
@@ -685,11 +695,19 @@ pub async fn sweep(
     store::cancel_abandoned(db, ABANDONED_AFTER_HOURS)
         .await
         .map_err(internal)?;
-    let live: std::collections::HashSet<Uuid> = store::live_ids(db)
+    dhpanel_database::exports::expire_due(db)
+        .await
+        .map_err(internal)?;
+    let mut live: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for id in store::live_ids(db).await.map_err(internal)? {
+        live.insert(format!("{}.dump", id.simple()));
+    }
+    for id in dhpanel_database::exports::live_ids(db)
         .await
         .map_err(internal)?
-        .into_iter()
-        .collect();
+    {
+        live.insert(format!("{}.sql.gz", id.simple()));
+    }
     let mut entries = match tokio::fs::read_dir(spool_dir).await {
         Ok(entries) => entries,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
@@ -698,15 +716,15 @@ pub async fn sweep(
     let mut removed = 0;
     while let Some(item) = entries.next_entry().await.map_err(internal)? {
         let path = item.path();
-        let id = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .and_then(|n| n.strip_suffix(".dump"))
-            .and_then(|n| Uuid::parse_str(n).ok());
-        if let Some(id) = id
-            && !live.contains(&id)
-            && tokio::fs::remove_file(&path).await.is_ok()
-        {
+        let Some(name) = path.file_name().and_then(|n| n.to_str()).map(str::to_owned) else {
+            continue;
+        };
+        // Only files this module makes: `<32 hex>.dump` and `<32 hex>.sql.gz`.
+        let stem = name
+            .strip_suffix(".dump")
+            .or_else(|| name.strip_suffix(".sql.gz"));
+        let ours = stem.is_some_and(|s| s.len() == 32 && s.bytes().all(|b| b.is_ascii_hexdigit()));
+        if ours && !live.contains(&name) && tokio::fs::remove_file(&path).await.is_ok() {
             removed += 1;
         }
     }

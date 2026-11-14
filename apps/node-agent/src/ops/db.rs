@@ -404,6 +404,13 @@ pub async fn drop_database(
             .await
             .map_err(|e| sql_error(&e))?;
     }
+    // The locked account that defines what an import made (T07.07), if there is one.
+    conn.query_drop(format!(
+        "DROP USER IF EXISTS '{}'@'%'",
+        super::sqlimport::definer_account(&name)
+    ))
+    .await
+    .map_err(|e| sql_error(&e))?;
     let _ = conn.disconnect().await;
     Ok(Output::DatabaseDropped {
         existed: existed.is_some(),

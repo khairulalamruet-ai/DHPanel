@@ -1,0 +1,42 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE operations\n           SET status = CASE\n                   WHEN attempts < max_attempts\n                        AND now() + make_interval(secs => $2::int) < expires_at\n                   THEN 'retryable' ELSE 'failed' END,\n               error = '{\"code\": \"timeout\", \"message\": \"the node did not answer in time\", \"retryable\": true}'::jsonb,\n               next_attempt_at = now() + make_interval(secs => $2::int),\n               finished_at = CASE\n                   WHEN attempts < max_attempts\n                        AND now() + make_interval(secs => $2::int) < expires_at\n                   THEN NULL ELSE now() END\n           WHERE status = 'dispatched'\n             AND dispatched_at < now() - make_interval(\n                     secs => CASE WHEN kind IN ('import_sql', 'export_sql') THEN $3::int ELSE $1::int END)\n           RETURNING id, status AS \"status!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "operations",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "status!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "operations",
+            "name": "status"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "77ae80430809299a4e5c4ee0de2d3a08a23797b882292261f0fd5ea309bb08dc"
+}
