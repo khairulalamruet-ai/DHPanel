@@ -10,6 +10,8 @@
 //! a temporary file in the same directory, then a rename) and nothing removes a
 //! file for good except emptying the trash.
 
+mod archive;
+
 use std::{
     io::{Read as _, Write as _},
     os::fd::{AsFd, OwnedFd},
@@ -98,6 +100,18 @@ fn run(root: &Root, request: FileRequest) -> Out<FileResult> {
             id,
             older_than_days,
         } => trash::empty(root, id.as_deref(), older_than_days),
+        FileRequest::Archive {
+            paths,
+            dest,
+            format,
+            max_bytes,
+        } => archive::archive(root, &paths, &dest, format, max_bytes),
+        FileRequest::Extract {
+            path,
+            dest,
+            max_bytes,
+            max_entries,
+        } => archive::extract(root, &path, &dest, max_bytes, max_entries),
         FileRequest::Chmod {
             path,
             mode,

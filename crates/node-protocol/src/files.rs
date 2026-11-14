@@ -107,12 +107,47 @@ pub enum FileRequest {
         #[serde(default)]
         recursive: bool,
     },
+    /// Packs files and folders into one archive file; never replaces.
+    Archive {
+        /// What to pack (each a file or a folder).
+        paths: Vec<String>,
+        /// The archive to make (its path, ending in `.zip` or `.tar.gz`).
+        dest: String,
+        /// Its format.
+        format: ArchiveFormat,
+        /// Refuse (`too_large`) when the files add up to more than this.
+        max_bytes: u64,
+    },
+    /// Unpacks an archive (`.zip`, `.tar.gz`, `.tgz`) into a folder. The whole
+    /// archive is checked first (names that leave the folder, sizes, how many
+    /// entries) and nothing is unpacked when anything is wrong; files that are
+    /// already there are never replaced; links and special files in it are skipped.
+    Extract {
+        /// The archive.
+        path: String,
+        /// The folder to unpack into (made when missing).
+        dest: String,
+        /// Refuse (`too_large`) when it unpacks to more than this.
+        max_bytes: u64,
+        /// Refuse (`too_many`) when it has more entries than this.
+        max_entries: u32,
+    },
     /// Sets sane bits on a whole tree: directories 755, files 644 (755 if the owner
     /// could run them). Links are left alone.
     FixPermissions {
         /// The path.
         path: String,
     },
+}
+
+/// An archive format.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ArchiveFormat {
+    /// `.zip`.
+    Zip,
+    /// `.tar.gz`.
+    TarGz,
 }
 
 /// What a path is.
@@ -233,6 +268,8 @@ pub enum FileErrorCode {
     InvalidArguments,
     /// Too many items.
     TooMany,
+    /// The archive is damaged, of another format, or has an entry that is not allowed.
+    BadArchive,
     /// Anything else.
     Failed,
 }
