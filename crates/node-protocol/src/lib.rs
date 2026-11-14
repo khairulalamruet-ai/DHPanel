@@ -106,6 +106,46 @@ impl AgentError {
     }
 }
 
+// ------------------------------------------------------------------- routes
+
+/// One redirect of a site: the exact path it applies to and where it sends the
+/// visitor. Both were checked by the control plane and are checked again by the
+/// agent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RouteRedirect {
+    /// The exact path, starting with `/`.
+    pub path: String,
+    /// A path of the same site or an http(s) address.
+    pub target: String,
+    /// 301, 302, 307 or 308.
+    pub code: u16,
+}
+
+/// How the web server answers for a group of names: the same site under every
+/// name in `hosts`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SiteRoute {
+    /// The names (lower-case ASCII), at least one.
+    pub hosts: Vec<String>,
+    /// Where the site's web container listens, `host:port` (for example
+    /// `dh-alice-web:8080`), or `None` for a suspended site: visitors then get
+    /// the "suspended" page and nothing is served from the tenant's files.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upstream: Option<String>,
+    /// Redirects, answered before the site is asked.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub redirects: Vec<RouteRedirect>,
+}
+
+/// Most sites one tenant may have on a node.
+pub const MAX_SITES_PER_TENANT: usize = 200;
+/// Most names in all of a tenant's sites.
+pub const MAX_HOSTS_PER_TENANT: usize = 500;
+/// Most redirects in all of a tenant's sites.
+pub const MAX_REDIRECTS_PER_TENANT: usize = 500;
+
 // ------------------------------------------------------------ skeleton files
 
 /// One default file of a new tenant: text, at a plain relative path below its
@@ -290,6 +330,17 @@ pub enum Operation {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         skeleton: Vec<SkeletonFile>,
     },
+    /// Set the web server's routes for one tenant: which names it answers for and
+    /// what it does for each (proxy to the tenant's web container, show the
+    /// "suspended" page, redirect paths). Replaces what the tenant had; an empty
+    /// list removes the tenant's routes. The agent keeps them and puts them back
+    /// whenever the web server loses them. Answered with [`Output::SiteRoutesSet`].
+    SetSiteRoutes {
+        /// The tenant's system name.
+        username: String,
+        /// The tenant's sites.
+        routes: Vec<SiteRoute>,
+    },
     /// Stop a tenant's containers; its files stay. Safe to repeat. Answered with
     /// [`Output::TenantSuspended`].
     SuspendTenant {
@@ -339,6 +390,7 @@ impl Operation {
         "provision_tenant_stack",
         "set_resource_limits",
         "set_up_tenant",
+        "set_site_routes",
         "suspend_tenant",
         "resume_tenant",
         "delete_tenant",
@@ -355,6 +407,7 @@ impl Operation {
             Self::ProvisionTenantStack { .. } => "provision_tenant_stack",
             Self::SetResourceLimits { .. } => "set_resource_limits",
             Self::SetUpTenant { .. } => "set_up_tenant",
+            Self::SetSiteRoutes { .. } => "set_site_routes",
             Self::SuspendTenant { .. } => "suspend_tenant",
             Self::ResumeTenant { .. } => "resume_tenant",
             Self::DeleteTenant { .. } => "delete_tenant",
@@ -496,6 +549,16 @@ pub enum Output {
         containers: Vec<String>,
         /// How storage limits are enforced (`xfs`), or `None` when they are not.
         storage_quota: Option<String>,
+    },
+    /// Answer to [`Operation::SetSiteRoutes`].
+    SiteRoutesSet {
+        /// Sites the tenant has now.
+        sites: usize,
+        /// Names they answer for.
+        hosts: usize,
+        /// Whether the web server has them (the routes are kept either way and
+        /// applied as soon as it can take them).
+        applied: bool,
     },
     /// Answer to [`Operation::SuspendTenant`].
     TenantSuspended {
@@ -1243,6 +1306,14 @@ mod tests {
                 pids: Some(100),
                 skeleton: Vec::new(),
             },
+            Operation::SetSiteRoutes {
+                username: "alice".into(),
+                routes: vec![SiteRoute {
+                    hosts: vec!["example.com".into()],
+                    upstream: Some("dh-alice-web:8080".into()),
+                    redirects: vec![],
+                }],
+            },
             Operation::SuspendTenant {
                 username: "alice".into(),
             },
@@ -1262,7 +1333,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            10,
+            11,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }

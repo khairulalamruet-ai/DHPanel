@@ -146,6 +146,17 @@ impl Registry {
             .insert(op_type, Box::new(move |op| Box::pin(handler(op))));
     }
 
+    /// Adds the web server operations, when the agent has a Caddy to drive.
+    #[must_use]
+    pub fn with_web(mut self, web: Option<Arc<crate::web::WebContext>>) -> Self {
+        if let Some(context) = web {
+            self.register("set_site_routes", move |op| {
+                crate::web::set_site_routes(context.clone(), op)
+            });
+        }
+        self
+    }
+
     /// Operation types that have a handler, sorted.
     #[must_use]
     pub fn types(&self) -> Vec<&'static str> {

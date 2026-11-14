@@ -39,8 +39,13 @@ pub const MAX_SOURCE: usize = 512;
 /// Longest target.
 pub const MAX_TARGET: usize = 2048;
 
+/// No whitespace or control characters, and none of `{`, `}`: the web server
+/// replaces `{name}` in the values it sends (a placeholder such as
+/// `{env.NAME}` would hand out the server's own settings).
 fn plain(text: &str) -> bool {
-    !text.chars().any(|c| c.is_whitespace() || c.is_control())
+    !text
+        .chars()
+        .any(|c| c.is_whitespace() || c.is_control() || matches!(c, '{' | '}'))
 }
 
 /// The path a redirect applies to.
@@ -56,7 +61,8 @@ impl SourcePath {
         if input.starts_with('/')
             && input.len() <= MAX_SOURCE
             && plain(input)
-            && !input.contains(['?', '#'])
+            // `*` would make the web server read the path as a pattern.
+            && !input.contains(['?', '#', '*'])
         {
             Ok(Self(input.to_owned()))
         } else {
@@ -252,6 +258,10 @@ mod tests {
             "/a?x=1",
             "/a#f",
             "/a\nb",
+            "/a*",
+            "/*",
+            "/{env.SECRET}",
+            "/a}",
             &format!("/{}", "a".repeat(512)),
         ] {
             assert_eq!(
@@ -293,6 +303,9 @@ mod tests {
             "https://.example.org/",
             "https://exa_mple.org/",
             "https://[::1]/x",
+            "/x?{env.SECRET}",
+            "https://example.org/{http.request.host}",
+            "/a{b}",
             &format!("/{}", "a".repeat(2048)),
         ] {
             assert_eq!(

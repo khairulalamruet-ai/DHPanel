@@ -12,6 +12,7 @@ pub mod identity;
 pub mod ops;
 pub mod stream;
 pub mod verify;
+pub mod web;
 
 /// Version of this agent build, reported to the control plane.
 pub const AGENT_VERSION: &str = env!("CARGO_PKG_VERSION");

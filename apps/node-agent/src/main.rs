@@ -311,7 +311,13 @@ fn run_command(state_dir: PathBuf, stream_url: Option<String>) -> ExitCode {
                 Ok(s) => s,
                 Err(err) => return fail(70, &format!("cannot listen for signals: {err}")),
             };
-        let executor = open_executor(&state_dir);
+        // The web server (Caddy) is driven only when its admin address is given.
+        let web = dhpanel_node_agent::web::Settings::from_env()
+            .map(|s| dhpanel_node_agent::web::WebContext::new(s, &state_dir));
+        if let Some(web) = &web {
+            tokio::spawn(web.clone().keep_in_sync(std::time::Duration::from_secs(20)));
+        }
+        let executor = open_executor(&state_dir, web);
         // Forget old results once an hour.
         tokio::spawn({
             let executor = executor.clone();
@@ -379,7 +385,10 @@ fn tenant_context() -> Option<ops::tenant::TenantContext> {
 /// cannot be used is set aside (never deleted) and a fresh one is started: the
 /// node stays manageable, at the price of not recognising operations it ran
 /// before, which the log line makes visible.
-fn open_executor(state_dir: &std::path::Path) -> std::sync::Arc<Executor> {
+fn open_executor(
+    state_dir: &std::path::Path,
+    web: Option<std::sync::Arc<dhpanel_node_agent::web::WebContext>>,
+) -> std::sync::Arc<Executor> {
     let path = state_dir.join(CACHE_FILE);
     let cache = match ResultCache::open(&path) {
         Ok(cache) => cache,
@@ -404,7 +413,7 @@ fn open_executor(state_dir: &std::path::Path) -> std::sync::Arc<Executor> {
         }
     };
     Executor::new(
-        Registry::builtin_with(state_dir, tenant_context()),
+        Registry::builtin_with(state_dir, tenant_context()).with_web(web),
         cache,
         DEFAULT_MAX_PARALLEL,
     )
