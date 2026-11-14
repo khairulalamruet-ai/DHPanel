@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT DISTINCT d.php_version AS \"version!\"\n           FROM domains d JOIN tenants t ON t.id = d.tenant_id\n           WHERE d.tenant_id = $1 AND d.php_version IS NOT NULL\n             AND d.php_version <> t.php_version\n           ORDER BY 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "version!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "domains",
+            "name": "php_version"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "4eb4eaea90675bfead8e420358d1d30d415069862693c2ab47ee3161bc43214f"
+}

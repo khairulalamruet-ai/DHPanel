@@ -313,6 +313,56 @@ impl Dispatcher {
         }
     }
 
+    /// Whether the account's PHP containers are as they should be; if not, asks
+    /// the node and says "not yet" (the account stays on the list).
+    async fn php_ready(
+        &self,
+        tenant: &dhpanel_database::routes::Pending,
+        username: &dhpanel_domain::TenantUsername,
+        slot: u64,
+    ) -> Result<bool, String> {
+        let db = self.ops.db();
+        let Some(state) = dhpanel_database::php::state(db, tenant.id)
+            .await
+            .map_err(|e| e.to_string())?
+        else {
+            return Ok(true);
+        };
+        if state.state_version == state.applied_version {
+            return Ok(true);
+        }
+        let account = dhpanel_database::tenants::get(db, tenant.id)
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or("the account is gone")?;
+        let plan = dhpanel_database::plans::get(db, account.plan_id)
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or("the plan is gone")?;
+        let extra = dhpanel_database::php::extra_versions(db, tenant.id)
+            .await
+            .map_err(|e| e.to_string())?;
+        let request = dhpanel_operations::Request::new(
+            tenant.node_id,
+            dhpanel_node_protocol::Operation::SetPhpVersions {
+                tenant_id: tenant.id,
+                username: username.as_str().to_owned(),
+                uid: u32::try_from(account.uid).map_err(|_| "negative uid")?,
+                cpu_millis: plan.cpu_millis.and_then(|v| u32::try_from(v).ok()),
+                memory_bytes: plan.memory_bytes.and_then(|v| u64::try_from(v).ok()),
+                pids: plan.pids.and_then(|v| u32::try_from(v).ok()),
+                php_version: state.version,
+                extra_php: extra,
+            },
+            // The migration reads the state back out of this key.
+            format!("php:{}:{}:{slot}", tenant.id.simple(), state.state_version),
+        );
+        let mut request = request;
+        request.tenant_id = Some(tenant.id);
+        self.enqueue_failed(&request).await?;
+        Ok(false)
+    }
+
     async fn queue_routes(
         &self,
         tenant: &dhpanel_database::routes::Pending,
@@ -322,6 +372,12 @@ impl Dispatcher {
         let username =
             dhpanel_domain::TenantUsername::parse(&tenant.username).map_err(|e| e.to_string())?;
         let upstream = dhpanel_tenant_stack::web_upstream(&username).map_err(|e| e.to_string())?;
+        // PHP first: the web server files point at containers that must exist.
+        // (A suspended account has nothing running: it is brought up to date when
+        // it is resumed.)
+        if tenant.status == "active" && !self.php_ready(tenant, &username, slot).await? {
+            return Ok(false);
+        }
         let domains = dhpanel_database::routes::domains(db, tenant.id)
             .await
             .map_err(|e| e.to_string())?;

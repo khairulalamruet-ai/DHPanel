@@ -1292,3 +1292,141 @@ async fn a_tenants_web_server_files_are_sent_with_its_routes_and_what_is_gone_is
         "a failed web server file means the tenant is looked at again"
     );
 }
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs PostgreSQL"]
+async fn php_containers_are_set_before_the_files_that_point_to_them(pool: PgPool) {
+    let p = plane(&pool).await;
+    let d = Dispatcher::new(p.ops.clone(), p.gateway.clone(), None, dispatch_settings());
+    let node = make_node(&p, &pool, "php").await;
+    let account: Uuid = sqlx::query_scalar(
+        "INSERT INTO accounts (kind, username, email, password_hash)
+         VALUES ('client', 'phil', 'phil@example.com',
+                 '$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHQ$aGFzaGhhc2hoYXNoaGFzaA') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let plan: Uuid = sqlx::query_scalar("SELECT id FROM plans WHERE is_default")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let tenant: Uuid = sqlx::query_scalar(
+        "INSERT INTO tenants (owner_account_id, node_id, plan_id, username, uid, status)
+         VALUES ($1, $2, $3, 'philhost', 10003, 'active') RETURNING id",
+    )
+    .bind(account)
+    .bind(node.id)
+    .bind(plan)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let main: Uuid = sqlx::query_scalar(
+        "INSERT INTO domains (tenant_id, fqdn, kind) VALUES ($1, 'phil.example.com', 'primary') RETURNING id",
+    )
+    .bind(tenant)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO domains (tenant_id, fqdn, kind, php_version) VALUES ($1, 'old.example.org', 'addon', '8.2')")
+        .bind(tenant)
+        .execute(&pool)
+        .await
+        .unwrap();
+    // An account that runs the version it started with needs no PHP step; with a
+    // domain on another version it does: the PHP operation goes out, the files wait.
+    let php_ops = || async {
+        sqlx::query_as::<_, (Uuid, serde_json::Value, String, String)>(
+            "SELECT id, payload, status, idempotency_key FROM operations WHERE kind = 'set_php_versions' ORDER BY created_at",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap()
+    };
+    let attached = || async {
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM operations WHERE kind = 'attach_domain'")
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+    };
+    assert_eq!(d.request_route_syncs().await, 0, "waiting for PHP");
+    let sent = php_ops().await;
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].1["php_version"], "8.4");
+    assert_eq!(sent[0].1["extra_php"], serde_json::json!(["8.2"]));
+    assert_eq!(sent[0].1["username"], "philhost");
+    assert!(sent[0].3.starts_with(&format!("php:{}:", tenant.simple())));
+    assert_eq!(
+        attached().await,
+        0,
+        "no file points at a container that is not there yet"
+    );
+    // Asking again before the node answers sends nothing new and still waits.
+    assert_eq!(d.request_route_syncs().await, 0);
+    assert_eq!(php_ops().await.len(), 1);
+
+    // The node says done: the account is up to date and the files go out.
+    sqlx::query("UPDATE operations SET status = 'dispatched', attempts = 1 WHERE id = $1")
+        .bind(sent[0].0)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(
+        dhpanel_database::operations::succeed(&pool, sent[0].0, &serde_json::json!({}))
+            .await
+            .unwrap()
+    );
+    let state = dhpanel_database::php::state(&pool, tenant)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(state.state_version, state.applied_version);
+    assert_eq!(d.request_route_syncs().await, 1);
+    let files: Vec<(String, String)> = sqlx::query_as(
+        "SELECT payload ->> 'domain', payload ->> 'config' FROM operations
+         WHERE kind = 'attach_domain' ORDER BY payload ->> 'domain'",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(files.len(), 2);
+    assert!(
+        files[0]
+            .1
+            .contains("fastcgi_pass dh-philhost-php-8-2:9000;"),
+        "{}",
+        files[0].1
+    );
+    assert!(
+        files[1].1.contains("fastcgi_pass dh-philhost-php:9000;"),
+        "{}",
+        files[1].1
+    );
+
+    // The account moves to 8.2: the domain that asked for it follows the main
+    // container, so no extra remains; the PHP step comes first again.
+    sqlx::query("UPDATE tenants SET php_version = '8.2' WHERE id = $1")
+        .bind(tenant)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(d.request_route_syncs().await, 0);
+    let sent = php_ops().await;
+    assert_eq!(sent.len(), 2);
+    assert_eq!(sent[1].1["php_version"], "8.2");
+    assert_eq!(sent[1].1["extra_php"], serde_json::json!([]));
+    let _ = main;
+
+    // A suspended account has nothing running: it does not wait for PHP.
+    sqlx::query("UPDATE tenants SET status = 'suspended' WHERE id = $1")
+        .bind(tenant)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(d.request_route_syncs().await, 1);
+    assert_eq!(
+        php_ops().await.len(),
+        2,
+        "nothing more is asked of a suspended account"
+    );
+}

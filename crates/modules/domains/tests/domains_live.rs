@@ -3408,3 +3408,292 @@ async fn administrators_keep_versions_of_the_web_server_templates_and_apply_them
         ]
     );
 }
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn an_account_and_its_domains_choose_php_versions_within_what_is_on_offer(pool: PgPool) {
+    let e = env(&pool).await;
+    let (alice, tenant) = client(&pool, "alice", 10_000).await;
+    let (bobby, _) = client(&pool, "bobby", 10_001).await;
+    let root = e
+        .sign_in(account(&pool, "rootuser", &["super_admin"]).await)
+        .await;
+    let (a, b) = (e.sign_in(alice).await, e.sign_in(bobby).await);
+    let mut domains = Vec::new();
+    for name in ["one.com", "two.com", "three.com", "four.com", "five.com"] {
+        let (status, d) = e
+            .call(Some(&a), "POST", CLIENT, Some(domain(name)), true)
+            .await;
+        assert_eq!(status, StatusCode::CREATED, "{d}");
+        domains.push(d["id"].as_str().unwrap().to_owned());
+    }
+    let (_, alias) = e
+        .call(
+            Some(&a),
+            "POST",
+            CLIENT,
+            Some(json!({"fqdn": "alias.org", "kind": "alias", "parent_domain_id": domains[0]})),
+            true,
+        )
+        .await;
+    const PHP: &str = "/api/v1/client/php";
+    let state = || {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_as::<_, (String, i64, i64)>(
+                "SELECT php_version, php_state_version, php_applied_version FROM tenants WHERE id = $1",
+            )
+            .bind(tenant)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        }
+    };
+
+    // Reading is open: the versions on offer, the account's, each domain's.
+    let (status, view) = e.call(Some(&a), "GET", PHP, None, false).await;
+    assert_eq!(status, StatusCode::OK, "{view}");
+    assert_eq!(view["available"], json!(["8.4", "8.5", "8.3", "8.2"]));
+    assert_eq!(view["account_version"], "8.4");
+    assert_eq!(view["applied"], true);
+    let listed = view["domains"].as_array().unwrap();
+    assert_eq!(
+        listed.len(),
+        5,
+        "aliases follow their domain and are not listed"
+    );
+    assert!(
+        listed
+            .iter()
+            .all(|d| d["php_version"].is_null() && d["effective_version"] == "8.4")
+    );
+
+    // Choosing needs the feature.
+    sqlx::query(
+        "UPDATE feature_sets SET all_features = false, features = ARRAY['domains']::feature_key[]
+         WHERE id = (SELECT feature_set_id FROM plans WHERE is_default)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (status, body) = e
+        .call(Some(&a), "PUT", PHP, Some(json!({"version": "8.3"})), true)
+        .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::FORBIDDEN, "feature_disabled")
+    );
+    sqlx::query(
+        "UPDATE feature_sets SET features = ARRAY['domains', 'php_version']::feature_key[]
+         WHERE id = (SELECT feature_set_id FROM plans WHERE is_default)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // The account moves to 8.3: the state goes up so the node is asked.
+    let before = state().await;
+    let (status, moved) = e
+        .call(Some(&a), "PUT", PHP, Some(json!({"version": "8.3"})), true)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{moved}");
+    assert_eq!(
+        (moved["account_version"].clone(), moved["applied"].clone()),
+        (json!("8.3"), json!(false))
+    );
+    let after = state().await;
+    assert_eq!(after.0, "8.3");
+    assert!(after.1 > before.1 && after.2 == before.2);
+    // The same again changes nothing.
+    e.call(Some(&a), "PUT", PHP, Some(json!({"version": "8.3"})), true)
+        .await;
+    assert_eq!(state().await, after);
+    // Unknown, old, malformed or missing versions are refused.
+    for (body, why) in [
+        (json!({"version": "7.4"}), "unavailable_version"),
+        (json!({"version": "8.9"}), "unavailable_version"),
+        (json!({"version": "8.4; rm"}), "unavailable_version"),
+        (json!({"version": null}), "version_required"),
+    ] {
+        let (status, resp) = e.call(Some(&a), "PUT", PHP, Some(body.clone()), true).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}: {resp}");
+        assert_eq!(resp["errors"][0]["code"], why);
+    }
+    assert_eq!(state().await.0, "8.3");
+
+    // A domain asks for another version; one that asks for the account's own is not extra.
+    let dpath = |i: usize| format!("{CLIENT}/{}/php", domains[i]);
+    let (status, v) = e
+        .call(
+            Some(&a),
+            "PUT",
+            &dpath(0),
+            Some(json!({"version": "8.2"})),
+            true,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let one = v["domains"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["fqdn"] == "one.com")
+        .unwrap()
+        .clone();
+    assert_eq!(
+        (one["php_version"].clone(), one["effective_version"].clone()),
+        (json!("8.2"), json!("8.2"))
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, Vec<String>>(
+            "SELECT array_agg(php_version) FROM domains WHERE php_version IS NOT NULL"
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap(),
+        ["8.2"]
+    );
+    let extra = dhpanel_database::php::extra_versions(&pool, tenant)
+        .await
+        .unwrap();
+    assert_eq!(extra, ["8.2"]);
+    e.call(
+        Some(&a),
+        "PUT",
+        &dpath(1),
+        Some(json!({"version": "8.3"})),
+        true,
+    )
+    .await;
+    assert_eq!(
+        dhpanel_database::php::extra_versions(&pool, tenant)
+            .await
+            .unwrap(),
+        ["8.2"],
+        "the account's own version is not an extra"
+    );
+    // At most three extra versions run beside the account's.
+    for (i, v) in [(2, "8.4"), (3, "8.5")] {
+        let (status, _) = e
+            .call(
+                Some(&a),
+                "PUT",
+                &dpath(i),
+                Some(json!({"version": v})),
+                true,
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK);
+    }
+    let (status, body) = e
+        .call(
+            Some(&a),
+            "PUT",
+            &dpath(4),
+            Some(json!({"version": "8.1"})),
+            true,
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    // Aliases follow their domain.
+    let (status, body) = e
+        .call(
+            Some(&a),
+            "PUT",
+            &format!("{CLIENT}/{}/php", alias["id"].as_str().unwrap()),
+            Some(json!({"version": "8.4"})),
+            true,
+        )
+        .await;
+    assert_eq!(
+        (status, body["errors"][0]["code"].clone()),
+        (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            json!("alias_follows_domain")
+        )
+    );
+    // Back to the account's own.
+    let (status, back) = e
+        .call(
+            Some(&a),
+            "PUT",
+            &dpath(0),
+            Some(json!({"version": null})),
+            true,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{back}");
+    assert_eq!(
+        dhpanel_database::php::extra_versions(&pool, tenant)
+            .await
+            .unwrap(),
+        ["8.4", "8.5"]
+    );
+
+    // The administrator narrows what is on offer; the account keeps what it runs.
+    let mut tx = pool.begin().await.unwrap();
+    dhpanel_settings::set(
+        &e.settings,
+        &mut tx,
+        "domains",
+        Scope::Global,
+        json!({"php_versions": "8.3 8.2"}).as_object().unwrap(),
+        None,
+    )
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+    let (_, view) = e.call(Some(&a), "GET", PHP, None, false).await;
+    assert_eq!(view["available"], json!(["8.3", "8.2"]));
+    let (status, _) = e
+        .call(Some(&a), "PUT", PHP, Some(json!({"version": "8.5"})), true)
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    // The administrator can set a domain's version for the account.
+    let (status, v) = e
+        .call(
+            Some(&root),
+            "PUT",
+            &format!("/api/v1/admin/domains/{}/php", domains[4]),
+            Some(json!({"version": "8.2"})),
+            true,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let (status, v) = e
+        .call(
+            Some(&root),
+            "GET",
+            &format!("/api/v1/admin/domains/{}/php", domains[4]),
+            None,
+            false,
+        )
+        .await;
+    assert_eq!(
+        (status, v["account_version"].clone()),
+        (StatusCode::OK, json!("8.3"))
+    );
+
+    // Not another account's.
+    assert_eq!(
+        e.call(
+            Some(&b),
+            "PUT",
+            &dpath(0),
+            Some(json!({"version": "8.3"})),
+            true
+        )
+        .await
+        .0,
+        StatusCode::NOT_FOUND
+    );
+    let (_, theirs) = e.call(Some(&b), "GET", PHP, None, false).await;
+    assert_eq!(theirs["domains"], json!([]));
+    let actions: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_logs WHERE action IN ('php.version_changed', 'domain.php_changed')",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(actions >= 6, "{actions}");
+}

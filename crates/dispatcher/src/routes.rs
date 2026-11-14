@@ -98,6 +98,7 @@ mod tests {
             force_https: false,
             hsts: false,
             docroot: String::new(),
+            php_version: None,
         }
     }
 

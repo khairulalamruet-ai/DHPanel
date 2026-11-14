@@ -2061,6 +2061,159 @@
         ]
       }
     },
+    "/api/v1/admin/domains/{id}/php": {
+      "get": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "The PHP versions of the account a domain belongs to.",
+        "operationId": "adminGetDomainPhp",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Domain id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Versions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhpView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such domain",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "Change the PHP version of a domain (`null` goes back to its account's).",
+        "operationId": "adminSetDomainPhp",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Domain id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetVersion"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhpView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied`, `reauth_required`, `csrf_failed` or `feature_disabled`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such domain",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`too_many_php_versions`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`unavailable_version` or `alias_follows_domain`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/domains/{id}/policy": {
       "get": {
         "tags": [
@@ -7703,6 +7856,103 @@
         ]
       }
     },
+    "/api/v1/client/domains/{id}/php": {
+      "put": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "Change the PHP version of one of your domains (`null` goes back to the account's).",
+        "operationId": "clientSetDomainPhp",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Domain id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetVersion"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhpView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only`, `csrf_failed` or `feature_disabled`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such domain (or it is not yours)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`too_many_php_versions`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`unavailable_version` or `alias_follows_domain`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/client/domains/{id}/policy": {
       "get": {
         "tags": [
@@ -8494,6 +8744,117 @@
           },
           "422": {
             "description": "`forbidden_directive` (naming it), `reserved_header`, `custom_too_large`, `custom_characters`, `template_syntax`, `template_braces` or `alias_has_no_file`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/php": {
+      "get": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "The PHP versions of your account and domains.",
+        "operationId": "clientGetPhp",
+        "responses": {
+          "200": {
+            "description": "Versions on offer, the account's version, and each domain's",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhpView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "Change the PHP version of your account (what its domains use unless they ask for another).",
+        "operationId": "clientSetPhp",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetVersion"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Saved; `applied` turns true when the node runs it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhpView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only`, `csrf_failed` or `feature_disabled`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`too_many_php_versions`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`unavailable_version` or `version_required`",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9845,6 +10206,37 @@
           }
         }
       },
+      "DomainPhp": {
+        "type": "object",
+        "description": "A domain and the PHP version it uses.",
+        "required": [
+          "id",
+          "fqdn",
+          "effective_version"
+        ],
+        "properties": {
+          "effective_version": {
+            "type": "string",
+            "description": "The version it runs on."
+          },
+          "fqdn": {
+            "type": "string",
+            "description": "The name."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Domain id."
+          },
+          "php_version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The version the domain asks for; `null` when it uses the account's."
+          }
+        }
+      },
       "DomainView": {
         "type": "object",
         "description": "A domain.",
@@ -10970,6 +11362,41 @@
           }
         }
       },
+      "PhpView": {
+        "type": "object",
+        "description": "PHP versions of an account.",
+        "required": [
+          "available",
+          "account_version",
+          "applied",
+          "domains"
+        ],
+        "properties": {
+          "account_version": {
+            "type": "string",
+            "description": "The account's version.",
+            "example": "8.4"
+          },
+          "applied": {
+            "type": "boolean",
+            "description": "Whether the node runs what is set (a change takes a moment to arrive)."
+          },
+          "available": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The versions that may be chosen, the one new accounts start with first."
+          },
+          "domains": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DomainPhp"
+            },
+            "description": "Its domains (aliases follow their domain and are left out)."
+          }
+        }
+      },
       "PlanInput": {
         "type": "object",
         "description": "What a plan is made of (create and replace).",
@@ -11609,6 +12036,21 @@
           "enabled": {
             "type": "boolean",
             "description": "On or off."
+          }
+        },
+        "additionalProperties": false
+      },
+      "SetVersion": {
+        "type": "object",
+        "description": "The version to use.",
+        "properties": {
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A version from `available`; for a domain, `null` goes back to the account's.",
+            "example": "8.3"
           }
         },
         "additionalProperties": false

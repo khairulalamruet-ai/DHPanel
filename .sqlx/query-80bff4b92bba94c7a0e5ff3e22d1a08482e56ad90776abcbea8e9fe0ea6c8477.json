@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT php_version FROM domains WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "php_version",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "domains",
+            "name": "php_version"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "80bff4b92bba94c7a0e5ff3e22d1a08482e56ad90776abcbea8e9fe0ea6c8477"
+}

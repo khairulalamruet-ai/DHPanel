@@ -31,6 +31,7 @@
 
 pub mod dns;
 pub mod nameservers;
+pub mod php;
 pub mod policy;
 pub mod records;
 pub mod redirects;
@@ -113,7 +114,8 @@ impl FromRef<DomainsState> for SessionStore {
 
 /// Routes for administrators, with full paths.
 pub fn admin_router() -> Router<DomainsState> {
-    policy::admin_router()
+    php::admin_router()
+        .merge(policy::admin_router())
         .merge(vhost::admin_router())
         .merge(vhost_templates::admin_router())
         .merge(redirects::admin_router())
@@ -135,7 +137,8 @@ pub fn admin_router() -> Router<DomainsState> {
 
 /// Routes for clients, with full paths.
 pub fn client_router() -> Router<DomainsState> {
-    policy::client_router()
+    php::client_router()
+        .merge(policy::client_router())
         .merge(vhost::client_router())
         .merge(redirects::client_router())
         .merge(records::client_router())
@@ -1142,6 +1145,8 @@ pub async fn client_delete(
     paths(
         admin_list, admin_get, admin_add, admin_update, admin_delete, admin_suspend,
         admin_unsuspend, client_list, client_get, client_add, client_update, client_delete,
+        php::admin_get, php::admin_set, php::client_get, php::client_set_account,
+        php::client_set_domain,
         policy::admin_get, policy::admin_set, policy::client_get, policy::client_set,
         vhost::admin_get, vhost::admin_set, vhost::client_get, vhost::client_set,
         vhost_templates::list, vhost_templates::show, vhost_templates::create,
@@ -1160,7 +1165,7 @@ pub async fn client_delete(
     ),
     components(schemas(
         DomainView, DomainList, AddDomain, AdminAddDomain, UpdateDomain,
-        policy::PolicyView, policy::HeaderView, vhost::VhostView, vhost::SetVhost, vhost_templates::TemplateSummary,
+        php::PhpView, php::DomainPhp, php::SetVersion, policy::PolicyView, policy::HeaderView, vhost::VhostView, vhost::SetVhost, vhost_templates::TemplateSummary,
         vhost_templates::TemplateView, vhost_templates::TemplateList, vhost_templates::TemplateInput,
         vhost_templates::VersionView, vhost_templates::VersionList, vhost_templates::PreviewInput,
         vhost_templates::Preview, vhost_templates::Applied, redirects::RedirectView, redirects::RedirectList, redirects::AddRedirect,

@@ -38,6 +38,8 @@ pub struct RoutedDomain {
     pub hsts: bool,
     /// Where the files are, below the tenant's web directory ("" for the directory itself).
     pub docroot: String,
+    /// The PHP version the domain asks for instead of the account's.
+    pub php_version: Option<String>,
 }
 
 /// A redirect of a domain.
@@ -79,7 +81,7 @@ pub async fn pending(pool: &PgPool, limit: i64) -> Result<Vec<Pending>, sqlx::Er
 pub async fn domains(pool: &PgPool, tenant_id: Uuid) -> Result<Vec<RoutedDomain>, sqlx::Error> {
     sqlx::query_as!(
         RoutedDomain,
-        r#"SELECT id, fqdn, kind, parent_domain_id AS parent_id, status, force_https, hsts, docroot
+        r#"SELECT id, fqdn, kind, parent_domain_id AS parent_id, status, force_https, hsts, docroot, php_version
            FROM domains WHERE tenant_id = $1 ORDER BY fqdn"#,
         tenant_id,
     )

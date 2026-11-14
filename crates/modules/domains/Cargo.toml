@@ -20,10 +20,12 @@ dhpanel-domain.workspace = true
 dhpanel-events.workspace = true
 dhpanel-kernel.workspace = true
 dhpanel-http-kit.workspace = true
+dhpanel-node-protocol.workspace = true
 dhpanel-pki.workspace = true
 dhpanel-rbac.workspace = true
 dhpanel-session.workspace = true
 dhpanel-settings.workspace = true
+dhpanel-tenant-stack.workspace = true
 dhpanel-web-config.workspace = true
 axum = "0.8"
 serde = { version = "1", features = ["derive"] }

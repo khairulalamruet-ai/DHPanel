@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT php_version AS version, php_state_version AS state_version,\n                  php_applied_version AS applied_version\n           FROM tenants WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "version",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "tenants",
+            "name": "php_version"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "state_version",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "tenants",
+            "name": "php_state_version"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "applied_version",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "tenants",
+            "name": "php_applied_version"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "289def4b0fed644baddd92a1db4d243a100bd920fc95d961264713f5322c3212"
+}

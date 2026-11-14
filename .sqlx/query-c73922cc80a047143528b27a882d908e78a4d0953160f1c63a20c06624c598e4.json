@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE tenants SET php_version = $2 WHERE id = $1 AND php_version <> $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c73922cc80a047143528b27a882d908e78a4d0953160f1c63a20c06624c598e4"
+}
