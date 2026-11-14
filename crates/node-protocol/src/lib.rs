@@ -146,6 +146,35 @@ pub struct SiteRoute {
     pub hsts: bool,
 }
 
+/// A certificate a person uploaded for one of their names, for the web server to use.
+///
+/// The private key is not part of what the control plane records in its ledger:
+/// there it is `None`, and the dispatcher fills it in at the moment the message is
+/// sent (see `dhpanel_dispatcher::SecretFiller`). `Debug` never shows it.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CustomCertificate {
+    /// The name it is for (lower-case ASCII).
+    pub host: String,
+    /// The certificates, PEM: the site's first, then the ones that vouch for it.
+    pub certificate: String,
+    /// The private key, PKCS#8 PEM. Present only on the wire.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub private_key: Option<String>,
+}
+
+impl std::fmt::Debug for CustomCertificate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CustomCertificate")
+            .field("host", &self.host)
+            .field("has_key", &self.private_key.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
+/// Most uploaded certificates one tenant may have on a node.
+pub const MAX_CUSTOM_CERTIFICATES_PER_TENANT: usize = 100;
+
 /// A certificate the web server holds.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -354,6 +383,17 @@ pub enum Operation {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         skeleton: Vec<SkeletonFile>,
     },
+    /// Set the certificates one tenant uploaded: the web server uses them for those
+    /// names instead of getting its own. Replaces what the tenant had; an empty list
+    /// removes them. Kept by the agent (the keys in a file only it can read) and put
+    /// back whenever the web server loses them. Answered with
+    /// [`Output::CustomCertificatesSet`].
+    SetCustomCertificates {
+        /// The tenant's system name.
+        username: String,
+        /// The certificates, each with its key.
+        items: Vec<CustomCertificate>,
+    },
     /// List the certificates the node's web server holds (name, issuer, validity).
     /// Answered with [`Output::Certificates`].
     ReportCertificates,
@@ -419,6 +459,7 @@ impl Operation {
         "set_up_tenant",
         "set_site_routes",
         "report_certificates",
+        "set_custom_certificates",
         "suspend_tenant",
         "resume_tenant",
         "delete_tenant",
@@ -437,6 +478,7 @@ impl Operation {
             Self::SetUpTenant { .. } => "set_up_tenant",
             Self::SetSiteRoutes { .. } => "set_site_routes",
             Self::ReportCertificates => "report_certificates",
+            Self::SetCustomCertificates { .. } => "set_custom_certificates",
             Self::SuspendTenant { .. } => "suspend_tenant",
             Self::ResumeTenant { .. } => "resume_tenant",
             Self::DeleteTenant { .. } => "delete_tenant",
@@ -578,6 +620,13 @@ pub enum Output {
         containers: Vec<String>,
         /// How storage limits are enforced (`xfs`), or `None` when they are not.
         storage_quota: Option<String>,
+    },
+    /// Answer to [`Operation::SetCustomCertificates`].
+    CustomCertificatesSet {
+        /// How many certificates the tenant has now.
+        count: usize,
+        /// Whether the web server has them (they are kept either way).
+        applied: bool,
     },
     /// Answer to [`Operation::ReportCertificates`].
     Certificates {
@@ -1341,6 +1390,10 @@ mod tests {
                 skeleton: Vec::new(),
             },
             Operation::ReportCertificates,
+            Operation::SetCustomCertificates {
+                username: "alice".into(),
+                items: vec![],
+            },
             Operation::SetSiteRoutes {
                 username: "alice".into(),
                 routes: vec![SiteRoute {
@@ -1370,7 +1423,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            12,
+            13,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }
@@ -1420,6 +1473,35 @@ mod tests {
         };
         // Quotes double in JSON: the worst case still fits the ledger (64 KiB) and the helper (64 KiB).
         assert!(serde_json::to_string(&worst).unwrap().len() < 56 * 1024);
+    }
+
+    #[test]
+    fn a_private_key_is_never_shown_and_the_ledger_form_has_none() {
+        let with_key = CustomCertificate {
+            host: "example.com".into(),
+            certificate: "CERT".into(),
+            private_key: Some(
+                "-----BEGIN PRIVATE KEY-----\nSECRET\n-----END PRIVATE KEY-----".into(),
+            ),
+        };
+        let op = Operation::SetCustomCertificates {
+            username: "alice".into(),
+            items: vec![with_key.clone()],
+        };
+        assert!(!format!("{op:?}").contains("SECRET"), "{op:?}");
+        assert!(format!("{op:?}").contains("has_key: true"));
+        // On the wire the key is there; without one the field is left out altogether.
+        assert!(serde_json::to_string(&op).unwrap().contains("SECRET"));
+        let bare = CustomCertificate {
+            private_key: None,
+            ..with_key
+        };
+        let json = serde_json::to_value(&bare).unwrap();
+        assert!(json.get("private_key").is_none(), "{json}");
+        assert_eq!(
+            serde_json::from_value::<CustomCertificate>(json).unwrap(),
+            bare
+        );
     }
 
     #[test]

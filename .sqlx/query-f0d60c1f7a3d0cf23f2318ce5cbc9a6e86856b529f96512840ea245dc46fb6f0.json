@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT d.fqdn, c.chain_pem AS \"chain_pem!\"\n           FROM certificates c JOIN domains d ON d.id = c.domain_id\n           WHERE d.tenant_id = $1 AND c.kind = 'custom' AND c.chain_pem IS NOT NULL\n           ORDER BY d.fqdn\n           LIMIT 200",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "fqdn",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "domains",
+            "name": "fqdn"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "chain_pem!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "certificates",
+            "name": "chain_pem"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "f0d60c1f7a3d0cf23f2318ce5cbc9a6e86856b529f96512840ea245dc46fb6f0"
+}

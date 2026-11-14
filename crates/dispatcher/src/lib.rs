@@ -103,6 +103,17 @@ pub struct TickStats {
     pub expired: u64,
 }
 
+/// What a [`SecretFiller`] answers.
+pub type Filled = std::pin::Pin<
+    Box<dyn std::future::Future<Output = Result<dhpanel_node_protocol::Operation, String>> + Send>,
+>;
+
+/// Puts back the secrets that are kept out of the ledger: the ledger holds an
+/// operation without them, and this adds them to the frame at the moment it is
+/// sent. The error text must not contain any secret.
+pub type SecretFiller =
+    std::sync::Arc<dyn Fn(dhpanel_node_protocol::Operation) -> Filled + Send + Sync>;
+
 /// Sends operations and records results.
 #[derive(Clone)]
 pub struct Dispatcher {
@@ -110,6 +121,7 @@ pub struct Dispatcher {
     gateway: Gateway,
     redis: Option<RedisHandle>,
     settings: Settings,
+    secrets: Option<SecretFiller>,
 }
 
 impl Dispatcher {
@@ -126,7 +138,15 @@ impl Dispatcher {
             gateway,
             redis,
             settings,
+            secrets: None,
         }
+    }
+
+    /// Adds the hook that fills in secrets when an operation is sent.
+    #[must_use]
+    pub fn with_secrets(mut self, secrets: SecretFiller) -> Self {
+        self.secrets = Some(secrets);
+        self
     }
 
     /// Runs until `shutdown` turns `true`.
@@ -292,6 +312,33 @@ impl Dispatcher {
             .await
             .map_err(|e| e.to_string())?;
         let routes = routes::build(&tenant.status, &upstream, &domains, &redirects);
+        // The uploaded certificates go first, so a site never answers without the
+        // certificate it should have. Their keys are not in the ledger.
+        let certificates = dhpanel_database::certificates::custom_of_tenant(db, tenant.id)
+            .await
+            .map_err(|e| e.to_string())?;
+        let mut certs = dhpanel_operations::Request::new(
+            tenant.node_id,
+            dhpanel_node_protocol::Operation::SetCustomCertificates {
+                username: tenant.username.clone(),
+                items: certificates
+                    .into_iter()
+                    .map(|c| dhpanel_node_protocol::CustomCertificate {
+                        host: c.fqdn,
+                        certificate: c.chain_pem,
+                        private_key: None,
+                    })
+                    .collect(),
+            },
+            format!("certs:{}:{}:{slot}", tenant.id.simple(), tenant.version),
+        );
+        certs.tenant_id = Some(tenant.id);
+        if let dhpanel_operations::Enqueued::Existing(op) =
+            self.ops.enqueue(&certs).await.map_err(|e| e.to_string())?
+            && op.status == Status::Failed
+        {
+            return Ok(false);
+        }
         let mut request = dhpanel_operations::Request::new(
             tenant.node_id,
             dhpanel_node_protocol::Operation::SetSiteRoutes {
@@ -459,11 +506,17 @@ impl Dispatcher {
         stats
     }
 
+    /// The frame for `op`: the stored operation with its secrets put back.
+    async fn frame(&self, op: &Row, now: i64) -> Result<String, String> {
+        let mut env = envelope(op, now).map_err(|e| e.to_string())?;
+        if let Some(fill) = &self.secrets {
+            env.op = fill(env.op).await?;
+        }
+        encode_operation(&env).map_err(|e| e.to_string())
+    }
+
     async fn deliver(&self, op: &Row, now: i64) -> Delivery {
-        let frame = match envelope(op, now)
-            .map_err(|e| e.to_string())
-            .and_then(|env| encode_operation(&env).map_err(|e| e.to_string()))
-        {
+        let frame = match self.frame(op, now).await {
             Ok(frame) => frame,
             Err(reason) => {
                 // A ledger row this build cannot express (for example written by a newer

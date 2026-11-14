@@ -244,3 +244,71 @@ pub async fn custom_material(
         })
     }))
 }
+
+/// An uploaded certificate of a tenant, without its key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TenantCustom {
+    /// Name of the domain, lower-case ASCII.
+    pub fqdn: String,
+    /// The certificates, PEM.
+    pub chain_pem: String,
+}
+
+/// The uploaded certificates of a tenant's domains, by name.
+///
+/// # Errors
+/// Database errors.
+pub async fn custom_of_tenant(
+    pool: &PgPool,
+    tenant_id: Uuid,
+) -> Result<Vec<TenantCustom>, sqlx::Error> {
+    let rows = sqlx::query!(
+        r#"SELECT d.fqdn, c.chain_pem AS "chain_pem!"
+           FROM certificates c JOIN domains d ON d.id = c.domain_id
+           WHERE d.tenant_id = $1 AND c.kind = 'custom' AND c.chain_pem IS NOT NULL
+           ORDER BY d.fqdn
+           LIMIT 200"#,
+        tenant_id,
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| TenantCustom {
+            fqdn: r.fqdn,
+            chain_pem: r.chain_pem,
+        })
+        .collect())
+}
+
+/// The sealed key of the uploaded certificate for `fqdn` of the tenant named
+/// `username`, with the domain id it was sealed for.
+///
+/// # Errors
+/// Database errors.
+pub async fn custom_key_of(
+    pool: &PgPool,
+    username: &str,
+    fqdn: &str,
+) -> Result<Option<(Uuid, Vec<u8>)>, sqlx::Error> {
+    let row = sqlx::query!(
+        r#"SELECT d.id AS domain_id, c.private_key_enc AS "key!"
+           FROM certificates c
+           JOIN domains d ON d.id = c.domain_id
+           JOIN tenants t ON t.id = d.tenant_id
+           WHERE t.username = $1 AND d.fqdn = $2 AND c.kind = 'custom'
+             AND c.private_key_enc IS NOT NULL"#,
+        username,
+        fqdn,
+    )
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(|r| (r.domain_id, r.key)))
+}
+
+/// What an uploaded certificate's key is sealed to: that domain's certificate and
+/// nothing else, so a sealed key moved to another row does not open.
+#[must_use]
+pub fn key_context(domain_id: Uuid) -> Vec<u8> {
+    format!("certificate-key:{domain_id}").into_bytes()
+}

@@ -962,6 +962,7 @@ dependencies = [
  "dhpanel-mod-system",
  "dhpanel-mod-users",
  "dhpanel-node-gateway",
+ "dhpanel-node-protocol",
  "dhpanel-observability",
  "dhpanel-operations",
  "dhpanel-pki",

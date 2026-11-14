@@ -211,7 +211,7 @@ impl std::fmt::Debug for UploadCertificate {
 
 /// What the key is sealed to: this domain's certificate and nothing else.
 fn key_context(domain_id: Uuid) -> Vec<u8> {
-    format!("certificate-key:{domain_id}").into_bytes()
+    dhpanel_database::certificates::key_context(domain_id)
 }
 
 async fn upload(

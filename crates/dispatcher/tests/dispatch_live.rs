@@ -990,3 +990,173 @@ async fn reported_certificates_are_kept_and_an_ending_one_is_announced_once(pool
         .unwrap();
     assert_eq!(d.announce_expiring().await, 0);
 }
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs PostgreSQL"]
+async fn an_uploaded_certificate_reaches_the_node_with_its_key_and_the_ledger_never_has_it(
+    pool: PgPool,
+) {
+    use std::sync::Mutex;
+    let p = plane(&pool).await;
+    // The hook plays the sealed-key lookup: whatever it is given gets this key.
+    let filler: dhpanel_dispatcher::SecretFiller = Arc::new(|op| {
+        Box::pin(async move {
+            match op {
+                Operation::SetCustomCertificates {
+                    username,
+                    mut items,
+                } => {
+                    for item in &mut items {
+                        item.private_key = Some("KEY-OPENED-AT-SEND-TIME".to_owned());
+                    }
+                    Ok(Operation::SetCustomCertificates { username, items })
+                }
+                other => Ok(other),
+            }
+        })
+    });
+    let d = Dispatcher::new(p.ops.clone(), p.gateway.clone(), None, dispatch_settings())
+        .with_secrets(filler);
+    let results = p.gateway.take_results().expect("results taken once");
+    tokio::spawn(d.clone().run(results, p.stop.subscribe()));
+
+    let got = Arc::new(Mutex::new(Vec::new()));
+    let mut registry = Registry::new();
+    let seen = got.clone();
+    registry.register("set_custom_certificates", move |op| {
+        let seen = seen.clone();
+        async move {
+            match op {
+                Operation::SetCustomCertificates { items, .. } => {
+                    let count = items.len();
+                    seen.lock().unwrap().extend(items);
+                    Ok(Output::CustomCertificatesSet {
+                        count,
+                        applied: true,
+                    })
+                }
+                _ => Err(dhpanel_node_agent::ops::wrong_operation()),
+            }
+        }
+    });
+    registry.register("set_site_routes", |op| async move {
+        match op {
+            Operation::SetSiteRoutes { routes, .. } => Ok(Output::SiteRoutesSet {
+                sites: routes.len(),
+                hosts: 0,
+                applied: true,
+            }),
+            _ => Err(dhpanel_node_agent::ops::wrong_operation()),
+        }
+    });
+    let node = make_node_with(&p, &pool, "certs", registry).await;
+    let (agent_stop, agent) = node.start_agent(p.addr);
+    wait_connected(&p, node.id).await;
+
+    let account: Uuid = sqlx::query_scalar(
+        "INSERT INTO accounts (kind, username, email, password_hash)
+         VALUES ('client', 'cora', 'cora@example.com',
+                 '$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHQ$aGFzaGhhc2hoYXNoaGFzaA') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let plan: Uuid = sqlx::query_scalar("SELECT id FROM plans WHERE is_default")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let tenant: Uuid = sqlx::query_scalar(
+        "INSERT INTO tenants (owner_account_id, node_id, plan_id, username, uid, status)
+         VALUES ($1, $2, $3, 'corahost', 10001, 'active') RETURNING id",
+    )
+    .bind(account)
+    .bind(node.id)
+    .bind(plan)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let domain: Uuid = sqlx::query_scalar(
+        "INSERT INTO domains (tenant_id, fqdn, kind) VALUES ($1, 'cora.example.com', 'primary') RETURNING id",
+    )
+    .bind(tenant)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    // Everything so far is synced: the certificate alone makes the tenant pending again.
+    assert_eq!(d.request_route_syncs().await, 1);
+    sqlx::query("UPDATE tenants SET routes_synced_version = routes_version WHERE id = $1")
+        .bind(tenant)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(d.request_route_syncs().await, 0);
+    let mut conn = pool.acquire().await.unwrap();
+    dhpanel_database::certificates::set_custom(
+        &mut conn,
+        &dhpanel_database::certificates::NewCustom {
+            domain_id: domain,
+            issuer: "Test CA",
+            not_before: 1_700_000_000,
+            not_after: 4_000_000_000,
+            chain_pem: "CHAIN-PEM",
+            private_key_enc: b"sealed-bytes",
+            uploaded_by: account,
+        },
+    )
+    .await
+    .unwrap();
+    drop(conn);
+    assert_eq!(
+        d.request_route_syncs().await,
+        1,
+        "an uploaded certificate is a change of the tenant's routes"
+    );
+
+    let mut waited = 0;
+    while got.lock().unwrap().is_empty() && waited < 100 {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        waited += 1;
+    }
+    {
+        let items = got.lock().unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].host, "cora.example.com");
+        assert_eq!(items[0].certificate, "CHAIN-PEM");
+        assert_eq!(
+            items[0].private_key.as_deref(),
+            Some("KEY-OPENED-AT-SEND-TIME")
+        );
+    }
+    // The ledger has the chain and never the key.
+    let payload: serde_json::Value = sqlx::query_scalar(
+        "SELECT payload FROM operations WHERE kind = 'set_custom_certificates' AND payload @> '{\"username\":\"corahost\"}'
+         ORDER BY created_at DESC LIMIT 1",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(payload["items"][0]["certificate"], "CHAIN-PEM");
+    assert!(
+        payload["items"][0].get("private_key").is_none(),
+        "{payload}"
+    );
+    assert!(!payload.to_string().contains("KEY-OPENED"));
+
+    // Removing the certificate makes the tenant pending again, with an empty list.
+    sqlx::query("UPDATE tenants SET routes_synced_version = routes_version WHERE id = $1")
+        .bind(tenant)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let mut conn = pool.acquire().await.unwrap();
+    assert!(
+        dhpanel_database::certificates::remove_custom(&mut conn, domain)
+            .await
+            .unwrap()
+    );
+    drop(conn);
+    assert_eq!(d.request_route_syncs().await, 1);
+
+    agent_stop.send(true).unwrap();
+    agent.await.unwrap();
+}

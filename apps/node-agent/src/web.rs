@@ -27,13 +27,15 @@ use std::{
 
 use dhpanel_domain::{Fqdn, SourcePath, Target, TenantUsername};
 use dhpanel_node_protocol::{
-    AgentError, CertificateInfo, ErrorCode, MAX_CERTIFICATES_PER_REPORT, MAX_HOSTS_PER_TENANT,
-    MAX_REDIRECTS_PER_TENANT, MAX_SITES_PER_TENANT, Operation, Output, SiteRoute,
+    AgentError, CertificateInfo, CustomCertificate, ErrorCode, MAX_CERTIFICATES_PER_REPORT,
+    MAX_CUSTOM_CERTIFICATES_PER_TENANT, MAX_HOSTS_PER_TENANT, MAX_REDIRECTS_PER_TENANT,
+    MAX_SITES_PER_TENANT, Operation, Output, SiteRoute,
 };
 use serde_json::{Value, json};
 use tokio::sync::Mutex;
 
 /// The name of the server inside Caddy's configuration.
+const LOAD_PEM: &str = "/config/apps/tls/certificates/load_pem";
 const SERVER: &str = "dhpanel";
 /// Time allowed for one call to Caddy.
 const TIMEOUT: Duration = Duration::from_secs(10);
@@ -80,6 +82,8 @@ impl Settings {
 pub struct WebContext {
     settings: Settings,
     dir: PathBuf,
+    /// Where the uploaded certificates and their keys are kept (mode 0600).
+    certs_dir: PathBuf,
     agent: ureq::Agent,
     /// One change at a time: files and Caddy move together.
     busy: Mutex<()>,
@@ -98,6 +102,7 @@ impl WebContext {
         Arc::new(Self {
             settings,
             dir: state_dir.join("routes"),
+            certs_dir: state_dir.join("certs"),
             agent,
             busy: Mutex::new(()),
         })
@@ -240,8 +245,13 @@ fn site_route(site: &SiteRoute) -> Value {
 }
 
 /// The whole Caddy configuration for every tenant's sites. Tenants and sites
-/// come in a fixed order, so the same input gives the same output.
-fn compile(all: &BTreeMap<String, Vec<SiteRoute>>, settings: &Settings) -> Value {
+/// come in a fixed order, so the same input gives the same output. Names that have
+/// an uploaded certificate are not given one of Caddy's own.
+fn compile(
+    all: &BTreeMap<String, Vec<SiteRoute>>,
+    uploaded: &BTreeSet<String>,
+    settings: &Settings,
+) -> Value {
     let mut routes: Vec<Value> = all.values().flatten().map(site_route).collect();
     // Anything else: a plain "no such site", never another tenant's page.
     routes.push(json!({"handle": [page(404, NOT_FOUND_PAGE, &[])]}));
@@ -249,11 +259,30 @@ fn compile(all: &BTreeMap<String, Vec<SiteRoute>>, settings: &Settings) -> Value
     server["automatic_https"] = if settings.automatic_https {
         // The sites that want HTTPS say so themselves (`force_https`); Caddy's own
         // blanket redirect would make that choice for everyone.
-        json!({"disable_redirects": true})
+        let mut automatic = json!({"disable_redirects": true});
+        // Left out when empty: Caddy does not keep an empty list, and what we
+        // compare with is what it answers.
+        if !uploaded.is_empty() {
+            automatic["skip_certificates"] = json!(uploaded);
+        }
+        automatic
     } else {
         json!({"disable": true})
     };
     json!({"apps": {"http": {"servers": {SERVER: server}}}})
+}
+
+/// The uploaded certificates of every tenant as Caddy loads them.
+fn compile_certificates(all: &BTreeMap<String, Vec<CustomCertificate>>) -> Vec<Value> {
+    all.values()
+        .flatten()
+        .filter_map(|c| {
+            Some(json!({
+                "certificate": c.certificate,
+                "key": c.private_key.as_ref()?,
+            }))
+        })
+        .collect()
 }
 
 // ----------------------------------------------------------- files on disk
@@ -307,6 +336,68 @@ fn load_all(dir: &Path) -> BTreeMap<String, Vec<SiteRoute>> {
     all
 }
 
+/// Writes a tenant's uploaded certificates (the keys among them) where only the
+/// agent's user can read them: the directory 0700, the file 0600 from the start.
+fn save_certificates(
+    dir: &Path,
+    username: &str,
+    items: &[CustomCertificate],
+) -> std::io::Result<()> {
+    use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _};
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(dir)?;
+    let path = file_of(dir, username);
+    if items.is_empty() {
+        return match std::fs::remove_file(&path) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+            _ => Ok(()),
+        };
+    }
+    let tmp = dir.join(format!(".{username}.json.tmp"));
+    let _ = std::fs::remove_file(&tmp);
+    let mut out = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&tmp)?;
+    std::io::Write::write_all(
+        &mut out,
+        &serde_json::to_vec(items).map_err(std::io::Error::other)?,
+    )?;
+    out.sync_all()?;
+    std::fs::rename(tmp, path)
+}
+
+/// Every tenant's saved certificates; unreadable files are skipped and named.
+fn load_all_certificates(dir: &Path) -> BTreeMap<String, Vec<CustomCertificate>> {
+    let mut all = BTreeMap::new();
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return all;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let Some(user) = name.strip_suffix(".json") else {
+            continue;
+        };
+        if TenantUsername::parse(user).is_err() {
+            continue;
+        }
+        match std::fs::read(entry.path())
+            .map_err(|e| e.to_string())
+            .and_then(|b| {
+                serde_json::from_slice::<Vec<CustomCertificate>>(&b).map_err(|e| e.to_string())
+            }) {
+            Ok(items) => {
+                all.insert(user.to_owned(), items);
+            }
+            Err(_) => eprintln!("dhpanel-agent: ignoring unusable certificates file {name}"),
+        }
+    }
+    all
+}
+
 // --------------------------------------------------------------- Caddy calls
 
 impl WebContext {
@@ -324,6 +415,8 @@ impl WebContext {
                 ("GET", _) => this.agent.get(&url).call(),
                 ("POST", Some(b)) => this.agent.post(&url).send_json(b),
                 ("PUT", Some(b)) => this.agent.put(&url).send_json(b),
+                ("PATCH", Some(b)) => this.agent.patch(&url).send_json(b),
+                ("DELETE", _) => this.agent.delete(&url).call(),
                 _ => return Err("unsupported call".to_owned()),
             }
             .map_err(|e| e.to_string())?;
@@ -340,16 +433,13 @@ impl WebContext {
         .map_err(|_| "the call was cancelled".to_owned())?
     }
 
-    /// What Caddy runs now for our server, if anything.
-    async fn live(self: &Arc<Self>) -> Result<Option<Value>, String> {
+    /// What Caddy runs now.
+    async fn live_config(self: &Arc<Self>) -> Result<Value, String> {
         let (status, text) = self.call("GET", "/config/", None).await?;
         if status != 200 {
             return Err(format!("Caddy answered {status}"));
         }
-        let config: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
-        Ok(config
-            .pointer(&format!("/apps/http/servers/{SERVER}"))
-            .cloned())
+        Ok(serde_json::from_str(&text).unwrap_or(Value::Null))
     }
 
     /// Makes Caddy run `server` as our server, leaving the rest of its
@@ -370,6 +460,54 @@ impl WebContext {
         }
     }
 
+    /// One configuration call that must answer 200.
+    async fn must(
+        self: &Arc<Self>,
+        method: &'static str,
+        path: &'static str,
+        body: Option<Value>,
+        what: &str,
+    ) -> Result<(), String> {
+        let (status, text) = self.call(method, path, body).await?;
+        if status == 200 {
+            return Ok(());
+        }
+        // Caddy's message may quote what it was given: only its first words.
+        let reason: String = text.chars().filter(|c| !c.is_control()).take(160).collect();
+        Err(format!("Caddy refused {what} ({status}): {reason}"))
+    }
+
+    /// Makes Caddy load exactly `certificates` (a list of PEM certificate and key
+    /// pairs), whatever part of the TLS configuration exists so far.
+    async fn load_certificates(
+        self: &Arc<Self>,
+        certificates: Value,
+        live: &Value,
+    ) -> Result<(), String> {
+        let empty = certificates.as_array().is_some_and(Vec::is_empty);
+        let what = "the certificates";
+        if live.pointer("/apps/tls/certificates/load_pem").is_some() {
+            return if empty {
+                self.must("DELETE", LOAD_PEM, None, what).await
+            } else {
+                self.must("PATCH", LOAD_PEM, Some(certificates), what).await
+            };
+        }
+        if empty {
+            return Ok(());
+        }
+        if live.pointer("/apps/tls/certificates").is_some() {
+            self.must("PUT", LOAD_PEM, Some(certificates), what).await
+        } else if live.pointer("/apps/tls").is_some() {
+            let body = json!({"load_pem": certificates});
+            self.must("PUT", "/config/apps/tls/certificates", Some(body), what)
+                .await
+        } else {
+            let body = json!({"certificates": {"load_pem": certificates}});
+            self.must("PUT", "/config/apps/tls", Some(body), what).await
+        }
+    }
+
     /// Compiles the saved sites and loads them if Caddy does not already run
     /// exactly that. Returns whether it had to load.
     ///
@@ -381,17 +519,38 @@ impl WebContext {
     }
 
     async fn reconcile_locked(self: &Arc<Self>) -> Result<bool, String> {
-        let config = compile(&load_all(&self.dir), &self.settings);
+        let certificates = load_all_certificates(&self.certs_dir);
+        let uploaded: BTreeSet<String> = certificates
+            .values()
+            .flatten()
+            .map(|c| c.host.clone())
+            .collect();
+        let config = compile(&load_all(&self.dir), &uploaded, &self.settings);
         let wanted = config
             .pointer(&format!("/apps/http/servers/{SERVER}"))
             .cloned()
             .ok_or_else(|| "no server to load".to_owned())?;
-        let live = self.live().await?;
-        if live.as_ref() == Some(&wanted) {
-            return Ok(false);
+        let wanted_certs = Value::Array(compile_certificates(&certificates));
+        let live = self.live_config().await?;
+        let live_server = live
+            .pointer(&format!("/apps/http/servers/{SERVER}"))
+            .cloned();
+        let live_certs = live.pointer("/apps/tls/certificates/load_pem").cloned();
+        let mut changed = false;
+        // Certificates first: the server that names them must find them loaded.
+        let certs_ok = match &live_certs {
+            Some(have) => have == &wanted_certs,
+            None => wanted_certs.as_array().is_some_and(Vec::is_empty),
+        };
+        if !certs_ok {
+            self.load_certificates(wanted_certs, &live).await?;
+            changed = true;
         }
-        self.load(wanted, live.is_some()).await?;
-        Ok(true)
+        if live_server.as_ref() != Some(&wanted) {
+            self.load(wanted, live_server.is_some()).await?;
+            changed = true;
+        }
+        Ok(changed)
     }
 
     /// Checks the sites again every `every`, loading them when Caddy has lost
@@ -461,6 +620,84 @@ pub async fn set_site_routes(
         Err(_) => Ok(Output::SiteRoutesSet {
             sites: routes.len(),
             hosts,
+            applied: false,
+        }),
+    }
+}
+
+/// `set_custom_certificates`: keeps a tenant's uploaded certificates and has
+/// Caddy serve them instead of getting its own for those names.
+///
+/// # Errors
+/// [`AgentError`]: a certificate that does not check out, or a name that another
+/// tenant already has a certificate for (not retryable); kept for the next pass
+/// when Caddy cannot be reached (the answer says `applied: false`).
+pub async fn set_custom_certificates(
+    context: Arc<WebContext>,
+    op: Operation,
+) -> Result<Output, AgentError> {
+    let Operation::SetCustomCertificates { username, items } = op else {
+        return Err(crate::ops::wrong_operation());
+    };
+    let username = TenantUsername::parse(&username).map_err(|e| invalid(e.to_string()))?;
+    if items.len() > MAX_CUSTOM_CERTIFICATES_PER_TENANT {
+        return Err(invalid("too many certificates"));
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX));
+    let mut checked = Vec::with_capacity(items.len());
+    let mut seen = BTreeSet::new();
+    for item in &items {
+        let host = Fqdn::parse(&item.host).map_err(|e| invalid(e.to_string()))?;
+        if host.as_str() != item.host || !seen.insert(item.host.clone()) {
+            return Err(invalid("a certificate name is not plain or is repeated"));
+        }
+        let key = item
+            .private_key
+            .as_deref()
+            .ok_or_else(|| invalid("a certificate came without its key"))?;
+        // The reason is a fixed word, never the material.
+        let ok =
+            dhpanel_pki::custom::check(&item.certificate, key, &item.host, now).map_err(|e| {
+                invalid(format!(
+                    "certificate for {} refused: {}",
+                    item.host,
+                    e.code()
+                ))
+            })?;
+        checked.push(CustomCertificate {
+            host: item.host.clone(),
+            certificate: ok.certificate_pem,
+            private_key: Some(secrecy::ExposeSecret::expose_secret(&ok.private_key_pem).to_owned()),
+        });
+    }
+    let _guard = context.busy.lock().await;
+    for (other, certs) in load_all_certificates(&context.certs_dir) {
+        if other != username.as_str() && certs.iter().any(|c| seen.contains(&c.host)) {
+            return Err(invalid(
+                "a name already has a certificate of another tenant",
+            ));
+        }
+    }
+    save_certificates(&context.certs_dir, username.as_str(), &checked).map_err(|e| {
+        AgentError::new(
+            ErrorCode::Internal,
+            format!("cannot keep the certificates: {e}"),
+        )
+        .retryable()
+    })?;
+    let count = checked.len();
+    match context.reconcile_locked().await {
+        Ok(_) => Ok(Output::CustomCertificatesSet {
+            count,
+            applied: true,
+        }),
+        Err(message) if message.starts_with("Caddy refused") => {
+            Err(AgentError::new(ErrorCode::Internal, message))
+        }
+        Err(_) => Ok(Output::CustomCertificatesSet {
+            count,
             applied: false,
         }),
     }
@@ -660,7 +897,7 @@ mod tests {
             "bobby".to_owned(),
             vec![site(&["bobs.net"], Some("dh-bobby-web:8080"))],
         );
-        let config = compile(&all, &settings());
+        let config = compile(&all, &BTreeSet::new(), &settings());
         let server = &config["apps"]["http"]["servers"]["dhpanel"];
         assert_eq!(server["listen"], json!([":80", ":443"]));
         let routes = server["routes"].as_array().unwrap();
@@ -695,10 +932,14 @@ mod tests {
         let fixed = format!("{SUSPENDED_PAGE}{NOT_FOUND_PAGE}");
         assert!(!fixed.contains('{') && !fixed.contains('}'));
         // The same input gives the same output.
-        assert_eq!(compile(&all, &settings()), compile(&all, &settings()));
+        assert_eq!(
+            compile(&all, &BTreeSet::new(), &settings()),
+            compile(&all, &BTreeSet::new(), &settings())
+        );
         // Automatic HTTPS can be turned off.
         let off = compile(
             &all,
+            &BTreeSet::new(),
             &Settings {
                 automatic_https: false,
                 ..settings()
@@ -731,7 +972,7 @@ mod tests {
             "alice".to_owned(),
             vec![secure, only_redirect, site(&["http-only.net"], None)],
         )]);
-        let config = compile(&all, &settings());
+        let config = compile(&all, &BTreeSet::new(), &settings());
         let routes = config["apps"]["http"]["servers"]["dhpanel"]["routes"]
             .as_array()
             .unwrap();
@@ -865,5 +1106,48 @@ mod tests {
         assert_eq!(load_all(&dir).keys().collect::<Vec<_>>(), ["alice"]);
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::remove_file(std::env::temp_dir().join("escape.json"));
+    }
+
+    #[test]
+    fn names_with_an_uploaded_certificate_are_left_out_of_caddys_own() {
+        let all = BTreeMap::from([("alice".to_owned(), vec![site(&["a.org"], None)])]);
+        let uploaded = BTreeSet::from(["a.org".to_owned()]);
+        let config = compile(&all, &uploaded, &settings());
+        assert_eq!(
+            config["apps"]["http"]["servers"][SERVER]["automatic_https"],
+            json!({"disable_redirects": true, "skip_certificates": ["a.org"]})
+        );
+        let none = compile(&all, &BTreeSet::new(), &settings());
+        assert_eq!(
+            none["apps"]["http"]["servers"][SERVER]["automatic_https"],
+            json!({"disable_redirects": true})
+        );
+    }
+
+    #[test]
+    fn certificates_are_kept_private_and_loaded_with_their_keys() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = std::env::temp_dir().join(format!("dh-certs-unit-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let item = CustomCertificate {
+            host: "a.org".into(),
+            certificate: "CERT".into(),
+            private_key: Some("KEY".into()),
+        };
+        save_certificates(&dir, "alice", std::slice::from_ref(&item)).unwrap();
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&dir), 0o700);
+        assert_eq!(mode(&dir.join("alice.json")), 0o600);
+        let all = load_all_certificates(&dir);
+        assert_eq!(all["alice"], vec![item]);
+        assert_eq!(
+            compile_certificates(&all),
+            vec![json!({"certificate": "CERT", "key": "KEY"})]
+        );
+        // An empty list removes the file; removing again is fine.
+        save_certificates(&dir, "alice", &[]).unwrap();
+        save_certificates(&dir, "alice", &[]).unwrap();
+        assert!(load_all_certificates(&dir).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

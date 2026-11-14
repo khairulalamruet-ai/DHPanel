@@ -21,6 +21,8 @@ dhpanel-common.workspace = true
 dhpanel-node-protocol.workspace = true
 dhpanel-docker-manager.workspace = true
 dhpanel-domain.workspace = true
+# Checks an uploaded certificate and its key before the web server gets them.
+dhpanel-pki.workspace = true
 dhpanel-priv-helper = { path = "../priv-helper" }
 dhpanel-tenant-stack.workspace = true
 rustls.workspace = true
@@ -63,7 +65,6 @@ dhpanel-cache.workspace = true
 dhpanel-database.workspace = true
 dhpanel-http-kit.workspace = true
 dhpanel-mod-nodes.workspace = true
-dhpanel-pki.workspace = true
 dhpanel-session.workspace = true
 axum = "0.8"
 sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "postgres", "macros", "uuid", "migrate"] }

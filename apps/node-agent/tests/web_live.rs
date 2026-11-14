@@ -9,8 +9,10 @@
 
 use std::{process::Command, time::Duration};
 
-use dhpanel_node_agent::web::{Settings, WebContext, set_site_routes};
-use dhpanel_node_protocol::{ErrorCode, Operation, Output, RouteRedirect, SiteRoute};
+use dhpanel_node_agent::web::{Settings, WebContext, set_custom_certificates, set_site_routes};
+use dhpanel_node_protocol::{
+    CustomCertificate, ErrorCode, Operation, Output, RouteRedirect, SiteRoute,
+};
 
 fn env(name: &str) -> Option<String> {
     std::env::var(name).ok()
@@ -437,5 +439,188 @@ async fn force_https_redirects_plain_requests_and_hsts_is_sent_over_https_only()
     set_site_routes(web.clone(), set("alice", vec![]))
         .await
         .unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The issuer line of the certificate Caddy shows for `host`.
+fn served_issuer(port: &str, host: &str) -> String {
+    let out = Command::new("curl")
+        .args([
+            "-svk",
+            "--max-time",
+            "10",
+            "--resolve",
+            &format!("{host}:{port}:127.0.0.1"),
+            "-o",
+            "/dev/null",
+            &format!("https://{host}:{port}/"),
+        ])
+        .output()
+        .expect("curl");
+    String::from_utf8_lossy(&out.stderr)
+        .lines()
+        .find(|l| l.trim_start().starts_with("issuer:") || l.contains(" issuer: "))
+        .unwrap_or("")
+        .to_owned()
+}
+
+#[tokio::test]
+#[ignore = "needs a Caddy with HTTP and HTTPS ports (see the file header)"]
+async fn an_uploaded_certificate_is_served_until_it_is_removed() {
+    let (Some(admin), Some(tls_port)) = (
+        env("DHPANEL_TEST_CADDY_ADMIN"),
+        env("DHPANEL_TEST_CADDY_TLS_PORT"),
+    ) else {
+        eprintln!("skipped: no Caddy (see the script)");
+        return;
+    };
+    let dir = std::env::temp_dir().join(format!("dh-web-certs-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let web = WebContext::new(
+        Settings {
+            admin,
+            listen: vec![":18080".into(), ":18443".into()],
+            automatic_https: true,
+            data_dir: None,
+        },
+        &dir,
+    );
+    // A certificate from a CA of our own, for a name Caddy would otherwise sign itself.
+    let mut ca_params = rcgen::CertificateParams::new(Vec::<String>::new()).unwrap();
+    ca_params
+        .distinguished_name
+        .push(rcgen::DnType::CommonName, "Uploaded Test Root");
+    ca_params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+    let ca_key = rcgen::KeyPair::generate().unwrap();
+    let ca_cert = ca_params.self_signed(&ca_key).unwrap();
+    let issuer = rcgen::Issuer::new(ca_params, ca_key);
+    let leaf_key = rcgen::KeyPair::generate().unwrap();
+    let leaf = rcgen::CertificateParams::new(vec!["own.example.com".to_owned()])
+        .unwrap()
+        .signed_by(&leaf_key, &issuer)
+        .unwrap();
+    let item = CustomCertificate {
+        host: "own.example.com".into(),
+        certificate: format!("{}{}", leaf.pem(), ca_cert.pem()),
+        private_key: Some(leaf_key.serialize_pem()),
+    };
+    set_site_routes(
+        web.clone(),
+        set(
+            "alice",
+            vec![site(
+                &["own.example.com", "auto.example.com"],
+                Some("dh-alice-web:8080"),
+                vec![],
+            )],
+        ),
+    )
+    .await
+    .unwrap();
+    let done = set_custom_certificates(
+        web.clone(),
+        Operation::SetCustomCertificates {
+            username: "alice".into(),
+            items: vec![item.clone()],
+        },
+    )
+    .await
+    .unwrap();
+    assert!(matches!(
+        done,
+        Output::CustomCertificatesSet {
+            count: 1,
+            applied: true
+        }
+    ));
+    // The key is on disk where only the agent can read it, and not with the routes.
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let file = dir.join("certs/alice.json");
+        assert_eq!(
+            std::fs::metadata(&file).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert_eq!(
+            std::fs::metadata(dir.join("certs"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
+        assert!(
+            !std::fs::read_to_string(dir.join("routes/alice.json"))
+                .unwrap()
+                .contains("PRIVATE KEY")
+        );
+    }
+    let mut issuer_line = String::new();
+    for _ in 0..20 {
+        issuer_line = served_issuer(&tls_port, "own.example.com");
+        if issuer_line.contains("Uploaded Test Root") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    assert!(issuer_line.contains("Uploaded Test Root"), "{issuer_line}");
+    // The other name still gets one of Caddy's own.
+    let mut other = String::new();
+    for _ in 0..30 {
+        other = served_issuer(&tls_port, "auto.example.com");
+        if other.contains("Caddy Local") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    assert!(other.contains("Caddy Local"), "{other}");
+    // Sending the same again changes nothing.
+    assert!(
+        !web.reconcile().await.unwrap(),
+        "nothing left to change after the certificate is in"
+    );
+    // A certificate without a key, or for another name, is refused before it is kept.
+    for bad in [
+        CustomCertificate {
+            private_key: None,
+            ..item.clone()
+        },
+        CustomCertificate {
+            host: "elsewhere.example.com".into(),
+            ..item.clone()
+        },
+    ] {
+        let err = set_custom_certificates(
+            web.clone(),
+            Operation::SetCustomCertificates {
+                username: "alice".into(),
+                items: vec![bad],
+            },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.code, ErrorCode::InvalidArguments);
+        assert!(!err.message.contains("PRIVATE KEY"), "{}", err.message);
+    }
+    // Removing it gives the name back to Caddy.
+    set_custom_certificates(
+        web.clone(),
+        Operation::SetCustomCertificates {
+            username: "alice".into(),
+            items: vec![],
+        },
+    )
+    .await
+    .unwrap();
+    assert!(!dir.join("certs/alice.json").exists());
+    let mut after = String::new();
+    for _ in 0..30 {
+        after = served_issuer(&tls_port, "own.example.com");
+        if after.contains("Caddy Local") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    assert!(after.contains("Caddy Local"), "{after}");
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -154,6 +154,10 @@ impl Registry {
                 let context = context.clone();
                 move |op| crate::web::set_site_routes(context.clone(), op)
             });
+            self.register("set_custom_certificates", {
+                let context = context.clone();
+                move |op| crate::web::set_custom_certificates(context.clone(), op)
+            });
             self.register("report_certificates", move |op| {
                 crate::web::report_certificates(context.clone(), op)
             });
