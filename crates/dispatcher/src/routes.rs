@@ -97,6 +97,7 @@ mod tests {
             status: status.into(),
             force_https: false,
             hsts: false,
+            docroot: String::new(),
         }
     }
 

@@ -118,8 +118,12 @@ impl Registry {
                 let context = context.clone();
                 move |op| vhost::attach_domain(context.clone(), op)
             });
-            registry.register("detach_domain", move |op| {
-                vhost::detach_domain(context.clone(), op)
+            registry.register("detach_domain", {
+                let context = context.clone();
+                move |op| vhost::detach_domain(context.clone(), op)
+            });
+            registry.register("keep_domains", move |op| {
+                vhost::keep_domains(context.clone(), op)
             });
         }
         let sources = capabilities::Sources::system(data_dir);

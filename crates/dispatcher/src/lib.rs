@@ -16,6 +16,7 @@
 //! the panel can update live; a failing publish never affects the ledger.
 
 pub mod routes;
+mod vhosts;
 
 use std::time::Duration;
 
@@ -101,6 +102,14 @@ pub struct TickStats {
     pub timed_out: usize,
     /// Operations that expired unsent.
     pub expired: u64,
+}
+
+/// A short number made from a name, for ledger keys that must stay short.
+fn short_hash(text: &str) -> u64 {
+    use std::hash::{Hash as _, Hasher as _};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    text.hash(&mut hasher);
+    hasher.finish()
 }
 
 /// What a [`SecretFiller`] answers.
@@ -296,6 +305,15 @@ impl Dispatcher {
         queued
     }
 
+    /// Puts a request in the ledger; `true` when the same request is already there
+    /// and has failed (then it waits for the next time slot to be asked afresh).
+    async fn enqueue_failed(&self, request: &dhpanel_operations::Request) -> Result<bool, String> {
+        match self.ops.enqueue(request).await.map_err(|e| e.to_string())? {
+            dhpanel_operations::Enqueued::Existing(op) => Ok(op.status == Status::Failed),
+            dhpanel_operations::Enqueued::Created(_) => Ok(false),
+        }
+    }
+
     async fn queue_routes(
         &self,
         tenant: &dhpanel_database::routes::Pending,
@@ -333,11 +351,51 @@ impl Dispatcher {
             format!("certs:{}:{}:{slot}", tenant.id.simple(), tenant.version),
         );
         certs.tenant_id = Some(tenant.id);
-        if let dhpanel_operations::Enqueued::Existing(op) =
-            self.ops.enqueue(&certs).await.map_err(|e| e.to_string())?
-            && op.status == Status::Failed
-        {
+        if self.enqueue_failed(&certs).await? {
             return Ok(false);
+        }
+        // The web server configuration of each site, then the removal of what
+        // is no longer a site.
+        let template = dhpanel_database::vhost_templates::default_for(db, "nginx")
+            .await
+            .map_err(|e| e.to_string())?
+            .map_or_else(
+                || dhpanel_domain::vhost::DEFAULT_NGINX_TEMPLATE.to_owned(),
+                |t| t.body,
+            );
+        let php = dhpanel_tenant_stack::php_upstream(&username).map_err(|e| e.to_string())?;
+        let files = vhosts::build(&tenant.status, &template, &php, &domains);
+        for (domain, config) in &files {
+            let mut attach = dhpanel_operations::Request::new(
+                tenant.node_id,
+                dhpanel_node_protocol::Operation::AttachDomain {
+                    username: tenant.username.clone(),
+                    domain: domain.clone(),
+                    config: config.clone(),
+                },
+                format!(
+                    "vhost:{}:{}:{:016x}:{slot}",
+                    tenant.id.simple(),
+                    tenant.version,
+                    short_hash(domain)
+                ),
+            );
+            attach.tenant_id = Some(tenant.id);
+            // A configuration the web server refuses must not hold back the
+            // routes: the failure puts the tenant on the list again (migration 30).
+            self.enqueue_failed(&attach).await?;
+        }
+        if matches!(tenant.status.as_str(), "active" | "suspended") {
+            let mut keep = dhpanel_operations::Request::new(
+                tenant.node_id,
+                dhpanel_node_protocol::Operation::KeepDomains {
+                    username: tenant.username.clone(),
+                    domains: files.into_iter().map(|(d, _)| d).collect(),
+                },
+                format!("keep:{}:{}:{slot}", tenant.id.simple(), tenant.version),
+            );
+            keep.tenant_id = Some(tenant.id);
+            self.enqueue_failed(&keep).await?;
         }
         let mut request = dhpanel_operations::Request::new(
             tenant.node_id,

@@ -418,6 +418,16 @@ pub enum Operation {
         /// The domain.
         domain: String,
     },
+    /// Remove the web server configuration of every domain of the tenant that is
+    /// not in `domains`, and reload. What the control plane sends after it has
+    /// attached the tenant's current domains, so a domain that was deleted does not
+    /// stay served. Safe to repeat. Answered with [`Output::DomainsKept`].
+    KeepDomains {
+        /// The tenant's system name.
+        username: String,
+        /// The domains whose configuration stays (at most [`MAX_HOSTS_PER_TENANT`]).
+        domains: Vec<String>,
+    },
     /// List the certificates the node's web server holds (name, issuer, validity).
     /// Answered with [`Output::Certificates`].
     ReportCertificates,
@@ -486,6 +496,7 @@ impl Operation {
         "set_custom_certificates",
         "attach_domain",
         "detach_domain",
+        "keep_domains",
         "suspend_tenant",
         "resume_tenant",
         "delete_tenant",
@@ -507,6 +518,7 @@ impl Operation {
             Self::SetCustomCertificates { .. } => "set_custom_certificates",
             Self::AttachDomain { .. } => "attach_domain",
             Self::DetachDomain { .. } => "detach_domain",
+            Self::KeepDomains { .. } => "keep_domains",
             Self::SuspendTenant { .. } => "suspend_tenant",
             Self::ResumeTenant { .. } => "resume_tenant",
             Self::DeleteTenant { .. } => "delete_tenant",
@@ -658,6 +670,13 @@ pub enum Output {
     /// Answer to [`Operation::DetachDomain`].
     DomainDetached {
         /// Whether the running web server dropped it.
+        applied: bool,
+    },
+    /// Answer to [`Operation::KeepDomains`].
+    DomainsKept {
+        /// How many configurations were removed.
+        removed: usize,
+        /// Whether the running web server dropped them.
         applied: bool,
     },
     /// Answer to [`Operation::SetCustomCertificates`].
@@ -1458,6 +1477,10 @@ mod tests {
                 username: "alice".into(),
                 domain: "example.com".into(),
             },
+            Operation::KeepDomains {
+                username: "alice".into(),
+                domains: vec!["example.com".into()],
+            },
             Operation::DeleteTenant {
                 tenant_id: id(),
                 username: "alice".into(),
@@ -1471,7 +1494,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            15,
+            16,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }

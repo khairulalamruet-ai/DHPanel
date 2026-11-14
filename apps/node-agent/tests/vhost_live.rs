@@ -216,6 +216,41 @@ async fn a_refused_configuration_is_rolled_back_and_the_site_keeps_running() {
     assert_eq!(fetch().1, "", "nothing answers any more");
     detach_domain(context.clone(), gone).await.unwrap();
 
+    // Keeping a list removes every other domain's file, and the site with it.
+    attach_domain(context.clone(), attach(site("kept")))
+        .await
+        .unwrap();
+    let other = |config: String| Operation::AttachDomain {
+        username: username.clone(),
+        domain: "gone.example.com".into(),
+        config,
+    };
+    attach_domain(
+        context.clone(),
+        other("server {\n    listen 8081;\n    location / { return 200 \"x\\n\"; }\n}\n".into()),
+    )
+    .await
+    .unwrap();
+    assert!(dir.join("gone.example.com.conf").exists());
+    let kept = dhpanel_node_agent::ops::vhost::keep_domains(
+        context.clone(),
+        Operation::KeepDomains {
+            username: username.clone(),
+            domains: vec!["example.com".into()],
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        kept,
+        Output::DomainsKept {
+            removed: 1,
+            applied: true
+        }
+    );
+    assert!(!dir.join("gone.example.com.conf").exists());
+    assert!(file.exists());
+    assert!(answers("kept").await, "{:?}", fetch());
     // With the web container stopped the file is kept and not applied.
     docker
         .stop(&web.name, Duration::from_secs(5))

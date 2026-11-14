@@ -15,7 +15,9 @@ use std::{
 
 use dhpanel_docker_manager::{DockerError, NginxCommand};
 use dhpanel_domain::{Fqdn, TenantUsername};
-use dhpanel_node_protocol::{AgentError, ErrorCode, MAX_VHOST_CONFIG_BYTES, Operation, Output};
+use dhpanel_node_protocol::{
+    AgentError, ErrorCode, MAX_HOSTS_PER_TENANT, MAX_VHOST_CONFIG_BYTES, Operation, Output,
+};
 use dhpanel_tenant_stack::web_container_name;
 
 use super::tenant::{TenantContext, docker_error};
@@ -67,10 +69,6 @@ fn check_config(config: &str) -> Result<(), AgentError> {
     Ok(())
 }
 
-fn file_of(dir: &Path, domain: &Fqdn) -> PathBuf {
-    dir.join(format!("{}.conf", domain.as_str()))
-}
-
 /// Puts `content` in `path` (or removes the file for `None`), all at once.
 fn put(dir: &Path, path: &Path, content: Option<&[u8]>) -> std::io::Result<()> {
     match content {
@@ -107,37 +105,54 @@ fn reason(output: &str) -> String {
     line.chars().filter(|c| !c.is_control()).take(300).collect()
 }
 
-/// Makes `new` the content of the domain's file and has the web server use it;
-/// returns whether a running web server has it now.
+/// One file's new content (`None` removes it).
+struct Change {
+    domain: String,
+    content: Option<String>,
+}
+
+/// Makes the changes, has the web server check and use the result, and puts
+/// every file back as it was when the web server refuses. Returns whether a
+/// running web server has the result now.
 async fn change(
     context: &TenantContext,
     username: &TenantUsername,
-    domain: &Fqdn,
-    new: Option<&str>,
+    changes: &[Change],
 ) -> Result<bool, AgentError> {
     let _one_at_a_time = CHANGING.lock().await;
     let dir =
         conf_dir(&context.vhosts_root, username).map_err(|e| disk("prepare the directory", &e))?;
-    let path = file_of(&dir, domain);
-    let before = match std::fs::read(&path) {
-        Ok(bytes) => Some(bytes),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-        Err(e) => return Err(disk("read the current file", &e)),
-    };
-    put(&dir, &path, new.map(str::as_bytes)).map_err(|e| disk("write the file", &e))?;
+    let mut before: Vec<(PathBuf, Option<Vec<u8>>)> = Vec::new();
+    for c in changes {
+        let path = dir.join(format!("{}.conf", c.domain));
+        let was = match std::fs::read(&path) {
+            Ok(bytes) => Some(bytes),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => return Err(disk("read the current file", &e)),
+        };
+        before.push((path, was));
+    }
     let restore = || {
-        if let Err(e) = put(&dir, &path, before.as_deref()) {
-            eprintln!(
-                "dhpanel-agent: could not put back {}: {}",
-                path.display(),
-                e.kind()
-            );
+        for (path, was) in &before {
+            if let Err(e) = put(&dir, path, was.as_deref()) {
+                eprintln!(
+                    "dhpanel-agent: could not put back {}: {}",
+                    path.display(),
+                    e.kind()
+                );
+            }
         }
     };
+    for (c, (path, _)) in changes.iter().zip(&before) {
+        if let Err(e) = put(&dir, path, c.content.as_deref().map(str::as_bytes)) {
+            restore();
+            return Err(disk("write the file", &e));
+        }
+    }
     let name = web_container_name(username).map_err(|e| invalid(e.to_string()))?;
     let docker = &context.docker;
     let tested = match docker.run_nginx(&name, NginxCommand::Test).await {
-        // Nothing runs: the file is kept and the container reads it when it starts.
+        // Nothing runs: the files are kept and the container reads them when it starts.
         Err(DockerError::NotFound | DockerError::Conflict(_)) => return Ok(false),
         Err(e) => {
             restore();
@@ -157,7 +172,7 @@ async fn change(
         Ok(result) if result.exit_code == 0 => Ok(true),
         Ok(result) => {
             restore();
-            // Best effort: the old file back in use.
+            // Best effort: the old files back in use.
             let _ = docker.run_nginx(&name, NginxCommand::Reload).await;
             Err(AgentError::new(
                 ErrorCode::Internal,
@@ -200,7 +215,15 @@ pub async fn attach_domain(
     };
     let (username, domain) = parse(&username, &domain)?;
     check_config(&config)?;
-    let applied = change(&context, &username, &domain, Some(&config)).await?;
+    let applied = change(
+        &context,
+        &username,
+        &[Change {
+            domain: domain.as_str().to_owned(),
+            content: Some(config),
+        }],
+    )
+    .await?;
     Ok(Output::DomainAttached { applied })
 }
 
@@ -216,8 +239,63 @@ pub async fn detach_domain(
         return Err(super::wrong_operation());
     };
     let (username, domain) = parse(&username, &domain)?;
-    let applied = change(&context, &username, &domain, None).await?;
+    let applied = change(
+        &context,
+        &username,
+        &[Change {
+            domain: domain.as_str().to_owned(),
+            content: None,
+        }],
+    )
+    .await?;
     Ok(Output::DomainDetached { applied })
+}
+
+/// `keep_domains`.
+///
+/// # Errors
+/// As [`attach_domain`].
+pub async fn keep_domains(
+    context: Arc<TenantContext>,
+    op: Operation,
+) -> Result<Output, AgentError> {
+    let Operation::KeepDomains { username, domains } = op else {
+        return Err(super::wrong_operation());
+    };
+    let username = TenantUsername::parse(&username).map_err(|e| invalid(e.to_string()))?;
+    if domains.len() > MAX_HOSTS_PER_TENANT {
+        return Err(invalid("too many domains"));
+    }
+    let mut keep = std::collections::BTreeSet::new();
+    for domain in &domains {
+        keep.insert(parse(username.as_str(), domain)?.1.as_str().to_owned());
+    }
+    let dir = context.vhosts_root.join(username.as_str());
+    let mut extra = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let file = entry.file_name().to_string_lossy().into_owned();
+            // Only files this agent could have written: `<plain domain>.conf`.
+            let Some(domain) = file.strip_suffix(".conf") else {
+                continue;
+            };
+            if Fqdn::parse(domain).is_ok_and(|f| f.as_str() == domain) && !keep.contains(domain) {
+                extra.push(Change {
+                    domain: domain.to_owned(),
+                    content: None,
+                });
+            }
+        }
+    }
+    if extra.is_empty() {
+        return Ok(Output::DomainsKept {
+            removed: 0,
+            applied: true,
+        });
+    }
+    let removed = extra.len();
+    let applied = change(&context, &username, &extra).await?;
+    Ok(Output::DomainsKept { removed, applied })
 }
 
 #[cfg(test)]
@@ -291,6 +369,35 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    #[tokio::test]
+    async fn keep_domains_checks_its_list_and_does_nothing_when_nothing_is_extra() {
+        let root = std::env::temp_dir().join(format!("dh-vhost-keep2-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let c = context(&root);
+        let keep = |domains: &[&str]| Operation::KeepDomains {
+            username: "alice".into(),
+            domains: domains.iter().map(|d| (*d).to_owned()).collect(),
+        };
+        assert_eq!(
+            keep_domains(c.clone(), keep(&["Example.com"]))
+                .await
+                .unwrap_err()
+                .code,
+            ErrorCode::InvalidArguments
+        );
+        // Nothing there: nothing to remove, and no web server needs asking.
+        assert_eq!(
+            keep_domains(c.clone(), keep(&["example.com"]))
+                .await
+                .unwrap(),
+            Output::DomainsKept {
+                removed: 0,
+                applied: true
+            }
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn writes_are_all_or_nothing_and_readable_by_the_container() {
         let root = std::env::temp_dir().join(format!("dh-vhost-put-{}", std::process::id()));
@@ -298,7 +405,7 @@ mod tests {
         let alice = TenantUsername::parse("alice").unwrap();
         let dir = conf_dir(&root, &alice).unwrap();
         let domain = Fqdn::parse("example.com").unwrap();
-        let path = file_of(&dir, &domain);
+        let path = dir.join(format!("{}.conf", domain.as_str()));
         put(&dir, &path, Some(b"one")).unwrap();
         put(&dir, &path, Some(b"two")).unwrap();
         assert_eq!(std::fs::read(&path).unwrap(), b"two");

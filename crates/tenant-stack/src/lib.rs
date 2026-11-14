@@ -287,6 +287,21 @@ pub fn files_volume_name(tenant: &TenantUsername) -> Result<Name, SpecError> {
     name(tenant, "www")
 }
 
+/// The port the tenant's PHP-FPM container listens on.
+pub const PHP_PORT: u16 = 9000;
+
+/// Where the tenant's web container reaches its PHP: the PHP container's name on
+/// the tenant's network and its port.
+///
+/// # Errors
+/// [`SpecError`] (cannot happen for a valid tenant name).
+pub fn php_upstream(tenant: &TenantUsername) -> Result<String, SpecError> {
+    Ok(format!(
+        "{}:{PHP_PORT}",
+        name(tenant, Role::Php.as_str())?.as_str()
+    ))
+}
+
 /// Name of a tenant's web container.
 ///
 /// # Errors

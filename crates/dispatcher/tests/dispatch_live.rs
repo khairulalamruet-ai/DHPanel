@@ -1160,3 +1160,126 @@ async fn an_uploaded_certificate_reaches_the_node_with_its_key_and_the_ledger_ne
     agent_stop.send(true).unwrap();
     agent.await.unwrap();
 }
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs PostgreSQL"]
+async fn a_tenants_web_server_files_are_sent_with_its_routes_and_what_is_gone_is_pruned(
+    pool: PgPool,
+) {
+    let p = plane(&pool).await;
+    let d = Dispatcher::new(p.ops.clone(), p.gateway.clone(), None, dispatch_settings());
+    let node = make_node(&p, &pool, "vhosts").await;
+    let account: Uuid = sqlx::query_scalar(
+        "INSERT INTO accounts (kind, username, email, password_hash)
+         VALUES ('client', 'vera', 'vera@example.com',
+                 '$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHQ$aGFzaGhhc2hoYXNoaGFzaA') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let plan: Uuid = sqlx::query_scalar("SELECT id FROM plans WHERE is_default")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let tenant: Uuid = sqlx::query_scalar(
+        "INSERT INTO tenants (owner_account_id, node_id, plan_id, username, uid, status)
+         VALUES ($1, $2, $3, 'verahost', 10002, 'active') RETURNING id",
+    )
+    .bind(account)
+    .bind(node.id)
+    .bind(plan)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let main: Uuid = sqlx::query_scalar(
+        "INSERT INTO domains (tenant_id, fqdn, kind, docroot) VALUES ($1, 'vera.example.com', 'primary', 'public_html') RETURNING id",
+    )
+    .bind(tenant)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO domains (tenant_id, fqdn, kind, parent_domain_id) VALUES ($1, 'www.vera.example.com', 'alias', $2)")
+        .bind(tenant)
+        .bind(main)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO domains (tenant_id, fqdn, kind, docroot) VALUES ($1, 'shop.example.org', 'addon', 'shop')")
+        .bind(tenant)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(d.request_route_syncs().await, 1);
+    let attached: Vec<(String, String)> = sqlx::query_as(
+        "SELECT payload ->> 'domain', payload ->> 'config' FROM operations
+         WHERE kind = 'attach_domain' ORDER BY payload ->> 'domain'",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let names: Vec<&str> = attached.iter().map(|(n, _)| n.as_str()).collect();
+    assert_eq!(names, ["shop.example.org", "vera.example.com"]);
+    assert!(
+        attached[1]
+            .1
+            .contains("server_name vera.example.com www.vera.example.com;")
+    );
+    assert!(attached[1].1.contains("root /var/www/html/public_html;"));
+    assert!(attached[1].1.contains("fastcgi_pass dh-verahost-php:9000;"));
+    let keep: serde_json::Value = sqlx::query_scalar(
+        "SELECT payload FROM operations WHERE kind = 'keep_domains' ORDER BY created_at DESC LIMIT 1",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        keep["domains"],
+        serde_json::json!(["shop.example.org", "vera.example.com"])
+    );
+
+    // A domain deleted: the next keep list no longer has it.
+    sqlx::query("DELETE FROM domains WHERE fqdn = 'shop.example.org'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(d.request_route_syncs().await, 1);
+    let keep: serde_json::Value = sqlx::query_scalar(
+        "SELECT payload FROM operations WHERE kind = 'keep_domains' ORDER BY created_at DESC LIMIT 1",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(keep["domains"], serde_json::json!(["vera.example.com"]));
+
+    // A configuration the web server refused puts the tenant on the list again,
+    // and does not stop the routes from being sent.
+    sqlx::query(
+        "UPDATE operations SET status = 'dispatched', attempts = 1 WHERE kind = 'attach_domain'
+           AND payload ->> 'domain' = 'vera.example.com'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let op: Uuid = sqlx::query_scalar(
+        "SELECT id FROM operations WHERE kind = 'attach_domain' AND status = 'dispatched'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        dhpanel_database::operations::fail(
+            &pool,
+            op,
+            &serde_json::json!({"code": "invalid_arguments", "message": "refused", "retryable": false}),
+            None,
+        )
+        .await
+        .unwrap(),
+        Some(dhpanel_operations::Status::Failed)
+    );
+    assert_eq!(
+        d.request_route_syncs().await,
+        1,
+        "a failed web server file means the tenant is looked at again"
+    );
+}
