@@ -1196,9 +1196,77 @@ const getInitialDnsRecords = (): MockDnsRecord[] => [
 let mockDnsZones = getInitialDnsZones();
 let mockDnsRecords = getInitialDnsRecords();
 
+export interface MockDnsClusterServer {
+  id: string;
+  name: string;
+  hostname: string;
+  ip_address: string;
+  port: number;
+  api_url: string;
+  role: "primary" | "secondary" | "replica";
+  status: "online" | "offline" | "syncing" | "error";
+  sync_strategy: "native_db" | "axfr" | "api_push";
+  zones_count: number;
+  last_sync_at: string;
+  latency_ms: number;
+  version?: string;
+  is_draining?: boolean;
+}
+
+export const getInitialDnsClusterServers = (): MockDnsClusterServer[] => [
+  {
+    id: "dns_srv_01",
+    name: "Primary PowerDNS US-East",
+    hostname: "ns1.dhpanel.internal",
+    ip_address: "192.0.2.11",
+    port: 53,
+    api_url: "http://192.0.2.11:8081",
+    role: "primary",
+    status: "online",
+    sync_strategy: "native_db",
+    zones_count: 14,
+    last_sync_at: new Date(Date.now() - 60000).toISOString(),
+    latency_ms: 12,
+    version: "PowerDNS Authoritative 4.9.1",
+  },
+  {
+    id: "dns_srv_02",
+    name: "Secondary PowerDNS EU-Central",
+    hostname: "ns2.dhpanel.internal",
+    ip_address: "198.51.100.22",
+    port: 53,
+    api_url: "http://198.51.100.22:8081",
+    role: "secondary",
+    status: "online",
+    sync_strategy: "axfr",
+    zones_count: 14,
+    last_sync_at: new Date(Date.now() - 120000).toISOString(),
+    latency_ms: 45,
+    version: "PowerDNS Authoritative 4.9.1",
+  },
+  {
+    id: "dns_srv_03",
+    name: "Edge Replica PowerDNS AP-South",
+    hostname: "ns3.dhpanel.internal",
+    ip_address: "203.0.113.33",
+    port: 53,
+    api_url: "http://203.0.113.33:8081",
+    role: "replica",
+    status: "online",
+    sync_strategy: "api_push",
+    zones_count: 14,
+    last_sync_at: new Date(Date.now() - 180000).toISOString(),
+    latency_ms: 88,
+    version: "PowerDNS Authoritative 4.9.1",
+  },
+];
+
+let mockDnsClusterServers = getInitialDnsClusterServers();
+
 export const resetMockDns = () => {
   mockDnsZones = getInitialDnsZones();
   mockDnsRecords = getInitialDnsRecords();
+  mockDnsClusterServers = getInitialDnsClusterServers();
 };
 
 interface MockSslCert {
@@ -3938,6 +4006,178 @@ export const handlers = [
       queried_at: new Date().toISOString(),
       status: "active",
       message: "Nameservers successfully verified and delegating properly.",
+    });
+  }),
+
+  // DNS Cluster: List cluster nameservers (GET /api/v1/admin/cluster/dns/servers)
+  // TODO(api:T16.04): Replace with real backend DNS cluster endpoint
+  http.get(/\/api\/v1\/admin\/cluster\/dns\/servers$/, () => {
+    const total = mockDnsClusterServers.length;
+    const online = mockDnsClusterServers.filter((s) => s.status === "online").length;
+    const primary = mockDnsClusterServers.filter((s) => s.role === "primary").length;
+    const secondary = mockDnsClusterServers.filter((s) => s.role !== "primary").length;
+
+    return HttpResponse.json({
+      items: mockDnsClusterServers,
+      overview: {
+        total_servers: total,
+        online_servers: online,
+        primary_count: primary,
+        secondary_count: secondary,
+        total_zones: 14,
+        cluster_healthy: online >= 2,
+        replication_lag_ms: 18,
+      },
+    });
+  }),
+
+  // DNS Cluster: Add new DNS server (POST /api/v1/admin/cluster/dns/servers)
+  // TODO(api:T16.04): Replace with real backend DNS cluster endpoint
+  http.post(/\/api\/v1\/admin\/cluster\/dns\/servers$/, async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as any;
+    const {
+      name,
+      hostname,
+      ip_address,
+      port = 53,
+      api_url,
+      role = "secondary",
+      sync_strategy = "native_db",
+    } = body || {};
+
+    if (!name || !hostname || !ip_address) {
+      return HttpResponse.json(
+        { message: "Name, hostname and IP address are required" },
+        { status: 400 }
+      );
+    }
+
+    const newServer: MockDnsClusterServer = {
+      id: `dns_srv_${Date.now()}`,
+      name: name.trim(),
+      hostname: hostname.trim().toLowerCase(),
+      ip_address: ip_address.trim(),
+      port: Number(port) || 53,
+      api_url: api_url || `http://${ip_address.trim()}:8081`,
+      role,
+      status: "online",
+      sync_strategy,
+      zones_count: 14,
+      last_sync_at: new Date().toISOString(),
+      latency_ms: Math.floor(Math.random() * 40) + 10,
+      version: "PowerDNS Authoritative 4.9.1",
+    };
+
+    mockDnsClusterServers.push(newServer);
+    return HttpResponse.json(newServer, { status: 201 });
+  }),
+
+  // DNS Cluster: Update DNS server (PUT /api/v1/admin/cluster/dns/servers/:id)
+  // TODO(api:T16.04): Replace with real backend DNS cluster endpoint
+  http.put(/\/api\/v1\/admin\/cluster\/dns\/servers\/([^/]+)$/, async ({ params, request }) => {
+    const id = (params.id || params[0]) as string;
+    const body = (await request.json().catch(() => ({}))) as any;
+
+    const index = mockDnsClusterServers.findIndex((s) => s.id === id);
+    if (index === -1) {
+      return HttpResponse.json({ message: "DNS server not found" }, { status: 404 });
+    }
+
+    const current = mockDnsClusterServers[index];
+    const updated: MockDnsClusterServer = {
+      ...current,
+      ...body,
+      id: current.id,
+    };
+
+    mockDnsClusterServers[index] = updated;
+    return HttpResponse.json(updated);
+  }),
+
+  // DNS Cluster: Delete DNS server (DELETE /api/v1/admin/cluster/dns/servers/:id)
+  // TODO(api:T16.04): Replace with real backend DNS cluster endpoint
+  http.delete(/\/api\/v1\/admin\/cluster\/dns\/servers\/([^/]+)$/, ({ params }) => {
+    const id = (params.id || params[0]) as string;
+    const index = mockDnsClusterServers.findIndex((s) => s.id === id);
+    if (index === -1) {
+      return HttpResponse.json({ message: "DNS server not found" }, { status: 404 });
+    }
+
+    if (mockDnsClusterServers[index].role === "primary") {
+      const remainingPrimaries = mockDnsClusterServers.filter(
+        (s) => s.role === "primary" && s.id !== id
+      );
+      if (remainingPrimaries.length === 0) {
+        return HttpResponse.json(
+          { message: "Cannot delete the only primary DNS server in cluster" },
+          { status: 400 }
+        );
+      }
+    }
+
+    mockDnsClusterServers.splice(index, 1);
+    return HttpResponse.json({ success: true });
+  }),
+
+  // DNS Cluster: Manual Sync server (POST /api/v1/admin/cluster/dns/servers/:id/sync)
+  // TODO(api:T16.04): Replace with real backend DNS cluster endpoint
+  http.post(/\/api\/v1\/admin\/cluster\/dns\/servers\/([^/]+)\/sync$/, ({ params }) => {
+    const id = (params.id || params[0]) as string;
+    const server = mockDnsClusterServers.find((s) => s.id === id);
+    if (!server) {
+      return HttpResponse.json({ message: "DNS server not found" }, { status: 404 });
+    }
+
+    server.last_sync_at = new Date().toISOString();
+    return HttpResponse.json({ success: true, synced_zones: server.zones_count });
+  }),
+
+  // DNS Cluster: High-Availability Resolution Test (POST /api/v1/admin/cluster/dns/resolve-test)
+  // TODO(api:T16.04): Replace with real backend DNS resolution endpoint
+  http.post(/\/api\/v1\/admin\/cluster\/dns\/resolve-test$/, async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as any;
+    const { domain = "example.com", record_type = "A", simulate_offline_server_id } = body || {};
+
+    const survivingServers = mockDnsClusterServers.filter(
+      (s) => s.status === "online" && s.id !== simulate_offline_server_id
+    );
+
+    const offlineDetected = mockDnsClusterServers
+      .filter((s) => s.status === "offline" || s.id === simulate_offline_server_id)
+      .map((s) => `${s.name} (${s.hostname})`);
+
+    if (survivingServers.length === 0) {
+      return HttpResponse.json({
+        domain,
+        record_type,
+        resolved: false,
+        answering_server: "None",
+        answering_ip: "N/A",
+        offline_servers_detected: offlineDetected,
+        redundancy_active: false,
+        records: [],
+        resolution_time_ms: 0,
+        message: "All DNS servers in the cluster are offline. Resolution failed.",
+      });
+    }
+
+    // Surviving node responds! (DoD T16.04: "একটা DNS server বন্ধ থাকলেও resolve হয়")
+    const answering = survivingServers[0];
+    const isFailover = offlineDetected.length > 0;
+
+    return HttpResponse.json({
+      domain,
+      record_type,
+      resolved: true,
+      answering_server: answering.name,
+      answering_ip: answering.ip_address,
+      offline_servers_detected: offlineDetected,
+      redundancy_active: isFailover,
+      records: record_type === "AAAA" ? ["2606:2800:220:1:248:1893:25c8:1946"] : ["93.184.216.34"],
+      resolution_time_ms: Math.floor(Math.random() * 15) + 5,
+      message: isFailover
+        ? `DoD T16.04 Verified: Server ${offlineDetected.join(", ")} was unreachable, but query successfully failed over and resolved via surviving cluster node ${answering.hostname}.`
+        : `Query resolved successfully through cluster primary ${answering.hostname}.`,
     });
   }),
 

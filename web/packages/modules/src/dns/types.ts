@@ -83,3 +83,66 @@ export interface BindExportResponse {
   soa_serial: number;
   bind_text: string;
 }
+
+// --- DNS Cluster Types (T16.04) ---
+
+export type DnsServerRole = "primary" | "secondary" | "replica";
+export type DnsServerStatus = "online" | "offline" | "syncing" | "error";
+export type DnsSyncStrategy = "native_db" | "axfr" | "api_push";
+
+export interface DnsClusterServer {
+  id: string;
+  name: string;
+  hostname: string;
+  ip_address: string;
+  port: number;
+  api_url: string;
+  role: DnsServerRole;
+  status: DnsServerStatus;
+  sync_strategy: DnsSyncStrategy;
+  zones_count: number;
+  last_sync_at: string;
+  latency_ms: number;
+  version?: string;
+  is_draining?: boolean;
+}
+
+export interface DnsClusterOverview {
+  total_servers: number;
+  online_servers: number;
+  primary_count: number;
+  secondary_count: number;
+  total_zones: number;
+  cluster_healthy: boolean;
+  replication_lag_ms: number;
+}
+
+export interface CreateDnsServerPayload {
+  name: string;
+  hostname: string;
+  ip_address: string;
+  port?: number;
+  api_url: string;
+  api_key?: string;
+  role: DnsServerRole;
+  sync_strategy: DnsSyncStrategy;
+}
+
+export interface DnsResolutionTestPayload {
+  domain: string;
+  record_type?: string;
+  simulate_offline_server_id?: string | null;
+}
+
+export interface DnsResolutionTestResult {
+  domain: string;
+  record_type: string;
+  resolved: boolean;
+  answering_server: string;
+  answering_ip: string;
+  offline_servers_detected: string[];
+  redundancy_active: boolean;
+  records: string[];
+  resolution_time_ms: number;
+  message: string;
+}
