@@ -1,0 +1,70 @@
+name: Frontend Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v1.0.0)"
+        required: true
+        default: "v1.0.0"
+
+defaults:
+  run:
+    working-directory: web
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & Package Frontend Release Artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.4.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: "pnpm"
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Security Audit
+        run: pnpm audit --audit-level=high
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build Web Production Bundles
+        run: pnpm build
+
+      - name: Generate CycloneDX SBOM
+        run: pnpm run sbom
+
+      - name: Package Dist Tarballs & Checksums
+        run: |
+          mkdir -p ../release-artifacts
+          tar -czf ../release-artifacts/dhpanel-admin-web.tar.gz -C apps/admin/dist .
+          tar -czf ../release-artifacts/dhpanel-client-web.tar.gz -C apps/client/dist .
+          cp sbom.json ../release-artifacts/dhpanel-web-sbom.json
+          cd ../release-artifacts
+          sha256sum * > SHA256SUMS.txt
+
+      - name: Upload Release Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-release-${{ github.ref_name || inputs.tag }}
+          path: release-artifacts/
+          retention-days: 90

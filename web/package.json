@@ -13,9 +13,11 @@
     "test": "vitest run",
     "test:e2e": "pnpm --filter @dhpanel/e2e test",
     "audit": "pnpm audit --audit-level=high",
+    "generate:sbom": "cdxgen -t js -o sbom.json",
     "sbom": "cdxgen -t js -o sbom.json"
   },
   "devDependencies": {
+    "@cyclonedx/cdxgen": "^12.9.2",
     "@eslint/js": "^9.20.0",
     "@tanstack/react-router": "^1.114.0",
     "@testing-library/jest-dom": "^6.6.3",
