@@ -45,6 +45,8 @@ pub enum Role {
     Web,
     /// PHP-FPM behind it.
     Php,
+    /// The node's shared database server (not part of a tenant's stack).
+    Db,
 }
 
 impl Role {
@@ -54,6 +56,7 @@ impl Role {
         match self {
             Self::Web => "web",
             Self::Php => "php",
+            Self::Db => "db",
         }
     }
 }
@@ -598,6 +601,8 @@ pub fn render(tenant: &Tenant<'_>, allowlist: &Allowlist) -> Result<Stack, Stack
                     ));
                 }
             }
+            // The database server is the node's, not a tenant's.
+            Role::Db => continue,
         }
         let copies = if template.role == Role::Php {
             php_copies

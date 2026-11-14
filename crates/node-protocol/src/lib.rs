@@ -406,6 +406,18 @@ pub enum Operation {
         /// More versions to run next to it (at most [`MAX_EXTRA_PHP_VERSIONS`]).
         extra_php: Vec<String>,
     },
+    /// Make sure the node's shared database server runs: its volume, its root
+    /// password (made on first use and kept in the agent's secret store, never
+    /// sent anywhere), and the container, published on the node's loopback address
+    /// only. Safe to repeat. Answered with [`Output::DbServerReady`].
+    EnsureDbServer,
+    /// Let a tenant's containers reach the shared database server as `db` on their
+    /// own network (the server is started first when it does not run). Safe to
+    /// repeat. Answered with [`Output::TenantDbAllowed`].
+    AllowTenantDatabases {
+        /// The tenant's system name.
+        username: String,
+    },
     /// Restart one of the tenant's own services: its web server (`web`) or all its
     /// PHP containers (`php`): stopped with a short grace period, started, and
     /// waited for. The files stay. Answered with [`Output::ServiceRestarted`].
@@ -567,6 +579,8 @@ impl Operation {
         "set_php_versions",
         "set_php_ini",
         "restart_service",
+        "ensure_db_server",
+        "allow_tenant_databases",
         "set_up_tenant",
         "set_site_routes",
         "set_error_pages",
@@ -593,6 +607,8 @@ impl Operation {
             Self::SetPhpVersions { .. } => "set_php_versions",
             Self::SetPhpIni { .. } => "set_php_ini",
             Self::RestartService { .. } => "restart_service",
+            Self::EnsureDbServer => "ensure_db_server",
+            Self::AllowTenantDatabases { .. } => "allow_tenant_databases",
             Self::SetUpTenant { .. } => "set_up_tenant",
             Self::SetSiteRoutes { .. } => "set_site_routes",
             Self::SetErrorPages { .. } => "set_error_pages",
@@ -749,6 +765,18 @@ pub enum Output {
         custom: usize,
         /// Whether the web server has them (they are kept either way).
         applied: bool,
+    },
+    /// Answer to [`Operation::EnsureDbServer`].
+    DbServerReady {
+        /// The loopback port the agent reaches it on.
+        port: u16,
+        /// Whether this call made the container.
+        created: bool,
+    },
+    /// Answer to [`Operation::AllowTenantDatabases`].
+    TenantDbAllowed {
+        /// The tenant's network the server was put on.
+        network: String,
     },
     /// Answer to [`Operation::RestartService`].
     ServiceRestarted {
@@ -1595,6 +1623,10 @@ mod tests {
                 service: "web".into(),
             },
             Operation::SetErrorPages { pages: vec![] },
+            Operation::EnsureDbServer,
+            Operation::AllowTenantDatabases {
+                username: "alice".into(),
+            },
             Operation::AttachDomain {
                 username: "alice".into(),
                 domain: "example.com".into(),
@@ -1621,7 +1653,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            20,
+            22,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }

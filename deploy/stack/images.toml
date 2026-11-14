@@ -51,3 +51,8 @@ role      = "php"
 version   = "8.2"
 reference = "php@sha256:d17bc39b8ef90e12d598f19cb466f1906c3c214f4bce661dfee49404b42fea09"
 note      = "PHP 8.2.35 FPM, Alpine (security fixes only until the end of 2026)"
+
+[[image]]
+role      = "db"
+reference = "mariadb@sha256:4ebbcf100a3ba320766dfa0e1af008df12261301db6ef72798c7650f70794aed"
+note      = "MariaDB 12.3.3 (long-term support): the node's shared database server (T07.01)"

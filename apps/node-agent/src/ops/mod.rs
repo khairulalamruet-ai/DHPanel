@@ -22,6 +22,7 @@
 
 pub mod cache;
 pub mod capabilities;
+pub mod db;
 pub mod tenant;
 pub mod vhost;
 
@@ -109,6 +110,14 @@ impl Registry {
             registry.register("provision_tenant_stack", {
                 let context = context.clone();
                 move |op| tenant::provision_tenant_stack(context.clone(), op)
+            });
+            registry.register("ensure_db_server", {
+                let context = context.clone();
+                move |op| db::ensure_db_server(context.clone(), op)
+            });
+            registry.register("allow_tenant_databases", {
+                let context = context.clone();
+                move |op| db::allow_tenant_databases(context.clone(), op)
             });
             registry.register("restart_service", {
                 let context = context.clone();

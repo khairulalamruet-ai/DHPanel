@@ -25,7 +25,10 @@ use bollard::{
     Docker,
     errors::Error as BollardError,
     exec::{CreateExecOptions, StartExecResults},
-    models::{ContainerUpdateBody, NetworkCreateRequest, VolumeCreateRequest},
+    models::{
+        ContainerUpdateBody, EndpointSettings, NetworkConnectRequest, NetworkCreateRequest,
+        VolumeCreateRequest,
+    },
     query_parameters::{
         CreateContainerOptionsBuilder, CreateImageOptionsBuilder, ListContainersOptionsBuilder,
         RemoveContainerOptionsBuilder, StatsOptionsBuilder, StopContainerOptionsBuilder,
@@ -607,6 +610,99 @@ impl DockerManager {
             .await
             .map(|_| ())
             .map_err(map_error)
+    }
+
+    /// Puts a running or stopped container of ours on a network of ours, under an
+    /// extra name (`alias`) that only that network's members see. Doing it again is
+    /// fine.
+    ///
+    /// # Errors
+    /// [`DockerError::NotFound`], [`DockerError::NotManaged`], [`DockerError::Invalid`]
+    /// for a bad alias, or an API error.
+    pub async fn connect_network(
+        &self,
+        container: &Name,
+        network: &Name,
+        alias: &str,
+    ) -> Result<(), DockerError> {
+        let plain = !alias.is_empty()
+            && alias.len() <= 63
+            && alias
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
+        if !plain {
+            return Err(DockerError::Invalid(SpecError {
+                field: "alias",
+                reason: "a network alias is lower-case letters, digits and dashes".into(),
+            }));
+        }
+        self.require_managed_container(container).await?;
+        let net = self
+            .docker
+            .inspect_network(network.as_str(), None)
+            .await
+            .map_err(map_error)?;
+        if net
+            .labels
+            .as_ref()
+            .and_then(|l| l.get(MANAGED_LABEL))
+            .map(String::as_str)
+            != Some("true")
+        {
+            return Err(DockerError::NotManaged);
+        }
+        match self
+            .docker
+            .connect_network(
+                network.as_str(),
+                NetworkConnectRequest {
+                    container: container.as_str().to_owned(),
+                    endpoint_config: Some(EndpointSettings {
+                        aliases: Some(vec![alias.to_owned()]),
+                        ..Default::default()
+                    }),
+                },
+            )
+            .await
+        {
+            Ok(()) => Ok(()),
+            // Already on it.
+            Err(BollardError::DockerResponseServerError {
+                status_code: 403 | 409,
+                message,
+            }) if message.contains("already exists") => Ok(()),
+            Err(e) => Err(map_error(e)),
+        }
+    }
+
+    /// The address range (CIDR) of one of our networks.
+    ///
+    /// # Errors
+    /// [`DockerError::NotFound`], [`DockerError::NotManaged`], or an API error
+    /// (also when the network has no range).
+    pub async fn network_subnet(&self, network: &Name) -> Result<String, DockerError> {
+        let net = self
+            .docker
+            .inspect_network(network.as_str(), None)
+            .await
+            .map_err(map_error)?;
+        if net
+            .labels
+            .as_ref()
+            .and_then(|l| l.get(MANAGED_LABEL))
+            .map(String::as_str)
+            != Some("true")
+        {
+            return Err(DockerError::NotManaged);
+        }
+        net.ipam
+            .and_then(|i| i.config)
+            .and_then(|c| {
+                c.into_iter()
+                    .filter_map(|c| c.subnet)
+                    .find(|s| !s.contains(':'))
+            })
+            .ok_or_else(|| DockerError::Api("the network has no address range".into()))
     }
 
     /// Creates the network unless it already exists and is ours.

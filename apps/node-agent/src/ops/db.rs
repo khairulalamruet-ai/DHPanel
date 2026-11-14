@@ -1,0 +1,325 @@
+//! The node's shared database server (T07.01).
+//!
+//! One MariaDB container per node, named `dh-db`, with its data in the volume
+//! `dh-db-data`. It is published on the node's loopback address only (the agent
+//! reaches it there; nothing outside the node can), and it joins the network of
+//! each tenant that may use databases, as `db`, so a tenant's containers reach it
+//! and nobody else's do. Its root password is made here, kept in the agent's
+//! secret store (`<state>/secrets/mariadb-root`, 0600) and never leaves the node.
+
+use std::{
+    io::Read as _,
+    os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _},
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::Duration,
+};
+
+use dhpanel_docker_manager::{
+    Capability, ContainerSpec, DockerError, Name, Network, PublishedPort, Restart, Tmpfs,
+    VolumeMount,
+};
+use dhpanel_domain::TenantUsername;
+use dhpanel_node_protocol::{AgentError, ErrorCode, Operation, Output};
+use dhpanel_tenant_stack::{Allowlist, Role, network_name};
+
+use super::tenant::{TenantContext, docker_error};
+
+/// The database container.
+pub const CONTAINER: &str = "dh-db";
+/// Its network (the tenants' networks are added to it as it is used).
+const NETWORK: &str = "dh-db-net";
+/// Its data.
+const VOLUME: &str = "dh-db-data";
+/// The loopback port it is published on unless `DHPANEL_AGENT_DB_PORT` says another.
+pub const DEFAULT_PORT: u16 = 3307;
+/// The name tenants reach it by on their own network.
+pub const ALIAS: &str = "db";
+/// Longest wait for it to accept connections.
+const READY_TIMEOUT: Duration = Duration::from_secs(120);
+
+const MIB: u64 = 1024 * 1024;
+
+/// The loopback port of the database server.
+#[must_use]
+pub fn port() -> u16 {
+    std::env::var("DHPANEL_AGENT_DB_PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .filter(|p| *p >= 1024)
+        .unwrap_or(DEFAULT_PORT)
+}
+
+/// Where the root password is kept: next to the agent's other secrets.
+fn secrets_dir(context: &TenantContext) -> PathBuf {
+    context.vhosts_root.with_file_name("secrets")
+}
+
+fn disk(what: &str, err: &std::io::Error) -> AgentError {
+    AgentError::new(
+        ErrorCode::Internal,
+        format!("cannot {what}: {}", err.kind()),
+    )
+    .retryable()
+}
+
+/// 64 hex digits from the system's random source.
+fn random_secret() -> std::io::Result<String> {
+    let mut bytes = [0u8; 32];
+    std::fs::File::open("/dev/urandom")?.read_exact(&mut bytes)?;
+    Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
+}
+
+/// The root password: read from the secret store, made first if there is none.
+///
+/// # Errors
+/// The disk failing (retryable).
+pub fn root_password(dir: &Path) -> Result<String, AgentError> {
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(dir)
+        .map_err(|e| disk("prepare the secret store", &e))?;
+    let path = dir.join("mariadb-root");
+    if let Ok(text) = std::fs::read_to_string(&path) {
+        let text = text.trim().to_owned();
+        if text.len() >= 32 {
+            return Ok(text);
+        }
+    }
+    let secret = random_secret().map_err(|e| disk("make a password", &e))?;
+    let tmp = dir.join(".mariadb-root.tmp");
+    let _ = std::fs::remove_file(&tmp);
+    let write = || -> std::io::Result<()> {
+        let mut out = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&tmp)?;
+        std::io::Write::write_all(&mut out, secret.as_bytes())?;
+        out.sync_all()?;
+        std::fs::rename(&tmp, &path)
+    };
+    write().map_err(|e| disk("keep the password", &e))?;
+    Ok(secret)
+}
+
+fn name(text: &str) -> Result<Name, AgentError> {
+    Name::parse(text).map_err(|e| AgentError::new(ErrorCode::Internal, e.to_string()))
+}
+
+/// The connection options for the root account on the loopback port.
+fn root_opts(password: &str) -> mysql_async::Opts {
+    mysql_async::OptsBuilder::default()
+        .ip_or_hostname("127.0.0.1")
+        .tcp_port(port())
+        .user(Some("root"))
+        .pass(Some(password))
+        .into()
+}
+
+/// Waits until the server answers a statement.
+async fn wait_ready(password: &str) -> Result<(), AgentError> {
+    use mysql_async::prelude::Queryable as _;
+    let deadline = tokio::time::Instant::now() + READY_TIMEOUT;
+    loop {
+        let attempt = async {
+            let mut conn = mysql_async::Conn::new(root_opts(password)).await?;
+            conn.query_drop("SELECT 1").await?;
+            conn.disconnect().await
+        };
+        if attempt.await.is_ok() {
+            return Ok(());
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Err(AgentError::new(
+                ErrorCode::Internal,
+                "the database server did not come up in time",
+            )
+            .retryable());
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+}
+
+/// Makes sure the server runs. Returns whether this call made the container.
+///
+/// # Errors
+/// Docker or the disk failing (retryable), or the server not coming up.
+pub async fn ensure_server(context: &TenantContext) -> Result<bool, AgentError> {
+    let password = root_password(&secrets_dir(context))?;
+    let docker = &context.docker;
+    let container = name(CONTAINER)?;
+    let created = match docker.inspect(&container).await {
+        Ok(_) => false,
+        Err(DockerError::NotFound) => {
+            let allowlist = Allowlist::embedded().map_err(|e| {
+                AgentError::new(
+                    ErrorCode::Internal,
+                    format!("the image list is broken: {e}"),
+                )
+            })?;
+            let image = allowlist
+                .current(Role::Db)
+                .map_err(|e| AgentError::new(ErrorCode::Internal, e.to_string()))?
+                .clone();
+            let network = name(NETWORK)?;
+            docker
+                .ensure_network(&network, false)
+                .await
+                .map_err(|e| docker_error(&e))?;
+            let volume = name(VOLUME)?;
+            docker
+                .create_volume(&volume)
+                .await
+                .map_err(|e| docker_error(&e))?;
+            docker
+                .pull_image(&image)
+                .await
+                .map_err(|e| docker_error(&e))?;
+            let mut spec = ContainerSpec::new(container.clone(), image);
+            spec.command = vec![
+                "--skip-name-resolve=1".into(),
+                "--local-infile=0".into(),
+                "--skip-symbolic-links".into(),
+                "--max-connections=300".into(),
+            ];
+            spec.env
+                .insert("MARIADB_ROOT_PASSWORD".into(), password.clone());
+            spec.env.insert("MARIADB_AUTO_UPGRADE".into(), "1".into());
+            // The image starts as root and gives its own files to `mysql`: it needs
+            // exactly the capabilities for that, and nothing else.
+            spec.cap_add = vec![
+                Capability::Chown,
+                Capability::DacOverride,
+                Capability::Fowner,
+                Capability::Setgid,
+                Capability::Setuid,
+            ];
+            spec.memory_bytes = 1024 * MIB;
+            spec.cpu_millis = 2000;
+            spec.pids_limit = 512;
+            spec.tmpfs = vec![
+                Tmpfs {
+                    target: "/tmp".into(),
+                    size_bytes: 256 * MIB,
+                },
+                Tmpfs {
+                    target: "/run/mysqld".into(),
+                    size_bytes: 16 * MIB,
+                },
+            ];
+            spec.volumes = vec![VolumeMount {
+                volume,
+                target: "/var/lib/mysql".into(),
+                read_only: false,
+            }];
+            spec.network = Network::Named(network);
+            spec.ports = vec![PublishedPort {
+                container_port: 3306,
+                host_port: port(),
+                host_ip: "127.0.0.1"
+                    .parse()
+                    .map_err(|_| AgentError::new(ErrorCode::Internal, "bad loopback address"))?,
+            }];
+            spec.restart = Restart::UnlessStopped;
+            match docker.create_container(&spec).await {
+                Ok(_) | Err(DockerError::Conflict(_)) => {}
+                Err(e) => return Err(docker_error(&e)),
+            }
+            true
+        }
+        Err(e) => return Err(docker_error(&e)),
+    };
+    docker
+        .start(&container)
+        .await
+        .map_err(|e| docker_error(&e))?;
+    wait_ready(&password).await?;
+    Ok(created)
+}
+
+/// `ensure_db_server`.
+///
+/// # Errors
+/// As [`ensure_server`].
+pub async fn ensure_db_server(
+    context: Arc<TenantContext>,
+    op: Operation,
+) -> Result<Output, AgentError> {
+    let Operation::EnsureDbServer = op else {
+        return Err(super::wrong_operation());
+    };
+    let created = ensure_server(&context).await?;
+    Ok(Output::DbServerReady {
+        port: port(),
+        created,
+    })
+}
+
+/// `allow_tenant_databases`.
+///
+/// # Errors
+/// As [`ensure_server`]; a tenant that has no network here (not retryable).
+pub async fn allow_tenant_databases(
+    context: Arc<TenantContext>,
+    op: Operation,
+) -> Result<Output, AgentError> {
+    let Operation::AllowTenantDatabases { username } = op else {
+        return Err(super::wrong_operation());
+    };
+    let username = TenantUsername::parse(&username)
+        .map_err(|e| AgentError::new(ErrorCode::InvalidArguments, e.to_string()))?;
+    let network = network_name(&username)
+        .map_err(|e| AgentError::new(ErrorCode::InvalidArguments, e.to_string()))?;
+    ensure_server(&context).await?;
+    match context
+        .docker
+        .connect_network(&name(CONTAINER)?, &network, ALIAS)
+        .await
+    {
+        Ok(()) => {}
+        Err(DockerError::NotFound) => {
+            return Err(AgentError::new(
+                ErrorCode::InvalidArguments,
+                "the tenant has no network on this node",
+            ));
+        }
+        Err(e) => return Err(docker_error(&e)),
+    }
+    Ok(Output::TenantDbAllowed {
+        network: network.as_str().to_owned(),
+    })
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::unwrap_used)]
+mod tests {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    use super::*;
+
+    #[test]
+    fn the_root_password_is_made_once_kept_private_and_read_back() {
+        let dir = std::env::temp_dir().join(format!("dh-secrets-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let first = root_password(&dir).unwrap();
+        assert_eq!(first.len(), 64);
+        assert!(first.bytes().all(|b| b.is_ascii_hexdigit()));
+        assert_eq!(root_password(&dir).unwrap(), first, "kept, not made again");
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&dir), 0o700);
+        assert_eq!(mode(&dir.join("mariadb-root")), 0o600);
+        // A damaged file is replaced rather than used.
+        std::fs::write(dir.join("mariadb-root"), "short").unwrap();
+        let second = root_password(&dir).unwrap();
+        assert_eq!(second.len(), 64);
+        assert_ne!(second, first);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_port_is_a_loopback_port_above_1023() {
+        assert_eq!(port(), DEFAULT_PORT);
+    }
+}

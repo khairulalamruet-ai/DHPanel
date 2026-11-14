@@ -43,7 +43,13 @@ async fn run(docker: &DockerManager, owner: &TenantUsername, n: u32, script: &st
         target: "/data".into(),
         read_only: false,
     });
-    docker.pull_image(&spec.image).await.unwrap();
+    // (Another test pulling the same image at the same moment may make one pull fail.)
+    for attempt in 0..4 {
+        if docker.pull_image(&spec.image).await.is_ok() || attempt == 3 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
     docker.create_container(&spec).await.unwrap();
     docker.start(&spec.name).await.unwrap();
     let mut exit = -1;
