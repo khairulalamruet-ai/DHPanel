@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE tenants SET routes_version = routes_version + 1\n         WHERE status IN ('active', 'suspended')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "ba3c1e7fc01b99385fe52feccecb811422e9a28a457e2fa05aaf63dafe422b9e"
+}

@@ -3109,3 +3109,302 @@ async fn an_owner_sees_its_web_server_file_and_adds_only_allowed_directives(pool
     assert_eq!(logged.len(), 2);
     assert!(!logged.iter().any(|m| m.to_string().contains("/old")));
 }
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn administrators_keep_versions_of_the_web_server_templates_and_apply_them(pool: PgPool) {
+    let e = env(&pool).await;
+    let (alice, tenant) = client(&pool, "alice", 10_000).await;
+    let a = e.sign_in(alice).await;
+    let root = e
+        .sign_in(account(&pool, "rootuser", &["super_admin"]).await)
+        .await;
+    let plain = e
+        .sign_in(account(&pool, "plainadmin", &["admin"]).await)
+        .await;
+    const T: &str = "/api/v1/admin/vhost-templates";
+
+    // Only administrators with the permission.
+    let (status, b) = e.call(Some(&plain), "GET", T, None, false).await;
+    assert_eq!(
+        (status, code(&b)),
+        (StatusCode::FORBIDDEN, "permission_denied")
+    );
+    assert_eq!(
+        e.call(Some(&a), "GET", T, None, false).await.0,
+        StatusCode::FORBIDDEN
+    );
+
+    let (status, list) = e.call(Some(&root), "GET", T, None, false).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(list["items"].as_array().unwrap().len(), 1);
+    assert_eq!(list["items"][0]["name"], "Default");
+    assert_eq!(
+        (
+            list["items"][0]["is_default"].clone(),
+            list["items"][0]["version"].clone()
+        ),
+        (json!(true), json!(1))
+    );
+    let default_id = list["items"][0]["id"].as_str().unwrap().to_owned();
+    let (_, full) = e
+        .call(
+            Some(&root),
+            "GET",
+            &format!("{T}/{default_id}"),
+            None,
+            false,
+        )
+        .await;
+    assert_eq!(full["body"], dhpanel_domain::vhost::DEFAULT_NGINX_TEMPLATE);
+
+    // Bad texts are refused with the reason; nothing is saved.
+    for (body, why) in [
+        ("server { root {{docroot}}; }", "missing_variable"),
+        (
+            "server { server_name {{server_names}}; root {{docroot}}; alias /etc; }",
+            "forbidden_directive",
+        ),
+        (
+            "server { server_name {{server_names}}; root {{docroot}}; {{nope}} }",
+            "unknown_variable",
+        ),
+        (
+            "server { server_name {{server_names}}; root {{docroot}}; ",
+            "template_braces",
+        ),
+    ] {
+        let (status, resp) = e
+            .call(
+                Some(&root),
+                "POST",
+                T,
+                Some(json!({"name": "bad", "body": body})),
+                true,
+            )
+            .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}: {resp}");
+        assert_eq!(resp["errors"][0]["field"], "body");
+        assert_eq!(resp["errors"][0]["code"], why);
+    }
+    let (status, resp) = e
+        .call(Some(&root), "POST", T, Some(json!({"name": "../x", "body": "server { server_name {{server_names}}; root {{docroot}}; }"})), true)
+        .await;
+    assert_eq!(
+        (status, resp["errors"][0]["code"].clone()),
+        (StatusCode::UNPROCESSABLE_ENTITY, json!("invalid_name"))
+    );
+
+    // A new template, a second version, and the history.
+    let v1 =
+        "server {\n    listen 8080;\n    server_name {{server_names}};\n    root {{docroot}};\n}\n";
+    let (status, created) = e
+        .call(
+            Some(&root),
+            "POST",
+            T,
+            Some(json!({"name": "Plain", "body": v1})),
+            true,
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    assert_eq!(
+        (created["version"].clone(), created["is_default"].clone()),
+        (json!(1), json!(false))
+    );
+    let id = created["id"].as_str().unwrap().to_owned();
+    let (status, taken) = e
+        .call(
+            Some(&root),
+            "POST",
+            T,
+            Some(json!({"name": "Plain", "body": v1})),
+            true,
+        )
+        .await;
+    assert_eq!(
+        (status, code(&taken)),
+        (StatusCode::CONFLICT, "template_name_taken")
+    );
+    let v2 = format!("{v1}# second\n");
+    let (status, saved) = e
+        .call(
+            Some(&root),
+            "PUT",
+            &format!("{T}/{id}"),
+            Some(json!({"name": "Plain", "body": v2})),
+            true,
+        )
+        .await;
+    assert_eq!(
+        (status, saved["version"].clone()),
+        (StatusCode::OK, json!(2)),
+        "{saved}"
+    );
+    // Saving the same text again is not a new version.
+    let (_, same) = e
+        .call(
+            Some(&root),
+            "PUT",
+            &format!("{T}/{id}"),
+            Some(json!({"name": "Plain", "body": v2})),
+            true,
+        )
+        .await;
+    assert_eq!(same["version"], 2);
+    let (_, hist) = e
+        .call(
+            Some(&root),
+            "GET",
+            &format!("{T}/{id}/versions"),
+            None,
+            false,
+        )
+        .await;
+    let items = hist["items"].as_array().unwrap();
+    assert_eq!(items.len(), 2);
+    assert_eq!(
+        (items[0]["version"].clone(), items[1]["version"].clone()),
+        (json!(2), json!(1))
+    );
+    assert_eq!(items[1]["body"], v1);
+    assert_eq!(items[0]["body"], v2);
+
+    // Preview fills the sample site in without saving.
+    let (status, shown) = e
+        .call(
+            Some(&root),
+            "POST",
+            &format!("{T}/preview"),
+            Some(json!({"body": dhpanel_domain::vhost::DEFAULT_NGINX_TEMPLATE})),
+            true,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{shown}");
+    let text = shown["rendered"].as_str().unwrap();
+    assert!(
+        text.contains("server_name example.com www.example.com;"),
+        "{text}"
+    );
+    assert!(
+        text.contains("add_header X-Example \"preview\" always;"),
+        "{text}"
+    );
+    assert!(
+        text.contains("location /old { return 301 /new; }"),
+        "{text}"
+    );
+    let (status, _) = e
+        .call(
+            Some(&root),
+            "POST",
+            &format!("{T}/preview"),
+            Some(json!({"body": "nonsense"})),
+            true,
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    // The default cannot be removed; another can become the default; then the old one can go.
+    let (status, resp) = e
+        .call(
+            Some(&root),
+            "DELETE",
+            &format!("{T}/{default_id}"),
+            None,
+            true,
+        )
+        .await;
+    assert_eq!(
+        (status, code(&resp)),
+        (StatusCode::CONFLICT, "template_is_default")
+    );
+    let (status, now) = e
+        .call(
+            Some(&root),
+            "POST",
+            &format!("{T}/{id}/default"),
+            None,
+            true,
+        )
+        .await;
+    assert_eq!(
+        (status, now["is_default"].clone()),
+        (StatusCode::OK, json!(true))
+    );
+    let (_, list) = e.call(Some(&root), "GET", T, None, false).await;
+    let defaults = list["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|i| i["is_default"] == true)
+        .count();
+    assert_eq!(defaults, 1);
+    assert_eq!(
+        e.call(
+            Some(&root),
+            "DELETE",
+            &format!("{T}/{default_id}"),
+            None,
+            true
+        )
+        .await
+        .0,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        e.call(
+            Some(&root),
+            "GET",
+            &format!("{T}/{default_id}"),
+            None,
+            false
+        )
+        .await
+        .0,
+        StatusCode::NOT_FOUND
+    );
+
+    // The sites that exist are untouched until the templates are applied.
+    let before: i64 = sqlx::query_scalar("SELECT routes_version FROM tenants WHERE id = $1")
+        .bind(tenant)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let (status, applied) = e
+        .call(Some(&root), "POST", &format!("{T}/apply"), None, true)
+        .await;
+    assert_eq!(
+        (status, applied["tenants"].clone()),
+        (StatusCode::ACCEPTED, json!(1))
+    );
+    let after: i64 = sqlx::query_scalar("SELECT routes_version FROM tenants WHERE id = $1")
+        .bind(tenant)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!(after > before);
+    assert_eq!(
+        e.call(Some(&plain), "POST", &format!("{T}/apply"), None, true)
+            .await
+            .0,
+        StatusCode::FORBIDDEN
+    );
+    let actions: Vec<String> = sqlx::query_scalar(
+        "SELECT action FROM audit_logs WHERE action LIKE 'admin.vhost_template%' ORDER BY at",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        actions,
+        [
+            "admin.vhost_template_created",
+            "admin.vhost_template_updated",
+            "admin.vhost_template_updated",
+            "admin.vhost_template_default",
+            "admin.vhost_template_deleted",
+            "admin.vhost_templates_applied"
+        ]
+    );
+}

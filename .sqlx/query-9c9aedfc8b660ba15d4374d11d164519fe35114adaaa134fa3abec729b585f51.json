@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT server FROM vhost_templates WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "server",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "vhost_templates",
+            "name": "server"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "9c9aedfc8b660ba15d4374d11d164519fe35114adaaa134fa3abec729b585f51"
+}

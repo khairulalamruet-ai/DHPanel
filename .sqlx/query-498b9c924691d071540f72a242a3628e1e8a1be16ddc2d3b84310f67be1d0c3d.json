@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO vhost_template_versions (template_id, version, name, body, changed_by)\n         VALUES ($1, 1, $2, $3, $4)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "498b9c924691d071540f72a242a3628e1e8a1be16ddc2d3b84310f67be1d0c3d"
+}

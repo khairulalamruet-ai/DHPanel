@@ -37,6 +37,7 @@ pub mod redirects;
 pub mod ssl;
 pub mod tls;
 pub mod vhost;
+pub mod vhost_templates;
 
 use std::sync::Arc;
 
@@ -114,6 +115,7 @@ impl FromRef<DomainsState> for SessionStore {
 pub fn admin_router() -> Router<DomainsState> {
     policy::admin_router()
         .merge(vhost::admin_router())
+        .merge(vhost_templates::admin_router())
         .merge(redirects::admin_router())
         .merge(records::admin_router())
         .merge(nameservers::admin_router())
@@ -1142,6 +1144,9 @@ pub async fn client_delete(
         admin_unsuspend, client_list, client_get, client_add, client_update, client_delete,
         policy::admin_get, policy::admin_set, policy::client_get, policy::client_set,
         vhost::admin_get, vhost::admin_set, vhost::client_get, vhost::client_set,
+        vhost_templates::list, vhost_templates::show, vhost_templates::create,
+        vhost_templates::update, vhost_templates::remove, vhost_templates::versions,
+        vhost_templates::set_default, vhost_templates::preview, vhost_templates::apply,
         redirects::admin_list, redirects::admin_add, redirects::admin_update,
         redirects::admin_delete, redirects::client_list, redirects::client_add,
         redirects::client_update, redirects::client_delete,
@@ -1155,7 +1160,10 @@ pub async fn client_delete(
     ),
     components(schemas(
         DomainView, DomainList, AddDomain, AdminAddDomain, UpdateDomain,
-        policy::PolicyView, policy::HeaderView, vhost::VhostView, vhost::SetVhost, redirects::RedirectView, redirects::RedirectList, redirects::AddRedirect,
+        policy::PolicyView, policy::HeaderView, vhost::VhostView, vhost::SetVhost, vhost_templates::TemplateSummary,
+        vhost_templates::TemplateView, vhost_templates::TemplateList, vhost_templates::TemplateInput,
+        vhost_templates::VersionView, vhost_templates::VersionList, vhost_templates::PreviewInput,
+        vhost_templates::Preview, vhost_templates::Applied, redirects::RedirectView, redirects::RedirectList, redirects::AddRedirect,
         redirects::UpdateRedirect, dns::TemplateLine, dns::TemplateView, dns::TemplateList,
         dns::TemplateInput, records::RecordView, records::RecordList, records::ZoneView,
         records::AddRecord, records::UpdateRecord, nameservers::Nameservers,

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE vhost_templates SET is_default = false WHERE server = $1 AND is_default AND id <> $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5f02f92ff0e3b138cbb2c6074a778aa1004af0f3b7a1254d8791f4b8597dedd4"
+}
