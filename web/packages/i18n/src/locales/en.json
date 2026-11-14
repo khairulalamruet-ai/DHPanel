@@ -32,6 +32,7 @@
     "errorBoundaryDesc": "An unexpected error occurred while rendering this page.",
     "retry": "Try again",
     "reload": "Reload page",
+    "save": "Save",
     "cancel": "Cancel",
     "saving": "Saving...",
     "processing": "Processing...",
@@ -290,6 +291,26 @@
       "totalAllocated": "Total Allocated",
       "totalUsable": "Effective Usable",
       "avgSaturation": "Avg Saturation"
+    },
+    "scheduler": {
+      "title": "Placement Scheduler & Policies",
+      "desc": "Configure automated cluster placement policy for incoming tenants, preview live simulation, and manage node maintenance exclusions.",
+      "configure": "Placement Policy",
+      "policyLabel": "Active Placement Algorithm",
+      "leastLoadedTitle": "Least-Loaded (Resource Saturation)",
+      "leastLoadedDesc": "Automatically routes new tenants to the node with the lowest resource load across CPU, memory, and disk.",
+      "roundRobinTitle": "Round-Robin (Cyclic Distribution)",
+      "roundRobinDesc": "Distributes new tenants sequentially across all eligible cluster nodes.",
+      "drainInvariantTitle": "Drainage Invariant (DoD Enforced)",
+      "drainInvariantDesc": "Nodes in draining or maintenance mode are strictly disqualified from all placement decisions. Existing workloads continue running without interruption.",
+      "simulationTitle": "Live Placement Simulation",
+      "nextTarget": "Next Scheduled Destination",
+      "excludedNodesTitle": "Disqualified Draining / Offline Nodes",
+      "saveSuccess": "Placement scheduler policy updated successfully.",
+      "drain": "Drain",
+      "undrain": "Undrain",
+      "drainSuccess": "Node set to draining mode. No new tenants will be scheduled on this node.",
+      "undrainSuccess": "Node restored to active cluster service."
     },
     "wizard": {
       "title": "Enroll New Node",
@@ -680,7 +701,10 @@
       "desc": "Select where the rootless container stack will be scheduled",
       "autoLabel": "Auto-Select (Recommended)",
       "autoDesc": "The control plane will automatically place the container on the node with lowest memory and CPU pressure",
-      "orSelectManual": "Or Manually Select Target Node"
+      "orSelectManual": "Or Manually Select Target Node",
+      "nodeDrainingError": "Cannot place new tenant on a draining node.",
+      "nodeDrainingTooltip": "Draining: No new tenants allowed",
+      "excludedDrainingNotice": "{{count}} draining node(s) automatically excluded from placement."
     },
     "step4": {
       "title": "Primary Domain (Optional)",

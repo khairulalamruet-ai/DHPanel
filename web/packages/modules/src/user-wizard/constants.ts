@@ -61,6 +61,14 @@ export const CLUSTER_NODES: NodeOption[] = [
     status: "healthy",
   },
   {
+    id: "node-fra-02-draining",
+    name: "node-fra-02",
+    region: "Frankfurt (Europe West)",
+    cpu_usage_pct: 45,
+    memory_usage_pct: 78,
+    status: "draining",
+  },
+  {
     id: "node-nyc-01",
     name: "node-nyc-01",
     region: "New York (US East)",

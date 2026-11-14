@@ -143,6 +143,7 @@ test.describe("Node Management UI (T02.16)", () => {
     const successAlert = page.getByTestId("agent-update-success-alert");
     await expect(successAlert).toBeVisible();
     await expect(page.getByTestId("badge-update-verified")).toBeVisible();
+  });
 
   test("displays node fullness/saturation percentage in table and cluster capacity overview (T16.01 DoD)", async ({ page }) => {
     // Verify Cluster Capacity Overview card is rendered
@@ -162,25 +163,43 @@ test.describe("Node Management UI (T02.16)", () => {
     await expect(saturationBars.first()).toBeVisible();
   });
 
-  test("toggles node drain and undrain mode (T16.01, T16.02)", async ({ page }) => {
-    // Find Drain button for active node
+  test("configures placement scheduler and toggles drain mode (DoD T16.02)", async ({ page }) => {
+    // Open placement scheduler dialog
+    const schedulerBtn = page.getByTestId("configure-scheduler-btn");
+    await expect(schedulerBtn).toBeVisible();
+    await schedulerBtn.click();
+
+    // Verify dialog content and simulation card
+    await expect(page.getByText(/Placement Scheduler & Policies|প্লেসমেন্ট শিডিউলার ও নীতি/i)).toBeVisible();
+    await expect(page.getByTestId("placement-simulation-card")).toBeVisible();
+
+    // Verify drainage invariant is mentioned and draining nodes are disqualified
+    await expect(page.getByText(/Disqualified Draining \/ Offline Nodes|অযোগ্য ড্রেনিং \/ অফলাইন নোডসমূহ/i)).toBeVisible();
+
+    // Save policy
+    const saveBtn = page.getByTestId("save-scheduler-policy-btn");
+    await expect(saveBtn).toBeVisible();
+    await saveBtn.click();
+
+    // Modal closes
+    await expect(page.getByText(/Placement Scheduler & Policies|প্লেসমেন্ট শিডিউলার ও নীতি/i)).not.toBeVisible();
+
+    // Toggle drain on online node
     const drainBtn = page.getByRole("button", { name: /^Drain$|^ড্রেন$/i }).first();
     await expect(drainBtn).toBeVisible();
     await drainBtn.click();
 
-    // Verify toast feedback for draining
     await expect(
       page.getByText(/Node set to draining mode|নোডটি ড্রেনিং মোডে নেওয়া হয়েছে/i).first()
     ).toBeVisible();
 
-    // Find Undrain button for draining node
+    // Toggle undrain on draining node
     const undrainBtn = page.getByRole("button", { name: /^Undrain$|^সচল করুন$/i }).first();
     await expect(undrainBtn).toBeVisible();
     await undrainBtn.click();
 
-    // Verify toast feedback for undraining
     await expect(
-      page.getByText(/Node restored to active service|নোডটি পুনরায় সফলভাবে সচল করা হয়েছে/i).first()
+      page.getByText(/Node restored to active cluster service|নোডটি পুনরায় ক্লাস্টার সার্ভিসে সচল করা হয়েছে|Node restored to active service/i).first()
     ).toBeVisible();
   });
 

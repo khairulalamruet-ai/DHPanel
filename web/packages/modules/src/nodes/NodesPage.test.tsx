@@ -62,6 +62,24 @@ vi.mock("@dhpanel/i18n", () => ({
         "nodes.capacity.saveSuccess": "Node capacity & oversell settings updated successfully.",
         "nodes.capacity.drainSuccess": "Node set to draining mode. No new tenants will be scheduled.",
         "nodes.capacity.undrainSuccess": "Node restored to active service.",
+        "nodes.scheduler.title": "Placement Scheduler & Policies",
+        "nodes.scheduler.desc": "Configure automated cluster placement policy for incoming tenants",
+        "nodes.scheduler.configure": "Placement Policy",
+        "nodes.scheduler.policyLabel": "Active Placement Algorithm",
+        "nodes.scheduler.leastLoadedTitle": "Least-Loaded (Resource Saturation)",
+        "nodes.scheduler.leastLoadedDesc": "Automatically routes new tenants to the node with the lowest resource load",
+        "nodes.scheduler.roundRobinTitle": "Round-Robin (Cyclic Distribution)",
+        "nodes.scheduler.roundRobinDesc": "Distributes new tenants sequentially",
+        "nodes.scheduler.drainInvariantTitle": "Drainage Invariant",
+        "nodes.scheduler.drainInvariantDesc": "Nodes in draining or maintenance mode are strictly disqualified",
+        "nodes.scheduler.simulationTitle": "Live Placement Simulation",
+        "nodes.scheduler.nextTarget": "Next Scheduled Destination",
+        "nodes.scheduler.excludedNodesTitle": "Disqualified Draining / Offline Nodes",
+        "nodes.scheduler.saveSuccess": "Placement scheduler policy updated successfully.",
+        "nodes.scheduler.drain": "Drain",
+        "nodes.scheduler.undrain": "Undrain",
+        "nodes.scheduler.drainSuccess": "Node set to draining mode.",
+        "nodes.scheduler.undrainSuccess": "Node restored to active cluster service.",
         "common.save": "Save Changes",
         "nodes.enrollments.title": "Enrollment Tokens",
         "nodes.enrollments.desc": "Single-use tokens issued for server onboarding.",
@@ -266,6 +284,9 @@ describe("NodesPage", () => {
         return { success: true, status: "draining" };
       }
       if (url.includes("/capacity") && opts?.method === "PUT") {
+        return { success: true };
+      }
+      if (url.includes("/cluster/scheduler") && opts?.method === "PUT") {
         return { success: true };
       }
       return {};
@@ -643,6 +664,43 @@ describe("NodesPage", () => {
     await waitFor(() => {
       expect(apiFetchSpy).toHaveBeenCalledWith(
         "/api/v1/admin/nodes/node_01/capacity",
+        expect.objectContaining({ method: "PUT" })
+      );
+    });
+  });
+
+  it("opens placement scheduler configuration dialog and verifies live simulation (DoD T16.02)", async () => {
+    const apiFetchSpy = vi.spyOn(dhpanelApi, "apiFetch");
+
+    render(
+      <ToastProvider>
+        <NodesPage />
+      </ToastProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("node-master-01")).toBeInTheDocument();
+    });
+
+    const schedulerBtn = screen.getByTestId("configure-scheduler-btn");
+    expect(schedulerBtn).toBeInTheDocument();
+    fireEvent.click(schedulerBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText("Placement Scheduler & Policies")).toBeInTheDocument();
+      expect(screen.getByTestId("placement-simulation-card")).toBeInTheDocument();
+    });
+
+    // Check that excluded nodes list contains draining nodes
+    expect(screen.getByText(/Disqualified Draining \/ Offline Nodes/i)).toBeInTheDocument();
+
+    // Click Save Changes
+    const saveBtn = screen.getByRole("button", { name: /Save Changes/i });
+    fireEvent.click(saveBtn);
+
+    await waitFor(() => {
+      expect(apiFetchSpy).toHaveBeenCalledWith(
+        "/api/v1/admin/cluster/scheduler",
         expect.objectContaining({ method: "PUT" })
       );
     });

@@ -2534,7 +2534,7 @@ export const handlers = [
         });
       }),
 
-      // Drain Node (POST /api/v1/admin/nodes/:id/drain) TODO(api:T16.01)
+      // Drain Node (POST /api/v1/admin/nodes/:id/drain) TODO(api:T16.01, T16.02)
       http.post(/\/api\/v1\/admin\/nodes\/([^/]+)\/drain$/, ({ params }) => {
         const { 0: nodeId } = params as any;
         const target = mockNodes.find((n) => n.id === nodeId || n.name === nodeId);
@@ -2548,7 +2548,7 @@ export const handlers = [
         });
       }),
 
-      // Undrain Node (POST /api/v1/admin/nodes/:id/undrain) TODO(api:T16.01)
+      // Undrain Node (POST /api/v1/admin/nodes/:id/undrain) TODO(api:T16.01, T16.02)
       http.post(/\/api\/v1\/admin\/nodes\/([^/]+)\/undrain$/, ({ params }) => {
         const { 0: nodeId } = params as any;
         const target = mockNodes.find((n) => n.id === nodeId || n.name === nodeId);
@@ -2581,6 +2581,25 @@ export const handlers = [
         return HttpResponse.json({
           success: true,
           node: target,
+        });
+      }),
+
+      // Get Cluster Placement Scheduler Config (GET /api/v1/admin/cluster/scheduler) TODO(api:T16.02)
+      http.get(/\/api\/v1\/admin\/cluster\/scheduler$/, () => {
+        return HttpResponse.json({
+          policy: "least-loaded",
+          exclude_draining: true,
+          fallback_policy: "round-robin",
+        });
+      }),
+
+      // Update Cluster Placement Scheduler Config (PUT /api/v1/admin/cluster/scheduler) TODO(api:T16.02)
+      http.put(/\/api\/v1\/admin\/cluster\/scheduler$/, async ({ request }) => {
+        const body = (await request.json().catch(() => ({}))) as any;
+        return HttpResponse.json({
+          success: true,
+          policy: body.policy || "least-loaded",
+          exclude_draining: true,
         });
       }),
     ];
@@ -3219,6 +3238,14 @@ export const handlers = [
       return HttpResponse.json(
         { title: "Validation Error", detail: "Username and email are required" },
         { status: 400 }
+      );
+    }
+
+    // Reject scheduling on draining nodes - TODO(api:T16.02)
+    if (node_id === "node-fra-02-draining" || node_id === "node-worker-02" || node_id.includes("draining")) {
+      return HttpResponse.json(
+        { title: "Placement Error", detail: "Target node is in drain mode and cannot accept new tenants" },
+        { status: 422 }
       );
     }
 
