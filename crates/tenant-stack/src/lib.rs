@@ -76,6 +76,9 @@ pub enum StackError {
     /// An image that is not in the allow-list was asked for.
     #[error("the image for `{0}` is not on the allow-list")]
     ImageNotAllowed(Role),
+    /// No image runs this PHP version.
+    #[error("PHP {0} is not available")]
+    UnknownPhpVersion(String),
     /// The plan leaves too little of a resource to run the stack.
     #[error("the plan's {0} is too small to run a stack")]
     PlanTooSmall(&'static str),
@@ -94,6 +97,8 @@ struct RawAllowlist {
 #[serde(deny_unknown_fields)]
 struct RawImage {
     role: Role,
+    /// The PHP version a `php` image runs (`8.4`).
+    version: Option<String>,
     reference: String,
     #[serde(default)]
     note: String,
@@ -103,6 +108,19 @@ struct RawImage {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Allowlist {
     by_role: BTreeMap<Role, Vec<ImageRef>>,
+    /// The PHP versions that may run, with their images, default first.
+    php: Vec<(String, ImageRef)>,
+}
+
+/// Whether `text` is a PHP version as the panel writes it: `8.4`.
+#[must_use]
+pub fn is_php_version(text: &str) -> bool {
+    text.split_once('.').is_some_and(|(major, minor)| {
+        (1..=2).contains(&major.len())
+            && (1..=2).contains(&minor.len())
+            && major.bytes().all(|b| b.is_ascii_digit())
+            && minor.bytes().all(|b| b.is_ascii_digit())
+    })
 }
 
 impl Allowlist {
@@ -114,6 +132,7 @@ impl Allowlist {
         let raw: RawAllowlist = toml::from_str(text)
             .map_err(|e| StackError::Allowlist(e.to_string().replace('\n', " ")))?;
         let mut by_role: BTreeMap<Role, Vec<ImageRef>> = BTreeMap::new();
+        let mut php: Vec<(String, ImageRef)> = Vec::new();
         for image in raw.image {
             let reference = ImageRef::parse(&image.reference).map_err(|e| {
                 StackError::Allowlist(format!(
@@ -129,6 +148,28 @@ impl Allowlist {
                     image.role
                 )));
             }
+            match (image.role, image.version) {
+                (Role::Php, Some(version)) if is_php_version(&version) => {
+                    if php.iter().any(|(v, _)| *v == version) {
+                        return Err(StackError::Allowlist(format!(
+                            "php {version} is listed twice"
+                        )));
+                    }
+                    php.push((version, reference.clone()));
+                }
+                (Role::Php, _) => {
+                    return Err(StackError::Allowlist(
+                        "a php image needs its version, like \"8.4\"".to_owned(),
+                    ));
+                }
+                (_, Some(_)) => {
+                    return Err(StackError::Allowlist(format!(
+                        "only php images have a version ({})",
+                        image.role
+                    )));
+                }
+                (_, None) => {}
+            }
             list.push(reference);
         }
         for role in [Role::Web, Role::Php] {
@@ -138,7 +179,7 @@ impl Allowlist {
                 )));
             }
         }
-        Ok(Self { by_role })
+        Ok(Self { by_role, php })
     }
 
     /// The list shipped with this build.
@@ -158,6 +199,35 @@ impl Allowlist {
             .get(&role)
             .and_then(|list| list.first())
             .ok_or(StackError::NoImage(role))
+    }
+
+    /// The PHP versions that may run, the one new accounts start with first.
+    #[must_use]
+    pub fn php_versions(&self) -> Vec<&str> {
+        self.php.iter().map(|(v, _)| v.as_str()).collect()
+    }
+
+    /// The version new accounts start with.
+    ///
+    /// # Errors
+    /// [`StackError::NoImage`].
+    pub fn default_php_version(&self) -> Result<&str, StackError> {
+        self.php
+            .first()
+            .map(|(v, _)| v.as_str())
+            .ok_or(StackError::NoImage(Role::Php))
+    }
+
+    /// The image that runs a PHP version.
+    ///
+    /// # Errors
+    /// [`StackError::UnknownPhpVersion`].
+    pub fn php_image(&self, version: &str) -> Result<&ImageRef, StackError> {
+        self.php
+            .iter()
+            .find(|(v, _)| v == version)
+            .map(|(_, image)| image)
+            .ok_or_else(|| StackError::UnknownPhpVersion(version.chars().take(10).collect()))
     }
 
     /// Whether `image` may run in `role`.
@@ -191,6 +261,13 @@ pub struct Tenant<'a> {
     pub uid: Uid,
     /// What its plan allows.
     pub resources: PlanResources,
+    /// The PHP version of its main PHP container (`None`: the one new accounts
+    /// start with).
+    pub php_version: Option<&'a str>,
+    /// More PHP versions that run next to it, for domains that ask for another
+    /// version. Each gets its own container; the PHP share of the plan is
+    /// divided between all of them.
+    pub extra_php: &'a [&'a str],
 }
 
 /// One container of the template.
@@ -323,15 +400,18 @@ pub fn conf_volume_name(tenant: &TenantUsername) -> Result<Name, SpecError> {
 fn service_limits(
     template: &ServiceTemplate,
     resources: &PlanResources,
+    copies: u64,
 ) -> Result<Limits, StackError> {
     let cpu = resources.cpu_millis.unwrap_or(UNLIMITED_CPU_MILLIS);
     let memory = resources.memory_bytes.unwrap_or(UNLIMITED_MEMORY_BYTES);
     let pids = resources.pids.unwrap_or(UNLIMITED_PIDS);
+    // The share is divided between the containers that play the part.
     let share = u64::from(template.share);
+    let copies = copies.max(1);
     let limits = Limits {
-        memory_bytes: memory * share / 100,
-        pids_limit: u32::try_from(u64::from(pids) * share / 100).unwrap_or(u32::MAX),
-        cpu_millis: u32::try_from(u64::from(cpu) * share / 100).unwrap_or(u32::MAX),
+        memory_bytes: memory * share / 100 / copies,
+        pids_limit: u32::try_from(u64::from(pids) * share / 100 / copies).unwrap_or(u32::MAX),
+        cpu_millis: u32::try_from(u64::from(cpu) * share / 100 / copies).unwrap_or(u32::MAX),
     };
     if limits.memory_bytes < template.min_memory_bytes {
         return Err(StackError::PlanTooSmall("memory"));
@@ -345,26 +425,68 @@ fn service_limits(
     Ok(limits)
 }
 
+/// Name of the container of an extra PHP version: `dh-<user>-php-8-3`.
+///
+/// # Errors
+/// [`SpecError`] (a bad version or tenant name).
+pub fn php_extra_name(tenant: &TenantUsername, version: &str) -> Result<Name, SpecError> {
+    if !is_php_version(version) {
+        return Err(SpecError {
+            field: "name",
+            reason: "not a PHP version".to_owned(),
+        });
+    }
+    name(tenant, &format!("php-{}", version.replace('.', "-")))
+}
+
+/// Where the web server reaches the PHP of a site: the main PHP container when
+/// the site uses the account's version, the container of its own version otherwise.
+///
+/// # Errors
+/// [`SpecError`].
+pub fn php_upstream_for(
+    tenant: &TenantUsername,
+    site_version: Option<&str>,
+    account_version: &str,
+) -> Result<String, SpecError> {
+    match site_version {
+        Some(v) if v != account_version => Ok(format!(
+            "{}:{PHP_PORT}",
+            php_extra_name(tenant, v)?.as_str()
+        )),
+        _ => php_upstream(tenant),
+    }
+}
+
 /// The limits each container of a tenant's stack gets from a plan, by container
-/// name, in start order. What [`render`] puts in the specifications, for
-/// changing a running stack when the plan changes.
+/// name, in start order (the main PHP container, the extra ones, the web server).
+/// What [`render`] puts in the specifications, for changing a running stack when
+/// the plan changes.
 ///
 /// # Errors
 /// [`StackError`]: the plan is too small to run the stack.
 pub fn plan_limits(
     username: &TenantUsername,
     resources: &PlanResources,
+    extra_php: &[&str],
 ) -> Result<Vec<(Name, Limits)>, StackError> {
-    WEB_PHP
-        .iter()
-        .rev()
-        .map(|template| {
-            Ok((
-                name(username, template.role.as_str())?,
-                service_limits(template, resources)?,
-            ))
-        })
-        .collect()
+    let php_copies = 1 + extra_php.len() as u64;
+    let mut out = Vec::new();
+    for template in WEB_PHP.iter().rev() {
+        let copies = if template.role == Role::Php {
+            php_copies
+        } else {
+            1
+        };
+        let limits = service_limits(template, resources, copies)?;
+        out.push((name(username, template.role.as_str())?, limits));
+        if template.role == Role::Php {
+            for version in extra_php {
+                out.push((php_extra_name(username, version)?, limits));
+            }
+        }
+    }
+    Ok(out)
 }
 
 /// Renders the web + PHP stack for a tenant from the allow-list.
@@ -377,47 +499,85 @@ pub fn render(tenant: &Tenant<'_>, allowlist: &Allowlist) -> Result<Stack, Stack
     let files = files_volume_name(tenant.username)?;
     let conf = conf_volume_name(tenant.username)?;
     let user = Some((tenant.uid.get(), tenant.uid.get()));
+    let account_version = match tenant.php_version {
+        Some(v) => v,
+        None => allowlist.default_php_version()?,
+    };
+    let php_copies = 1 + tenant.extra_php.len() as u64;
     let mut services = Vec::new();
     // PHP first, so the web server never starts without its backend.
     for template in WEB_PHP.iter().rev() {
-        let image = allowlist.current(template.role)?.clone();
-        if !allowlist.allows(template.role, &image) {
-            return Err(StackError::ImageNotAllowed(template.role));
+        // The containers this part makes: one, or (PHP) one per version.
+        let mut makes: Vec<(Name, ImageRef)> = Vec::new();
+        match template.role {
+            Role::Web => {
+                let image = allowlist.current(Role::Web)?.clone();
+                makes.push((name(tenant.username, "web")?, image));
+            }
+            Role::Php => {
+                makes.push((
+                    name(tenant.username, "php")?,
+                    allowlist.php_image(account_version)?.clone(),
+                ));
+                for version in tenant.extra_php {
+                    if *version == account_version
+                        || tenant.extra_php.iter().filter(|v| *v == version).count() > 1
+                    {
+                        return Err(StackError::UnknownPhpVersion(format!(
+                            "{version} is listed twice"
+                        )));
+                    }
+                    makes.push((
+                        php_extra_name(tenant.username, version)?,
+                        allowlist.php_image(version)?.clone(),
+                    ));
+                }
+            }
         }
-        let limits = service_limits(template, &tenant.resources)?;
-        let mut spec = ContainerSpec::new(name(tenant.username, template.role.as_str())?, image);
-        spec.command = template.command.iter().map(|a| (*a).to_owned()).collect();
-        spec.user = user;
-        spec.memory_bytes = limits.memory_bytes;
-        spec.cpu_millis = limits.cpu_millis;
-        spec.pids_limit = limits.pids_limit;
-        spec.tmpfs = template
-            .tmpfs
-            .iter()
-            .map(|(target, size)| Tmpfs {
-                target: (*target).to_owned(),
-                size_bytes: *size,
-            })
-            .collect();
-        spec.volumes = vec![VolumeMount {
-            volume: files.clone(),
-            target: template.files_at.to_owned(),
-            read_only: template.files_read_only,
-        }];
-        if let Some(target) = template.conf_at {
-            spec.volumes.push(VolumeMount {
-                volume: conf.clone(),
-                target: target.to_owned(),
-                read_only: true,
-            });
+        let copies = if template.role == Role::Php {
+            php_copies
+        } else {
+            1
+        };
+        let limits = service_limits(template, &tenant.resources, copies)?;
+        for (container, image) in makes {
+            if !allowlist.allows(template.role, &image) {
+                return Err(StackError::ImageNotAllowed(template.role));
+            }
+            let mut spec = ContainerSpec::new(container, image);
+            spec.command = template.command.iter().map(|a| (*a).to_owned()).collect();
+            spec.user = user;
+            spec.memory_bytes = limits.memory_bytes;
+            spec.cpu_millis = limits.cpu_millis;
+            spec.pids_limit = limits.pids_limit;
+            spec.tmpfs = template
+                .tmpfs
+                .iter()
+                .map(|(target, size)| Tmpfs {
+                    target: (*target).to_owned(),
+                    size_bytes: *size,
+                })
+                .collect();
+            spec.volumes = vec![VolumeMount {
+                volume: files.clone(),
+                target: template.files_at.to_owned(),
+                read_only: template.files_read_only,
+            }];
+            if let Some(target) = template.conf_at {
+                spec.volumes.push(VolumeMount {
+                    volume: conf.clone(),
+                    target: target.to_owned(),
+                    read_only: true,
+                });
+            }
+            spec.network = Network::Named(network.clone());
+            spec.restart = Restart::UnlessStopped;
+            spec.cap_add = Vec::<Capability>::new();
+            spec.tenant = Some(tenant.id);
+            spec.role = Some(template.role.as_str().to_owned());
+            spec.validate()?;
+            services.push(spec);
         }
-        spec.network = Network::Named(network.clone());
-        spec.restart = Restart::UnlessStopped;
-        spec.cap_add = Vec::<Capability>::new();
-        spec.tenant = Some(tenant.id);
-        spec.role = Some(template.role.as_str().to_owned());
-        spec.validate()?;
-        services.push(spec);
     }
     Ok(Stack {
         network,
@@ -450,6 +610,8 @@ mod tests {
                 username: &username,
                 uid: uid(n),
                 resources,
+                php_version: None,
+                extra_php: &[],
             },
             &allowlist(),
         )
@@ -473,7 +635,7 @@ mod tests {
         ] {
             let stack = render_for("alice", 1, resources).unwrap();
             let username = TenantUsername::parse("alice").unwrap();
-            let limits = plan_limits(&username, &resources).unwrap();
+            let limits = plan_limits(&username, &resources, &[]).unwrap();
             assert_eq!(limits.len(), stack.services.len());
             for ((name, limit), spec) in limits.iter().zip(&stack.services) {
                 assert_eq!(name, &spec.name, "same order: PHP first");
@@ -486,7 +648,7 @@ mod tests {
         };
         let username = TenantUsername::parse("alice").unwrap();
         assert!(matches!(
-            plan_limits(&username, &tiny),
+            plan_limits(&username, &tiny, &[]),
             Err(StackError::PlanTooSmall("memory"))
         ));
     }
@@ -512,7 +674,9 @@ mod tests {
             format!("[[image]]\nrole = \"{role}\"\nreference = \"{reference}\"\n")
         };
         let web = good("web", &format!("nginx@sha256:{digest}"));
-        let php = good("php", &format!("php@sha256:{digest}"));
+        let php = format!(
+            "[[image]]\nrole = \"php\"\nversion = \"8.4\"\nreference = \"php@sha256:{digest}\"\n"
+        );
         assert!(Allowlist::parse(&format!("{web}{php}")).is_ok());
         for (text, needle) in [
             (format!("{}{php}", good("web", "nginx:latest")), "pinned"),
@@ -722,5 +886,135 @@ mod tests {
         };
         assert!(names(&a).iter().all(|n| !names(&b).contains(n)));
         assert_ne!(a.services[0].user, b.services[0].user);
+    }
+
+    #[test]
+    fn php_versions_come_from_the_list_and_extra_ones_get_their_own_container() {
+        let list = allowlist();
+        assert_eq!(list.php_versions(), ["8.4", "8.5", "8.3", "8.2"]);
+        assert_eq!(list.default_php_version().unwrap(), "8.4");
+        assert_eq!(
+            list.php_image("8.4").unwrap(),
+            list.current(Role::Php).unwrap(),
+            "the default version is the current PHP image"
+        );
+        for version in list.php_versions() {
+            assert!(
+                list.php_image(version)
+                    .unwrap()
+                    .as_str()
+                    .contains("@sha256:")
+            );
+        }
+        for bad in ["8.9", "7.4", "8", "8.4.1", "", "x.y", "8.4; rm"] {
+            assert!(
+                matches!(list.php_image(bad), Err(StackError::UnknownPhpVersion(_))),
+                "{bad}"
+            );
+        }
+
+        let username = TenantUsername::parse("alice").unwrap();
+        let stack = render(
+            &Tenant {
+                id: Uuid::now_v7(),
+                username: &username,
+                uid: uid(0),
+                resources: BASIC,
+                php_version: Some("8.5"),
+                extra_php: &["8.3", "8.2"],
+            },
+            &list,
+        )
+        .unwrap();
+        let names: Vec<&str> = stack.services.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "dh-alice-php",
+                "dh-alice-php-8-3",
+                "dh-alice-php-8-2",
+                "dh-alice-web"
+            ]
+        );
+        assert_eq!(stack.services[0].image, *list.php_image("8.5").unwrap());
+        assert_eq!(stack.services[1].image, *list.php_image("8.3").unwrap());
+        assert_eq!(stack.services[2].image, *list.php_image("8.2").unwrap());
+        // The PHP share (75 % of 512 MiB) is divided between the three PHP containers.
+        for php in &stack.services[..3] {
+            assert_eq!(php.memory_bytes, 128 * MIB);
+            assert_eq!(php.role.as_deref(), Some("php"));
+        }
+        assert_eq!(stack.services[3].memory_bytes, 128 * MIB);
+        // What plan_limits says is what was rendered.
+        let limits = plan_limits(&username, &BASIC, &["8.3", "8.2"]).unwrap();
+        for ((name, limit), spec) in limits.iter().zip(&stack.services) {
+            assert_eq!((name, *limit), (&spec.name, spec.limits()));
+        }
+        // The same version twice, an unknown one, or the account's own again are refused.
+        for extra in [&["8.3", "8.3"][..], &["8.9"], &["8.5"]] {
+            assert!(
+                render(
+                    &Tenant {
+                        id: Uuid::now_v7(),
+                        username: &username,
+                        uid: uid(0),
+                        resources: BASIC,
+                        php_version: Some("8.5"),
+                        extra_php: extra,
+                    },
+                    &list,
+                )
+                .is_err(),
+                "{extra:?}"
+            );
+        }
+        // A site on another version is sent to that version's container.
+        assert_eq!(
+            php_upstream_for(&username, Some("8.3"), "8.5").unwrap(),
+            "dh-alice-php-8-3:9000"
+        );
+        for same in [Some("8.5"), None] {
+            assert_eq!(
+                php_upstream_for(&username, same, "8.5").unwrap(),
+                "dh-alice-php:9000"
+            );
+        }
+        assert!(php_extra_name(&username, "8.3; x").is_err());
+    }
+
+    #[test]
+    fn a_php_image_needs_its_version_and_only_php_has_one() {
+        let digest = "a".repeat(64);
+        let web = format!("[[image]]\nrole = \"web\"\nreference = \"nginx@sha256:{digest}\"\n");
+        let php = |extra: &str, d: &str| {
+            format!("[[image]]\nrole = \"php\"\n{extra}reference = \"php@sha256:{d}\"\n")
+        };
+        let other = "b".repeat(64);
+        assert!(Allowlist::parse(&format!("{web}{}", php("version = \"8.4\"\n", &digest))).is_ok());
+        for (text, needle) in [
+            (format!("{web}{}", php("", &digest)), "needs its version"),
+            (
+                format!("{web}{}", php("version = \"eight\"\n", &digest)),
+                "needs its version",
+            ),
+            (
+                format!(
+                    "{web}{}{}",
+                    php("version = \"8.4\"\n", &digest),
+                    php("version = \"8.4\"\n", &other)
+                ),
+                "twice",
+            ),
+            (
+                format!(
+                    "{}[[image]]\nrole = \"web\"\nversion = \"1.2\"\nreference = \"nginx@sha256:{digest}\"\n",
+                    php("version = \"8.4\"\n", &digest),
+                ),
+                "only php",
+            ),
+        ] {
+            let err = Allowlist::parse(&text).unwrap_err().to_string();
+            assert!(err.contains(needle), "{needle}: {err}");
+        }
     }
 }

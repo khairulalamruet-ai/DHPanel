@@ -110,6 +110,10 @@ impl Registry {
                 let context = context.clone();
                 move |op| tenant::provision_tenant_stack(context.clone(), op)
             });
+            registry.register("set_php_versions", {
+                let context = context.clone();
+                move |op| tenant::set_php_versions(context.clone(), op)
+            });
             registry.register("set_storage_quota", {
                 let context = context.clone();
                 move |op| tenant::set_storage_quota(context.clone(), op)

@@ -172,6 +172,9 @@ impl std::fmt::Debug for CustomCertificate {
     }
 }
 
+/// Most PHP versions besides the account's own that one tenant may run.
+pub const MAX_EXTRA_PHP_VERSIONS: usize = 3;
+
 /// Longest web server configuration of one domain.
 pub const MAX_VHOST_CONFIG_BYTES: usize = 32 * 1024;
 
@@ -358,6 +361,31 @@ pub enum Operation {
         /// Processes the plan gives the stack (`None` = unlimited).
         pids: Option<u32>,
     },
+    /// Make the tenant's PHP containers match: the account's version in its main
+    /// PHP container, one more container for each extra version, none for any
+    /// other. A container that runs another version than asked is replaced (the
+    /// files stay), new ones are started and waited for, and the plan's PHP share
+    /// is divided between them. The web server is not touched (its configuration
+    /// says which container each site uses). Safe to repeat. Answered with
+    /// [`Output::PhpVersionsSet`].
+    SetPhpVersions {
+        /// The tenant's id.
+        tenant_id: Uuid,
+        /// The tenant's system name.
+        username: String,
+        /// The tenant's numeric user id on this node.
+        uid: u32,
+        /// CPU the plan gives the stack, in thousandths of a core (`None` = unlimited).
+        cpu_millis: Option<u32>,
+        /// Memory the plan gives the stack, in bytes (`None` = unlimited).
+        memory_bytes: Option<u64>,
+        /// Processes the plan gives the stack (`None` = unlimited).
+        pids: Option<u32>,
+        /// The version of the main PHP container, `8.4`.
+        php_version: String,
+        /// More versions to run next to it (at most [`MAX_EXTRA_PHP_VERSIONS`]).
+        extra_php: Vec<String>,
+    },
     /// Everything a new tenant needs on its node, in one operation: directories,
     /// network and volume ([`Operation::CreateTenant`]), the storage limits
     /// ([`Operation::SetStorageQuota`], skipped when the plan has none or the node
@@ -490,6 +518,7 @@ impl Operation {
         "set_storage_quota",
         "provision_tenant_stack",
         "set_resource_limits",
+        "set_php_versions",
         "set_up_tenant",
         "set_site_routes",
         "report_certificates",
@@ -512,6 +541,7 @@ impl Operation {
             Self::SetStorageQuota { .. } => "set_storage_quota",
             Self::ProvisionTenantStack { .. } => "provision_tenant_stack",
             Self::SetResourceLimits { .. } => "set_resource_limits",
+            Self::SetPhpVersions { .. } => "set_php_versions",
             Self::SetUpTenant { .. } => "set_up_tenant",
             Self::SetSiteRoutes { .. } => "set_site_routes",
             Self::ReportCertificates => "report_certificates",
@@ -660,6 +690,13 @@ pub enum Output {
         containers: Vec<String>,
         /// How storage limits are enforced (`xfs`), or `None` when they are not.
         storage_quota: Option<String>,
+    },
+    /// Answer to [`Operation::SetPhpVersions`].
+    PhpVersionsSet {
+        /// The PHP containers that run now, the main one first.
+        containers: Vec<String>,
+        /// The containers that were removed because no domain uses their version.
+        removed: Vec<String>,
     },
     /// Answer to [`Operation::AttachDomain`].
     DomainAttached {
@@ -1468,6 +1505,16 @@ mod tests {
             Operation::ResumeTenant {
                 username: "alice".into(),
             },
+            Operation::SetPhpVersions {
+                tenant_id: id(),
+                username: "alice".into(),
+                uid: 10_000,
+                cpu_millis: None,
+                memory_bytes: None,
+                pids: None,
+                php_version: "8.4".into(),
+                extra_php: vec!["8.3".into()],
+            },
             Operation::AttachDomain {
                 username: "alice".into(),
                 domain: "example.com".into(),
@@ -1494,7 +1541,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            16,
+            17,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }

@@ -1,10 +1,12 @@
-# The images a tenant stack may be built from (T04.06).
+# The images a tenant stack may be built from (T04.06, T06.02).
 #
 # Only images listed here, pinned by digest, can ever be started for a tenant:
 # the stack renderer refuses anything else, and so does the docker-manager
 # crate (it does not accept tags). The first entry of a role is the one new
 # stacks use; older entries stay allowed so existing stacks keep working until
-# they are moved to the current one.
+# they are moved to the current one. PHP images carry the PHP version they run
+# (`version`); the first PHP entry is the version new accounts start with, and
+# an account may be moved to any version listed here.
 #
 # To change an image: pull it, check it (scan, user, size), copy the digest
 # that `docker image inspect --format '{{index .RepoDigests 0}}'` prints, add it
@@ -12,10 +14,34 @@
 
 [[image]]
 role      = "web"
+reference = "nginxinc/nginx-unprivileged@sha256:f5116ed4606f3eb015dd4a8e28cb9b351476dc0ad4bc6e9f93b19cec130cdf03"
+note      = "nginx 1.30.6, unprivileged build (listens on 8080, runs as any user), Alpine"
+
+[[image]]
+role      = "web"
 reference = "nginxinc/nginx-unprivileged@sha256:7377697a821c131a924a7105fafbe7414db4e9fcc77a6f08f776f33f141ec3f8"
-note      = "nginx 1.28, unprivileged build (listens on 8080, runs as any user), Alpine"
+note      = "nginx 1.28.2 (what stacks created before T06.02 run)"
 
 [[image]]
 role      = "php"
+version   = "8.4"
 reference = "php@sha256:511af6fa3ef55c4ea0c68bb47096ba4b81771ab4949bde7813807bf177efda11"
-note      = "PHP 8.4 FPM (listens on 9000), Alpine"
+note      = "PHP 8.4.27 FPM (listens on 9000), Alpine"
+
+[[image]]
+role      = "php"
+version   = "8.5"
+reference = "php@sha256:951fb5b1780219b81d5daffa4cebef8e0077c537f3893d9790a5dfcd66ca334d"
+note      = "PHP 8.5.12 FPM, Alpine"
+
+[[image]]
+role      = "php"
+version   = "8.3"
+reference = "php@sha256:f9804e0c991b5b339d6fa4fab9edf3c9c9ae68048fb1017cb6dea6265ccef054"
+note      = "PHP 8.3.36 FPM, Alpine"
+
+[[image]]
+role      = "php"
+version   = "8.2"
+reference = "php@sha256:d17bc39b8ef90e12d598f19cb466f1906c3c214f4bce661dfee49404b42fea09"
+note      = "PHP 8.2.35 FPM, Alpine (security fixes only until the end of 2026)"

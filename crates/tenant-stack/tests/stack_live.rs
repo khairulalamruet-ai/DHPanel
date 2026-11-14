@@ -62,6 +62,8 @@ async fn the_stack_starts_as_the_tenant_not_as_root_and_nothing_is_left_behind()
                 memory_bytes: Some(512 * 1024 * 1024),
                 pids: Some(128),
             },
+            php_version: None,
+            extra_php: &[],
         },
         &list,
     )

@@ -91,6 +91,8 @@ async fn a_refused_configuration_is_rolled_back_and_the_site_keeps_running() {
                 memory_bytes: Some(512 << 20),
                 pids: Some(128),
             },
+            php_version: None,
+            extra_php: &[],
         },
         &list,
     )

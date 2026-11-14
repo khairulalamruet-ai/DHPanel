@@ -214,6 +214,148 @@ async fn wait_healthy(docker: &DockerManager, name: &Name) -> Result<(), AgentEr
     }
 }
 
+/// The PHP versions of the extra containers a tenant has now (from their names).
+async fn existing_extra_php(
+    docker: &DockerManager,
+    username: &TenantUsername,
+) -> Result<Vec<(String, Name)>, AgentError> {
+    let prefix = format!("dh-{}-php-", username.as_str());
+    let mut found = Vec::new();
+    for name in docker.list().await.map_err(|e| docker_error(&e))? {
+        let Some(rest) = name.strip_prefix(&prefix) else {
+            continue;
+        };
+        // `8-3`: the version the name stands for, if it is one.
+        let version = rest.replace('-', ".");
+        if dhpanel_tenant_stack::is_php_version(&version)
+            && let Ok(parsed) = Name::parse(&name)
+        {
+            found.push((version, parsed));
+        }
+    }
+    found.sort();
+    Ok(found)
+}
+
+/// Brings the tenant's containers to what the template says for these versions:
+/// creates what is missing, replaces a PHP container that runs another image,
+/// fits the limits, starts everything and waits. With `prune`, PHP containers of
+/// versions that are not asked for are removed.
+#[allow(clippy::too_many_arguments)]
+async fn converge_stack(
+    context: &TenantContext,
+    tenant_id: Uuid,
+    username: &TenantUsername,
+    uid: u32,
+    resources: PlanResources,
+    php_version: Option<&str>,
+    extra_php: &[&str],
+    prune: bool,
+) -> Result<(Vec<String>, Vec<String>), AgentError> {
+    let invalid = |m: &str| AgentError::new(ErrorCode::InvalidArguments, m.to_owned());
+    let uid = UidRange::DEFAULT
+        .checked(uid)
+        .ok_or_else(|| invalid("the user id is outside the tenant range"))?;
+    let allowlist = Allowlist::embedded().map_err(|e| {
+        AgentError::new(
+            ErrorCode::Internal,
+            format!("the image list is broken: {e}"),
+        )
+    })?;
+    let stack = render(
+        &Tenant {
+            id: tenant_id,
+            username,
+            uid,
+            resources,
+            php_version,
+            extra_php,
+        },
+        &allowlist,
+    )
+    .map_err(|e| invalid(&e.to_string()))?;
+
+    let docker = &context.docker;
+    // The web server's configuration directory and volume (the web container
+    // mounts it); a tenant that had a stack before gets them now.
+    let conf = conf_volume_name(username).map_err(|e| invalid(&e.to_string()))?;
+    let conf_dir = super::vhost::conf_dir(&context.vhosts_root, username).map_err(|e| {
+        AgentError::new(
+            ErrorCode::Internal,
+            format!(
+                "cannot prepare the web configuration directory: {}",
+                e.kind()
+            ),
+        )
+        .retryable()
+    })?;
+    docker
+        .create_bind_volume(&conf, &conf_dir, &context.vhosts_root)
+        .await
+        .map_err(|e| docker_error(&e))?;
+    let mut started = Vec::new();
+    for spec in &stack.services {
+        let is_php = spec.role.as_deref() == Some("php");
+        match docker.inspect(&spec.name).await {
+            // A PHP container of another image is replaced (its files are in the
+            // volume); the web container is left as it is.
+            Ok(info) if is_php && info.image != spec.image.as_str() => {
+                docker
+                    .stop(&spec.name, STOP_GRACE)
+                    .await
+                    .map_err(|e| docker_error(&e))?;
+                docker
+                    .remove(&spec.name, true)
+                    .await
+                    .map_err(|e| docker_error(&e))?;
+                create_container(docker, spec).await?;
+            }
+            Ok(info) => {
+                // A change of the plan or of the number of PHP versions changes the share.
+                if info.limits != spec.limits() {
+                    docker
+                        .update_limits(&spec.name, &spec.limits())
+                        .await
+                        .map_err(|e| docker_error(&e))?;
+                }
+            }
+            Err(DockerError::NotFound) => create_container(docker, spec).await?,
+            Err(e) => return Err(docker_error(&e)),
+        }
+        docker
+            .start(&spec.name)
+            .await
+            .map_err(|e| docker_error(&e))?;
+        wait_healthy(docker, &spec.name).await?;
+        started.push(spec.name.as_str().to_owned());
+    }
+    let mut removed = Vec::new();
+    if prune {
+        for (_, name) in existing_extra_php(docker, username).await? {
+            if !stack.services.iter().any(|s| s.name == name) {
+                gone_is_fine(docker.remove(&name, true).await)?;
+                removed.push(name.as_str().to_owned());
+            }
+        }
+    }
+    Ok((started, removed))
+}
+
+async fn create_container(
+    docker: &DockerManager,
+    spec: &dhpanel_docker_manager::ContainerSpec,
+) -> Result<(), AgentError> {
+    docker
+        .pull_image(&spec.image)
+        .await
+        .map_err(|e| docker_error(&e))?;
+    match docker.create_container(spec).await {
+        // Another attempt created it in the meantime.
+        Ok(_) | Err(DockerError::Conflict(_)) => Ok(()),
+        Err(e) => Err(docker_error(&e)),
+    }
+}
+
 /// `provision_tenant_stack`.
 ///
 /// # Errors
@@ -235,76 +377,84 @@ pub async fn provision_tenant_stack(
     else {
         return Err(super::wrong_operation());
     };
-    let invalid = |m: &str| AgentError::new(ErrorCode::InvalidArguments, m.to_owned());
-    let username = TenantUsername::parse(&username).map_err(|e| invalid(&e.to_string()))?;
-    let uid = UidRange::DEFAULT
-        .checked(uid)
-        .ok_or_else(|| invalid("the user id is outside the tenant range"))?;
-    let allowlist = Allowlist::embedded().map_err(|e| {
-        AgentError::new(
-            ErrorCode::Internal,
-            format!("the image list is broken: {e}"),
-        )
-    })?;
-    let stack = render(
-        &Tenant {
-            id: tenant_id,
-            username: &username,
-            uid,
-            resources: PlanResources {
-                cpu_millis,
-                memory_bytes,
-                pids,
-            },
+    let username = parse_username(&username)?;
+    // The first set-up runs the version new accounts start with; the control
+    // plane moves the account to another one with `set_php_versions`.
+    let (started, _) = converge_stack(
+        &context,
+        tenant_id,
+        &username,
+        uid,
+        PlanResources {
+            cpu_millis,
+            memory_bytes,
+            pids,
         },
-        &allowlist,
+        None,
+        &[],
+        false,
     )
-    .map_err(|e| invalid(&e.to_string()))?;
-
-    let docker = &context.docker;
-    // The web server's configuration directory and volume (the web container
-    // mounts it); a tenant that had a stack before gets them now.
-    let conf = conf_volume_name(&username).map_err(|e| invalid(&e.to_string()))?;
-    let conf_dir = super::vhost::conf_dir(&context.vhosts_root, &username).map_err(|e| {
-        AgentError::new(
-            ErrorCode::Internal,
-            format!(
-                "cannot prepare the web configuration directory: {}",
-                e.kind()
-            ),
-        )
-        .retryable()
-    })?;
-    docker
-        .create_bind_volume(&conf, &conf_dir, &context.vhosts_root)
-        .await
-        .map_err(|e| docker_error(&e))?;
-    let mut started = Vec::new();
-    for spec in &stack.services {
-        match docker.inspect(&spec.name).await {
-            Ok(_) => {}
-            Err(DockerError::NotFound) => {
-                docker
-                    .pull_image(&spec.image)
-                    .await
-                    .map_err(|e| docker_error(&e))?;
-                match docker.create_container(spec).await {
-                    // Another attempt created it in the meantime.
-                    Ok(_) | Err(DockerError::Conflict(_)) => {}
-                    Err(e) => return Err(docker_error(&e)),
-                }
-            }
-            Err(e) => return Err(docker_error(&e)),
-        }
-        docker
-            .start(&spec.name)
-            .await
-            .map_err(|e| docker_error(&e))?;
-        wait_healthy(docker, &spec.name).await?;
-        started.push(spec.name.as_str().to_owned());
-    }
+    .await?;
     Ok(Output::StackProvisioned {
         containers: started,
+    })
+}
+
+/// `set_php_versions`.
+///
+/// # Errors
+/// As [`provision_tenant_stack`], and a version that is not available (not
+/// retryable).
+pub async fn set_php_versions(
+    context: Arc<TenantContext>,
+    op: Operation,
+) -> Result<Output, AgentError> {
+    let Operation::SetPhpVersions {
+        tenant_id,
+        username,
+        uid,
+        cpu_millis,
+        memory_bytes,
+        pids,
+        php_version,
+        extra_php,
+    } = op
+    else {
+        return Err(super::wrong_operation());
+    };
+    let username = parse_username(&username)?;
+    if extra_php.len() > dhpanel_node_protocol::MAX_EXTRA_PHP_VERSIONS {
+        return Err(invalid_arg("too many PHP versions"));
+    }
+    let extra: Vec<&str> = extra_php.iter().map(String::as_str).collect();
+    // The files and the network have to be there: this changes a stack, it does
+    // not make one.
+    require_provisioned(
+        &context.docker,
+        &stack_names(&context.docker, &username).await?,
+    )
+    .await?;
+    let (containers, removed) = converge_stack(
+        &context,
+        tenant_id,
+        &username,
+        uid,
+        PlanResources {
+            cpu_millis,
+            memory_bytes,
+            pids,
+        },
+        Some(&php_version),
+        &extra,
+        true,
+    )
+    .await?;
+    Ok(Output::PhpVersionsSet {
+        containers: containers
+            .into_iter()
+            .filter(|name| name.contains("-php"))
+            .collect(),
+        removed,
     })
 }
 
@@ -389,18 +539,26 @@ fn parse_username(username: &str) -> Result<TenantUsername, AgentError> {
         .map_err(|e| AgentError::new(ErrorCode::InvalidArguments, e.to_string()))
 }
 
-/// Names of a tenant's containers, in start order (PHP, then the web server).
-fn stack_names(username: &TenantUsername) -> Result<Vec<Name>, AgentError> {
-    plan_limits(
-        username,
-        &PlanResources {
-            cpu_millis: None,
-            memory_bytes: None,
-            pids: None,
-        },
-    )
-    .map(|all| all.into_iter().map(|(name, _)| name).collect())
-    .map_err(|e| AgentError::new(ErrorCode::InvalidArguments, e.to_string()))
+/// Names of a tenant's containers, in start order: PHP, the extra PHP versions,
+/// then the web server.
+async fn stack_names(
+    docker: &DockerManager,
+    username: &TenantUsername,
+) -> Result<Vec<Name>, AgentError> {
+    let mut names = vec![name_of(username, "php")?];
+    names.extend(
+        existing_extra_php(docker, username)
+            .await?
+            .into_iter()
+            .map(|(_, name)| name),
+    );
+    names.push(name_of(username, "web")?);
+    Ok(names)
+}
+
+fn name_of(username: &TenantUsername, role: &str) -> Result<Name, AgentError> {
+    Name::parse(&format!("dh-{}-{role}", username.as_str()))
+        .map_err(|e| AgentError::new(ErrorCode::InvalidArguments, e.to_string()))
 }
 
 /// Fails (not retryable) unless every container of the stack exists.
@@ -432,7 +590,7 @@ pub async fn suspend_tenant(
     let Operation::SuspendTenant { username } = op else {
         return Err(super::wrong_operation());
     };
-    let mut names = stack_names(&parse_username(&username)?)?;
+    let mut names = stack_names(&context.docker, &parse_username(&username)?).await?;
     require_provisioned(&context.docker, &names).await?;
     names.reverse();
     let mut stopped = Vec::new();
@@ -460,7 +618,7 @@ pub async fn resume_tenant(
     let Operation::ResumeTenant { username } = op else {
         return Err(super::wrong_operation());
     };
-    let names = stack_names(&parse_username(&username)?)?;
+    let names = stack_names(&context.docker, &parse_username(&username)?).await?;
     require_provisioned(&context.docker, &names).await?;
     let mut running = Vec::new();
     for name in &names {
@@ -594,7 +752,7 @@ pub async fn delete_tenant(
     }
     let docker = &context.docker;
     let id = tenant_id.to_string();
-    let mut names = stack_names(&username)?;
+    let mut names = stack_names(docker, &username).await?;
     names.reverse(); // web first
     for name in &names {
         gone_is_fine(docker.remove(name, true).await)?;
@@ -648,6 +806,9 @@ pub async fn set_resource_limits(
     };
     let invalid = |m: &str| AgentError::new(ErrorCode::InvalidArguments, m.to_owned());
     let username = TenantUsername::parse(&username).map_err(|e| invalid(&e.to_string()))?;
+    // The extra PHP versions the tenant runs share the PHP part of the plan.
+    let extra = existing_extra_php(&context.docker, &username).await?;
+    let extra_versions: Vec<&str> = extra.iter().map(|(v, _)| v.as_str()).collect();
     let wanted = plan_limits(
         &username,
         &PlanResources {
@@ -655,6 +816,7 @@ pub async fn set_resource_limits(
             memory_bytes,
             pids,
         },
+        &extra_versions,
     )
     .map_err(|e| invalid(&e.to_string()))?;
     // All containers must be there before any is changed: a half-updated stack
