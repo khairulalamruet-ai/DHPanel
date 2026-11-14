@@ -38,6 +38,7 @@ pub fn document() -> utoipa::openapi::OpenApi {
     doc.merge(dhpanel_mod_users::UsersApi::openapi());
     doc.merge(dhpanel_mod_domains::DomainsApi::openapi());
     doc.merge(dhpanel_mod_databases::DatabasesApi::openapi());
+    doc.merge(dhpanel_mod_files::FilesApi::openapi());
     doc
 }
 

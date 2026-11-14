@@ -39,6 +39,7 @@ members = [
     "crates/modules/users",
     "crates/modules/domains",
     "crates/modules/databases",
+    "crates/modules/files",
     "crates/dns",
 ]
 
@@ -77,6 +78,7 @@ dhpanel-mod-plans = { path = "crates/modules/plans" }
 dhpanel-mod-users = { path = "crates/modules/users" }
 dhpanel-mod-domains = { path = "crates/modules/domains" }
 dhpanel-mod-databases = { path = "crates/modules/databases" }
+dhpanel-mod-files = { path = "crates/modules/files" }
 dhpanel-dns = { path = "crates/dns" }
 dhpanel-node-gateway = { path = "crates/node-gateway" }
 dhpanel-operations = { path = "crates/operations" }

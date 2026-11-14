@@ -36,6 +36,7 @@ dhpanel-mod-system.workspace = true
 dhpanel-mod-users.workspace = true
 dhpanel-mod-domains.workspace = true
 dhpanel-mod-databases.workspace = true
+dhpanel-mod-files.workspace = true
 dhpanel-dispatcher.workspace = true
 dhpanel-dns.workspace = true
 dhpanel-events.workspace = true

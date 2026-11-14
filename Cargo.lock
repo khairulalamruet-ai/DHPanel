@@ -982,6 +982,7 @@ dependencies = [
  "dhpanel-mod-auth",
  "dhpanel-mod-databases",
  "dhpanel-mod-domains",
+ "dhpanel-mod-files",
  "dhpanel-mod-nodes",
  "dhpanel-mod-plans",
  "dhpanel-mod-system",
@@ -1291,6 +1292,34 @@ dependencies = [
  "tower",
  "utoipa",
  "uuid",
+]
+
+[[package]]
+name = "dhpanel-mod-files"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "dhpanel-audit",
+ "dhpanel-cache",
+ "dhpanel-database",
+ "dhpanel-fileops",
+ "dhpanel-http-kit",
+ "dhpanel-kernel",
+ "dhpanel-mod-auth",
+ "dhpanel-node-protocol",
+ "dhpanel-rbac",
+ "dhpanel-safe-fs",
+ "dhpanel-session",
+ "dhpanel-settings",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tokio",
+ "tower",
+ "utoipa",
+ "uuid",
+ "zip",
 ]
 
 [[package]]

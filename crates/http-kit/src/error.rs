@@ -89,6 +89,14 @@ pub enum AppError {
         /// Explanation safe to show to the client.
         detail: String,
     },
+    /// 413 — what was sent (or asked for) is bigger than allowed.
+    #[error("payload too large: {code}")]
+    PayloadTooLarge {
+        /// Stable code, e.g. `too_large`.
+        code: Cow<'static, str>,
+        /// Explanation safe to show to the client.
+        detail: String,
+    },
     /// 422 — well-formed but invalid input.
     #[error("validation failed ({} field errors)", errors.len())]
     Validation {
@@ -146,6 +154,14 @@ impl AppError {
             resource: resource.into(),
         }
     }
+    /// 413 with a code and client-safe detail.
+    pub fn payload_too_large(code: &'static str, detail: impl Into<String>) -> Self {
+        Self::PayloadTooLarge {
+            code: code.into(),
+            detail: detail.into(),
+        }
+    }
+
     /// 409 with a code and client-safe detail.
     pub fn conflict(code: &'static str, detail: impl Into<String>) -> Self {
         Self::Conflict {
@@ -192,6 +208,7 @@ impl AppError {
             Self::Forbidden { .. } => StatusCode::FORBIDDEN,
             Self::NotFound { .. } => StatusCode::NOT_FOUND,
             Self::Conflict { .. } => StatusCode::CONFLICT,
+            Self::PayloadTooLarge { .. } => StatusCode::PAYLOAD_TOO_LARGE,
             Self::Validation { .. } => StatusCode::UNPROCESSABLE_ENTITY,
             Self::TooManyRequests { .. } => StatusCode::TOO_MANY_REQUESTS,
             Self::Unavailable { .. } => StatusCode::SERVICE_UNAVAILABLE,
@@ -207,6 +224,7 @@ impl AppError {
             | Self::AuthenticationFailed { code, .. }
             | Self::Forbidden { code, .. }
             | Self::Conflict { code, .. }
+            | Self::PayloadTooLarge { code, .. }
             | Self::TooManyRequests { code, .. }
             | Self::Unavailable { code, .. } => code,
             Self::Unauthorized => "unauthenticated",
@@ -222,6 +240,7 @@ impl AppError {
             | Self::AuthenticationFailed { detail, .. }
             | Self::Forbidden { detail, .. }
             | Self::Conflict { detail, .. }
+            | Self::PayloadTooLarge { detail, .. }
             | Self::TooManyRequests { detail, .. }
             | Self::Unavailable { detail, .. } => detail.clone(),
             Self::Unauthorized => "Authentication is required.".to_owned(),

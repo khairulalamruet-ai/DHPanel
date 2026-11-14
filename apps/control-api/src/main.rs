@@ -320,6 +320,20 @@ async fn main() -> ExitCode {
             }
         }
     });
+    // What has been in the accounts' trash longer than the setting says goes for good.
+    tokio::spawn({
+        let (db, settings) = (db.clone(), settings.clone());
+        async move {
+            let mut every = tokio::time::interval(std::time::Duration::from_secs(3600));
+            every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                every.tick().await;
+                if let Err(error) = dhpanel_mod_files::purge_trash(&db, &settings).await {
+                    tracing::warn!(%error, "could not queue the trash purges");
+                }
+            }
+        }
+    });
     tokio::spawn(modules::follow_enabled(
         db.clone(),
         mount.clone(),

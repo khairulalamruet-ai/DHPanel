@@ -1,0 +1,18 @@
+# Files: the file manager's API (crates/modules/files).
+[module]
+name       = "files"
+version    = "0.1.0"
+title      = { en = "Files", bn = "ফাইল" }
+category   = "files"
+core       = false
+depends_on = ["auth", "rbac", "audit", "system", "plans", "users"]
+
+[permissions]
+keys = []
+
+[features]
+keys = ["files"]
+
+[ui]
+admin_nav  = { group = "Data", order = 20, icon = "folder" }
+client_nav = { group = "Files", order = 10, icon = "folder" }

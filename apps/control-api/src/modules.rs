@@ -23,6 +23,7 @@ const EMBEDDED: &[(&str, &str)] = &[
     ("users", dhpanel_mod_users::MANIFEST),
     ("domains", dhpanel_mod_domains::MANIFEST),
     ("databases", dhpanel_mod_databases::MANIFEST),
+    ("files", dhpanel_mod_files::MANIFEST),
 ];
 
 /// Days the data of a deleted user is kept before it is purged.
@@ -51,6 +52,7 @@ impl Module for Wired {
             "system" => serde_json::from_str(dhpanel_mod_system::SETTINGS_SCHEMA).ok(),
             "domains" => serde_json::from_str(dhpanel_mod_domains::SETTINGS_SCHEMA).ok(),
             "databases" => serde_json::from_str(dhpanel_mod_databases::SETTINGS_SCHEMA).ok(),
+            "files" => serde_json::from_str(dhpanel_mod_files::SETTINGS_SCHEMA).ok(),
             _ => None,
         }
     }
@@ -65,7 +67,7 @@ pub fn settings(registry: &Registry) -> Result<SettingsRegistry, Vec<String>> {
     let mut problems = Vec::new();
     for module in registry.modules() {
         let name = module.manifest().module.name.clone();
-        if matches!(name.as_str(), "system" | "domains" | "databases")
+        if matches!(name.as_str(), "system" | "domains" | "databases" | "files")
             && module.settings_schema().is_none()
         {
             problems.push(format!(
@@ -315,6 +317,28 @@ pub fn mount(
                         None => ModuleRoutes::none(),
                     })
                 }
+                "files" => {
+                    let (db, sessions, late_settings) =
+                        (db.clone(), sessions.clone(), late_settings.clone());
+                    Box::new(move || match late_settings.get() {
+                        Some(settings) => {
+                            let state = dhpanel_mod_files::FilesState {
+                                db: db.clone(),
+                                sessions: sessions.clone(),
+                                settings: settings.clone(),
+                                wait: dhpanel_mod_files::DEFAULT_WAIT,
+                            };
+                            ModuleRoutes {
+                                admin: Some(
+                                    dhpanel_mod_files::admin_router().with_state(state.clone()),
+                                ),
+                                client: Some(dhpanel_mod_files::client_router().with_state(state)),
+                                ..ModuleRoutes::none()
+                            }
+                        }
+                        None => ModuleRoutes::none(),
+                    })
+                }
                 // A manifest without code behind it has no routes.
                 _ => Box::new(ModuleRoutes::none),
             };
@@ -540,7 +564,8 @@ mod tests {
                 "plans",
                 "users",
                 "domains",
-                "databases"
+                "databases",
+                "files"
             ]
         );
         // And they fit together: dependencies first.
@@ -556,7 +581,8 @@ mod tests {
                 "plans",
                 "users",
                 "databases",
-                "domains"
+                "domains",
+                "files"
             ]
         );
         assert_eq!(
@@ -568,7 +594,8 @@ mod tests {
                 "plans",
                 "users",
                 "databases",
-                "domains"
+                "domains",
+                "files"
             ]
         );
         // Every dependency names a module that exists.

@@ -10672,6 +10672,964 @@
         ]
       }
     },
+    "/api/v1/client/files": {
+      "get": {
+        "tags": [
+          "files"
+        ],
+        "summary": "A page of a folder.",
+        "operationId": "clientListFiles",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "description": "Relative to the account's files (`\"\"`: the top).",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "path",
+            "description": "Entries to skip.",
+            "required": true,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "path",
+            "description": "Entries to give (at most the panel's page size setting).",
+            "required": true,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Folders first, then by name",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectoryPage"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Still going",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Pending"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`invalid_path` or `link_in_path`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "files"
+        ],
+        "summary": "Delete: the file goes to the trash.",
+        "operationId": "clientDeleteFile",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "description": "Relative to the account's files (`\"\"`: the top).",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "In the trash",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Changed"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/files/archive": {
+      "post": {
+        "tags": [
+          "files"
+        ],
+        "summary": "Pack files and folders into a zip or tar.gz.",
+        "operationId": "clientArchive",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PackRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Packed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Changed"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Still going",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Pending"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "`too_large`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/files/content": {
+      "get": {
+        "tags": [
+          "files"
+        ],
+        "summary": "A text file, for the editor.",
+        "operationId": "clientReadFile",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "description": "Relative to the account's files (`\"\"`: the top).",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The text",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileContent"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "`too_large`: bigger than the editor's limit",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "files"
+        ],
+        "summary": "Save a text file (whole, atomically).",
+        "operationId": "clientWriteFile",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveFile"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Changed"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`exists` or `changed_meanwhile`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "`too_large`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/files/copy": {
+      "post": {
+        "tags": [
+          "files"
+        ],
+        "summary": "Copy a file or a whole folder (never over something; links are left out).",
+        "operationId": "clientCopyFile",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FromTo"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Copied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Changed"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Still going",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Pending"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`exists`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/files/extract": {
+      "post": {
+        "tags": [
+          "files"
+        ],
+        "summary": "Unpack an archive; the whole archive is checked first.",
+        "operationId": "clientExtract",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnpackRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Unpacked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Changed"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Still going",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Pending"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "`too_large`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`bad_archive`, `too_many`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/files/folders": {
+      "post": {
+        "tags": [
+          "files"
+        ],
+        "summary": "Make a folder.",
+        "operationId": "clientMakeFolder",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OnePath"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Made",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Changed"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`exists`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/files/move": {
+      "post": {
+        "tags": [
+          "files"
+        ],
+        "summary": "Move or rename (never over something).",
+        "operationId": "clientMoveFile",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FromTo"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Moved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Changed"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`exists`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/files/operations/{id}": {
+      "get": {
+        "tags": [
+          "files"
+        ],
+        "summary": "The answer to a request that was answered `202`.",
+        "operationId": "clientFileOperation",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The operation id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Done: the answer the request would have given",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Changed"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Still going",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Pending"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such operation (or not yours)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/files/permissions": {
+      "post": {
+        "tags": [
+          "files"
+        ],
+        "summary": "Change permissions.",
+        "operationId": "clientChmod",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetMode"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Changed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Changed"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`invalid_mode`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/files/permissions/fix": {
+      "post": {
+        "tags": [
+          "files"
+        ],
+        "summary": "Set sane permissions on a whole tree (folders 755, files 644).",
+        "operationId": "clientFixPermissions",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OnePath"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Fixed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Changed"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Still going",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Pending"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/files/stat": {
+      "get": {
+        "tags": [
+          "files"
+        ],
+        "summary": "One path.",
+        "operationId": "clientStatFile",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "description": "Relative to the account's files (`\"\"`: the top).",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "What it is",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EntryView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/files/trash": {
+      "get": {
+        "tags": [
+          "files"
+        ],
+        "summary": "What is in the trash.",
+        "operationId": "clientListTrash",
+        "responses": {
+          "200": {
+            "description": "Newest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrashList"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "files"
+        ],
+        "summary": "Empty the trash (all of it, one item, or what is old).",
+        "operationId": "clientEmptyTrash",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Only this item.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "older_than_days",
+            "in": "path",
+            "description": "Only items deleted more than this many days ago.",
+            "required": true,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "How many items went",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Changed"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/files/trash/{id}/restore": {
+      "post": {
+        "tags": [
+          "files"
+        ],
+        "summary": "Put something back where it was.",
+        "operationId": "clientRestoreFile",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The trash id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Back",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Changed"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`exists`: something is there now",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/client/imports": {
       "get": {
         "tags": [
@@ -12487,6 +13445,21 @@
         },
         "additionalProperties": false
       },
+      "Changed": {
+        "type": "object",
+        "description": "What a change did.",
+        "required": [
+          "count"
+        ],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Files and folders touched.",
+            "minimum": 0
+          }
+        }
+      },
       "CheckResult": {
         "type": "object",
         "description": "Public result for one probe.",
@@ -12945,6 +13918,43 @@
           }
         }
       },
+      "DirectoryPage": {
+        "type": "object",
+        "description": "A page of a folder.",
+        "required": [
+          "items",
+          "total",
+          "offset",
+          "limit"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EntryView"
+            },
+            "description": "Folders first, then by name."
+          },
+          "limit": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Entries asked for.",
+            "minimum": 0
+          },
+          "offset": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Entries skipped.",
+            "minimum": 0
+          },
+          "total": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many entries the folder has.",
+            "minimum": 0
+          }
+        }
+      },
       "DomainList": {
         "type": "object",
         "description": "A page of domains.",
@@ -13271,6 +14281,46 @@
           }
         }
       },
+      "EntryView": {
+        "type": "object",
+        "description": "What a path is.",
+        "required": [
+          "name",
+          "kind",
+          "size",
+          "modified_at",
+          "mode"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "description": "`file`, `dir`, `link` (never followed) or `other`.",
+            "example": "file"
+          },
+          "mode": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Permission bits, as the octal number written out (`0o644` is 420).",
+            "minimum": 0
+          },
+          "modified_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Last change of content (RFC 3339, UTC)."
+          },
+          "name": {
+            "type": "string",
+            "description": "Its name.",
+            "example": "index.php"
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Size in bytes.",
+            "minimum": 0
+          }
+        }
+      },
       "ExportList": {
         "type": "object",
         "description": "The exports of an account.",
@@ -13535,6 +14585,58 @@
             "description": "Human-readable message (English; the UI translates by `code`)."
           }
         }
+      },
+      "FileContent": {
+        "type": "object",
+        "description": "A text file.",
+        "required": [
+          "binary",
+          "size",
+          "mtime"
+        ],
+        "properties": {
+          "binary": {
+            "type": "boolean",
+            "description": "Whether the file is not text."
+          },
+          "content": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The text; none when the file is not UTF-8 text."
+          },
+          "mtime": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Modification time (Unix seconds): give it back as `expected_mtime` when saving,\nto be told if someone changed the file meanwhile."
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Size in bytes.",
+            "minimum": 0
+          }
+        }
+      },
+      "FromTo": {
+        "type": "object",
+        "description": "From and to.",
+        "required": [
+          "from",
+          "to"
+        ],
+        "properties": {
+          "from": {
+            "type": "string",
+            "description": "What to move or copy."
+          },
+          "to": {
+            "type": "string",
+            "description": "The new path (not the folder it goes into)."
+          }
+        },
+        "additionalProperties": false
       },
       "GrantView": {
         "type": "object",
@@ -14261,6 +15363,20 @@
           }
         }
       },
+      "OnePath": {
+        "type": "object",
+        "description": "One path in a body.",
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "The path."
+          }
+        },
+        "additionalProperties": false
+      },
       "OperationList": {
         "type": "object",
         "description": "Recent operations.",
@@ -14418,6 +15534,35 @@
           }
         }
       },
+      "PackRequest": {
+        "type": "object",
+        "description": "What to pack.",
+        "required": [
+          "paths",
+          "dest",
+          "format"
+        ],
+        "properties": {
+          "dest": {
+            "type": "string",
+            "description": "The archive to make (never replaced).",
+            "example": "backup.zip"
+          },
+          "format": {
+            "type": "string",
+            "description": "`zip` or `tar_gz`.",
+            "example": "zip"
+          },
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Files and folders (1 to 1000)."
+          }
+        },
+        "additionalProperties": false
+      },
       "PageInput": {
         "type": "object",
         "description": "A page to keep.",
@@ -14476,6 +15621,20 @@
             "type": "string",
             "description": "`suspended_domain`, `suspended_account`, `not_found` or `bad_gateway`.",
             "example": "not_found"
+          }
+        }
+      },
+      "Pending": {
+        "type": "object",
+        "description": "Work that is still going on.",
+        "required": [
+          "operation_id"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Ask `GET /api/v1/client/files/operations/{id}` for the answer."
           }
         }
       },
@@ -15239,6 +16398,38 @@
           }
         }
       },
+      "SaveFile": {
+        "type": "object",
+        "description": "A file to save.",
+        "required": [
+          "path",
+          "content"
+        ],
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "What to write (the whole file)."
+          },
+          "create_only": {
+            "type": "boolean",
+            "description": "Refuse (409) when the file already exists."
+          },
+          "expected_mtime": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The `mtime` the editor opened it with; refused (409) when it changed since."
+          },
+          "path": {
+            "type": "string",
+            "description": "The file.",
+            "example": "www/index.php"
+          }
+        },
+        "additionalProperties": false
+      },
       "SessionList": {
         "type": "object",
         "description": "Live sessions.",
@@ -15318,6 +16509,31 @@
             "type": "string",
             "description": "`read_only`, `read_write` or `all`.",
             "example": "read_write"
+          }
+        },
+        "additionalProperties": false
+      },
+      "SetMode": {
+        "type": "object",
+        "description": "New permission bits.",
+        "required": [
+          "path",
+          "mode"
+        ],
+        "properties": {
+          "mode": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The bits, as the number (`0o755` is 493); at most 0o777: no setuid, setgid\nor sticky bit, and the owner keeps read and write.",
+            "minimum": 0
+          },
+          "path": {
+            "type": "string",
+            "description": "The path."
+          },
+          "recursive": {
+            "type": "boolean",
+            "description": "For a folder: everything below it too."
           }
         },
         "additionalProperties": false
@@ -15900,6 +17116,77 @@
           }
         }
       },
+      "TrashEntry": {
+        "type": "object",
+        "description": "Something in the trash.",
+        "required": [
+          "id",
+          "path",
+          "kind",
+          "size",
+          "deleted_at"
+        ],
+        "properties": {
+          "deleted_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it was deleted (RFC 3339, UTC)."
+          },
+          "id": {
+            "type": "string",
+            "description": "Its id."
+          },
+          "kind": {
+            "type": "string",
+            "description": "`file`, `dir`, `link` or `other`."
+          },
+          "path": {
+            "type": "string",
+            "description": "Where it was."
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Size in bytes.",
+            "minimum": 0
+          }
+        }
+      },
+      "TrashList": {
+        "type": "object",
+        "description": "The trash.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrashEntry"
+            },
+            "description": "Newest first."
+          }
+        }
+      },
+      "UnpackRequest": {
+        "type": "object",
+        "description": "What to unpack.",
+        "required": [
+          "path",
+          "dest"
+        ],
+        "properties": {
+          "dest": {
+            "type": "string",
+            "description": "The folder to unpack into (made when missing)."
+          },
+          "path": {
+            "type": "string",
+            "description": "The archive (`.zip`, `.tar.gz`, `.tgz`)."
+          }
+        },
+        "additionalProperties": false
+      },
       "UpdateAdministrator": {
         "type": "object",
         "description": "Changes to an administrator; omitted fields stay as they are.",
@@ -16332,6 +17619,10 @@
     {
       "name": "databases",
       "description": "Databases, their users and grants"
+    },
+    {
+      "name": "files",
+      "description": "The file manager"
     }
   ]
 }

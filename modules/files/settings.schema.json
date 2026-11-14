@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Files",
+  "description": "What the file manager allows.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "page_size": {
+      "type": "integer",
+      "title": "Entries per page",
+      "default": 200,
+      "minimum": 10,
+      "maximum": 1000,
+      "x-scope": "global",
+      "x-title": { "en": "Entries per page", "bn": "প্রতি পেজে এন্ট্রি" },
+      "x-description": {
+        "en": "How many files and folders a directory listing shows per page.",
+        "bn": "ডিরেক্টরির তালিকায় প্রতি পেজে কতগুলো ফাইল ও ফোল্ডার দেখাবে।"
+      }
+    },
+    "edit_size_kb": {
+      "type": "integer",
+      "title": "Biggest file the editor opens (KB)",
+      "default": 256,
+      "minimum": 1,
+      "maximum": 256,
+      "x-scope": "global",
+      "x-title": { "en": "Biggest file the editor opens (KB)", "bn": "এডিটরে খোলা যায় এমন সর্বোচ্চ ফাইল (KB)" },
+      "x-description": {
+        "en": "A bigger file is refused (413) when it is opened or saved in the editor; it can still be downloaded and uploaded.",
+        "bn": "এর চেয়ে বড় ফাইল এডিটরে খুললে বা সেভ করলে প্রত্যাখ্যাত হয় (413); ডাউনলোড ও আপলোড চলে।"
+      }
+    },
+    "trash_purge_days": {
+      "type": "integer",
+      "title": "Empty the trash after (days)",
+      "default": 30,
+      "minimum": 0,
+      "maximum": 3650,
+      "x-scope": "global",
+      "x-title": { "en": "Empty the trash after (days)", "bn": "ট্র্যাশ খালি হবে (দিন পর)" },
+      "x-description": {
+        "en": "Deleted files wait in the account's trash this long, then go for good. 0: they are never removed on their own.",
+        "bn": "মুছে ফেলা ফাইল এত দিন অ্যাকাউন্টের ট্র্যাশে থাকে, তারপর স্থায়ীভাবে যায়। 0: নিজে থেকে কখনও মুছে না।"
+      }
+    },
+    "max_archive_mb": {
+      "type": "integer",
+      "title": "Biggest archive to pack (MB)",
+      "default": 2048,
+      "minimum": 1,
+      "maximum": 102400,
+      "x-scope": "global",
+      "x-title": { "en": "Biggest archive to pack (MB)", "bn": "প্যাক করা যায় এমন সর্বোচ্চ আর্কাইভ (MB)" },
+      "x-description": {
+        "en": "The files a zip or tar.gz is made from may add up to this much.",
+        "bn": "zip বা tar.gz বানানোর ফাইলগুলোর মোট আকার এর বেশি হতে পারবে না।"
+      }
+    },
+    "max_extract_mb": {
+      "type": "integer",
+      "title": "Biggest archive to unpack (MB)",
+      "default": 4096,
+      "minimum": 1,
+      "maximum": 102400,
+      "x-scope": "global",
+      "x-title": { "en": "Biggest archive to unpack (MB)", "bn": "আনপ্যাক করা যায় এমন সর্বোচ্চ আর্কাইভ (MB)" },
+      "x-description": {
+        "en": "An archive that would unpack to more than this is refused before anything is written (a guard against zip bombs).",
+        "bn": "যে আর্কাইভ এর বেশি আনপ্যাক হবে তা কিছু লেখার আগেই প্রত্যাখ্যাত হয় (zip bomb থেকে সুরক্ষা)।"
+      }
+    }
+  }
+}
