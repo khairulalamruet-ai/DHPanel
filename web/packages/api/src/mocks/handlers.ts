@@ -3351,6 +3351,20 @@ export const handlers = [
         { id: "backups", title: "Backup & Restore", icon: "Archive", href: "/backups", phase: 8 },
         { id: "security", title: "Account Security", icon: "ShieldCheck", href: "/security", phase: 1 },
       ],
+      last_backup: {
+        created_at: new Date(Date.now() - 3600 * 1000 * 18).toISOString(),
+        size_mb: 248,
+        status: "completed",
+        type: "automatic",
+      },
+      ssl_warnings: [
+        {
+          domain: "staging.alpha-hosting.com",
+          issuer: "Let's Encrypt",
+          expires_in_days: 7,
+          severity: "warning",
+        },
+      ],
       recent_events: [
         {
           id: "ev_01",

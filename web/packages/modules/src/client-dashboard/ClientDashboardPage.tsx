@@ -30,6 +30,8 @@ import {
   Box,
   CheckCircle2,
   Mail,
+  Star,
+  AlertTriangle,
 } from "lucide-react";
 import { ClientDashboardData } from "./types";
 
@@ -44,6 +46,35 @@ export function ClientDashboardPage() {
   const { toast } = useToast();
   const [data, setData] = useState<ClientDashboardData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+
+  const FAVORITES_STORAGE_KEY = "dhpanel-client-favorites";
+  const DEFAULT_FAVORITES = ["files", "databases", "domains", "ssl"];
+
+  const [favorites, setFavorites] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem(FAVORITES_STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {
+      // ignore
+    }
+    return DEFAULT_FAVORITES;
+  });
+
+  const toggleFavorite = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setFavorites((prev) => {
+      const next = prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id];
+      try {
+        localStorage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  };
 
   const fetchDashboardData = async () => {
     setIsLoading(true);
@@ -103,8 +134,111 @@ export function ClientDashboardPage() {
     security: <ShieldCheck className="h-5 w-5 text-primary" />,
   };
 
+  const favoriteShortcuts = data.shortcuts.filter((sc) => favorites.includes(sc.id));
+
+  const renderShortcutCard = (sc: (typeof data.shortcuts)[0], isFavSection = false) => {
+    const isAvailable = sc.phase <= 4;
+    const isFav = favorites.includes(sc.id);
+
+    return (
+      <Card
+        key={`${isFavSection ? "fav-" : ""}${sc.id}`}
+        onClick={() => {
+          if (sc.href && isAvailable) {
+            window.location.href = sc.href;
+          } else {
+            toast({
+              title: sc.title,
+              description: `Scheduled for delivery in Phase 0${sc.phase}`,
+            });
+          }
+        }}
+        className={`p-4 border bg-card hover:bg-muted/40 transition-all cursor-pointer relative group ${
+          !isAvailable ? "opacity-85" : ""
+        }`}
+        data-testid={`shortcut-card-${sc.id}`}
+      >
+        <div className="flex items-center justify-between mb-2">
+          <div className="p-2 rounded-lg bg-primary/10 border border-primary/20">
+            {shortcutIcons[sc.id] || <Box className="h-5 w-5 text-primary" />}
+          </div>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              aria-label={isFav ? "Unpin favorite" : "Pin favorite"}
+              onClick={(e) => toggleFavorite(sc.id, e)}
+              className="p-1 rounded hover:bg-muted/60 transition-colors z-10"
+              data-testid={`btn-favorite-${sc.id}`}
+            >
+              <Star
+                className={`h-4 w-4 transition-colors ${
+                  isFav
+                    ? "fill-amber-400 text-amber-500"
+                    : "text-muted-foreground/40 hover:text-muted-foreground"
+                }`}
+              />
+            </button>
+            {isAvailable ? (
+              <Badge variant="secondary" className="text-[10px] font-mono">
+                Active
+              </Badge>
+            ) : (
+              <Badge variant="outline" className="text-[10px] font-mono text-muted-foreground">
+                Phase 0{sc.phase}
+              </Badge>
+            )}
+          </div>
+        </div>
+        <h3 className="text-sm font-semibold text-foreground group-hover:text-primary transition-colors">
+          {sc.title}
+        </h3>
+        <p className="text-[11px] text-muted-foreground mt-0.5">
+          {isAvailable ? "Manage settings" : `Phase 0${sc.phase} Preview`}
+        </p>
+      </Card>
+    );
+  };
+
   return (
-    <div className="space-y-6 max-w-6xl mx-auto pb-12">
+    <div className="space-y-6 max-w-6xl mx-auto pb-12" data-testid="client-dashboard-page">
+      {/* SSL Expiration / Warnings Alert Banner */}
+      {data.ssl_warnings && data.ssl_warnings.length > 0 && (
+        <div className="space-y-3" data-testid="client-ssl-warning-banner">
+          {data.ssl_warnings.map((warn, idx) => (
+            <div
+              key={idx}
+              className="p-4 rounded-lg bg-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-xs"
+            >
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="h-5 w-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                <div>
+                  <div className="font-semibold text-amber-900 dark:text-amber-200 text-sm flex items-center gap-2">
+                    <span>{t("clientDashboard.sslWarningTitle") || "SSL Certificate Expiring Soon"}</span>
+                    <Badge variant="outline" className="text-[10px] bg-amber-500/20 text-amber-700 dark:text-amber-300 border-amber-500/40">
+                      {warn.expires_in_days} days left
+                    </Badge>
+                  </div>
+                  <p className="text-muted-foreground mt-0.5">
+                    {t("clientDashboard.sslWarningDesc", { domain: warn.domain, days: warn.expires_in_days }) ||
+                      `The SSL certificate for ${warn.domain} expires in ${warn.expires_in_days} days. Renew now to avoid service interruption.`}
+                  </p>
+                </div>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                className="border-amber-500/40 text-amber-800 dark:text-amber-300 hover:bg-amber-500/10 shrink-0 text-xs gap-1.5"
+                onClick={() => (window.location.href = "/ssl")}
+                data-testid={`btn-renew-ssl-${idx}`}
+              >
+                <Lock className="h-3.5 w-3.5" />
+                {t("clientDashboard.renewSsl") || "Renew Certificate"}
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* 1. Tenant Welcome Banner */}
       <Card className="border shadow-sm bg-card overflow-hidden">
         <CardContent className="p-6">
@@ -340,66 +474,44 @@ export function ClientDashboardPage() {
         </div>
       </div>
 
-      {/* 3. Quick Shortcuts (Favorites) */}
-      <div className="space-y-3">
-        <div>
-          <h2 className="text-lg font-bold tracking-tight text-foreground flex items-center gap-2">
-            <Box className="h-5 w-5 text-primary" />
-            <span>{t("clientDashboard.shortcuts.title")}</span>
-          </h2>
-          <p className="text-xs text-muted-foreground">
-            {t("clientDashboard.shortcuts.desc")}
-          </p>
-        </div>
+      {/* 3. Quick Shortcuts & Pinned Favorites */}
+      <div className="space-y-6">
+        {/* Pinned Favorites */}
+        {favoriteShortcuts.length > 0 && (
+          <div className="space-y-3" data-testid="client-favorites-section">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold flex items-center gap-1.5 text-foreground">
+                <Star className="h-4 w-4 fill-amber-400 text-amber-500" />
+                <span>{t("clientDashboard.favoritesTitle") || "Favorite Tools"}</span>
+              </h3>
+              <span className="text-xs text-muted-foreground">{favoriteShortcuts.length} pinned</span>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+              {favoriteShortcuts.map((sc) => renderShortcutCard(sc, true))}
+            </div>
+          </div>
+        )}
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-          {data.shortcuts.map((sc) => {
-            const isAvailable = sc.phase <= 4;
-            return (
-              <Card
-                key={sc.id}
-                onClick={() => {
-                  if (sc.href && isAvailable) {
-                    window.location.href = sc.href;
-                  } else {
-                    toast({
-                      title: sc.title,
-                      description: `Scheduled for delivery in Phase 0${sc.phase}`,
-                    });
-                  }
-                }}
-                className={`p-4 border bg-card hover:bg-muted/40 transition-all cursor-pointer relative group ${
-                  !isAvailable ? "opacity-85" : ""
-                }`}
-              >
-                <div className="flex items-center justify-between mb-2">
-                  <div className="p-2 rounded-lg bg-primary/10 border border-primary/20">
-                    {shortcutIcons[sc.id] || <Box className="h-5 w-5 text-primary" />}
-                  </div>
-                  {isAvailable ? (
-                    <Badge variant="secondary" className="text-[10px] font-mono">
-                      Active
-                    </Badge>
-                  ) : (
-                    <Badge variant="outline" className="text-[10px] font-mono text-muted-foreground">
-                      Phase 0{sc.phase}
-                    </Badge>
-                  )}
-                </div>
-                <h3 className="text-sm font-semibold text-foreground group-hover:text-primary transition-colors">
-                  {sc.title}
-                </h3>
-                <p className="text-[11px] text-muted-foreground mt-0.5">
-                  {isAvailable ? "Manage settings" : `Phase 0${sc.phase} Preview`}
-                </p>
-              </Card>
-            );
-          })}
+        {/* All Shortcuts */}
+        <div className="space-y-3">
+          <div>
+            <h2 className="text-lg font-bold tracking-tight text-foreground flex items-center gap-2">
+              <Box className="h-5 w-5 text-primary" />
+              <span>{t("clientDashboard.shortcuts.title")}</span>
+            </h2>
+            <p className="text-xs text-muted-foreground">
+              {t("clientDashboard.shortcuts.desc")}
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4" data-testid="all-shortcuts-grid">
+            {data.shortcuts.map((sc) => renderShortcutCard(sc, false))}
+          </div>
         </div>
       </div>
 
-      {/* 4. Host Info & Server Details Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      {/* 4. Host Info, Backups & Server Details Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* Primary Domain & SSL Details */}
         <Card className="border bg-card">
           <CardHeader className="pb-3">
@@ -416,7 +528,7 @@ export function ClientDashboardPage() {
             </div>
             <div className="flex justify-between py-1.5 border-b">
               <span className="text-muted-foreground">Document Root</span>
-              <span className="font-mono font-semibold truncate max-w-[280px]" title={primary_domain.docroot}>
+              <span className="font-mono font-semibold truncate max-w-[200px]" title={primary_domain.docroot}>
                 {primary_domain.docroot}
               </span>
             </div>
@@ -432,7 +544,70 @@ export function ClientDashboardPage() {
             </div>
             <div className="flex justify-between py-1.5">
               <span className="text-muted-foreground">Nameservers</span>
-              <span className="font-mono text-muted-foreground">{tenant.nameservers.join(", ")}</span>
+              <span className="font-mono text-muted-foreground truncate max-w-[180px]">{tenant.nameservers.join(", ")}</span>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Latest Backup Card */}
+        <Card className="border bg-card" data-testid="client-last-backup-card">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                <Archive className="h-4 w-4 text-primary" />
+                <span>{t("clientDashboard.lastBackupTitle") || "Latest Backup"}</span>
+              </CardTitle>
+              {data.last_backup ? (
+                <Badge
+                  variant="default"
+                  className={
+                    data.last_backup.status === "completed"
+                      ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 text-[10px]"
+                      : "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30 text-[10px]"
+                  }
+                >
+                  {data.last_backup.status.toUpperCase()}
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="text-[10px]">None</Badge>
+              )}
+            </div>
+            <CardDescription>{t("clientDashboard.lastBackupDesc") || "Snapshot state and automatic backup protection"}</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3 text-xs">
+            {data.last_backup ? (
+              <>
+                <div className="flex justify-between py-1.5 border-b">
+                  <span className="text-muted-foreground">Backup Date</span>
+                  <span className="font-mono font-medium">
+                    {new Date(data.last_backup.created_at).toLocaleString()}
+                  </span>
+                </div>
+                <div className="flex justify-between py-1.5 border-b">
+                  <span className="text-muted-foreground">Archive Size</span>
+                  <span className="font-mono font-semibold">{data.last_backup.size_mb} MB</span>
+                </div>
+                <div className="flex justify-between py-1.5 border-b">
+                  <span className="text-muted-foreground">Type</span>
+                  <span className="capitalize">{data.last_backup.type} snapshot</span>
+                </div>
+              </>
+            ) : (
+              <p className="text-muted-foreground py-2 text-center">
+                {t("clientDashboard.noBackups") || "No backups created yet"}
+              </p>
+            )}
+            <div className="flex items-center gap-2 pt-1">
+              <Button
+                size="sm"
+                variant="outline"
+                className="w-full text-xs gap-1.5"
+                onClick={() => (window.location.href = "/backups")}
+                data-testid="btn-manage-backups"
+              >
+                <Archive className="h-3.5 w-3.5" />
+                {t("clientDashboard.manageBackups") || "Manage Backups"}
+              </Button>
             </div>
           </CardContent>
         </Card>
