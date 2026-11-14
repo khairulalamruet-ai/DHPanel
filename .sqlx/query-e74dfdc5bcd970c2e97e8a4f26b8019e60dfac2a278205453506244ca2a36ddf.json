@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT z.id, z.domain_id, z.name, z.status, z.last_error\n         FROM dns_zones z JOIN domains d ON d.id = z.domain_id\n         WHERE d.tenant_id = $1 AND $2 LIKE '%.' || z.name\n         ORDER BY length(z.name) DESC LIMIT 1",
+  "query": "SELECT id, domain_id, name, status, last_error, updated_at::text AS \"version!\" FROM dns_zones WHERE domain_id = $1",
   "describe": {
     "columns": [
       {
@@ -57,12 +57,17 @@
             "name": "last_error"
           }
         }
+      },
+      {
+        "ordinal": 5,
+        "name": "version!",
+        "type_info": "Text",
+        "origin": "Expression"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid",
-        "Text"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -70,8 +75,9 @@
       false,
       false,
       false,
-      true
+      true,
+      null
     ]
   },
-  "hash": "cd0ccb09abc21ee02fbd7fbd38a1090af9d9f22d4bbf58153edd32da50ebc529"
+  "hash": "e74dfdc5bcd970c2e97e8a4f26b8019e60dfac2a278205453506244ca2a36ddf"
 }

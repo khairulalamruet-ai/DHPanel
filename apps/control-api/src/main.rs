@@ -330,6 +330,37 @@ async fn main() -> ExitCode {
         Some(tokio::spawn(dispatcher.run(results, stopped.clone())))
     });
     let relay_task = tokio::spawn(relay.run(stopped.clone()));
+    // Zones kept in the panel are pushed to the DNS server, when there is one.
+    let dns_task = match config.dns.powerdns_url.clone() {
+        None => {
+            tracing::info!("DNS sync is off: dns.powerdns_url is not set");
+            None
+        }
+        Some(url) => match config.powerdns_api_key() {
+            Ok(api_key) => {
+                let provider =
+                    dhpanel_dns::powerdns::PowerDns::new(&dhpanel_dns::powerdns::Config {
+                        url,
+                        api_key,
+                        server_id: config.dns.powerdns_server_id.clone(),
+                    });
+                let sync = dhpanel_dns::sync::ZoneSync::new(
+                    db.clone(),
+                    Arc::new(provider),
+                    config.dns.nameservers.clone(),
+                );
+                Some(tokio::spawn(sync.run(
+                    std::time::Duration::from_secs(u64::from(config.dns.sync_seconds)),
+                    stopped.clone(),
+                )))
+            }
+            Err(err) => {
+                tracing::error!(error = %err, "DNS API key unavailable");
+                telemetry.shutdown();
+                return ExitCode::from(EXIT_CONFIG);
+            }
+        },
+    };
     let gateway_task =
         gateway.map(|(gateway, listener)| tokio::spawn(gateway.serve(listener, stopped.clone())));
 
@@ -362,6 +393,9 @@ async fn main() -> ExitCode {
         let _ = task.await;
     }
     let _ = relay_task.await;
+    if let Some(task) = dns_task {
+        let _ = task.await;
+    }
 
     db.close().await;
     telemetry.shutdown();

@@ -51,6 +51,28 @@ pub struct ControlConfig {
     pub agent: AgentConfig,
     /// The internal certificate authority for node mTLS.
     pub pki: PkiConfig,
+    /// The DNS server that hosts the zones of hosted domains.
+    pub dns: DnsConfig,
+}
+
+/// DNS server settings.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DnsConfig {
+    /// Address of PowerDNS's HTTP API, e.g. `http://127.0.0.1:8053`. Without it
+    /// zones are kept in the panel only and nothing is pushed to a DNS server.
+    pub powerdns_url: Option<String>,
+    /// The API key. Prefer `powerdns_api_key_file`.
+    #[serde(default, skip_serializing)]
+    pub powerdns_api_key: Option<SecretString>,
+    /// File holding the API key (mode 0600).
+    pub powerdns_api_key_file: Option<PathBuf>,
+    /// PowerDNS's server id (almost always `localhost`).
+    pub powerdns_server_id: String,
+    /// The name servers every new zone gets, absolute (`ns1.example.net.`).
+    pub nameservers: Vec<String>,
+    /// Seconds between passes that push changed zones (5..=3600).
+    pub sync_seconds: u32,
 }
 
 /// Internal certificate authority settings.
@@ -243,6 +265,14 @@ impl Default for ControlConfig {
             pki: PkiConfig {
                 ca_dir: PathBuf::from("/etc/dhpanel/secrets"),
             },
+            dns: DnsConfig {
+                powerdns_url: None,
+                powerdns_api_key: None,
+                powerdns_api_key_file: None,
+                powerdns_server_id: "localhost".to_owned(),
+                nameservers: Vec::new(),
+                sync_seconds: 30,
+            },
         }
     }
 }
@@ -327,6 +357,43 @@ impl ControlConfig {
             return Err(ConfigError::Invalid {
                 key: "listen",
                 reason: "port must not be 0".to_owned(),
+            });
+        }
+        if let Some(url) = &self.dns.powerdns_url {
+            let plain = |c: char| {
+                c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '/' | '[' | ']')
+            };
+            let ok = (url.starts_with("http://") || url.starts_with("https://"))
+                && url.len() <= 200
+                && !url.ends_with('/')
+                && url.chars().all(plain);
+            if !ok {
+                return Err(ConfigError::Invalid {
+                    key: "dns.powerdns_url",
+                    reason: "must look like http://127.0.0.1:8053 (no path, no trailing slash)"
+                        .to_owned(),
+                });
+            }
+        }
+        if !(5..=3600).contains(&self.dns.sync_seconds) {
+            return Err(ConfigError::Invalid {
+                key: "dns.sync_seconds",
+                reason: format!("must be 5..=3600, got {}", self.dns.sync_seconds),
+            });
+        }
+        if self.dns.nameservers.len() > 8
+            || self.dns.nameservers.iter().any(|n| {
+                !(n.ends_with('.')
+                    && n.len() <= 254
+                    && n.len() > 3
+                    && n.bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-')))
+            })
+        {
+            return Err(ConfigError::Invalid {
+                key: "dns.nameservers",
+                reason: "at most 8 names, each absolute with a final dot, like ns1.example.net."
+                    .to_owned(),
             });
         }
         if self.log.filter.trim().is_empty() {
@@ -476,6 +543,18 @@ impl ControlConfig {
             "secrets.master_key",
             self.secrets.master_key.as_ref(),
             self.secrets.master_key_file.as_deref(),
+        )
+    }
+
+    /// Resolves the PowerDNS API key from `dns.powerdns_api_key` or its file.
+    ///
+    /// # Errors
+    /// Missing secret, unreadable file or unsafe permissions.
+    pub fn powerdns_api_key(&self) -> Result<SecretString, ConfigError> {
+        resolve_secret(
+            "dns.powerdns_api_key",
+            self.dns.powerdns_api_key.as_ref(),
+            self.dns.powerdns_api_key_file.as_deref(),
         )
     }
 
@@ -756,6 +835,61 @@ mod tests {
             jail.set_env("DHPANEL_SECRETS__MASTER_KEY_FILE", "/nonexistent");
             let msg = load(jail).expect_err("both").to_string();
             assert!(msg.contains("secrets.master_key"), "{msg}");
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn dns_is_off_by_default_and_its_settings_are_checked() {
+        Jail::expect_with(|jail| {
+            jail.clear_env();
+            let cfg = load(jail).expect("defaults");
+            assert_eq!(cfg.dns.powerdns_url, None);
+            assert_eq!(cfg.dns.powerdns_server_id, "localhost");
+            assert_eq!((cfg.dns.sync_seconds, cfg.dns.nameservers.len()), (30, 0));
+            assert!(cfg.powerdns_api_key().is_err(), "no key until one is set");
+
+            jail.set_env("DHPANEL_DNS__POWERDNS_URL", "http://127.0.0.1:8053");
+            jail.set_env("DHPANEL_DNS__POWERDNS_API_KEY", "dns-key-material");
+            jail.set_env(
+                "DHPANEL_DNS__NAMESERVERS",
+                "[ns1.example.net., ns2.example.net.]",
+            );
+            let cfg = load(jail).expect("set");
+            assert!(cfg.powerdns_api_key().is_ok());
+            assert_eq!(
+                cfg.dns.nameservers,
+                ["ns1.example.net.", "ns2.example.net."]
+            );
+            assert!(
+                !format!("{cfg:?}").contains("dns-key-material"),
+                "the key is never printed"
+            );
+
+            for bad in [
+                "ftp://x",
+                "http://127.0.0.1:8053/",
+                "127.0.0.1:8053",
+                "http://a b",
+                "http://x;y",
+            ] {
+                jail.set_env("DHPANEL_DNS__POWERDNS_URL", bad);
+                let msg = load(jail).expect_err(bad).to_string();
+                assert!(msg.contains("dns.powerdns_url"), "{bad}: {msg}");
+            }
+            jail.set_env("DHPANEL_DNS__POWERDNS_URL", "https://dns.example.net:8443");
+            assert!(load(jail).is_ok());
+            for bad in ["4", "3601", "0"] {
+                jail.set_env("DHPANEL_DNS__SYNC_SECONDS", bad);
+                let msg = load(jail).expect_err(bad).to_string();
+                assert!(msg.contains("dns.sync_seconds"), "{bad}: {msg}");
+            }
+            jail.set_env("DHPANEL_DNS__SYNC_SECONDS", "30");
+            for bad in ["[ns1.example.net]", "[bad name.]", "[.]"] {
+                jail.set_env("DHPANEL_DNS__NAMESERVERS", bad);
+                let msg = load(jail).expect_err(bad).to_string();
+                assert!(msg.contains("dns.nameservers"), "{bad}: {msg}");
+            }
             Ok(())
         });
     }

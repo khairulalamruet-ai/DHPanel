@@ -925,6 +925,7 @@ dependencies = [
  "dhpanel-config",
  "dhpanel-database",
  "dhpanel-dispatcher",
+ "dhpanel-dns",
  "dhpanel-events",
  "dhpanel-http-kit",
  "dhpanel-kernel",
@@ -1007,6 +1008,22 @@ dependencies = [
  "tokio-rustls",
  "tokio-tungstenite",
  "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "dhpanel-dns"
+version = "0.1.0"
+dependencies = [
+ "dhpanel-database",
+ "dhpanel-domain",
+ "secrecy",
+ "serde_json",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "ureq",
  "uuid",
 ]
 

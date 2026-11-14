@@ -275,11 +275,17 @@ impl Record {
                 absolute_host("content", content)?
             }
             RecordType::Txt => {
-                if content.is_empty() || content.chars().count() > MAX_TXT || !printable(content) {
+                // Printable ASCII without quotes and backslashes: what SPF, DKIM,
+                // DMARC and verification records are made of. PowerDNS cannot
+                // store the other characters reliably through its API.
+                let allowed = |b: u8| (0x20..=0x7e).contains(&b) && b != b'"' && b != b'\\';
+                if content.is_empty() || content.len() > MAX_TXT || !content.bytes().all(allowed) {
                     return Err(err(
                         "content",
                         "invalid_txt",
-                        format!("Text of 1 to {MAX_TXT} printable characters."),
+                        format!(
+                            "Text of 1 to {MAX_TXT} printable ASCII characters, without quotes (\") or backslashes."
+                        ),
                     ));
                 }
                 content.to_owned()
@@ -487,6 +493,15 @@ mod tests {
         assert_eq!(field("@", "NS", "ns.example.com"), "name");
         assert_eq!(field("@", "TXT", ""), "content");
         assert_eq!(field("@", "TXT", "line\nbreak"), "content");
+        assert_eq!(field("@", "TXT", "say \"hi\""), "content", "no quotes");
+        assert_eq!(
+            field("@", "TXT", "back\\slash"),
+            "content",
+            "no backslashes"
+        );
+        assert_eq!(field("@", "TXT", "café"), "content", "ASCII only");
+        assert_eq!(field("@", "TXT", &"x".repeat(2001)), "content");
+        assert!(rec("@", "TXT", &"x".repeat(2000)).is_ok());
         assert_eq!(field("@", "SRV", "5 5060"), "content");
         assert_eq!(field("@", "SRV", "x 5060 a.example.com"), "content");
         assert_eq!(field("@", "CAA", "0 badtag x.org"), "content");

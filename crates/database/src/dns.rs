@@ -19,6 +19,9 @@ pub struct Zone {
     pub status: String,
     /// Why the last push to the DNS server failed.
     pub last_error: Option<String>,
+    /// Changes whenever the zone row does: a push only marks the zone done if
+    /// this is still what it started from (otherwise something changed meanwhile).
+    pub version: String,
 }
 
 /// A stored record.
@@ -332,12 +335,17 @@ pub async fn create_zone(
     let zone = sqlx::query_as!(
         Zone,
         "INSERT INTO dns_zones (domain_id, name) VALUES ($1, $2)
-         RETURNING id, domain_id, name, status, last_error",
+         RETURNING id, domain_id, name, status, last_error, updated_at::text AS \"version!\"",
         domain_id,
         name,
     )
     .fetch_one(&mut *conn)
     .await?;
+    // A zone of this name that was removed a moment ago is back: the server still
+    // has it, and the next sync makes it match.
+    sqlx::query!("DELETE FROM dns_zone_removals WHERE name = $1", name)
+        .execute(&mut *conn)
+        .await?;
     insert_records(conn, zone.id, records).await?;
     Ok(zone)
 }
@@ -376,7 +384,7 @@ pub async fn insert_records(
 pub async fn zone_of_domain(pool: &PgPool, domain_id: Uuid) -> Result<Option<Zone>, sqlx::Error> {
     sqlx::query_as!(
         Zone,
-        "SELECT id, domain_id, name, status, last_error FROM dns_zones WHERE domain_id = $1",
+        "SELECT id, domain_id, name, status, last_error, updated_at::text AS \"version!\" FROM dns_zones WHERE domain_id = $1",
         domain_id,
     )
     .fetch_optional(pool)
@@ -396,7 +404,7 @@ pub async fn nearest_zone(
 ) -> Result<Option<Zone>, sqlx::Error> {
     sqlx::query_as!(
         Zone,
-        "SELECT z.id, z.domain_id, z.name, z.status, z.last_error
+        "SELECT z.id, z.domain_id, z.name, z.status, z.last_error, z.updated_at::text AS \"version!\"
          FROM dns_zones z JOIN domains d ON d.id = z.domain_id
          WHERE d.tenant_id = $1 AND $2 LIKE '%.' || z.name
          ORDER BY length(z.name) DESC LIMIT 1",
@@ -455,4 +463,108 @@ pub async fn remove_host_records(
     .execute(conn)
     .await?;
     Ok(done.rows_affected())
+}
+
+/// Zones whose copy on the DNS server is not up to date: new or changed ones
+/// (`pending`), and refused ones (`error`) once they have waited `retry_after_secs`.
+///
+/// # Errors
+/// Database errors.
+pub async fn zones_to_sync(
+    pool: &PgPool,
+    retry_after_secs: i32,
+    limit: i64,
+) -> Result<Vec<Zone>, sqlx::Error> {
+    sqlx::query_as!(
+        Zone,
+        r#"SELECT id, domain_id, name, status, last_error, updated_at::text AS "version!"
+           FROM dns_zones
+           WHERE status = 'pending'
+              OR (status = 'error' AND updated_at < now() - make_interval(secs => $1::int))
+           ORDER BY updated_at, id
+           LIMIT $2"#,
+        retry_after_secs,
+        limit,
+    )
+    .fetch_all(pool)
+    .await
+}
+
+/// One zone.
+///
+/// # Errors
+/// Database errors.
+pub async fn zone(pool: &PgPool, id: Uuid) -> Result<Option<Zone>, sqlx::Error> {
+    sqlx::query_as!(
+        Zone,
+        r#"SELECT id, domain_id, name, status, last_error, updated_at::text AS "version!"
+           FROM dns_zones WHERE id = $1"#,
+        id,
+    )
+    .fetch_optional(pool)
+    .await
+}
+
+/// Records how a push went. `version` is the zone's version when the push
+/// started: if the zone changed since, nothing is written (it stays `pending`
+/// and the next pass pushes it again). Returns whether it was written.
+///
+/// # Errors
+/// Database errors.
+pub async fn mark_zone(
+    pool: &PgPool,
+    id: Uuid,
+    version: &str,
+    status: &str,
+    last_error: Option<&str>,
+) -> Result<bool, sqlx::Error> {
+    let last_error = last_error.map(|e| e.chars().take(1000).collect::<String>());
+    let done = sqlx::query!(
+        "UPDATE dns_zones SET status = $3, last_error = $4
+         WHERE id = $1 AND updated_at::text = $2",
+        id,
+        version,
+        status,
+        last_error,
+    )
+    .execute(pool)
+    .await?;
+    Ok(done.rows_affected() == 1)
+}
+
+/// Names of zones to remove from the DNS server, oldest first.
+///
+/// # Errors
+/// Database errors.
+pub async fn queued_removals(pool: &PgPool, limit: i64) -> Result<Vec<String>, sqlx::Error> {
+    sqlx::query_scalar!(
+        "SELECT name FROM dns_zone_removals ORDER BY queued_at, name LIMIT $1",
+        limit,
+    )
+    .fetch_all(pool)
+    .await
+}
+
+/// Whether a zone of this name exists (again).
+///
+/// # Errors
+/// Database errors.
+pub async fn zone_name_exists(pool: &PgPool, name: &str) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar!(
+        r#"SELECT EXISTS (SELECT 1 FROM dns_zones WHERE name = $1) AS "exists!""#,
+        name,
+    )
+    .fetch_one(pool)
+    .await
+}
+
+/// Takes a name off the removal list.
+///
+/// # Errors
+/// Database errors.
+pub async fn finish_removal(pool: &PgPool, name: &str) -> Result<(), sqlx::Error> {
+    sqlx::query!("DELETE FROM dns_zone_removals WHERE name = $1", name)
+        .execute(pool)
+        .await?;
+    Ok(())
 }

@@ -1,0 +1,28 @@
+[package]
+name = "dhpanel-dns"
+description = "DNS providers (PowerDNS) and the sync of the panel's zones to them."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+dhpanel-database.workspace = true
+dhpanel-domain.workspace = true
+secrecy = "0.10"
+serde_json = "1"
+thiserror = "2.0.21"
+tokio = { version = "1", features = ["rt", "macros", "time", "sync"] }
+tracing = "0.1.44"
+# One short blocking HTTP call per change, run on the blocking pool: the same
+# small client the node agent uses (rustls with the ring backend).
+ureq = { version = "3", default-features = false, features = ["rustls", "json"] }
+uuid = "1"
+
+[dev-dependencies]
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "postgres", "macros", "uuid", "json", "migrate"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
