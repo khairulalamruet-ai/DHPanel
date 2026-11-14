@@ -33,6 +33,7 @@ vi.mock("@dhpanel/i18n", () => ({
         "nodes.status.revoked": "Revoked",
         "nodes.table.node": "Node / Hostname",
         "nodes.table.status": "Status",
+        "nodes.table.saturation": "Fullness (%)",
         "nodes.table.cpu": "CPU",
         "nodes.table.ram": "RAM",
         "nodes.table.disk": "Disk",
@@ -40,7 +41,28 @@ vi.mock("@dhpanel/i18n", () => ({
         "nodes.table.lastSeen": "Last Seen",
         "nodes.table.actions": "Actions",
         "nodes.table.viewDetails": "View Specs",
+        "nodes.table.editCapacity": "Capacity / Oversell",
+        "nodes.table.drain": "Drain",
+        "nodes.table.undrain": "Undrain",
         "nodes.table.revoke": "Revoke",
+        "nodes.capacity.title": "Node Capacity & Saturation",
+        "nodes.capacity.totalNodes": "Total Nodes",
+        "nodes.capacity.saturation": "Saturation",
+        "nodes.capacity.fullness": "Fullness",
+        "nodes.capacity.tenants": "Tenants",
+        "nodes.capacity.clusterFullness": "Cluster Fullness",
+        "nodes.capacity.avgSaturation": "Avg Saturation",
+        "nodes.capacity.configureOversell": "Configure Oversell",
+        "nodes.capacity.oversellSettings": "Oversell Settings",
+        "nodes.capacity.oversellDesc": "Configure CPU, RAM, and Disk oversell allocation multipliers for this node.",
+        "nodes.capacity.cpuRatioLabel": "CPU Oversell Multiplier",
+        "nodes.capacity.ramRatioLabel": "RAM Oversell Multiplier",
+        "nodes.capacity.diskRatioLabel": "Disk Oversell Multiplier",
+        "nodes.capacity.maxTenantsLabel": "Maximum Tenants Capacity",
+        "nodes.capacity.saveSuccess": "Node capacity & oversell settings updated successfully.",
+        "nodes.capacity.drainSuccess": "Node set to draining mode. No new tenants will be scheduled.",
+        "nodes.capacity.undrainSuccess": "Node restored to active service.",
+        "common.save": "Save Changes",
         "nodes.enrollments.title": "Enrollment Tokens",
         "nodes.enrollments.desc": "Single-use tokens issued for server onboarding.",
         "nodes.enrollments.name": "Node Name",
@@ -128,6 +150,19 @@ const mockNodesList = [
       docker_version: "27.3.1",
       security_features: ["seccomp", "apparmor"],
     },
+    capacity: {
+      allocated_cpu_cores: 12,
+      allocated_ram_bytes: 18 * 1024 * 1024 * 1024,
+      allocated_disk_bytes: 160 * 1024 * 1024 * 1024,
+      tenants_count: 24,
+      max_tenants: 50,
+      saturation_pct: 68,
+      oversell: {
+        cpu_ratio: 2.0,
+        ram_ratio: 1.25,
+        disk_ratio: 1.0,
+      },
+    },
   },
   {
     id: "node_02",
@@ -150,6 +185,19 @@ const mockNodesList = [
       kernel: "Linux 6.5.0",
       docker_version: "26.1.4",
       security_features: ["seccomp"],
+    },
+    capacity: {
+      allocated_cpu_cores: 6,
+      allocated_ram_bytes: 7 * 1024 * 1024 * 1024,
+      allocated_disk_bytes: 80 * 1024 * 1024 * 1024,
+      tenants_count: 48,
+      max_tenants: 60,
+      saturation_pct: 85,
+      oversell: {
+        cpu_ratio: 2.0,
+        ram_ratio: 1.25,
+        disk_ratio: 1.0,
+      },
     },
   },
 ];
@@ -214,6 +262,12 @@ describe("NodesPage", () => {
           message: "Agent self-update verified and applied successfully",
         };
       }
+      if (url.includes("/drain") || url.includes("/undrain")) {
+        return { success: true, status: "draining" };
+      }
+      if (url.includes("/capacity") && opts?.method === "PUT") {
+        return { success: true };
+      }
       return {};
     });
   });
@@ -225,7 +279,7 @@ describe("NodesPage", () => {
       </ToastProvider>
     );
 
-    expect(screen.getByText("Cluster Nodes")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Cluster Nodes" })).toBeInTheDocument();
 
     await waitFor(() => {
       expect(screen.getByText("node-master-01")).toBeInTheDocument();
@@ -490,6 +544,107 @@ describe("NodesPage", () => {
     await waitFor(() => {
       expect(screen.getByTestId("agent-update-success-alert")).toBeInTheDocument();
       expect(screen.getByTestId("badge-update-verified")).toHaveTextContent("VERIFIED & UPDATED");
+    });
+  });
+
+  it("renders node fullness/saturation percentage in table (DoD: T16.01)", async () => {
+    render(
+      <ToastProvider>
+        <NodesPage />
+      </ToastProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("node-master-01")).toBeInTheDocument();
+    });
+
+    // DoD check: Admin UI shows node saturation/fullness percentage
+    expect(screen.getByText("68%")).toBeInTheDocument();
+    expect(screen.getByText("85%")).toBeInTheDocument();
+    expect(screen.getByText("Fullness (%)")).toBeInTheDocument();
+  });
+
+  it("renders cluster capacity overview metrics", async () => {
+    render(
+      <ToastProvider>
+        <NodesPage />
+      </ToastProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("cluster-capacity-overview")).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("Cluster Fullness")).toBeInTheDocument();
+    expect(screen.getByText("Placement Scheduler")).toBeInTheDocument();
+  });
+
+  it("toggles node drain and undrain actions", async () => {
+    const apiFetchSpy = vi.spyOn(dhpanelApi, "apiFetch");
+
+    render(
+      <ToastProvider>
+        <NodesPage />
+      </ToastProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("node-master-01")).toBeInTheDocument();
+    });
+
+    // node-master-01 is online, so it has a Drain button
+    const drainBtn = screen.getByRole("button", { name: /^Drain$/i });
+    expect(drainBtn).toBeInTheDocument();
+    fireEvent.click(drainBtn);
+
+    await waitFor(() => {
+      expect(apiFetchSpy).toHaveBeenCalledWith(
+        "/api/v1/admin/nodes/node_01/drain",
+        expect.objectContaining({ method: "POST" })
+      );
+    });
+
+    // node-worker-02 is draining, so it has an Undrain button
+    const undrainBtn = screen.getByRole("button", { name: /^Undrain$/i });
+    expect(undrainBtn).toBeInTheDocument();
+    fireEvent.click(undrainBtn);
+
+    await waitFor(() => {
+      expect(apiFetchSpy).toHaveBeenCalledWith(
+        "/api/v1/admin/nodes/node_02/undrain",
+        expect.objectContaining({ method: "POST" })
+      );
+    });
+  });
+
+  it("opens oversell configuration dialog and saves updated ratios", async () => {
+    const apiFetchSpy = vi.spyOn(dhpanelApi, "apiFetch");
+
+    render(
+      <ToastProvider>
+        <NodesPage />
+      </ToastProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("node-master-01")).toBeInTheDocument();
+    });
+
+    const editCapacityBtns = screen.getAllByRole("button", { name: /Capacity \/ Oversell/i });
+    fireEvent.click(editCapacityBtns[0]);
+
+    await waitFor(() => {
+      expect(screen.getByText("Oversell Settings")).toBeInTheDocument();
+    });
+
+    const saveBtn = screen.getByRole("button", { name: /Save Changes/i });
+    fireEvent.click(saveBtn);
+
+    await waitFor(() => {
+      expect(apiFetchSpy).toHaveBeenCalledWith(
+        "/api/v1/admin/nodes/node_01/capacity",
+        expect.objectContaining({ method: "PUT" })
+      );
     });
   });
 });

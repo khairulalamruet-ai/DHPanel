@@ -2324,6 +2324,19 @@ export const handlers = [
           docker_version: "27.3.1",
           security_features: ["seccomp", "apparmor", "userns"],
         },
+        capacity: {
+          allocated_cpu_cores: 12,
+          allocated_ram_bytes: 18 * 1024 * 1024 * 1024,
+          allocated_disk_bytes: 160 * 1024 * 1024 * 1024,
+          tenants_count: 24,
+          max_tenants: 50,
+          saturation_pct: 68,
+          oversell: {
+            cpu_ratio: 2.0,
+            ram_ratio: 1.25,
+            disk_ratio: 1.0,
+          },
+        },
       },
       {
         id: "00000000-0000-0000-0000-0000000000bb",
@@ -2347,6 +2360,19 @@ export const handlers = [
           docker_version: "27.3.1",
           security_features: ["seccomp", "apparmor"],
         },
+        capacity: {
+          allocated_cpu_cores: 28,
+          allocated_ram_bytes: 34 * 1024 * 1024 * 1024,
+          allocated_disk_bytes: 420 * 1024 * 1024 * 1024,
+          tenants_count: 48,
+          max_tenants: 60,
+          saturation_pct: 85,
+          oversell: {
+            cpu_ratio: 2.0,
+            ram_ratio: 1.25,
+            disk_ratio: 1.0,
+          },
+        },
       },
       {
         id: "00000000-0000-0000-0000-0000000000cc",
@@ -2369,6 +2395,19 @@ export const handlers = [
           kernel: "Linux 6.5.0-28-generic",
           docker_version: "26.1.4",
           security_features: ["seccomp"],
+        },
+        capacity: {
+          allocated_cpu_cores: 2,
+          allocated_ram_bytes: 2 * 1024 * 1024 * 1024,
+          allocated_disk_bytes: 25 * 1024 * 1024 * 1024,
+          tenants_count: 4,
+          max_tenants: 20,
+          saturation_pct: 22,
+          oversell: {
+            cpu_ratio: 2.0,
+            ram_ratio: 1.25,
+            disk_ratio: 1.0,
+          },
         },
       },
     ];
@@ -2492,6 +2531,56 @@ export const handlers = [
           success: true,
           version: target.version,
           message: "Agent self-update verified and applied successfully",
+        });
+      }),
+
+      // Drain Node (POST /api/v1/admin/nodes/:id/drain) TODO(api:T16.01)
+      http.post(/\/api\/v1\/admin\/nodes\/([^/]+)\/drain$/, ({ params }) => {
+        const { 0: nodeId } = params as any;
+        const target = mockNodes.find((n) => n.id === nodeId || n.name === nodeId);
+        if (target) {
+          target.status = "draining";
+        }
+        return HttpResponse.json({
+          success: true,
+          status: "draining",
+          message: "Node is now draining",
+        });
+      }),
+
+      // Undrain Node (POST /api/v1/admin/nodes/:id/undrain) TODO(api:T16.01)
+      http.post(/\/api\/v1\/admin\/nodes\/([^/]+)\/undrain$/, ({ params }) => {
+        const { 0: nodeId } = params as any;
+        const target = mockNodes.find((n) => n.id === nodeId || n.name === nodeId);
+        if (target) {
+          target.status = "online";
+        }
+        return HttpResponse.json({
+          success: true,
+          status: "online",
+          message: "Node restored to service",
+        });
+      }),
+
+      // Update Node Capacity & Oversell (PUT /api/v1/admin/nodes/:id/capacity) TODO(api:T16.01)
+      http.put(/\/api\/v1\/admin\/nodes\/([^/]+)\/capacity$/, async ({ params, request }) => {
+        const { 0: nodeId } = params as any;
+        const body = (await request.json().catch(() => ({}))) as any;
+        const target = mockNodes.find((n) => n.id === nodeId || n.name === nodeId);
+        if (target) {
+          if (target.capacity && body.oversell) {
+            target.capacity.oversell = {
+              ...target.capacity.oversell,
+              ...body.oversell,
+            };
+          }
+          if (target.capacity && typeof body.max_tenants === "number") {
+            target.capacity.max_tenants = body.max_tenants;
+          }
+        }
+        return HttpResponse.json({
+          success: true,
+          node: target,
         });
       }),
     ];

@@ -143,5 +143,70 @@ test.describe("Node Management UI (T02.16)", () => {
     const successAlert = page.getByTestId("agent-update-success-alert");
     await expect(successAlert).toBeVisible();
     await expect(page.getByTestId("badge-update-verified")).toBeVisible();
+
+  test("displays node fullness/saturation percentage in table and cluster capacity overview (T16.01 DoD)", async ({ page }) => {
+    // Verify Cluster Capacity Overview card is rendered
+    const clusterOverview = page.getByTestId("cluster-capacity-overview");
+    await expect(clusterOverview).toBeVisible();
+    await expect(clusterOverview.getByText(/Cluster Fullness|ক্লাস্টার পূর্ণতা/i)).toBeVisible();
+
+    // Verify Fullness (%) column header (DoD requirement: Admin UI shows node saturation/fullness %)
+    await expect(page.getByText(/Fullness \(%\)|পূর্ণতা \(%\)/i)).toBeVisible();
+
+    // Verify node saturation percentages are visible
+    await expect(page.getByText("68%").first()).toBeVisible();
+    await expect(page.getByText("85%").first()).toBeVisible();
+
+    // Verify saturation progress bar exists
+    const saturationBars = page.getByTestId("node-saturation-bar");
+    await expect(saturationBars.first()).toBeVisible();
+  });
+
+  test("toggles node drain and undrain mode (T16.01, T16.02)", async ({ page }) => {
+    // Find Drain button for active node
+    const drainBtn = page.getByRole("button", { name: /^Drain$|^ড্রেন$/i }).first();
+    await expect(drainBtn).toBeVisible();
+    await drainBtn.click();
+
+    // Verify toast feedback for draining
+    await expect(
+      page.getByText(/Node set to draining mode|নোডটি ড্রেনিং মোডে নেওয়া হয়েছে/i).first()
+    ).toBeVisible();
+
+    // Find Undrain button for draining node
+    const undrainBtn = page.getByRole("button", { name: /^Undrain$|^সচল করুন$/i }).first();
+    await expect(undrainBtn).toBeVisible();
+    await undrainBtn.click();
+
+    // Verify toast feedback for undraining
+    await expect(
+      page.getByText(/Node restored to active service|নোডটি পুনরায় সফলভাবে সচল করা হয়েছে/i).first()
+    ).toBeVisible();
+  });
+
+  test("opens oversell configuration dialog, modifies ratio, and saves (T16.01)", async ({ page }) => {
+    // Click capacity / oversell button
+    const editBtn = page.getByRole("button", { name: /Capacity \/ Oversell|ধারণক্ষমতা \/ ওভারসেল/i }).first();
+    await expect(editBtn).toBeVisible();
+    await editBtn.click();
+
+    // Verify dialog opens
+    await expect(page.getByText(/Oversell Settings|ওভারসেল সেটিংস/i)).toBeVisible();
+    await expect(page.getByText(/CPU Oversell Multiplier|সিপিইউ ওভারসেল মাল্টিপ্লায়ার/i)).toBeVisible();
+
+    // Modify CPU ratio
+    const cpuInput = page.locator("#cpu-ratio-input");
+    await expect(cpuInput).toBeVisible();
+    await cpuInput.fill("2.5");
+
+    // Click Save
+    const saveBtn = page.getByRole("button", { name: /Save|সংরক্ষণ করুন/i });
+    await expect(saveBtn).toBeVisible();
+    await saveBtn.click();
+
+    // Verify toast feedback
+    await expect(
+      page.getByText(/Node capacity & oversell settings updated|নোড ধারণক্ষমতা ও ওভারসেল সেটিংস সফলভাবে সংরক্ষিত হয়েছে/i).first()
+    ).toBeVisible();
   });
 });
