@@ -1709,3 +1709,82 @@ async fn running_imports_are_asked_how_far_they_are_and_the_answer_is_kept(pool:
     agent_stop.send(true).unwrap();
     agent.await.unwrap();
 }
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs PostgreSQL"]
+async fn a_disk_usage_answer_is_kept_for_the_account(pool: PgPool) {
+    use dhpanel_node_protocol::files::{FileRequest, FileResult, FolderUsage};
+    let p = plane(&pool).await;
+    let d = Dispatcher::new(p.ops.clone(), p.gateway.clone(), None, dispatch_settings());
+    let mut registry = Registry::new();
+    registry.register("file_op", |_| async move {
+        Ok(Output::File {
+            result: FileResult::Usage {
+                total_bytes: 123_456,
+                inodes: 77,
+                folders: vec![FolderUsage {
+                    path: "www".into(),
+                    bytes: 100_000,
+                    inodes: 70,
+                }],
+                partial: false,
+            },
+        })
+    });
+    let node = make_node_with(&p, &pool, "usage", registry).await;
+    let (agent_stop, agent) = node.start_agent(p.addr);
+    wait_connected(&p, node.id).await;
+    let results = p.gateway.take_results().expect("results taken once");
+    tokio::spawn(d.clone().run(results, p.stop.subscribe()));
+    let account: Uuid = sqlx::query_scalar(
+        "INSERT INTO accounts (kind, username, email, password_hash)
+         VALUES ('client', 'fay', 'fay@example.com',
+                 '$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHQ$aGFzaGhhc2hoYXNoaGFzaA') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let plan: Uuid = sqlx::query_scalar("SELECT id FROM plans WHERE is_default")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let tenant: Uuid = sqlx::query_scalar(
+        "INSERT INTO tenants (owner_account_id, node_id, plan_id, username, uid, status)
+         VALUES ($1, $2, $3, 'fay', 10006, 'active') RETURNING id",
+    )
+    .bind(account)
+    .bind(node.id)
+    .bind(plan)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let mut request = dhpanel_operations::Request::new(
+        node.id,
+        dhpanel_node_protocol::Operation::FileOp {
+            tenant_id: tenant,
+            uid: 10_006,
+            request: FileRequest::DiskUsage { top: 5 },
+        },
+        "du:test",
+    );
+    request.tenant_id = Some(tenant);
+    p.ops.enqueue(&request).await.unwrap();
+    let mut found = None;
+    for _ in 0..100 {
+        found = dhpanel_database::file_transfers::usage_of(&pool, tenant)
+            .await
+            .unwrap();
+        if found.is_some() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let found = found.expect("the measurement was kept");
+    assert_eq!(
+        (found.total_bytes, found.inodes, found.partial),
+        (123_456, 77, false)
+    );
+    assert_eq!(found.folders[0]["path"], "www");
+    agent_stop.send(true).unwrap();
+    agent.await.unwrap();
+}

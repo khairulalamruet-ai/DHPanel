@@ -1081,3 +1081,72 @@ async fn big_files_go_up_in_chunks_that_can_be_resumed_and_come_down_through_a_f
     let _ = tenant;
     let _ = std::fs::remove_dir_all(spool_dir());
 }
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn the_disk_usage_is_measured_by_the_node_and_kept_for_the_client(pool: PgPool) {
+    let base = scratch("usage");
+    let e = env(&pool, Duration::from_secs(20)).await;
+    let (alice, tenant) = client(&pool, "alice", 10_000).await;
+    let a = e.sign_in(alice).await;
+    let (status, got) = e.call(&a, "GET", "/api/v1/client/files/usage", None).await;
+    assert_eq!(
+        (
+            status,
+            got["measured_at"].clone(),
+            got["total_bytes"].clone()
+        ),
+        (StatusCode::OK, Value::Null, json!(0))
+    );
+    // The panel queues a measurement for every active account, once per slot.
+    assert_eq!(dhpanel_mod_files::measure_usage(&pool).await.unwrap(), 1);
+    assert_eq!(
+        dhpanel_mod_files::measure_usage(&pool).await.unwrap(),
+        0,
+        "once per six hours"
+    );
+    let payload: Value =
+        sqlx::query_scalar("SELECT payload FROM operations WHERE kind = 'file_op'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(payload["request"]["type"], "disk_usage");
+    // The node measures (the real walk); what comes back is kept as the dispatcher does.
+    let dir = base.join(tenant.to_string());
+    std::fs::create_dir_all(dir.join("www/big")).unwrap();
+    std::fs::write(dir.join("www/big/a.bin"), vec![1u8; 200_000]).unwrap();
+    let root = dhpanel_safe_fs::Root::open(&dir).unwrap();
+    let dhpanel_node_protocol::files::FileResult::Usage {
+        total_bytes,
+        inodes,
+        folders,
+        partial,
+    } = dhpanel_fileops::handle(
+        &root,
+        dhpanel_node_protocol::files::FileRequest::DiskUsage { top: 5 },
+    )
+    else {
+        panic!()
+    };
+    dhpanel_database::file_transfers::record_usage(
+        &pool,
+        tenant,
+        i64::try_from(total_bytes).unwrap(),
+        i64::try_from(inodes).unwrap(),
+        partial,
+        &serde_json::to_value(&folders).unwrap(),
+    )
+    .await
+    .unwrap();
+    let (_, got) = e.call(&a, "GET", "/api/v1/client/files/usage", None).await;
+    assert!(got["measured_at"].is_string());
+    assert!(got["total_bytes"].as_i64().unwrap() >= 200_000);
+    assert_eq!(got["inodes"], 3);
+    assert_eq!(got["folders"][0]["path"], "www");
+    // "Measure now" is allowed and queues one (again within five minutes: the same one).
+    let (status, one) = e.call(&a, "POST", "/api/v1/client/files/usage", None).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{one}");
+    let (_, two) = e.call(&a, "POST", "/api/v1/client/files/usage", None).await;
+    assert_eq!(one["operation_id"], two["operation_id"]);
+    let _ = std::fs::remove_dir_all(&base);
+}

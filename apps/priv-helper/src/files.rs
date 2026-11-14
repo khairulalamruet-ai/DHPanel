@@ -51,6 +51,25 @@ pub fn run(
     work(&root, host, host, request)
 }
 
+/// What to put before the worker: a walk over everything runs at the lowest disk and
+/// processor priority, so it does not slow down the sites.
+fn low_priority(request: &FileRequest) -> Vec<&'static str> {
+    if !matches!(request, FileRequest::DiskUsage { .. }) {
+        return Vec::new();
+    }
+    let mut prefix = Vec::new();
+    for (program, args) in [
+        ("/usr/bin/ionice", ["-c3"].as_slice()),
+        ("/usr/bin/nice", ["-n19"].as_slice()),
+    ] {
+        if Path::new(program).exists() {
+            prefix.push(program);
+            prefix.extend_from_slice(args);
+        }
+    }
+    prefix
+}
+
 /// Starts the worker as `uid`/`gid` (the caller has already checked both).
 ///
 /// # Errors
@@ -73,6 +92,7 @@ pub fn work(root: &Path, uid: u32, gid: u32, request: &FileRequest) -> Result<Fi
         .arg("--clear-groups")
         .arg("--no-new-privs")
         .arg("--")
+        .args(low_priority(request))
         .arg(program)
         .arg("fileop")
         .arg("--root")

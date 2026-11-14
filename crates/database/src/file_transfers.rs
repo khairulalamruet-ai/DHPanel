@@ -391,3 +391,67 @@ pub async fn live_ids(pool: &PgPool) -> Result<Vec<Uuid>, sqlx::Error> {
     .fetch_all(pool)
     .await
 }
+
+/// What an account's files use, as last measured (T08.10).
+#[derive(Debug, Clone, PartialEq)]
+pub struct DiskUsage {
+    /// When it was measured (Unix seconds).
+    pub measured_at: i64,
+    /// Disk used, in bytes.
+    pub total_bytes: i64,
+    /// Files, folders and links.
+    pub inodes: i64,
+    /// Whether the walk stopped at its limit.
+    pub partial: bool,
+    /// The biggest folders (`[{path, bytes, inodes}]`).
+    pub folders: serde_json::Value,
+}
+
+/// Keeps a measurement.
+///
+/// # Errors
+/// Database errors.
+pub async fn record_usage(
+    pool: &PgPool,
+    tenant_id: Uuid,
+    total_bytes: i64,
+    inodes: i64,
+    partial: bool,
+    folders: &serde_json::Value,
+) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        "INSERT INTO tenant_disk_usage (tenant_id, total_bytes, inodes, partial, folders)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (tenant_id) DO UPDATE
+           SET measured_at = now(), total_bytes = $2, inodes = $3, partial = $4, folders = $5",
+        tenant_id,
+        total_bytes,
+        inodes,
+        partial,
+        folders,
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// The last measurement of an account.
+///
+/// # Errors
+/// Database errors.
+pub async fn usage_of(pool: &PgPool, tenant_id: Uuid) -> Result<Option<DiskUsage>, sqlx::Error> {
+    let row = sqlx::query!(
+        r#"SELECT extract(epoch FROM measured_at)::bigint AS "measured_at!", total_bytes, inodes, partial, folders
+           FROM tenant_disk_usage WHERE tenant_id = $1"#,
+        tenant_id,
+    )
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(|r| DiskUsage {
+        measured_at: r.measured_at,
+        total_bytes: r.total_bytes,
+        inodes: r.inodes,
+        partial: r.partial,
+        folders: r.folders,
+    }))
+}

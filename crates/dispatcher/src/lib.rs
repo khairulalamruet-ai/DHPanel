@@ -885,6 +885,31 @@ impl Dispatcher {
                 if let Some(dhpanel_node_protocol::Output::DbSizes { items }) = &output {
                     self.store_db_sizes(node_id, items).await;
                 }
+                if let Some(dhpanel_node_protocol::Output::File {
+                    result:
+                        dhpanel_node_protocol::files::FileResult::Usage {
+                            total_bytes,
+                            inodes,
+                            folders,
+                            partial,
+                        },
+                }) = &output
+                    && let Some(tenant_id) = row.tenant_id
+                {
+                    let folders = serde_json::to_value(folders).unwrap_or_default();
+                    if let Err(err) = dhpanel_database::file_transfers::record_usage(
+                        self.ops.db(),
+                        tenant_id,
+                        i64::try_from(*total_bytes).unwrap_or(i64::MAX),
+                        i64::try_from(*inodes).unwrap_or(i64::MAX),
+                        *partial,
+                        &folders,
+                    )
+                    .await
+                    {
+                        tracing::warn!(%tenant_id, error = %err, "could not keep a disk usage measurement");
+                    }
+                }
                 if let Some(report @ dhpanel_node_protocol::Output::ImportProgress { .. }) = &output
                     && let Some(import_id) = row
                         .payload

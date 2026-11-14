@@ -1,0 +1,71 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT extract(epoch FROM measured_at)::bigint AS \"measured_at!\", total_bytes, inodes, partial, folders\n           FROM tenant_disk_usage WHERE tenant_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "measured_at!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "total_bytes",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "tenant_disk_usage",
+            "name": "total_bytes"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "inodes",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "tenant_disk_usage",
+            "name": "inodes"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "partial",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "tenant_disk_usage",
+            "name": "partial"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "folders",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "tenant_disk_usage",
+            "name": "folders"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "84c283440e4cbd5c7c7f917ea6992cfd635bc3ca5a07434083be4c9b79625302"
+}

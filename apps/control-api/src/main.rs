@@ -334,6 +334,9 @@ async fn main() -> ExitCode {
                 if let Err(error) = dhpanel_mod_files::purge_trash(&db, &settings).await {
                     tracing::warn!(%error, "could not queue the trash purges");
                 }
+                if let Err(error) = dhpanel_mod_files::measure_usage(&db).await {
+                    tracing::warn!(%error, "could not queue the disk usage measurements");
+                }
             }
         }
     });

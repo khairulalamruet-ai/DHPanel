@@ -12096,6 +12096,67 @@
         ]
       }
     },
+    "/api/v1/client/files/usage": {
+      "get": {
+        "tags": [
+          "files"
+        ],
+        "summary": "The last measurement of what the account's files use.",
+        "operationId": "clientDiskUsage",
+        "responses": {
+          "200": {
+            "description": "Zeros and no `measured_at` until the first measurement",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiskUsageView"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "files"
+        ],
+        "summary": "Measure now (at most once in five minutes); the answer arrives with the next\n`GET` of the usage.",
+        "operationId": "clientMeasureDiskUsage",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Pending"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/client/imports": {
       "get": {
         "tags": [
@@ -14421,6 +14482,47 @@
           }
         }
       },
+      "DiskUsageView": {
+        "type": "object",
+        "description": "What the account's files use.",
+        "required": [
+          "total_bytes",
+          "inodes",
+          "partial",
+          "folders"
+        ],
+        "properties": {
+          "folders": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FolderUse"
+            },
+            "description": "The biggest folders, biggest first."
+          },
+          "inodes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Files, folders and links."
+          },
+          "measured_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When it was measured (RFC 3339, UTC); the node measures every few hours."
+          },
+          "partial": {
+            "type": "boolean",
+            "description": "Whether the measurement stopped at its limit (the figures are then a lower bound)."
+          },
+          "total_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Disk used, in bytes."
+          }
+        }
+      },
       "DomainList": {
         "type": "object",
         "description": "A page of domains.",
@@ -15082,6 +15184,34 @@
             "format": "int64",
             "description": "Size in bytes.",
             "minimum": 0
+          }
+        }
+      },
+      "FolderUse": {
+        "type": "object",
+        "description": "What one folder uses.",
+        "required": [
+          "path",
+          "bytes",
+          "inodes"
+        ],
+        "properties": {
+          "bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Disk used below it, in bytes.",
+            "minimum": 0
+          },
+          "inodes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Files and folders below it.",
+            "minimum": 0
+          },
+          "path": {
+            "type": "string",
+            "description": "The folder.",
+            "example": "www/uploads"
           }
         }
       },

@@ -654,3 +654,38 @@ fn permissions_cannot_gain_setuid_or_lock_the_owner_out() {
         "a link is left alone"
     );
 }
+
+#[test]
+fn disk_usage_counts_blocks_and_files_and_names_the_biggest_folders() {
+    let s = Scratch::new("usage");
+    let root = s.root();
+    std::fs::create_dir_all(s.path("www/big")).unwrap();
+    std::fs::create_dir_all(s.path("www/small")).unwrap();
+    std::fs::create_dir_all(s.path("logs")).unwrap();
+    std::fs::write(s.path("www/big/a.bin"), vec![1u8; 300_000]).unwrap();
+    std::fs::write(s.path("www/big/b.bin"), vec![2u8; 200_000]).unwrap();
+    std::fs::write(s.path("www/small/c.txt"), "c").unwrap();
+    std::fs::write(s.path("logs/x.log"), vec![3u8; 100_000]).unwrap();
+    symlink("/etc", s.path("link")).unwrap();
+    let FileResult::Usage {
+        total_bytes,
+        inodes,
+        folders,
+        partial,
+    } = handle(&root, R::DiskUsage { top: 3 })
+    else {
+        panic!()
+    };
+    assert!(!partial);
+    // 3 folders at the top + big, small + 4 files + the link = 9
+    assert_eq!(inodes, 9);
+    assert!((600_000..700_000).contains(&total_bytes), "{total_bytes}");
+    let names: Vec<_> = folders.iter().map(|f| f.path.as_str()).collect();
+    assert_eq!(names, ["www", "www/big", "logs"], "{folders:?}");
+    assert!(folders[0].bytes >= 500_000 && folders[1].bytes >= 500_000);
+    assert_eq!(folders[1].inodes, 3);
+    assert_eq!(
+        err(handle(&root, R::DiskUsage { top: 0 })),
+        FileErrorCode::InvalidArguments
+    );
+}

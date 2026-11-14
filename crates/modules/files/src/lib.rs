@@ -116,6 +116,7 @@ pub fn client_router() -> Router<FilesState> {
         .route("/api/v1/client/files/archive", post(archive))
         .route("/api/v1/client/files/extract", post(extract))
         .route("/api/v1/client/files/operations/{id}", get(operation))
+        .route("/api/v1/client/files/usage", get(usage).post(measure_now))
         .merge(transfers::client_router())
 }
 
@@ -361,6 +362,18 @@ fn respond(result: FileResult) -> Result<Response, AppError> {
         })
         .into_response(),
         FileResult::Done { count } => Json(Changed { count }).into_response(),
+        FileResult::Usage {
+            total_bytes,
+            inodes,
+            folders,
+            partial,
+        } => Json(serde_json::json!({
+            "total_bytes": total_bytes,
+            "inodes": inodes,
+            "partial": partial,
+            "folders": folders,
+        }))
+        .into_response(),
         FileResult::Trash { items } => Json(TrashList {
             items: items
                 .into_iter()
@@ -1128,6 +1141,172 @@ pub async fn operation(
     wait(&state, h.tenant.id, id, Duration::from_millis(1)).await
 }
 
+// ------------------------------------------------------------- disk usage
+
+/// What one folder uses.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct FolderUse {
+    /// The folder.
+    #[schema(example = "www/uploads")]
+    pub path: String,
+    /// Disk used below it, in bytes.
+    pub bytes: u64,
+    /// Files and folders below it.
+    pub inodes: u64,
+}
+
+/// What the account's files use.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct DiskUsageView {
+    /// When it was measured (RFC 3339, UTC); the node measures every few hours.
+    #[schema(format = DateTime)]
+    pub measured_at: Option<String>,
+    /// Disk used, in bytes.
+    pub total_bytes: i64,
+    /// Files, folders and links.
+    pub inodes: i64,
+    /// Whether the measurement stopped at its limit (the figures are then a lower bound).
+    pub partial: bool,
+    /// The biggest folders, biggest first.
+    pub folders: Vec<FolderUse>,
+}
+
+/// The last measurement of what the account's files use.
+#[utoipa::path(
+    get,
+    path = "/api/v1/client/files/usage",
+    tag = "files",
+    operation_id = "clientDiskUsage",
+    security(("session" = [])),
+    responses((status = 200, description = "Zeros and no `measured_at` until the first measurement", body = DiskUsageView))
+)]
+pub async fn usage(
+    State(state): State<FilesState>,
+    who: Principal,
+) -> Result<Json<DiskUsageView>, AppError> {
+    let h = client_hosting(&state, &who).await?;
+    let found = dhpanel_database::file_transfers::usage_of(&state.db, h.tenant.id)
+        .await
+        .map_err(internal)?;
+    Ok(Json(match found {
+        Some(u) => DiskUsageView {
+            measured_at: Some(dhpanel_session::rfc3339(u.measured_at)),
+            total_bytes: u.total_bytes,
+            inodes: u.inodes,
+            partial: u.partial,
+            folders: serde_json::from_value(u.folders).unwrap_or_default(),
+        },
+        None => DiskUsageView {
+            measured_at: None,
+            total_bytes: 0,
+            inodes: 0,
+            partial: false,
+            folders: Vec::new(),
+        },
+    }))
+}
+
+/// Measure now (at most once in five minutes); the answer arrives with the next
+/// `GET` of the usage.
+#[utoipa::path(
+    post,
+    path = "/api/v1/client/files/usage",
+    tag = "files",
+    operation_id = "clientMeasureDiskUsage",
+    security(("session" = [])),
+    params(("X-CSRF-Token" = String, Header, description = "The session's csrf_token")),
+    responses((status = 202, description = "Queued", body = Pending))
+)]
+pub async fn measure_now(
+    State(state): State<FilesState>,
+    who: Principal,
+) -> Result<Response, AppError> {
+    let h = client_hosting(&state, &who).await?;
+    let slot = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() / 300);
+    let id = queue_usage(
+        &state.db,
+        h.tenant.id,
+        h.tenant.node_id,
+        h.tenant.uid,
+        &format!("du-now:{}:{slot}", h.tenant.id.simple()),
+        Some(who.account_id()),
+    )
+    .await?;
+    Ok((StatusCode::ACCEPTED, Json(Pending { operation_id: id })).into_response())
+}
+
+async fn queue_usage(
+    db: &PgPool,
+    tenant_id: Uuid,
+    node_id: Uuid,
+    uid: i32,
+    key: &str,
+    by: Option<Uuid>,
+) -> Result<Uuid, AppError> {
+    let op = Operation::FileOp {
+        tenant_id,
+        uid: u32::try_from(uid).map_err(internal)?,
+        request: FileRequest::DiskUsage { top: 20 },
+    };
+    let payload = serde_json::to_value(&op).map_err(internal)?;
+    let mut conn = db.acquire().await.map_err(internal)?;
+    let queued = operations::enqueue_in(
+        &mut conn,
+        &NewOperation {
+            node_id,
+            kind: op.type_name(),
+            tenant_id: Some(tenant_id),
+            payload: &payload,
+            idempotency_key: key,
+            created_by: by,
+            ttl_secs: 6 * 3600,
+            max_attempts: 2,
+        },
+    )
+    .await
+    .map_err(internal)?;
+    Ok(queued.operation().id)
+}
+
+/// Asks the node of every active account to measure its files (once per six hours
+/// each). Run now and then; returns how many were queued.
+///
+/// # Errors
+/// Database errors.
+pub async fn measure_usage(db: &PgPool) -> Result<usize, AppError> {
+    let rows: Vec<(Uuid, Uuid, i32)> = dhpanel_database::sqlx::query_as(
+        "SELECT id, node_id, uid FROM tenants WHERE status = 'active'",
+    )
+    .fetch_all(db)
+    .await
+    .map_err(internal)?;
+    let slot = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() / (6 * 3600));
+    let mut queued = 0;
+    for (tenant_id, node_id, uid) in rows {
+        let key = format!("du:{}:{slot}", tenant_id.simple());
+        let before: Option<Uuid> = dhpanel_database::sqlx::query_scalar(
+            "SELECT id FROM operations WHERE node_id = $1 AND idempotency_key = $2",
+        )
+        .bind(node_id)
+        .bind(&key)
+        .fetch_optional(db)
+        .await
+        .map_err(internal)?;
+        if before.is_none()
+            && queue_usage(db, tenant_id, node_id, uid, &key, None)
+                .await
+                .is_ok()
+        {
+            queued += 1;
+        }
+    }
+    Ok(queued)
+}
+
 // ------------------------------------------------------------ trash purging
 
 /// Asks every active account's node to empty what has been in the trash longer
@@ -1201,13 +1380,13 @@ pub async fn purge_trash(db: &PgPool, settings: &SettingsRegistry) -> Result<usi
 #[openapi(
     paths(
         list, stat, read, write, mkdir, rename, copy, remove, trash_list, trash_empty, restore,
-        chmod, fix_permissions, archive, extract, operation, transfers::start_upload,
+        chmod, fix_permissions, archive, extract, operation, usage, measure_now, transfers::start_upload,
         transfers::put_chunk, transfers::complete_upload, transfers::start_download,
         transfers::get_transfer, transfers::cancel_transfer, transfers::make_link
     ),
     components(schemas(
         EntryView, DirectoryPage, FileContent, TrashEntry, TrashList, Changed, Pending, SaveFile,
-        OnePath, FromTo, SetMode, PackRequest, UnpackRequest, transfers::StartUpload,
+        OnePath, FromTo, SetMode, PackRequest, UnpackRequest, FolderUse, DiskUsageView, transfers::StartUpload,
         transfers::TransferView, transfers::DownloadLink
     )),
     tags((name = "files", description = "The file manager"))

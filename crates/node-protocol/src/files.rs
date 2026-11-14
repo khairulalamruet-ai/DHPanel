@@ -132,6 +132,12 @@ pub enum FileRequest {
         /// Refuse (`too_many`) when it has more entries than this.
         max_entries: u32,
     },
+    /// How much disk and how many files the tenant's files use, and which folders use
+    /// the most. Done at the lowest priority (it walks everything).
+    DiskUsage {
+        /// How many of the biggest folders to name (1..=100).
+        top: u32,
+    },
     /// Sets sane bits on a whole tree: directories 755, files 644 (755 if the owner
     /// could run them). Links are left alone.
     FixPermissions {
@@ -177,6 +183,17 @@ pub struct FileEntry {
     pub mtime: i64,
     /// Permission bits (`0o755` is 493).
     pub mode: u32,
+}
+
+/// What one folder uses.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FolderUsage {
+    /// The folder, relative to the tenant's files.
+    pub path: String,
+    /// Disk used below it, in bytes.
+    pub bytes: u64,
+    /// Files and folders below it.
+    pub inodes: u64,
 }
 
 /// Something in the trash.
@@ -225,6 +242,17 @@ pub enum FileResult {
     Done {
         /// Items touched.
         count: u32,
+    },
+    /// What the files use.
+    Usage {
+        /// Disk used, in bytes (blocks, as the disk counts them), links not followed.
+        total_bytes: u64,
+        /// Files, folders and links.
+        inodes: u64,
+        /// The biggest folders (every level counted, the top one left out), biggest first.
+        folders: Vec<FolderUsage>,
+        /// Whether the walk stopped at the limit (the figures are then a lower bound).
+        partial: bool,
     },
     /// The trash.
     Trash {

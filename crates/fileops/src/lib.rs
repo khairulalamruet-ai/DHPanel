@@ -11,6 +11,7 @@
 //! file for good except emptying the trash.
 
 mod archive;
+mod usage;
 
 use std::{
     io::{Read as _, Write as _},
@@ -112,6 +113,7 @@ fn run(root: &Root, request: FileRequest) -> Out<FileResult> {
             max_bytes,
             max_entries,
         } => archive::extract(root, &path, &dest, max_bytes, max_entries),
+        FileRequest::DiskUsage { top } => usage::disk_usage(root, top),
         FileRequest::Chmod {
             path,
             mode,
