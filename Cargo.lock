@@ -1388,6 +1388,7 @@ dependencies = [
  "dhpanel-priv-helper",
  "dhpanel-session",
  "dhpanel-tenant-stack",
+ "flate2",
  "futures-util",
  "mysql_async",
  "rcgen",

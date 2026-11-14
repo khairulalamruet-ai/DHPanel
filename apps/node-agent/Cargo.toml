@@ -33,6 +33,8 @@ clap = { version = "4", features = ["derive", "env"] }
 # The agent makes its own key and certificate signing request.
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "ring", "x509-parser"] }
 # Checks what the control plane sends back before anything is stored.
+# Reads SQL dumps that were compressed with gzip (T07.07).
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 # Talks to the shared MariaDB server of the node (loopback only) to make databases and
 # users (T07.03). No TLS: the connection never leaves the host.
 mysql_async = { version = "0.37", default-features = false, features = ["minimal"] }
