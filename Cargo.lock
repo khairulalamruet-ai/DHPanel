@@ -1017,11 +1017,13 @@ version = "0.1.0"
 dependencies = [
  "dhpanel-cache",
  "dhpanel-database",
+ "dhpanel-domain",
  "dhpanel-node-agent",
  "dhpanel-node-gateway",
  "dhpanel-node-protocol",
  "dhpanel-operations",
  "dhpanel-pki",
+ "dhpanel-tenant-stack",
  "futures-util",
  "rcgen",
  "rustls",

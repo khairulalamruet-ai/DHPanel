@@ -254,6 +254,18 @@ fn name(tenant: &TenantUsername, suffix: &str) -> Result<Name, SpecError> {
     Name::parse(&format!("dh-{tenant}-{suffix}"))
 }
 
+/// The port the tenant's web container listens on (the unprivileged nginx).
+pub const WEB_PORT: u16 = 8080;
+
+/// Where the web server (Caddy) reaches a tenant's web container: its name on
+/// the tenant's network and its port.
+///
+/// # Errors
+/// [`SpecError`] (cannot happen for a valid tenant name).
+pub fn web_upstream(tenant: &TenantUsername) -> Result<String, SpecError> {
+    Ok(format!("{}:{WEB_PORT}", name(tenant, "web")?.as_str()))
+}
+
 /// Name of a tenant's private network.
 ///
 /// # Errors

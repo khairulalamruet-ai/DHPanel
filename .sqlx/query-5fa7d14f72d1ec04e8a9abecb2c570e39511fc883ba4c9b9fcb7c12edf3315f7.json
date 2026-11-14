@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT r.domain_id, r.source_path AS path, r.target, r.code\n           FROM redirects r JOIN domains d ON d.id = r.domain_id\n           WHERE d.tenant_id = $1 ORDER BY d.fqdn, r.source_path",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "domain_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "redirects",
+            "name": "domain_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "path",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "redirects",
+            "name": "source_path"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "target",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "redirects",
+            "name": "target"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "code",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "redirects",
+            "name": "code"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "5fa7d14f72d1ec04e8a9abecb2c570e39511fc883ba4c9b9fcb7c12edf3315f7"
+}

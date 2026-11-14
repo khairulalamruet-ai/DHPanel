@@ -42,6 +42,7 @@ fn dispatch_settings() -> Settings {
         capabilities_check: Duration::from_millis(200),
         capabilities_max_age: Duration::from_secs(3600),
         purge_check: Duration::from_secs(3600),
+        route_check: Duration::from_secs(3600),
     }
 }
 
@@ -663,4 +664,168 @@ async fn data_of_deleted_tenants_is_purged_when_due_and_the_tenant_goes_when_the
         .unwrap();
     assert_eq!(left, [later]);
     assert_eq!(d.request_purges().await, 0, "nothing more is due");
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs PostgreSQL"]
+async fn a_tenants_routes_are_sent_when_anything_they_are_made_of_changes(pool: PgPool) {
+    use dhpanel_node_protocol::Operation as Op;
+    let p = plane(&pool).await;
+    // Not running: the test asks for the sync itself, at the moment it wants to.
+    let d = Dispatcher::new(p.ops.clone(), p.gateway.clone(), None, dispatch_settings());
+    let node = make_node(&p, &pool, "web").await;
+    let account: Uuid = sqlx::query_scalar(
+        "INSERT INTO accounts (kind, username, email, password_hash)
+         VALUES ('client', 'zed', 'zed@example.com',
+                 '$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHQ$aGFzaGhhc2hoYXNoaGFzaA') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let plan: Uuid = sqlx::query_scalar("SELECT id FROM plans WHERE is_default")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let tenant: Uuid = sqlx::query_scalar(
+        "INSERT INTO tenants (owner_account_id, node_id, plan_id, username, uid, status)
+         VALUES ($1, $2, $3, 'zedhost', 10000, 'provisioning') RETURNING id",
+    )
+    .bind(account)
+    .bind(node.id)
+    .bind(plan)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let ops = |pool: PgPool| async move {
+        sqlx::query_as::<_, (Uuid, serde_json::Value, String)>(
+            "SELECT id, payload, status FROM operations WHERE kind = 'set_site_routes' ORDER BY created_at, id",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap()
+    };
+
+    // A new tenant is pending; while it is being set up it has no routes, but the
+    // empty list is still sent (the agent removes what it may hold from before).
+    assert_eq!(d.request_route_syncs().await, 1);
+    let sent = ops(pool.clone()).await;
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].1["username"], "zedhost");
+    assert_eq!(sent[0].1["routes"], serde_json::json!([]));
+    assert_eq!(
+        d.request_route_syncs().await,
+        0,
+        "nothing changed: nothing sent"
+    );
+
+    // Active, with a domain, an alias and a redirect: one site, both names.
+    sqlx::query("UPDATE tenants SET status = 'active' WHERE id = $1")
+        .bind(tenant)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let main: Uuid = sqlx::query_scalar("INSERT INTO domains (tenant_id, fqdn, kind) VALUES ($1, 'example.com', 'primary') RETURNING id")
+        .bind(tenant)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO domains (tenant_id, fqdn, kind, parent_domain_id) VALUES ($1, 'example.net', 'alias', $2)")
+        .bind(tenant)
+        .bind(main)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO redirects (domain_id, source_path, target) VALUES ($1, '/old', '/new')",
+    )
+    .bind(main)
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        d.request_route_syncs().await,
+        1,
+        "several changes, one operation"
+    );
+    let sent = ops(pool.clone()).await;
+    assert_eq!(sent.len(), 2);
+    let routes = &sent[1].1["routes"];
+    assert_eq!(
+        routes[0]["hosts"],
+        serde_json::json!(["example.com", "example.net"])
+    );
+    assert_eq!(routes[0]["upstream"], "dh-zedhost-web:8080");
+    assert_eq!(routes[0]["redirects"][0]["path"], "/old");
+    assert_eq!(routes[0]["redirects"][0]["code"], 301);
+
+    // A domain suspended by the administrator, then the whole tenant: the page, not the files.
+    sqlx::query("UPDATE domains SET status = 'suspended', suspended_at = now() WHERE id = $1")
+        .bind(main)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(d.request_route_syncs().await, 1);
+    let sent = ops(pool.clone()).await;
+    assert!(
+        sent[2].1["routes"][0].get("upstream").is_none()
+            || sent[2].1["routes"][0]["upstream"].is_null()
+    );
+    sqlx::query("UPDATE domains SET status = 'active', suspended_at = NULL WHERE id = $1")
+        .bind(main)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE tenants SET status = 'suspended' WHERE id = $1")
+        .bind(tenant)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(d.request_route_syncs().await, 1);
+    assert!(
+        ops(pool.clone()).await[3].1["routes"][0]
+            .get("upstream")
+            .is_none()
+    );
+
+    // A delete of the domain: the empty list again.
+    sqlx::query("DELETE FROM domains WHERE tenant_id = $1 AND kind = 'alias'")
+        .bind(tenant)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM domains WHERE id = $1")
+        .bind(main)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(d.request_route_syncs().await, 1);
+    assert_eq!(
+        ops(pool.clone()).await[4].1["routes"],
+        serde_json::json!([])
+    );
+
+    // An operation that fails for good puts the tenant back on the list; it is asked
+    // again in the next five-minute slot, not at once.
+    let last = ops(pool.clone()).await.last().unwrap().0;
+    sqlx::query("UPDATE operations SET status = 'dispatched', attempts = 1 WHERE id = $1")
+        .bind(last)
+        .execute(&pool)
+        .await
+        .unwrap();
+    dhpanel_database::operations::fail(&pool, last, &serde_json::json!({"code": "boom"}), None)
+        .await
+        .unwrap();
+    let pending: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM tenants WHERE routes_version <> routes_synced_version",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(pending, 1, "the failure queued the work again");
+    assert_eq!(
+        d.request_route_syncs().await,
+        0,
+        "in this slot the failed request is not repeated"
+    );
+    let _ = Op::ReportCapabilities;
 }

@@ -15,6 +15,8 @@
 //! (`dh:ops` and `dh:ops:<op_id>`, a small JSON event without output) so that
 //! the panel can update live; a failing publish never affects the ledger.
 
+pub mod routes;
+
 use std::time::Duration;
 
 use dhpanel_cache::RedisHandle;
@@ -48,6 +50,8 @@ pub struct Settings {
     pub capabilities_max_age: Duration,
     /// How often deleted tenants are checked for data that is due to be purged.
     pub purge_check: Duration,
+    /// How often tenants whose web routes changed are looked for.
+    pub route_check: Duration,
 }
 
 impl Default for Settings {
@@ -61,6 +65,7 @@ impl Default for Settings {
             capabilities_check: Duration::from_secs(30),
             capabilities_max_age: Duration::from_secs(3600),
             purge_check: Duration::from_secs(600),
+            route_check: Duration::from_secs(5),
         }
     }
 }
@@ -127,12 +132,15 @@ impl Dispatcher {
         capabilities.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut purges = tokio::time::interval(self.settings.purge_check);
         purges.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut routes = tokio::time::interval(self.settings.route_check);
+        routes.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             tokio::select! {
                 () = stopped(&mut shutdown) => return,
                 _ = tick.tick() => { self.tick().await; }
                 _ = capabilities.tick() => { self.request_capabilities().await; }
                 _ = purges.tick() => { self.request_purges().await; }
+                _ = routes.tick() => { self.request_route_syncs().await; }
                 Some(report) = results.recv() => self.handle_result(report).await,
             }
         }
@@ -221,6 +229,80 @@ impl Dispatcher {
             }
         }
         asked
+    }
+
+    /// Sends the web routes of every tenant that changed since they were last
+    /// sent (its domains, aliases, redirects, suspension, or its own status).
+    /// Returns how many tenants were queued.
+    ///
+    /// The operation's key carries the version and a five-minute slot, so a pass
+    /// that repeats makes no second operation, and one that failed for good is
+    /// tried again at most every five minutes (the ledger puts the tenant back on
+    /// the list when it fails).
+    pub async fn request_route_syncs(&self) -> usize {
+        let pending = match dhpanel_database::routes::pending(self.ops.db(), 50).await {
+            Ok(p) => p,
+            Err(err) => {
+                tracing::warn!(error = %err, "could not look for routes to send");
+                return 0;
+            }
+        };
+        let slot = u64::try_from(unix_now()).unwrap_or(0) / 300;
+        let mut queued = 0;
+        for tenant in pending {
+            match self.queue_routes(&tenant, slot).await {
+                Ok(true) => queued += 1,
+                Ok(false) => {}
+                Err(error) => {
+                    tracing::warn!(tenant = %tenant.id, %error, "could not queue the web routes");
+                }
+            }
+        }
+        queued
+    }
+
+    async fn queue_routes(
+        &self,
+        tenant: &dhpanel_database::routes::Pending,
+        slot: u64,
+    ) -> Result<bool, String> {
+        let db = self.ops.db();
+        let username =
+            dhpanel_domain::TenantUsername::parse(&tenant.username).map_err(|e| e.to_string())?;
+        let upstream = dhpanel_tenant_stack::web_upstream(&username).map_err(|e| e.to_string())?;
+        let domains = dhpanel_database::routes::domains(db, tenant.id)
+            .await
+            .map_err(|e| e.to_string())?;
+        let redirects = dhpanel_database::routes::redirects(db, tenant.id)
+            .await
+            .map_err(|e| e.to_string())?;
+        let routes = routes::build(&tenant.status, &upstream, &domains, &redirects);
+        let mut request = dhpanel_operations::Request::new(
+            tenant.node_id,
+            dhpanel_node_protocol::Operation::SetSiteRoutes {
+                username: tenant.username.clone(),
+                routes,
+            },
+            format!("routes:{}:{}:{slot}", tenant.id.simple(), tenant.version),
+        );
+        request.tenant_id = Some(tenant.id);
+        match self
+            .ops
+            .enqueue(&request)
+            .await
+            .map_err(|e| e.to_string())?
+        {
+            dhpanel_operations::Enqueued::Created(_) => {}
+            // The same request again: fine, unless it already failed (then it waits
+            // for the next slot to be asked afresh).
+            dhpanel_operations::Enqueued::Existing(op) if op.status == Status::Failed => {
+                return Ok(false);
+            }
+            dhpanel_operations::Enqueued::Existing(_) => {}
+        }
+        dhpanel_database::routes::mark_synced(db, tenant.id, tenant.version)
+            .await
+            .map_err(|e| e.to_string())
     }
 
     /// One pass; see the module documentation.

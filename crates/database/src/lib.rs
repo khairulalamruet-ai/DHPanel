@@ -24,6 +24,7 @@ pub mod permissions;
 pub mod plans;
 pub mod rbac;
 pub mod redirects;
+pub mod routes;
 pub mod settings;
 pub mod skeleton;
 pub mod tenants;

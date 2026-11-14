@@ -16,6 +16,8 @@ dhpanel-database.workspace = true
 dhpanel-node-gateway.workspace = true
 dhpanel-node-protocol.workspace = true
 dhpanel-operations.workspace = true
+dhpanel-domain.workspace = true
+dhpanel-tenant-stack.workspace = true
 serde_json = "1"
 tokio = { version = "1", features = ["macros", "rt", "time", "sync"] }
 tracing = "0.1.44"
