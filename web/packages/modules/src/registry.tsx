@@ -1,5 +1,5 @@
 import React from "react";
-import { LayoutDashboard, ShieldCheck, ShieldAlert, Sparkles, Puzzle, Globe, Users, Settings, FileText, Boxes, Server, Activity, Layers, Lock, FileCode2, Cpu, Database, Folder, Archive, Clock, Terminal, Wrench, Flame, Mail, Briefcase, ArrowRightLeft, KeyRound, Palette } from "lucide-react";
+import { LayoutDashboard, ShieldCheck, ShieldAlert, Sparkles, Puzzle, Globe, Users, Settings, FileText, Boxes, Server, Activity, Layers, Lock, FileCode2, Cpu, Database, Folder, Archive, Clock, Terminal, Wrench, Flame, Mail, Briefcase, ArrowRightLeft, KeyRound, Palette, ArrowUpCircle } from "lucide-react";
 
 export interface ModuleManifest {
   name: string;
@@ -992,6 +992,25 @@ export const registeredFrontendModules: FrontendModule[] = [
         icon: <Palette className="h-4 w-4" />,
         href: "/admin/branding",
         order: 86,
+      },
+    ],
+  },
+  {
+    manifest: {
+      name: "update",
+      title: { en: "Updates", bn: "আপডেট" },
+      category: "core",
+      core: true,
+      permissions: ["admin.update.manage"],
+    },
+    adminNav: [
+      {
+        id: "update",
+        labelKey: "update.nav",
+        icon: <ArrowUpCircle className="h-4 w-4" />,
+        href: "/admin/update",
+        order: 87,
+        permission: "admin.update.manage",
       },
     ],
       },

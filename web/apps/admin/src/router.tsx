@@ -57,6 +57,7 @@ import {
   BrandingPage,
   CommandPalette,
   CommandPaletteTrigger,
+  UpdatePage,
   filterNavItems,
   registeredFrontendModules,
 } from "@dhpanel/modules";
@@ -525,9 +526,20 @@ const brandingRoute = createRoute({
   path: "/branding",
   component: BrandingPage,
 });
+
+// 49. Update routes (T18.10)
+const updateRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/update",
+  component: UpdatePage,
 });
 
-// 18. Login route
+const adminUpdateRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/update",
+  component: UpdatePage,
+});
+
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/login",
@@ -598,6 +610,8 @@ const routeTree = rootRoute.addChildren([
   settingsNotificationsRoute,
   adminBrandingRoute,
   brandingRoute,
+  updateRoute,
+  adminUpdateRoute,
   loginRoute,
 ]);
 

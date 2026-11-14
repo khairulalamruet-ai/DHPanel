@@ -46,4 +46,5 @@ export * from "./notifications";
 export * from "./branding";
 export * from "./onboarding";
 export * from "./search";
+export * from "./update";
 export type { SslStatus } from "./domains";

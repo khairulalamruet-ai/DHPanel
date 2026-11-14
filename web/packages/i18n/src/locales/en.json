@@ -2867,5 +2867,49 @@
     "triggerLabel": "Search or jump to...",
     "triggerTitle": "Global search & command palette (Ctrl+K)",
     "triggerPlaceholder": "Search..."
+  },
+  "update": {
+    "nav": "Panel Update",
+    "title": "DHPanel Release & Update Manager",
+    "pageTitle": "Panel Update & Releases",
+    "pageSubtitle": "Manage control plane versions, switch update channels, and execute verified releases.",
+    "description": "Automated self-updating control plane backed by Ed25519 signed manifests and atomic rollbacks.",
+    "checkNow": "Check for Updates",
+    "installedVersion": "Installed Version",
+    "lastChecked": "Last checked",
+    "releaseChannel": "Release Channel",
+    "rollbackStatus": "Rollback Checkpoint",
+    "noRollbackCheckpoint": "No previous snapshot",
+    "rollbackTo": "Rollback to {{version}}",
+    "newVersionAvailable": "New Version Available",
+    "releasedOn": "Released on",
+    "updateNow": "Update Now",
+    "changelog": "Release Notes & Changelog",
+    "requiredMigrations": "Database Schema Migrations",
+    "upToDate": "DHPanel is up to date.",
+    "upToDateDesc": "You are currently running the latest certified build on the active channel.",
+    "channelUpdated": "Update Channel Changed",
+    "channelUpdatedDesc": "Switched update channel.",
+    "checkSuccess": "Update Check Complete",
+    "checkSuccessDesc": "Repository and signatures checked against release manifest.",
+    "steps": {
+      "downloading": "Downloading signed package bundle...",
+      "verifying": "Verifying Ed25519 cryptographic signature...",
+      "snapshot": "Creating pre-update backup snapshot...",
+      "migrations": "Applying database schema migrations...",
+      "rollbackSuccess": "Update failed. Automatic rollback completed: safely returned to previous version.",
+      "completed": "Update successfully applied! DHPanel is running the newest release.",
+      "manualRollback": "Reverting schema and binary to previous version..."
+    },
+    "rollbackNotice": "Automatic Rollback Triggered",
+    "rollbackNoticeDesc": "Safety invariant activated: system rolled back to initial version.",
+    "updateSuccess": "Update Applied Successfully",
+    "rollbackSuccessTitle": "Rollback Successful",
+    "rollbackSuccessDesc": "Panel safely returned to previous version.",
+    "history": {
+      "title": "Release History & Rollback Ledger",
+      "desc": "Audit trail of all package upgrades, schema migrations, and emergency rollback events.",
+      "empty": "No update history recorded yet."
+    }
   }
 }
