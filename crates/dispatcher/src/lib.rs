@@ -16,7 +16,6 @@
 //! the panel can update live; a failing publish never affects the ledger.
 
 pub mod routes;
-mod vhosts;
 
 use std::time::Duration;
 
@@ -356,18 +355,8 @@ impl Dispatcher {
         }
         // The web server configuration of each site, then the removal of what
         // is no longer a site.
-        let template = dhpanel_database::vhost_templates::default_for(db, "nginx")
-            .await
-            .map_err(|e| e.to_string())?
-            .map_or_else(
-                || dhpanel_domain::vhost::DEFAULT_NGINX_TEMPLATE.to_owned(),
-                |t| t.body,
-            );
-        let php = dhpanel_tenant_stack::php_upstream(&username).map_err(|e| e.to_string())?;
-        let policies = dhpanel_database::domain_policies::of_tenant(db, tenant.id)
-            .await
-            .map_err(|e| e.to_string())?;
-        let files = vhosts::build(&tenant.status, &template, &php, &domains, &policies);
+        let files =
+            dhpanel_web_config::site_files(db, tenant.id, &tenant.username, &tenant.status).await?;
         for (domain, config) in &files {
             let mut attach = dhpanel_operations::Request::new(
                 tenant.node_id,

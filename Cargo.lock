@@ -1027,6 +1027,7 @@ dependencies = [
  "dhpanel-operations",
  "dhpanel-pki",
  "dhpanel-tenant-stack",
+ "dhpanel-web-config",
  "futures-util",
  "rcgen",
  "rustls",
@@ -1209,6 +1210,7 @@ dependencies = [
  "dhpanel-rbac",
  "dhpanel-session",
  "dhpanel-settings",
+ "dhpanel-web-config",
  "rcgen",
  "secrecy",
  "serde",
@@ -1510,6 +1512,17 @@ dependencies = [
  "thiserror",
  "tokio",
  "toml 1.2.1+spec-1.1.0",
+ "uuid",
+]
+
+[[package]]
+name = "dhpanel-web-config"
+version = "0.1.0"
+dependencies = [
+ "dhpanel-database",
+ "dhpanel-domain",
+ "dhpanel-node-protocol",
+ "dhpanel-tenant-stack",
  "uuid",
 ]
 

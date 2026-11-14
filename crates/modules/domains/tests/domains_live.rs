@@ -2949,3 +2949,163 @@ async fn a_domains_rate_limit_and_headers_are_checked_kept_and_need_the_feature(
     .unwrap();
     assert_eq!(actions, 2);
 }
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn an_owner_sees_its_web_server_file_and_adds_only_allowed_directives(pool: PgPool) {
+    let e = env(&pool).await;
+    let (alice, tenant) = client(&pool, "alice", 10_000).await;
+    let (bobby, _) = client(&pool, "bobby", 10_001).await;
+    let (a, b) = (e.sign_in(alice).await, e.sign_in(bobby).await);
+    let (_, main) = e
+        .call(Some(&a), "POST", CLIENT, Some(domain("example.com")), true)
+        .await;
+    let (_, alias) = e
+        .call(
+            Some(&a),
+            "POST",
+            CLIENT,
+            Some(json!({"fqdn": "example.net", "kind": "alias", "parent_domain_id": main["id"]})),
+            true,
+        )
+        .await;
+    let path = format!("{CLIENT}/{}/vhost", main["id"].as_str().unwrap());
+    let alias_path = format!("{CLIENT}/{}/vhost", alias["id"].as_str().unwrap());
+    let put = |path: String, text: &str| {
+        let (e, a) = (&e, &a);
+        let body = json!({ "custom_block": text });
+        async move { e.call(Some(a), "PUT", &path, Some(body), true).await }
+    };
+
+    // Without the feature the page is closed, reading too.
+    sqlx::query(
+        "UPDATE feature_sets SET all_features = false, features = ARRAY['domains']::feature_key[]
+         WHERE id = (SELECT feature_set_id FROM plans WHERE is_default)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (status, body) = e.call(Some(&a), "GET", &path, None, false).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::FORBIDDEN, "feature_disabled")
+    );
+    assert_eq!(
+        put(path.clone(), "return 200 x;").await.0,
+        StatusCode::FORBIDDEN
+    );
+    sqlx::query(
+        "UPDATE feature_sets SET features = ARRAY['domains', 'edit_vhost']::feature_key[]
+         WHERE id = (SELECT feature_set_id FROM plans WHERE is_default)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // The file the site runs on, with the alias in its server_name.
+    let (status, view) = e.call(Some(&a), "GET", &path, None, false).await;
+    assert_eq!(status, StatusCode::OK, "{view}");
+    let config = view["config"].as_str().unwrap();
+    assert!(
+        config.contains("server_name example.com example.net;"),
+        "{config}"
+    );
+    assert!(
+        config.contains("fastcgi_pass dh-alice-php:9000;"),
+        "{config}"
+    );
+    assert_eq!(view["custom_block"], "");
+    assert_eq!(view["max_custom_bytes"], 8192);
+    // An alias shows its domain's file and has none of its own to change.
+    let (_, via_alias) = e.call(Some(&a), "GET", &alias_path, None, false).await;
+    assert_eq!(via_alias["config"], view["config"]);
+    let (status, body) = put(alias_path.clone(), "return 200 x;").await;
+    assert_eq!(
+        (status, body["errors"][0]["code"].clone()),
+        (StatusCode::UNPROCESSABLE_ENTITY, json!("alias_has_no_file"))
+    );
+
+    // An allowed block is saved, shown in the file, and makes the tenant out of date.
+    let before: i64 = sqlx::query_scalar("SELECT routes_version FROM tenants WHERE id = $1")
+        .bind(tenant)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let block = "location /old { return 301 /new; }\nclient_max_body_size 64m;";
+    let (status, saved) = put(path.clone(), block).await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(saved["custom_block"], block);
+    assert!(
+        saved["config"]
+            .as_str()
+            .unwrap()
+            .contains("    location /old { return 301 /new; }\n    client_max_body_size 64m;\n")
+    );
+    let after: i64 = sqlx::query_scalar("SELECT routes_version FROM tenants WHERE id = $1")
+        .bind(tenant)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!(after > before);
+
+    // What is not allowed is refused, naming the directive; the block stays as it was.
+    for (text, why, mention) in [
+        ("alias /etc/;", "forbidden_directive", "alias"),
+        (
+            "location / { proxy_pass http://10.0.2.2:5432; }",
+            "forbidden_directive",
+            "proxy_pass",
+        ),
+        ("include /etc/passwd;", "forbidden_directive", "include"),
+        (
+            "add_header Strict-Transport-Security \"x\";",
+            "reserved_header",
+            "Strict-Transport-Security",
+        ),
+        (
+            "add_header X \"a#\"; root /;",
+            "forbidden_directive",
+            "root",
+        ),
+        ("return 200 \"open", "template_syntax", ""),
+    ] {
+        let (status, body) = put(path.clone(), text).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{text}: {body}");
+        assert_eq!(body["errors"][0]["field"], "custom_block");
+        assert_eq!(body["errors"][0]["code"], why, "{text}");
+        assert!(
+            body["errors"][0]["message"]
+                .as_str()
+                .unwrap()
+                .contains(mention),
+            "{body}"
+        );
+    }
+    let (_, kept) = e.call(Some(&a), "GET", &path, None, false).await;
+    assert_eq!(kept["custom_block"], block);
+
+    // Not another account's.
+    assert_eq!(
+        e.call(Some(&b), "GET", &path, None, false).await.0,
+        StatusCode::NOT_FOUND
+    );
+    // An empty text removes it; the file is the plain one again.
+    let (status, cleared) = put(path.clone(), "").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(cleared["custom_block"], "");
+    assert!(!cleared["config"].as_str().unwrap().contains("/old"));
+    let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM domain_custom_blocks")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(rows, 0);
+    // The audit log notes the change and never the text.
+    let logged: Vec<serde_json::Value> = sqlx::query_scalar(
+        "SELECT metadata FROM audit_logs WHERE action = 'domain.vhost_changed' ORDER BY at",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(logged.len(), 2);
+    assert!(!logged.iter().any(|m| m.to_string().contains("/old")));
+}

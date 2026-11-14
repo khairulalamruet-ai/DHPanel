@@ -2859,6 +2859,149 @@
         ]
       }
     },
+    "/api/v1/admin/domains/{id}/vhost": {
+      "get": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "See a domain's web server file and its owner's own directives.",
+        "operationId": "adminGetDomainVhost",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Domain id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The file and the block",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VhostView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such domain",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "Replace a domain's own directives (an empty text removes them).",
+        "operationId": "adminSetDomainVhost",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Domain id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetVhost"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VhostView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied`, `reauth_required`, `csrf_failed` or `feature_disabled`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such domain",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`forbidden_directive` (naming it), `reserved_header`, `custom_too_large`, `custom_characters`, `template_syntax`, `template_braces` or `alias_has_no_file`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/feature-sets": {
       "get": {
         "tags": [
@@ -7653,6 +7796,149 @@
         ]
       }
     },
+    "/api/v1/client/domains/{id}/vhost": {
+      "get": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "See the web server file of one of your domains and your own directives.",
+        "operationId": "clientGetDomainVhost",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Domain id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The file and the block",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VhostView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only` or `feature_disabled`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such domain (or it is not yours)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "Replace your own directives for one of your domains (an empty text removes them).",
+        "operationId": "clientSetDomainVhost",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Domain id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetVhost"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VhostView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only`, `csrf_failed` or `feature_disabled`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such domain (or it is not yours)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`forbidden_directive` (naming it), `reserved_header`, `custom_too_large`, `custom_characters`, `template_syntax`, `template_braces` or `alias_has_no_file`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/public/auth/impersonate": {
       "post": {
         "tags": [
@@ -10714,6 +11000,20 @@
         },
         "additionalProperties": false
       },
+      "SetVhost": {
+        "type": "object",
+        "description": "The owner's own directives.",
+        "required": [
+          "custom_block"
+        ],
+        "properties": {
+          "custom_block": {
+            "type": "string",
+            "description": "The directives; an empty text removes the block."
+          }
+        },
+        "additionalProperties": false
+      },
       "SettingsChange": {
         "type": "object",
         "description": "The outcome of a change.",
@@ -11407,6 +11707,33 @@
             "type": "string",
             "description": "Login name.",
             "example": "alice"
+          }
+        }
+      },
+      "VhostView": {
+        "type": "object",
+        "description": "A domain's web server file.",
+        "required": [
+          "custom_block",
+          "max_custom_bytes"
+        ],
+        "properties": {
+          "config": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The file the site runs on, as the panel makes it from the template, the\ndomain's settings and the block below. `null` while the account has no\nweb server yet (it is being set up or removed)."
+          },
+          "custom_block": {
+            "type": "string",
+            "description": "The owner's own directives (empty for none)."
+          },
+          "max_custom_bytes": {
+            "type": "integer",
+            "description": "Longest block, in bytes.",
+            "example": 8192,
+            "minimum": 0
           }
         }
       },

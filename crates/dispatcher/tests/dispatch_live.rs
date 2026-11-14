@@ -1039,6 +1039,15 @@ async fn an_uploaded_certificate_reaches_the_node_with_its_key_and_the_ledger_ne
             }
         }
     });
+    registry.register("attach_domain", |_| async move {
+        Ok(Output::DomainAttached { applied: true })
+    });
+    registry.register("keep_domains", |_| async move {
+        Ok(Output::DomainsKept {
+            removed: 0,
+            applied: true,
+        })
+    });
     registry.register("set_site_routes", |op| async move {
         match op {
             Operation::SetSiteRoutes { routes, .. } => Ok(Output::SiteRoutesSet {

@@ -5,7 +5,8 @@
 //! is plain nginx configuration with these variables: `{{domain}}`,
 //! `{{server_names}}`, `{{docroot}}`, `{{php_upstream}}`, and the two places a
 //! domain's [`Policy`] goes, `{{policy_http}}` (before the `server` block) and
-//! `{{policy}}` (inside it). Every value that goes in comes from a checked type,
+//! `{{policy}}` (inside it), and `{{custom}}` for the directives a person adds to
+//! their own site (see [`check_custom_block`]). Every value that goes in comes from a checked type,
 //! so no domain, path, header or address can carry a directive of its own into
 //! the file.
 
@@ -18,13 +19,14 @@ pub const MAX_TEMPLATE_BYTES: usize = 32 * 1024;
 /// Most names (the domain and its aliases) in one `server_name`.
 pub const MAX_SERVER_NAMES: usize = 50;
 /// Variables a template may use.
-pub const VARIABLES: [&str; 6] = [
+pub const VARIABLES: [&str; 7] = [
     "domain",
     "server_names",
     "docroot",
     "php_upstream",
     "policy_http",
     "policy",
+    "custom",
 ];
 /// Variables a template must use: without them it does not make a site.
 const REQUIRED: [&str; 2] = ["server_names", "docroot"];
@@ -38,6 +40,7 @@ server {
     root {{docroot}};
     index index.php index.html index.htm;
     {{policy}}
+    {{custom}}
 
     location / {
         try_files $uri $uri/ /index.php?$query_string;
@@ -86,23 +89,97 @@ const FORBIDDEN: [&str; 8] = [
     "ssi",
 ];
 
-/// The directives (first word of each statement) in `text`, with their first argument.
-fn directives(text: &str) -> Vec<(String, Option<String>)> {
-    let mut out = Vec::new();
-    // Comments run to the end of the line (a `#` inside a quoted string is not
-    // handled: such a template is refused as unbalanced or odd, never let through).
-    let code: String = text
-        .lines()
-        .map(|l| l.split('#').next().unwrap_or(""))
-        .collect::<Vec<_>>()
-        .join("\n");
-    for statement in code.split([';', '{', '}']) {
-        let mut words = statement.split_whitespace();
-        if let Some(first) = words.next() {
-            out.push((first.to_owned(), words.next().map(str::to_owned)));
+/// The statements of nginx configuration text, each as its words, read the way
+/// nginx reads it: words end at white space, `;`, `{` and `}` unless quoted
+/// (single or double quotes, backslash escapes inside and outside), and `#` starts
+/// a comment only at the start of a word. Quotes must close and braces must match.
+///
+/// What a person writes is judged on these words and not on the raw text, so a
+/// `#` or `;` inside a string cannot hide a directive from the checks.
+fn statements(text: &str) -> Result<Vec<Vec<String>>, VhostError> {
+    let bad = |what: &str| err("template_syntax", what.to_owned());
+    let mut out: Vec<Vec<String>> = Vec::new();
+    let mut words: Vec<String> = Vec::new();
+    let mut word = String::new();
+    let mut in_word = false;
+    let mut quote: Option<char> = None;
+    let mut depth: i32 = 0;
+    let mut chars = text.chars();
+    while let Some(c) = chars.next() {
+        if let Some(q) = quote {
+            if c == '\\' {
+                word.push(c);
+                if let Some(next) = chars.next() {
+                    word.push(next);
+                }
+            } else if c == q {
+                quote = None;
+            } else {
+                word.push(c);
+            }
+            continue;
+        }
+        match c {
+            c if c.is_whitespace() => {
+                if in_word {
+                    words.push(std::mem::take(&mut word));
+                    in_word = false;
+                }
+            }
+            '"' | '\'' => {
+                quote = Some(c);
+                in_word = true;
+            }
+            '#' if !in_word => {
+                for rest in chars.by_ref() {
+                    if rest == '\n' {
+                        break;
+                    }
+                }
+            }
+            '\\' => {
+                in_word = true;
+                word.push(c);
+                if let Some(next) = chars.next() {
+                    word.push(next);
+                }
+            }
+            ';' | '{' | '}' => {
+                if in_word {
+                    words.push(std::mem::take(&mut word));
+                    in_word = false;
+                }
+                if !words.is_empty() {
+                    out.push(std::mem::take(&mut words));
+                }
+                match c {
+                    '{' => depth += 1,
+                    '}' => depth -= 1,
+                    _ => {}
+                }
+                if depth < 0 {
+                    return Err(bad("A } has no {."));
+                }
+            }
+            c => {
+                in_word = true;
+                word.push(c);
+            }
         }
     }
-    out
+    if quote.is_some() {
+        return Err(bad("A quote is never closed."));
+    }
+    if in_word {
+        words.push(word);
+    }
+    if !words.is_empty() {
+        out.push(words);
+    }
+    if depth != 0 {
+        return Err(err("template_braces", "The braces { } do not match."));
+    }
+    Ok(out)
 }
 
 fn forbidden(name: &str, argument: Option<&str>) -> bool {
@@ -177,25 +254,11 @@ pub fn check_template(body: &str) -> Result<(), VhostError> {
             "dh-sample-php:9000".into(),
         ),
     );
-    let mut depth: i32 = 0;
-    for c in sample.chars() {
-        match c {
-            '{' => depth += 1,
-            '}' => depth -= 1,
-            _ => {}
-        }
-        if depth < 0 {
-            break;
-        }
-    }
-    if depth != 0 {
-        return Err(err("template_braces", "The braces { } do not match."));
-    }
-    for (name, argument) in directives(&sample) {
-        if forbidden(&name, argument.as_deref()) {
+    for words in statements(&sample)? {
+        if forbidden(&words[0], words.get(1).map(String::as_str)) {
             return Err(err(
                 "forbidden_directive",
-                format!("The directive `{}` is not allowed.", name.trim()),
+                format!("The directive `{}` is not allowed.", words[0].trim()),
             ));
         }
     }
@@ -210,6 +273,8 @@ struct Values {
     /// Lines for `{{policy_http}}` and `{{policy}}`.
     policy_http: Vec<String>,
     policy: Vec<String>,
+    /// The lines of the person's own block, for `{{custom}}`.
+    custom: Vec<String>,
 }
 
 impl Values {
@@ -221,6 +286,7 @@ impl Values {
             php_upstream,
             policy_http: Vec::new(),
             policy: Vec::new(),
+            custom: Vec::new(),
         }
     }
 }
@@ -249,6 +315,7 @@ fn put_lines(body: &str, name: &str, lines: &[String]) -> String {
 fn render_with(body: &str, values: &Values) -> String {
     let body = put_lines(body, "policy_http", &values.policy_http);
     let body = put_lines(&body, "policy", &values.policy);
+    let body = put_lines(&body, "custom", &values.custom);
     body.replace("{{domain}}", &values.domain)
         .replace("{{server_names}}", &values.server_names)
         .replace("{{docroot}}", &values.docroot)
@@ -285,6 +352,9 @@ pub struct Site<'a> {
     pub php_upstream: &'a str,
     /// Rate limit and response headers.
     pub policy: &'a Policy,
+    /// The person's own directives (empty for none), already checked with
+    /// [`check_custom_block`].
+    pub custom: &'a str,
 }
 
 /// Makes the configuration of one site from a template.
@@ -316,7 +386,101 @@ pub fn render(template: &str, site: &Site<'_>) -> Result<String, VhostError> {
     );
     values.policy_http = site.policy.http_lines(site.domain);
     values.policy = site.policy.server_lines(site.domain);
+    if !site.custom.trim().is_empty() {
+        check_custom_block(site.custom)?;
+        values.custom = site.custom.lines().map(str::to_owned).collect();
+    }
     Ok(render_with(template, &values))
+}
+
+/// Longest block of a person's own directives.
+pub const MAX_CUSTOM_BYTES: usize = 8 * 1024;
+/// Most directives (statements) in one.
+const MAX_CUSTOM_STATEMENTS: usize = 200;
+/// The directives a person may use in their own block: what shapes the answers
+/// of their own site. Nothing that names a file outside the site, another
+/// address to send requests to, a log, a module or a script language.
+const CUSTOM_ALLOWED: [&str; 24] = [
+    "location",
+    "if",
+    "set",
+    "rewrite",
+    "return",
+    "break",
+    "try_files",
+    "index",
+    "error_page",
+    "expires",
+    "add_header",
+    "deny",
+    "allow",
+    "gzip",
+    "gzip_types",
+    "gzip_min_length",
+    "gzip_comp_level",
+    "gzip_vary",
+    "client_max_body_size",
+    "autoindex",
+    "charset",
+    "default_type",
+    "limit_except",
+    "etag",
+];
+
+/// Checks the block of directives a person adds to their site: only the
+/// directives in a short list, quotes and braces that match, and a size limit.
+/// What is not on the list is refused, so a directive nobody thought of cannot be
+/// used.
+///
+/// # Errors
+/// [`VhostError`] for the first problem (`forbidden_directive` names the directive).
+pub fn check_custom_block(text: &str) -> Result<(), VhostError> {
+    if text.len() > MAX_CUSTOM_BYTES {
+        return Err(err(
+            "custom_too_large",
+            format!("The block is at most {MAX_CUSTOM_BYTES} bytes."),
+        ));
+    }
+    if text
+        .chars()
+        .any(|c| !(c == '\n' || c == '\t' || (' '..='~').contains(&c)))
+    {
+        return Err(err(
+            "custom_characters",
+            "The block holds characters other than printable ASCII.",
+        ));
+    }
+    if text.contains("{{") || text.contains("}}") {
+        return Err(err("custom_characters", "The block may not hold {{ or }}."));
+    }
+    let all = statements(text)?;
+    if all.len() > MAX_CUSTOM_STATEMENTS {
+        return Err(err(
+            "custom_too_large",
+            "The block has too many directives.",
+        ));
+    }
+    for words in &all {
+        let name = words[0].to_ascii_lowercase();
+        if !CUSTOM_ALLOWED.contains(&name.as_str()) {
+            return Err(err(
+                "forbidden_directive",
+                format!("The directive `{}` is not allowed here.", words[0]),
+            ));
+        }
+        // Headers the panel sets itself stay its own.
+        if name == "add_header"
+            && words
+                .get(1)
+                .is_some_and(|h| RESERVED_HEADERS.contains(&h.to_ascii_lowercase().as_str()))
+        {
+            return Err(err(
+                "reserved_header",
+                format!("The header {} is set by the panel.", words[1]),
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Most response headers one domain may add.
@@ -488,23 +652,15 @@ impl Policy {
 /// # Errors
 /// [`VhostError`] for the first problem.
 pub fn check_site_config(text: &str) -> Result<(), VhostError> {
-    for (name, first) in directives(text) {
-        if forbidden(&name, first.as_deref()) {
+    for words in statements(text)? {
+        if forbidden(&words[0], words.get(1).map(String::as_str)) {
             return Err(err(
                 "forbidden_directive",
-                format!("The directive `{}` is not allowed.", name.trim()),
+                format!("The directive `{}` is not allowed.", words[0].trim()),
             ));
         }
-    }
-    let code: String = text
-        .lines()
-        .map(|l| l.split('#').next().unwrap_or(""))
-        .collect::<Vec<_>>()
-        .join("\n");
-    for statement in code.split([';', '{', '}']) {
-        let mut words = statement.split_whitespace();
-        if words.next() == Some("root") {
-            let inside = words.next().is_some_and(|path| {
+        if words[0] == "root" {
+            let inside = words.get(1).is_some_and(|path| {
                 (path == WEB_ROOT || path.starts_with(&format!("{WEB_ROOT}/")))
                     && !path.split('/').any(|part| part == "..")
             });
@@ -542,6 +698,7 @@ mod tests {
                 docroot: &docroot,
                 php_upstream: "dh-alice-php:9000",
                 policy: &Policy::default(),
+                custom: "",
             },
         )
         .unwrap();
@@ -590,6 +747,7 @@ server {
                 docroot: &Docroot::default(),
                 php_upstream: "dh-alice-php:9000",
                 policy: &Policy::default(),
+                custom: "",
             },
         )
         .unwrap();
@@ -673,6 +831,7 @@ server {
                     docroot: &Docroot::default(),
                     php_upstream: bad,
                     policy: &Policy::default(),
+                    custom: "",
                 },
             )
             .unwrap_err();
@@ -689,6 +848,7 @@ server {
                 docroot: &Docroot::default(),
                 php_upstream: "dh-a-php:9000",
                 policy: &Policy::default(),
+                custom: "",
             },
         )
         .unwrap_err();
@@ -721,6 +881,7 @@ server {
                 docroot: &Docroot::default(),
                 php_upstream: "dh-alice-php:9000",
                 policy: &policy,
+                custom: "",
             },
         )
         .unwrap();
@@ -744,6 +905,7 @@ server {
                 docroot: &Docroot::default(),
                 php_upstream: "dh-alice-php:9000",
                 policy: &Policy::default(),
+                custom: "",
             },
         )
         .unwrap();
@@ -824,5 +986,114 @@ server {
                 .as_str(),
         )
         .unwrap();
+    }
+
+    #[test]
+    fn a_persons_own_block_may_shape_the_site_and_nothing_else() {
+        let good = "# old pages\nlocation /old { return 301 /new; }\nlocation ~* \\.(png|jpg)$ {\n    expires 30d;\n    add_header Cache-Control \"public\";\n}\nrewrite ^/a/(.*)$ /b/$1 permanent;\nerror_page 404 /404.html;\nclient_max_body_size 64m;\nif ($host = 'www.example.com') { return 301 https://example.com$request_uri; }\n";
+        check_custom_block(good).unwrap();
+        check_custom_block("").unwrap();
+        // Text inside a string is text, not a directive.
+        check_custom_block("set $a \"; alias /etc;\";").unwrap();
+        let cases = [
+            ("alias /etc/;", "forbidden_directive"),
+            ("root /etc;", "forbidden_directive"),
+            ("include /etc/passwd;", "forbidden_directive"),
+            ("proxy_pass http://10.0.2.2:5432;", "forbidden_directive"),
+            ("fastcgi_pass 127.0.0.1:9000;", "forbidden_directive"),
+            ("access_log /tmp/x;", "forbidden_directive"),
+            ("content_by_lua_block { }", "forbidden_directive"),
+            ("perl_set $x 'sub { }';", "forbidden_directive"),
+            ("load_module x.so;", "forbidden_directive"),
+            ("server { }", "forbidden_directive"),
+            ("location / { alias /etc; }", "forbidden_directive"),
+            (
+                "add_header Strict-Transport-Security \"x\";",
+                "reserved_header",
+            ),
+            // Nothing hides a directive from the check: not a quote, a comment mark or a semicolon.
+            ("add_header X \"a#\"; alias /etc;", "forbidden_directive"),
+            ("add_header X 'a'; alias /etc;", "forbidden_directive"),
+            ("return 200 x;alias /etc;", "forbidden_directive"),
+            ("location /x {\n}\nalias /etc;", "forbidden_directive"),
+            ("add_header X \"unclosed;", "template_syntax"),
+            ("location / { return 200 x;", "template_braces"),
+            ("return 200 x; }", "template_syntax"),
+            ("return 200 \"{{domain}}\";", "custom_characters"),
+            ("return 200 \"\u{e9}\";", "custom_characters"),
+            ("return 200 \"\u{0}\";", "custom_characters"),
+        ];
+        for (text, code) in cases {
+            assert_eq!(
+                check_custom_block(text).err().map(|e| e.code),
+                Some(code),
+                "{text:?}"
+            );
+        }
+        let big = "return 200 x;\n".repeat(MAX_CUSTOM_BYTES);
+        assert_eq!(
+            check_custom_block(&big).unwrap_err().code,
+            "custom_too_large"
+        );
+        let many = "break;".repeat(MAX_CUSTOM_STATEMENTS + 1);
+        assert_eq!(
+            check_custom_block(&many).unwrap_err().code,
+            "custom_too_large"
+        );
+    }
+
+    #[test]
+    fn a_comment_mark_inside_a_word_or_string_hides_nothing_from_the_node_either() {
+        for text in [
+            "server { add_header X \"a#\"; alias /etc; }",
+            "server { set $a b#c; alias /etc; }",
+            "server { set $a \"x;y\"; alias /etc; }",
+        ] {
+            assert_eq!(
+                check_site_config(text).unwrap_err().code,
+                "forbidden_directive",
+                "{text}"
+            );
+        }
+        // A real comment hides its own line only.
+        check_site_config("server { # alias /etc;\n root /var/www/html; }").unwrap();
+        assert!(check_site_config("server { # alias /etc;\n alias /etc; }").is_err());
+    }
+
+    #[test]
+    fn the_block_lands_in_the_file_where_the_template_says() {
+        let domain = fqdn("example.com");
+        let custom = "location /old { return 301 /new; }\nclient_max_body_size 64m;";
+        let text = render(
+            DEFAULT_NGINX_TEMPLATE,
+            &Site {
+                domain: &domain,
+                aliases: &[],
+                docroot: &Docroot::default(),
+                php_upstream: "dh-alice-php:9000",
+                policy: &Policy::default(),
+                custom,
+            },
+        )
+        .unwrap();
+        assert!(
+            text.contains("    index index.php index.html index.htm;\n    location /old { return 301 /new; }\n    client_max_body_size 64m;\n\n    location / {"),
+            "{text}"
+        );
+        check_site_config(&text).unwrap();
+        // A block that is not allowed is not rendered, whoever asks.
+        let e = render(
+            DEFAULT_NGINX_TEMPLATE,
+            &Site {
+                domain: &domain,
+                aliases: &[],
+                docroot: &Docroot::default(),
+                php_upstream: "dh-alice-php:9000",
+                policy: &Policy::default(),
+                custom: "alias /etc;",
+            },
+        )
+        .unwrap_err();
+        assert_eq!(e.code, "forbidden_directive");
     }
 }

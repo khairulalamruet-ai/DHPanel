@@ -26,6 +26,7 @@ members = [
     "crates/feature-gate",
     "crates/settings",
     "crates/tenant-stack",
+    "crates/web-config",
     "crates/docker-manager",
     "crates/pki",
     "crates/modules/auth",
@@ -62,6 +63,7 @@ dhpanel-rbac = { path = "crates/rbac" }
 dhpanel-audit = { path = "crates/audit" }
 dhpanel-node-protocol = { path = "crates/node-protocol" }
 dhpanel-pki = { path = "crates/pki" }
+dhpanel-web-config = { path = "crates/web-config" }
 dhpanel-mod-auth = { path = "crates/modules/auth" }
 dhpanel-mod-admin = { path = "crates/modules/admin" }
 dhpanel-mod-nodes = { path = "crates/modules/nodes" }

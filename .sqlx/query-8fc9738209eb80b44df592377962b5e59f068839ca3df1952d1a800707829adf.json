@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO domain_custom_blocks (domain_id, body) VALUES ($1, $2)\n         ON CONFLICT (domain_id) DO UPDATE SET body = EXCLUDED.body",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8fc9738209eb80b44df592377962b5e59f068839ca3df1952d1a800707829adf"
+}

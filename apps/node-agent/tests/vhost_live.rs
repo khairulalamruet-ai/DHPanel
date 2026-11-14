@@ -253,7 +253,7 @@ async fn a_refused_configuration_is_rolled_back_and_the_site_keeps_running() {
     assert!(answers("kept").await, "{:?}", fetch());
     // A domain's policy, rendered from a template, works in the real web server:
     // the header is on every answer and a visitor over the limit gets 429.
-    let template = "{{policy_http}}\nserver {\n    listen 8080;\n    server_name {{server_names}};\n    root {{docroot}};\n    {{policy}}\n    location / { try_files $uri @answer; }\n    location @answer { return 200 \"policy\\n\"; }\n}\n";
+    let template = "{{policy_http}}\nserver {\n    listen 8080;\n    server_name {{server_names}};\n    root {{docroot}};\n    {{policy}}\n    {{custom}}\n    location / { try_files $uri @answer; }\n    location @answer { return 200 \"policy\\n\"; }\n}\n";
     let policy = dhpanel_domain::vhost::Policy::parse(
         Some(2),
         vec![dhpanel_domain::vhost::Header {
@@ -271,6 +271,7 @@ async fn a_refused_configuration_is_rolled_back_and_the_site_keeps_running() {
             docroot: &dhpanel_domain::Docroot::default(),
             php_upstream: "dh-x-php:9000",
             policy: &policy,
+            custom: "location /moved { return 301 /elsewhere; }",
         },
     )
     .unwrap();
@@ -311,6 +312,23 @@ async fn a_refused_configuration_is_rolled_back_and_the_site_keeps_running() {
         .collect();
     assert!(codes.iter().any(|c| c == "429"), "{codes:?}");
     assert!(codes.iter().any(|c| c == "200"), "{codes:?}");
+    // The person's own block works too (a location of their own).
+    let moved = Command::new("curl")
+        .args([
+            "-s",
+            "-o",
+            "/dev/null",
+            "-w",
+            "%{http_code} %{redirect_url}",
+            &format!("http://127.0.0.1:{PORT}/moved"),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        String::from_utf8_lossy(&moved.stdout).starts_with("301 "),
+        "{:?}",
+        moved
+    );
     // Another visitor is not held back by the first one's requests.
     let other = Command::new("curl")
         .args([

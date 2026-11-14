@@ -1,0 +1,18 @@
+[package]
+name = "dhpanel-web-config"
+description = "A tenant's web server configuration, made from the panel's tables."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+dhpanel-database.workspace = true
+dhpanel-domain.workspace = true
+dhpanel-node-protocol.workspace = true
+dhpanel-tenant-stack.workspace = true
+uuid = "1"

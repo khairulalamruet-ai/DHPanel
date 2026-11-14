@@ -1,4 +1,7 @@
 //! A tenant's web server configuration, made from the panel's tables (T06.04b).
+//!
+//! Used by the dispatcher (to send the files to the node) and by the API (to show
+//! a person the file their site runs on).
 
 use dhpanel_database::{domain_policies::DomainPolicy, routes::RoutedDomain};
 use dhpanel_domain::{Docroot, Fqdn, vhost};
@@ -19,6 +22,7 @@ pub fn build(
     php_upstream: &str,
     domains: &[RoutedDomain],
     policies: &[(Uuid, DomainPolicy)],
+    customs: &[(Uuid, String)],
 ) -> Vec<(String, String)> {
     if !matches!(tenant_status, "active" | "suspended") {
         return Vec::new();
@@ -55,12 +59,21 @@ pub fn build(
                 .ok()
             })
             .unwrap_or_default();
+        // The person's own block was checked when it was saved; one that no longer
+        // passes (the rules got stricter) is left out, the site stays.
+        let custom = customs
+            .iter()
+            .find(|(id, _)| *id == d.id)
+            .map(|(_, text)| text.as_str())
+            .filter(|text| vhost::check_custom_block(text).is_ok())
+            .unwrap_or("");
         let site = vhost::Site {
             domain: &domain,
             aliases: &aliases,
             docroot: &docroot,
             php_upstream,
             policy: &policy,
+            custom,
         };
         if let Ok(config) = vhost::render(template, &site) {
             out.push((domain.as_str().to_owned(), config));
@@ -69,6 +82,36 @@ pub fn build(
     out.sort();
     out.truncate(MAX_HOSTS_PER_TENANT);
     out
+}
+
+/// Reads what the files are made from and makes them for a tenant.
+///
+/// # Errors
+/// A database error, as text.
+pub async fn site_files(
+    db: &dhpanel_database::sqlx::PgPool,
+    tenant_id: Uuid,
+    username: &str,
+    status: &str,
+) -> Result<Vec<(String, String)>, String> {
+    let username = dhpanel_domain::TenantUsername::parse(username).map_err(|e| e.to_string())?;
+    let template = dhpanel_database::vhost_templates::default_for(db, "nginx")
+        .await
+        .map_err(|e| e.to_string())?
+        .map_or_else(|| vhost::DEFAULT_NGINX_TEMPLATE.to_owned(), |t| t.body);
+    let php = dhpanel_tenant_stack::php_upstream(&username).map_err(|e| e.to_string())?;
+    let domains = dhpanel_database::routes::domains(db, tenant_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    let policies = dhpanel_database::domain_policies::of_tenant(db, tenant_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    let customs = dhpanel_database::domain_policies::custom_blocks_of_tenant(db, tenant_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(build(
+        status, &template, &php, &domains, &policies, &customs,
+    ))
 }
 
 #[cfg(test)]
@@ -102,7 +145,7 @@ mod tests {
             dom(3, "shop.org", "addon", None, "shop"),
             dom(4, "blog.example.com", "sub", Some(1), "blog"),
         ];
-        let files = build("active", DEFAULT_NGINX_TEMPLATE, PHP, &domains, &[]);
+        let files = build("active", DEFAULT_NGINX_TEMPLATE, PHP, &domains, &[], &[]);
         let names: Vec<&str> = files.iter().map(|(d, _)| d.as_str()).collect();
         assert_eq!(names, ["blog.example.com", "example.com", "shop.org"]);
         let main = &files[1].1;
@@ -119,17 +162,17 @@ mod tests {
     fn a_tenant_without_containers_has_no_files_and_a_bad_domain_is_skipped() {
         let domains = vec![dom(1, "example.com", "primary", None, "")];
         for status in ["provisioning", "failed", "deleting"] {
-            assert!(build(status, DEFAULT_NGINX_TEMPLATE, PHP, &domains, &[]).is_empty());
+            assert!(build(status, DEFAULT_NGINX_TEMPLATE, PHP, &domains, &[], &[]).is_empty());
         }
         assert_eq!(
-            build("suspended", DEFAULT_NGINX_TEMPLATE, PHP, &domains, &[]).len(),
+            build("suspended", DEFAULT_NGINX_TEMPLATE, PHP, &domains, &[], &[]).len(),
             1
         );
         let bad = vec![
             dom(1, "example.com", "primary", None, "../etc"),
             dom(2, "ok.org", "primary", None, ""),
         ];
-        let files = build("active", DEFAULT_NGINX_TEMPLATE, PHP, &bad, &[]);
+        let files = build("active", DEFAULT_NGINX_TEMPLATE, PHP, &bad, &[], &[]);
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].0, "ok.org");
     }
@@ -139,7 +182,7 @@ mod tests {
         let mut alias = dom(2, "www.example.com", "alias", Some(1), "");
         alias.status = "suspended".into();
         let domains = vec![dom(1, "example.com", "primary", None, ""), alias];
-        let files = build("active", DEFAULT_NGINX_TEMPLATE, PHP, &domains, &[]);
+        let files = build("active", DEFAULT_NGINX_TEMPLATE, PHP, &domains, &[], &[]);
         assert!(files[0].1.contains("server_name example.com;"));
     }
 
@@ -163,6 +206,7 @@ mod tests {
             PHP,
             &domains,
             &[(Uuid::from_u128(1), policy)],
+            &[],
         );
         assert!(files[0].1.contains("add_header X-Test \"yes\" always;"));
         assert!(files[0].1.contains("rate=5r/s"));
@@ -178,6 +222,7 @@ mod tests {
             PHP,
             &domains,
             &[(Uuid::from_u128(1), broken)],
+            &[],
         );
         assert_eq!(files.len(), 2);
         assert!(!files[0].1.contains("limit_req"));

@@ -103,3 +103,64 @@ pub async fn of_tenant(
         .map(|r| (r.domain_id, decode(r.rate_limit_per_second, r.headers)))
         .collect())
 }
+
+/// A domain's own directives (what a person with `edit_vhost` wrote), if any.
+///
+/// # Errors
+/// Database errors.
+pub async fn custom_block(pool: &PgPool, domain_id: Uuid) -> Result<Option<String>, sqlx::Error> {
+    sqlx::query_scalar!(
+        "SELECT body FROM domain_custom_blocks WHERE domain_id = $1",
+        domain_id,
+    )
+    .fetch_optional(pool)
+    .await
+}
+
+/// Sets a domain's own directives; an empty text removes them.
+///
+/// # Errors
+/// Database errors.
+pub async fn set_custom_block(
+    conn: &mut PgConnection,
+    domain_id: Uuid,
+    body: &str,
+) -> Result<(), sqlx::Error> {
+    if body.trim().is_empty() {
+        sqlx::query!(
+            "DELETE FROM domain_custom_blocks WHERE domain_id = $1",
+            domain_id
+        )
+        .execute(conn)
+        .await?;
+        return Ok(());
+    }
+    sqlx::query!(
+        "INSERT INTO domain_custom_blocks (domain_id, body) VALUES ($1, $2)
+         ON CONFLICT (domain_id) DO UPDATE SET body = EXCLUDED.body",
+        domain_id,
+        body,
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
+/// The own directives of a tenant's domains, by domain.
+///
+/// # Errors
+/// Database errors.
+pub async fn custom_blocks_of_tenant(
+    pool: &PgPool,
+    tenant_id: Uuid,
+) -> Result<Vec<(Uuid, String)>, sqlx::Error> {
+    let rows = sqlx::query!(
+        "SELECT b.domain_id, b.body
+         FROM domain_custom_blocks b JOIN domains d ON d.id = b.domain_id
+         WHERE d.tenant_id = $1",
+        tenant_id,
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.into_iter().map(|r| (r.domain_id, r.body)).collect())
+}
