@@ -5855,7 +5855,8 @@ export const handlers = [
 
   // ===================================  // File Manager: T08.09 Handlers
   // TODO(api:T08.08): Real backend agent file system endpoints
-  // ===================================  ...(() => {
+  // ===================================
+  ...(() => {
     interface MockFsItem {
       id: string;
       name: string;
@@ -6335,10 +6336,13 @@ export const handlers = [
           message: "Recalculation scheduled",
         });
       }),
+    ];
+  })(),
 
       // ===================================      // FTP Accounts: T08.13 Handlers
       // TODO(api:T08.12): Real FTPS account management endpoints
-      // ===================================      ...(() => {
+      // ===================================
+  ...(() => {
         interface MockFtpAccount {
           id: string;
           username: string;
@@ -6458,7 +6462,8 @@ export const handlers = [
 
           // ===================================          // Backup & Restore: T09.09 Handlers
           // TODO(api:T09.08): Real agent backup creation and restoration endpoints
-          // ===================================          ...(() => {
+          // ===================================
+  ...(() => {
             interface MockBackupItem {
               id: string;
               name: string;
@@ -6590,7 +6595,8 @@ export const handlers = [
               }),
 
               // ===================================              // ADMIN BACKUPS (TODO(api:T09.08))
-              // ===================================              ...(() => {
+              // ===================================
+  ...(() => {
                 interface MockAdminDestination {
                   id: string;
                   name: string;
@@ -6864,7 +6870,8 @@ export const handlers = [
                   }),
 
                   // ===================================                  // CRON JOBS (TODO(api:T10.01, T10.02))
-                  // ===================================                  ...(() => {
+                  // ===================================
+  ...(() => {
                     interface MockCronJob {
                       id: string;
                       name: string;
@@ -7035,7 +7042,8 @@ export const handlers = [
                       }),
 
                       // ===================================                      // LOG VIEWER (TODO(api:T10.04))
-                      // ===================================                      ...(() => {
+                      // ===================================
+  ...(() => {
                         const mockDomainOverviews = [
                           {
                             domain: "demo.dhpanel.test",
@@ -7182,7 +7190,8 @@ export const handlers = [
                           }),
 
                           // ===================================                          // ADMIN SYSTEM LOGS (TODO(api:T10.07))
-                          // ===================================                          ...(() => {
+                          // ===================================
+  ...(() => {
                             const mockServiceStats = [
                               {
                                 service: "control-plane",
@@ -7295,7 +7304,8 @@ export const handlers = [
                               }),
 
                               // ===================================                              // USAGE ANALYTICS (TODO(api:T10.09))
-                              // ===================================                              ...(() => {
+                              // ===================================
+  ...(() => {
                                 const generateHistoryPoints = (range: string, isNode = false) => {
                                   const points: any[] = [];
                                   const count = range === "24h" ? 24 : range === "7d" ? 28 : 30;
@@ -7406,7 +7416,8 @@ export const handlers = [
                                   }),
 
                                   // ===================================                                  // PROCESS MANAGER (TODO(api:T10.14))
-                                  // ===================================                                  ...(() => {
+                                  // ===================================
+  ...(() => {
                                     interface MockProcess {
                                       pid: number;
                                       ppid: number;
@@ -9574,7 +9585,8 @@ export const handlers = [
                                                      ];
                                                    })(),
                                               // ===================================                                              // T18.06 — Branding & Live Theming Handlers (TODO(api:T18.06))
-                                              // ===================================                                              ...(() => {
+                                              // ===================================
+  ...(() => {
                                                 let mockBrandingState = {
                                                   companyName: "DHPanel",
                                                   logoUrl: "",
@@ -9605,7 +9617,8 @@ export const handlers = [
                                                 ];
                                               })(),
                                               // ===================================                                              // T18.07: Onboarding & Tour Handlers
-                                              // ===================================                                              ...(() => {
+                                              // ===================================
+  ...(() => {
                                                 let adminDismissed = false;
                                                 let clientDismissed = false;
                                                 let completedSteps = ["add_node"];
@@ -9651,7 +9664,8 @@ export const handlers = [
                                                 ];
                                               })(),
                                               // ===================================                                              // T18.10: Panel Update Handlers
-                                              // ===================================                                              ...(() => {
+                                              // ===================================
+  ...(() => {
                                                 let currentVersion = "0.1.0";
                                                 let previousVersion: string | null = null;
                                                 let channel: "stable" | "beta" = "stable";
@@ -9838,7 +9852,8 @@ export const handlers = [
                                                 ];
                                               })(),
                                               // ===================================                                              // T18.11: API Tokens & Scoped Execution
-                                              // ===================================                                              ...(() => {
+                                              // ===================================
+  ...(() => {
                                                 let mockTokens: Array<{
                                                   id: string;
                                                   name: string;

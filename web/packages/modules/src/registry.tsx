@@ -1066,8 +1066,6 @@ export const registeredFrontendModules: FrontendModule[] = [
         order: 90,
       },
     ],
-      },
-    ],
   },
 ];
 
