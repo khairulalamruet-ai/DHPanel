@@ -5,6 +5,7 @@ export * from "./audit/AuditViewerPage";
 export * from "./dummy/DummyModulePage";
 export * from "./module-manager";
 export * from "./nodes/NodesPage";
+export * from "./nodes/NodeFailoverDialog";
 export * from "./nodes/types";
 export * from "./operations/OperationsPage";
 export * from "./operations/useOperation";

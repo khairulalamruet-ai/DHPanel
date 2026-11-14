@@ -76,6 +76,15 @@ vi.mock("@dhpanel/i18n", () => ({
         "nodes.revoke.desc": "Are you sure you want to revoke this node?",
         "nodes.revoke.confirmPrompt": "Type the node name to confirm revocation:",
         "nodes.revoke.success": "Node revoked successfully",
+        "nodes.health.alertTitle": "Node Offline Alert (Heartbeat missed > 60s)",
+        "nodes.health.alertDesc": "Node {{nodes}} is unreachable. Failover may be initiated.",
+        "nodes.health.triggerFailover": "Trigger Failover",
+        "nodes.health.failoverModalTitle": "Emergency Node Failover",
+        "nodes.health.failoverModalDesc": "Evacuate and failover hosted tenants",
+        "nodes.health.sourceNode": "Offline Source Node",
+        "nodes.health.targetNode": "Target Destination Node",
+        "nodes.health.executeFailover": "Execute Failover",
+        "nodes.health.failoverSuccess": "Failover initiated successfully",
         "common.loading": "Loading...",
         "common.reload": "Reload",
         "common.cancel": "Cancel",
@@ -137,6 +146,29 @@ const mockNodesList = [
       security_features: ["seccomp"],
     },
   },
+  {
+    id: "node_03",
+    name: "node-worker-03-backup",
+    hostname: "worker3.dhpanel.net",
+    ip_address: "167.104.101.83",
+    status: "offline" as const,
+    version: "0.1.0",
+    fingerprint: "SHA256:3c4d5e6f7a8b",
+    last_seen_at: "2026-11-10T12:00:00Z",
+    enrolled_at: "2026-11-01T00:00:00Z",
+    capabilities: {
+      cpu_cores: 4,
+      cpu_model: "Intel Xeon E-2288G",
+      cpu_usage_pct: 0,
+      ram_total_bytes: 8 * 1024 * 1024 * 1024,
+      ram_used_bytes: 1.1 * 1024 * 1024 * 1024,
+      disk_total_bytes: 100 * 1024 * 1024 * 1024,
+      disk_used_bytes: 20 * 1024 * 1024 * 1024,
+      kernel: "Linux 6.5.0",
+      docker_version: "26.1.4",
+      security_features: ["seccomp"],
+    },
+  },
 ];
 
 const mockEnrollmentsList = [
@@ -178,6 +210,9 @@ describe("NodesPage", () => {
       }
       if (url.includes("/revoke")) {
         return { success: true, message: "Node revoked successfully" };
+      }
+      if (url.includes("/failover")) {
+        return { success: true, message: "Failover completed successfully", migrated_tenants: 12 };
       }
       return {};
     });
@@ -396,5 +431,36 @@ describe("NodesPage", () => {
       </ToastProvider>
     );
     expect(screen.getByText("Permission denied")).toBeInTheDocument();
+  });
+
+  it("displays node offline alert banner and triggers emergency failover (DoD T16.07)", async () => {
+    render(
+      <ToastProvider>
+        <NodesPage />
+      </ToastProvider>
+    );
+
+    // Verify alert banner is displayed for offline node
+    await waitFor(() => {
+      expect(screen.getByTestId("node-offline-alert-banner")).toBeInTheDocument();
+      expect(screen.getByText("node-worker-03-backup")).toBeInTheDocument();
+      expect(screen.getByTestId("btn-trigger-failover")).toBeInTheDocument();
+    });
+
+    // Click trigger failover
+    fireEvent.click(screen.getByTestId("btn-trigger-failover"));
+
+    // Verify modal opens
+    await waitFor(() => {
+      expect(screen.getByText("Emergency Node Failover")).toBeInTheDocument();
+      expect(screen.getByTestId("btn-confirm-failover")).toBeInTheDocument();
+    });
+
+    // Confirm failover
+    fireEvent.click(screen.getByTestId("btn-confirm-failover"));
+
+    await waitFor(() => {
+      expect(screen.queryByText("Emergency Node Failover")).not.toBeInTheDocument();
+    });
   });
 });

@@ -99,4 +99,32 @@ test.describe("Node Management UI (T02.16)", () => {
     // Verify modal closes
     await expect(page.getByText(/Revoke Node Certificate|নোড সার্টিফিকেট বাতিল করুন/i)).not.toBeVisible();
   });
+
+  test("displays node offline alert banner and initiates emergency failover (T16.07)", async ({ page }) => {
+    // Verify alert banner is visible
+    const alertBanner = page.getByTestId("node-offline-alert-banner");
+    await expect(alertBanner).toBeVisible();
+    await expect(alertBanner).toContainText(/Heartbeat missed|হার্টবিট বন্ধ/i);
+
+    // Verify offline badge on node row
+    await expect(page.getByTestId("node-offline-badge").first()).toBeVisible();
+
+    // Click trigger failover
+    const triggerBtn = page.getByTestId("btn-trigger-failover");
+    await expect(triggerBtn).toBeVisible();
+    await triggerBtn.click();
+
+    // Verify failover modal opens
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByText(/Emergency Node Failover|জরুরি নোড ফেলওভার/i)).toBeVisible();
+
+    // Confirm failover
+    const confirmBtn = page.getByTestId("btn-confirm-failover");
+    await expect(confirmBtn).toBeVisible();
+    await confirmBtn.click();
+
+    // Dialog closes
+    await expect(dialog).not.toBeVisible();
+  });
 });

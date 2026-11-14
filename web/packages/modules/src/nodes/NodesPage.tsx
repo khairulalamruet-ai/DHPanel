@@ -34,6 +34,7 @@ import {
 import type { NodeItem, EnrollmentView, NodeStatus } from "./types";
 import { AddNodeDialog } from "./AddNodeDialog";
 import { NodeDetailDialog } from "./NodeDetailDialog";
+import { NodeFailoverDialog } from "./NodeFailoverDialog";
 
 export function NodesPage() {
   const { t } = useTranslation();
@@ -51,6 +52,7 @@ export function NodesPage() {
   const [selectedNode, setSelectedNode] = useState<NodeItem | null>(null);
   const [revokingNode, setRevokingNode] = useState<NodeItem | null>(null);
   const [cancellingEnrollmentId, setCancellingEnrollmentId] = useState<string | null>(null);
+  const [failoverSourceNode, setFailoverSourceNode] = useState<NodeItem | null>(null);
 
   // List nodes - TODO(api:T02.08): replace mocked nodes with backend endpoint when implemented
   const fetchNodes = async () => {
@@ -145,7 +147,11 @@ export function NodesPage() {
         );
       case "offline":
         return (
-          <Badge variant="secondary" className="gap-1 text-[11px] py-0 px-2 font-medium text-muted-foreground">
+          <Badge
+            variant="destructive"
+            data-testid="node-offline-badge"
+            className="gap-1 text-[11px] py-0 px-2 font-medium"
+          >
             <Clock className="h-3 w-3" />
             {t("nodes.status.offline")}
           </Badge>
@@ -234,6 +240,42 @@ export function NodesPage() {
           )}
         </div>
       </div>
+
+      {/* Node Health & Failover Alert Banner (T16.07) */}
+      {nodes.some((n) => n.status === "offline") && (
+        <div
+          data-testid="node-offline-alert-banner"
+          className="p-4 rounded-lg border border-destructive/30 bg-destructive/10 text-destructive flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in"
+        >
+          <div className="flex items-start sm:items-center gap-3">
+            <AlertTriangle className="h-5 w-5 shrink-0 text-destructive mt-0.5 sm:mt-0" />
+            <div>
+              <p className="font-semibold text-sm">
+                {t("nodes.health.alertTitle", { count: nodes.filter((n) => n.status === "offline").length })}
+              </p>
+              <p className="text-xs text-destructive/80 mt-0.5">
+                {t("nodes.health.alertDesc", {
+                  nodes: nodes.filter((n) => n.status === "offline").map((n) => n.name).join(", "),
+                })}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {hasPermission("admin.nodes.write") && (
+              <Button
+                size="sm"
+                variant="destructive"
+                data-testid="btn-trigger-failover"
+                onClick={() => setFailoverSourceNode(nodes.find((n) => n.status === "offline") || null)}
+                className="text-xs h-8 gap-1.5"
+              >
+                <AlertTriangle className="h-3.5 w-3.5" />
+                {t("nodes.health.triggerFailover")}
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Nodes Table Card */}
       <Card>
@@ -327,6 +369,17 @@ export function NodesPage() {
                               <Info className="h-3.5 w-3.5" />
                               {t("nodes.table.viewDetails")}
                             </Button>
+                            {hasPermission("admin.nodes.write") && node.status === "offline" && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                data-testid={`btn-failover-${node.id}`}
+                                onClick={() => setFailoverSourceNode(node)}
+                                className="h-8 px-2 text-xs text-destructive hover:bg-destructive/10 border-destructive/30"
+                              >
+                                {t("nodes.health.triggerFailover")}
+                              </Button>
+                            )}
                             {hasPermission("admin.nodes.write") && node.status !== "revoked" && (
                               <Button
                                 variant="outline"
@@ -419,6 +472,15 @@ export function NodesPage() {
         node={selectedNode}
         open={!!selectedNode}
         onOpenChange={(open) => !open && setSelectedNode(null)}
+      />
+
+      {/* Node Failover Dialog (T16.07) */}
+      <NodeFailoverDialog
+        node={failoverSourceNode}
+        open={!!failoverSourceNode}
+        onOpenChange={(open) => !open && setFailoverSourceNode(null)}
+        availableTargetNodes={nodes}
+        onFailoverComplete={loadData}
       />
 
       {/* Revoke Node Confirmation Dialog (AGENTS.md typed-confirmation) */}
