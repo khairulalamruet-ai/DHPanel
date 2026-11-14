@@ -6,3 +6,5 @@ packages:
 allowBuilds:
   esbuild: true
   msw: true
+overrides:
+  tinypool: ">=2.1.2"
