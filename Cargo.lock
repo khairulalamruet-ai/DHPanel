@@ -1511,6 +1511,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "dhpanel-safe-fs"
+version = "0.1.0"
+dependencies = [
+ "rustix",
+ "thiserror",
+]
+
+[[package]]
 name = "dhpanel-session"
 version = "0.1.0"
 dependencies = [

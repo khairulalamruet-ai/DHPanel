@@ -1,0 +1,16 @@
+[package]
+name = "dhpanel-safe-fs"
+description = "File access that cannot leave a directory: paths below a root, no symlinks, no magic links (T08.01)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror = "2.0.21"
+# Safe bindings to openat2 and friends: this workspace forbids `unsafe`.
+rustix = { version = "1", default-features = false, features = ["std", "fs"] }
