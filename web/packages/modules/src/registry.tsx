@@ -100,6 +100,14 @@ export const registeredFrontendModules: FrontendModule[] = [
         order: 22,
         permission: "admin.nodes.read",
       },
+      {
+        id: "ip-pools",
+        labelKey: "nodes.ipPools.nav",
+        icon: <Globe className="h-4 w-4" />,
+        href: "/admin/ip-pools",
+        order: 23,
+        permission: "admin.nodes.read",
+      },
     ],
   },
   {

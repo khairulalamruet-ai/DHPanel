@@ -16,6 +16,7 @@ import {
   DummyModulePage,
   ModuleManagerPage,
   NodesPage,
+  AdminIpPoolsPage,
   OperationsPage,
   SettingsPage,
   FeatureSetsPage,
@@ -155,6 +156,13 @@ const nodesRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/nodes",
   component: NodesPage,
+});
+
+// IP Pools route (T16.05)
+const ipPoolsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/ip-pools",
+  component: AdminIpPoolsPage,
 });
 
 // 9. Operations route (Operation Ledger T02.17)
@@ -469,6 +477,7 @@ const routeTree = rootRoute.addChildren([
   dummyRoute,
   modulesRoute,
   nodesRoute,
+  ipPoolsRoute,
   operationsRoute,
   settingsRoute,
   featureSetsRoute,

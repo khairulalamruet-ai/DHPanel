@@ -48,3 +48,49 @@ export interface CreatedEnrollment {
 
 // Backwards-compatible alias if referenced elsewhere
 export type EnrollmentTokenResponse = CreatedEnrollment;
+
+// --- Node IP Pool Types (T16.05) ---
+
+export type IpAddressType = "shared" | "dedicated";
+export type IpAddressStatus = "active" | "available" | "reserved";
+
+export interface NodeIpAddress {
+  id: string;
+  node_id: string;
+  node_name: string;
+  ip_address: string;
+  subnet_mask: string;
+  interface_name: string;
+  type: IpAddressType;
+  status: IpAddressStatus;
+  is_primary: boolean;
+  assigned_tenant_id?: string | null;
+  assigned_tenant_username?: string | null;
+  assigned_domain?: string | null;
+  shared_tenants_count?: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface NodeIpPoolMetrics {
+  total_ips: number;
+  shared_ips: number;
+  dedicated_total: number;
+  dedicated_assigned: number;
+  dedicated_available: number;
+}
+
+export interface AddNodeIpPayload {
+  node_id: string;
+  ip_address: string;
+  subnet_mask?: string;
+  interface_name?: string;
+  type: IpAddressType;
+}
+
+export interface AllocateIpPayload {
+  tenant_id: string;
+  tenant_username: string;
+  domain?: string;
+}
+
