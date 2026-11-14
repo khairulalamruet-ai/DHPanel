@@ -7342,6 +7342,54 @@
           }
         }
       }
+    },
+    "/api/v1/public/tls/ask": {
+      "get": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "May a certificate be issued for this name?",
+        "operationId": "tlsAsk",
+        "parameters": [
+          {
+            "name": "domain",
+            "in": "query",
+            "description": "The host name a visitor asked for.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The name is an active domain of this panel: a certificate may be issued"
+          },
+          "400": {
+            "description": "Not a host name",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not a domain of this panel, or not active: no certificate"
+          },
+          "429": {
+            "description": "This address asks too often",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {

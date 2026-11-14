@@ -431,3 +431,21 @@ pub async fn set_docroot(
     .await?;
     Ok(done.rows_affected() == 1)
 }
+
+/// Whether a certificate may be issued for `fqdn`: it is a domain of a hosting
+/// account that is running or suspended (a suspended site still shows its page
+/// over HTTPS), and the domain itself is active.
+///
+/// # Errors
+/// Database errors.
+pub async fn certificate_allowed(pool: &PgPool, fqdn: &str) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar!(
+        r#"SELECT EXISTS (
+               SELECT 1 FROM domains d JOIN tenants t ON t.id = d.tenant_id
+               WHERE d.fqdn = $1 AND d.status = 'active' AND t.status IN ('active', 'suspended')
+           ) AS "allowed!""#,
+        fqdn,
+    )
+    .fetch_one(pool)
+    .await
+}

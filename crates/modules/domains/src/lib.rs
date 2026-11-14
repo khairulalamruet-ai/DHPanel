@@ -33,6 +33,7 @@ pub mod dns;
 pub mod nameservers;
 pub mod records;
 pub mod redirects;
+pub mod tls;
 
 use std::sync::Arc;
 
@@ -88,6 +89,8 @@ pub struct DomainsState {
     pub settings: Arc<SettingsRegistry>,
     /// Asks the public DNS which name servers a domain has.
     pub resolver: Arc<dyn dhpanel_dns::resolver::NsResolver>,
+    /// Limits how often one address may ask whether a name may get a certificate.
+    pub ask_limiter: dhpanel_cache::ratelimit::RateLimiter,
 }
 
 impl FromRef<DomainsState> for PgPool {
@@ -1067,7 +1070,7 @@ pub async fn client_delete(
         dns::delete_template, records::admin_list, records::admin_add, records::admin_update,
         records::admin_delete, records::client_list, records::client_add, records::client_update,
         records::client_delete, nameservers::admin_nameservers, nameservers::client_nameservers,
-        nameservers::admin_check, nameservers::client_check
+        nameservers::admin_check, nameservers::client_check, tls::ask
     ),
     components(schemas(
         DomainView, DomainList, AddDomain, AdminAddDomain, UpdateDomain,

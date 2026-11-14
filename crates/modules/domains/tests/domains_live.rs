@@ -63,9 +63,14 @@ struct Browser {
 }
 
 async fn env(pool: &PgPool) -> Env {
+    env_limited(pool, 1000).await
+}
+
+/// The environment with the TLS question limit set (per minute and address).
+async fn env_limited(pool: &PgPool, ask_limit: u32) -> Env {
     let url = std::env::var("REDIS_URL").expect("REDIS_URL must be set");
     let redis = RedisHandle::new(&SecretString::from(url)).expect("valid REDIS_URL");
-    let sessions = SessionStore::new(redis, pool.clone(), SessionConfig::default());
+    let sessions = SessionStore::new(redis.clone(), pool.clone(), SessionConfig::default());
     let settings = Arc::new(
         SettingsRegistry::build(vec![(
             "domains".to_owned(),
@@ -74,14 +79,21 @@ async fn env(pool: &PgPool) -> Env {
         .unwrap(),
     );
     let resolver = MockResolver::new();
+    let ask_limiter = dhpanel_cache::ratelimit::RateLimiter::new(
+        redis.clone(),
+        format!("test-{}", Uuid::now_v7().simple()),
+        ask_limit,
+        std::time::Duration::from_secs(60),
+    );
     let domains = Arc::new(Fake {
         manifest: manifest("domains"),
         routes: Box::new({
-            let (pool, sessions, settings, resolver) = (
+            let (pool, sessions, settings, resolver, ask_limiter) = (
                 pool.clone(),
                 sessions.clone(),
                 settings.clone(),
                 resolver.clone(),
+                ask_limiter.clone(),
             );
             move || {
                 let state = DomainsState {
@@ -89,11 +101,12 @@ async fn env(pool: &PgPool) -> Env {
                     sessions: sessions.clone(),
                     settings: settings.clone(),
                     resolver: Arc::new(resolver.clone()),
+                    ask_limiter: ask_limiter.clone(),
                 };
                 ModuleRoutes {
                     admin: Some(admin_router().with_state(state.clone())),
-                    client: Some(client_router().with_state(state)),
-                    ..ModuleRoutes::none()
+                    client: Some(client_router().with_state(state.clone())),
+                    public: Some(dhpanel_mod_domains::tls::public_router().with_state(state)),
                 }
             }
         }),
@@ -2131,5 +2144,163 @@ async fn clients_are_told_the_name_servers_and_can_check_their_domains(pool: PgP
         .await
         .0,
         StatusCode::FORBIDDEN
+    );
+}
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn a_certificate_may_be_issued_only_for_active_domains_of_running_accounts(pool: PgPool) {
+    const ASK: &str = "/api/v1/public/tls/ask";
+    let e = env(&pool).await;
+    let (alice, tenant) = client(&pool, "alice", 10_000).await;
+    let a = e.sign_in(alice).await;
+    let (_, main) = e
+        .call(Some(&a), "POST", CLIENT, Some(domain("example.com")), true)
+        .await;
+    e.call(
+        Some(&a),
+        "POST",
+        CLIENT,
+        Some(json!({"fqdn": "blog.example.com", "kind": "sub", "parent_domain_id": main["id"]})),
+        true,
+    )
+    .await;
+    e.call(
+        Some(&a),
+        "POST",
+        CLIENT,
+        Some(json!({"fqdn": "example.net", "kind": "alias", "parent_domain_id": main["id"]})),
+        true,
+    )
+    .await;
+    let ask = |name: &str| {
+        let e = &e;
+        let path = format!("{ASK}?domain={name}");
+        async move { e.call(None, "GET", &path, None, false).await.0 }
+    };
+
+    // No session needed (the web server asks); the domains of the panel get a yes.
+    for name in [
+        "example.com",
+        "blog.example.com",
+        "example.net",
+        "EXAMPLE.com",
+        "example.com.",
+    ] {
+        assert_eq!(ask(name).await, StatusCode::OK, "{name}");
+    }
+    // Everything else gets a no: unknown names, parents and neighbours, other endings.
+    for name in [
+        "unknown.org",
+        "www.example.com",
+        "example.org",
+        "com",
+        "a.blog.example.com",
+        "xample.com",
+    ] {
+        assert_eq!(ask(name).await, StatusCode::NOT_FOUND, "{name}");
+    }
+    // Not a host name at all.
+    for name in [
+        "",
+        "a%20b",
+        "http://example.com",
+        "example.com/x",
+        "*.example.com",
+        "1.2.3.4",
+    ] {
+        assert_eq!(ask(name).await, StatusCode::BAD_REQUEST, "{name:?}");
+    }
+    assert_eq!(
+        e.call(None, "GET", ASK, None, false).await.0,
+        StatusCode::BAD_REQUEST,
+        "no name given"
+    );
+
+    // A suspended domain gets no certificate; a suspended account does (its page is shown over HTTPS).
+    sqlx::query(
+        "UPDATE domains SET status = 'suspended', suspended_at = now() WHERE fqdn = 'example.net'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert_eq!(ask("example.net").await, StatusCode::NOT_FOUND);
+    assert_eq!(ask("example.com").await, StatusCode::OK);
+    sqlx::query("UPDATE tenants SET status = 'suspended' WHERE id = $1")
+        .bind(tenant)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(ask("example.com").await, StatusCode::OK);
+    // One that is being deleted, failed or not set up yet gets none.
+    for status in ["deleting", "failed", "provisioning"] {
+        let sql = if status == "deleting" {
+            "UPDATE tenants SET status = 'deleting', deleted_at = now(), purge_after = now() + interval '7 days' WHERE id = $1"
+        } else {
+            "UPDATE tenants SET status = $2, deleted_at = NULL, purge_after = NULL WHERE id = $1"
+        };
+        let mut q = sqlx::query(sql).bind(tenant);
+        if status != "deleting" {
+            q = q.bind(status);
+        }
+        q.execute(&pool).await.unwrap();
+        assert_eq!(ask("example.com").await, StatusCode::NOT_FOUND, "{status}");
+    }
+    // The answer carries nothing.
+    sqlx::query(
+        "UPDATE tenants SET status = 'active', deleted_at = NULL, purge_after = NULL WHERE id = $1",
+    )
+    .bind(tenant)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let res = e
+        .app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("{ASK}?domain=example.com"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert!(
+        axum::body::to_bytes(res.into_body(), 1024)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn an_address_that_asks_too_often_is_told_to_wait(pool: PgPool) {
+    let e = env_limited(&pool, 5).await;
+    for i in 1..=5 {
+        let (status, _) = e
+            .call(
+                None,
+                "GET",
+                "/api/v1/public/tls/ask?domain=nothing.example.com",
+                None,
+                false,
+            )
+            .await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "question {i}");
+    }
+    let (status, body) = e
+        .call(
+            None,
+            "GET",
+            "/api/v1/public/tls/ask?domain=nothing.example.com",
+            None,
+            false,
+        )
+        .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::TOO_MANY_REQUESTS, "too_many_requests")
     );
 }

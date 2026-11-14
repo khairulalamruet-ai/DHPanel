@@ -18,6 +18,7 @@ use secrecy::{ExposeSecret, SecretString};
 use tokio::sync::OnceCell;
 
 pub mod lockout;
+pub mod ratelimit;
 
 pub use redis;
 

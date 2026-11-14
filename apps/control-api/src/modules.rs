@@ -115,6 +115,13 @@ pub fn mount(
     // One cache for every rebuild of the system routes, so it survives a module switch.
     let branding: Arc<dhpanel_mod_system::bootstrap::BrandingCache> = Arc::default();
     let (db, sessions) = (states.auth.db.clone(), states.auth.sessions.clone());
+    // One counter for the whole panel, so the limit holds across instances.
+    let ask_limiter = dhpanel_cache::ratelimit::RateLimiter::new(
+        states.auth.redis.clone(),
+        "tls-ask",
+        dhpanel_mod_domains::tls::ASK_LIMIT_PER_MINUTE,
+        std::time::Duration::from_secs(60),
+    );
     let States { auth, admin, nodes } = states;
     let modules = manifests
         .into_iter()
@@ -209,11 +216,12 @@ pub fn mount(
                         })
                     }
                     "domains" => {
-                        let (db, sessions, late_settings, resolver) = (
+                        let (db, sessions, late_settings, resolver, ask_limiter) = (
                             db.clone(),
                             sessions.clone(),
                             late_settings.clone(),
                             resolver.clone(),
+                            ask_limiter.clone(),
                         );
                         Box::new(move || match late_settings.get() {
                             Some(settings) => {
@@ -222,6 +230,7 @@ pub fn mount(
                                     sessions: sessions.clone(),
                                     settings: settings.clone(),
                                     resolver: resolver.clone(),
+                                    ask_limiter: ask_limiter.clone(),
                                 };
                                 ModuleRoutes {
                                     admin: Some(
@@ -229,9 +238,12 @@ pub fn mount(
                                             .with_state(state.clone()),
                                     ),
                                     client: Some(
-                                        dhpanel_mod_domains::client_router().with_state(state),
+                                        dhpanel_mod_domains::client_router()
+                                            .with_state(state.clone()),
                                     ),
-                                    ..ModuleRoutes::none()
+                                    public: Some(
+                                        dhpanel_mod_domains::tls::public_router().with_state(state),
+                                    ),
                                 }
                             }
                             None => ModuleRoutes::none(),
