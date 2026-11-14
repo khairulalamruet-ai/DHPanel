@@ -2808,3 +2808,144 @@ async fn force_https_and_hsts_are_per_domain_and_hsts_needs_force_https(pool: Pg
             .unwrap();
     assert_eq!(actions.len(), 4, "on, hsts on, both off, both on");
 }
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn a_domains_rate_limit_and_headers_are_checked_kept_and_need_the_feature(pool: PgPool) {
+    let e = env(&pool).await;
+    let (alice, tenant) = client(&pool, "alice", 10_000).await;
+    let (bobby, _) = client(&pool, "bobby", 10_001).await;
+    let (a, b) = (e.sign_in(alice).await, e.sign_in(bobby).await);
+    let (_, main) = e
+        .call(Some(&a), "POST", CLIENT, Some(domain("example.com")), true)
+        .await;
+    let path = format!("{CLIENT}/{}/policy", main["id"].as_str().unwrap());
+    let put = |body: Value| {
+        let (e, a, path) = (&e, &a, path.clone());
+        async move { e.call(Some(a), "PUT", &path, Some(body), true).await }
+    };
+    let version = || {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_scalar::<_, i64>("SELECT routes_version FROM tenants WHERE id = $1")
+                .bind(tenant)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+        }
+    };
+
+    // Reading is open; an empty policy is what a new domain has.
+    let (status, empty) = e.call(Some(&a), "GET", &path, None, false).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(empty, json!({"rate_limit_per_second": null, "headers": []}));
+    // Changing needs the feature in the plan.
+    sqlx::query(
+        "UPDATE feature_sets SET all_features = false, features = ARRAY['domains']::feature_key[]
+         WHERE id = (SELECT feature_set_id FROM plans WHERE is_default)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (status, body) = put(json!({"rate_limit_per_second": 10, "headers": []})).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::FORBIDDEN, "feature_disabled")
+    );
+    sqlx::query(
+        "UPDATE feature_sets SET features = ARRAY['domains', 'web_policy']::feature_key[]
+         WHERE id = (SELECT feature_set_id FROM plans WHERE is_default)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let before = version().await;
+    let good = json!({
+        "rate_limit_per_second": 20,
+        "headers": [{"name": "X-Frame-Options", "value": "SAMEORIGIN"}]
+    });
+    let (status, saved) = put(good.clone()).await;
+    assert_eq!((status, &saved), (StatusCode::OK, &good), "{saved}");
+    assert!(
+        version().await > before,
+        "the web server gets it with the next sync"
+    );
+    let (_, read) = e.call(Some(&a), "GET", &path, None, false).await;
+    assert_eq!(read, good);
+
+    // What could break the file or the site is refused, with the field named.
+    for (body, field, why) in [
+        (
+            json!({"rate_limit_per_second": 0, "headers": []}),
+            "rate_limit_per_second",
+            "invalid_rate_limit",
+        ),
+        (
+            json!({"rate_limit_per_second": 5000, "headers": []}),
+            "rate_limit_per_second",
+            "invalid_rate_limit",
+        ),
+        (
+            json!({"rate_limit_per_second": null, "headers": [{"name": "Strict-Transport-Security", "value": "x"}]}),
+            "headers",
+            "reserved_header",
+        ),
+        (
+            json!({"rate_limit_per_second": null, "headers": [{"name": "X-A", "value": "a\"; deny all; \""}]}),
+            "headers",
+            "invalid_header_value",
+        ),
+        (
+            json!({"rate_limit_per_second": null, "headers": [{"name": "X A", "value": "x"}]}),
+            "headers",
+            "invalid_header_name",
+        ),
+    ] {
+        let (status, body) = put(body).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+        assert_eq!(
+            (
+                body["errors"][0]["field"].clone(),
+                body["errors"][0]["code"].clone()
+            ),
+            (json!(field), json!(why))
+        );
+    }
+    assert_eq!(
+        put(json!({"rate_limit_per_second": 5, "unknown": 1}))
+            .await
+            .0,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    let (_, read) = e.call(Some(&a), "GET", &path, None, false).await;
+    assert_eq!(read, good, "a refused change leaves the policy as it was");
+
+    // Not another account's.
+    assert_eq!(
+        e.call(Some(&b), "GET", &path, None, false).await.0,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        e.call(Some(&b), "PUT", &path, Some(good.clone()), true)
+            .await
+            .0,
+        StatusCode::NOT_FOUND
+    );
+
+    // An empty policy removes it.
+    let (status, cleared) = put(json!({"rate_limit_per_second": null, "headers": []})).await;
+    assert_eq!((status, cleared), (StatusCode::OK, empty));
+    let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM domain_policies")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(rows, 0);
+    let actions: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_logs WHERE action = 'domain.policy_changed'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(actions, 2);
+}

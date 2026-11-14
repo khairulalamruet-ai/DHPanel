@@ -251,6 +251,81 @@ async fn a_refused_configuration_is_rolled_back_and_the_site_keeps_running() {
     assert!(!dir.join("gone.example.com.conf").exists());
     assert!(file.exists());
     assert!(answers("kept").await, "{:?}", fetch());
+    // A domain's policy, rendered from a template, works in the real web server:
+    // the header is on every answer and a visitor over the limit gets 429.
+    let template = "{{policy_http}}\nserver {\n    listen 8080;\n    server_name {{server_names}};\n    root {{docroot}};\n    {{policy}}\n    location / { try_files $uri @answer; }\n    location @answer { return 200 \"policy\\n\"; }\n}\n";
+    let policy = dhpanel_domain::vhost::Policy::parse(
+        Some(2),
+        vec![dhpanel_domain::vhost::Header {
+            name: "X-Policy-Test".into(),
+            value: "applied".into(),
+        }],
+    )
+    .unwrap();
+    let domain = dhpanel_domain::Fqdn::parse("example.com").unwrap();
+    let rendered = dhpanel_domain::vhost::render(
+        template,
+        &dhpanel_domain::vhost::Site {
+            domain: &domain,
+            aliases: &[],
+            docroot: &dhpanel_domain::Docroot::default(),
+            php_upstream: "dh-x-php:9000",
+            policy: &policy,
+        },
+    )
+    .unwrap();
+    attach_domain(context.clone(), attach(rendered))
+        .await
+        .unwrap();
+    assert!(answers("policy").await, "{:?}", fetch());
+    let head = Command::new("curl")
+        .args([
+            "-s",
+            "-I",
+            "-H",
+            "X-Forwarded-For: 203.0.113.9",
+            &format!("http://127.0.0.1:{PORT}/"),
+        ])
+        .output()
+        .unwrap();
+    let head = String::from_utf8_lossy(&head.stdout).to_ascii_lowercase();
+    assert!(head.contains("x-policy-test: applied"), "{head}");
+    // 2 requests a second with a burst of 4: ten at once from one visitor are not all served.
+    let codes: Vec<String> = (0..10)
+        .map(|_| {
+            let out = Command::new("curl")
+                .args([
+                    "-s",
+                    "-o",
+                    "/dev/null",
+                    "-w",
+                    "%{http_code}",
+                    "-H",
+                    "X-Forwarded-For: 203.0.113.9",
+                    &format!("http://127.0.0.1:{PORT}/"),
+                ])
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&out.stdout).into_owned()
+        })
+        .collect();
+    assert!(codes.iter().any(|c| c == "429"), "{codes:?}");
+    assert!(codes.iter().any(|c| c == "200"), "{codes:?}");
+    // Another visitor is not held back by the first one's requests.
+    let other = Command::new("curl")
+        .args([
+            "-s",
+            "-o",
+            "/dev/null",
+            "-w",
+            "%{http_code}",
+            "-H",
+            "X-Forwarded-For: 198.51.100.7",
+            &format!("http://127.0.0.1:{PORT}/"),
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&other.stdout), "200");
     // With the web container stopped the file is kept and not applied.
     docker
         .stop(&web.name, Duration::from_secs(5))

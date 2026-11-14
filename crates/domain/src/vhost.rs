@@ -2,10 +2,12 @@
 //! keeps, and what is made of it for one domain.
 //!
 //! The control plane renders; the node only writes what it is given. A template
-//! is plain nginx configuration with four variables, `{{domain}}`,
-//! `{{server_names}}`, `{{docroot}}` and `{{php_upstream}}`. Every value that goes
-//! in comes from a checked type, so no domain, path or address can carry a
-//! directive of its own into the file.
+//! is plain nginx configuration with these variables: `{{domain}}`,
+//! `{{server_names}}`, `{{docroot}}`, `{{php_upstream}}`, and the two places a
+//! domain's [`Policy`] goes, `{{policy_http}}` (before the `server` block) and
+//! `{{policy}}` (inside it). Every value that goes in comes from a checked type,
+//! so no domain, path, header or address can carry a directive of its own into
+//! the file.
 
 use crate::{Docroot, Fqdn};
 
@@ -16,17 +18,26 @@ pub const MAX_TEMPLATE_BYTES: usize = 32 * 1024;
 /// Most names (the domain and its aliases) in one `server_name`.
 pub const MAX_SERVER_NAMES: usize = 50;
 /// Variables a template may use.
-pub const VARIABLES: [&str; 4] = ["domain", "server_names", "docroot", "php_upstream"];
+pub const VARIABLES: [&str; 6] = [
+    "domain",
+    "server_names",
+    "docroot",
+    "php_upstream",
+    "policy_http",
+    "policy",
+];
 /// Variables a template must use: without them it does not make a site.
 const REQUIRED: [&str; 2] = ["server_names", "docroot"];
 
 /// The template new installations start with.
 pub const DEFAULT_NGINX_TEMPLATE: &str = r"# Managed by DHPanel for {{domain}}. Changes made here are overwritten.
+{{policy_http}}
 server {
     listen 8080;
     server_name {{server_names}};
     root {{docroot}};
     index index.php index.html index.htm;
+    {{policy}}
 
     location / {
         try_files $uri $uri/ /index.php?$query_string;
@@ -159,12 +170,12 @@ pub fn check_template(body: &str) -> Result<(), VhostError> {
     // Looked at with the variables filled in, so braces of the values count too.
     let sample = render_with(
         body,
-        &Values {
-            domain: "example.com".into(),
-            server_names: "example.com www.example.com".into(),
-            docroot: format!("{WEB_ROOT}/public_html"),
-            php_upstream: "dh-sample-php:9000".into(),
-        },
+        &Values::plain(
+            "example.com".into(),
+            "example.com www.example.com".into(),
+            format!("{WEB_ROOT}/public_html"),
+            "dh-sample-php:9000".into(),
+        ),
     );
     let mut depth: i32 = 0;
     for c in sample.chars() {
@@ -196,9 +207,48 @@ struct Values {
     server_names: String,
     docroot: String,
     php_upstream: String,
+    /// Lines for `{{policy_http}}` and `{{policy}}`.
+    policy_http: Vec<String>,
+    policy: Vec<String>,
+}
+
+impl Values {
+    fn plain(domain: String, server_names: String, docroot: String, php_upstream: String) -> Self {
+        Self {
+            domain,
+            server_names,
+            docroot,
+            php_upstream,
+            policy_http: Vec::new(),
+            policy: Vec::new(),
+        }
+    }
+}
+
+/// A line that is only a policy variable becomes the policy's lines (same
+/// indentation), or disappears when there are none; anywhere else the lines are
+/// joined with spaces.
+fn put_lines(body: &str, name: &str, lines: &[String]) -> String {
+    let token = format!("{{{{{name}}}}}");
+    let mut out = String::with_capacity(body.len());
+    for line in body.split_inclusive('\n') {
+        if line.trim() == token {
+            let indent = &line[..line.len() - line.trim_start().len()];
+            for l in lines {
+                out.push_str(indent);
+                out.push_str(l);
+                out.push('\n');
+            }
+        } else {
+            out.push_str(&line.replace(&token, &lines.join(" ")));
+        }
+    }
+    out
 }
 
 fn render_with(body: &str, values: &Values) -> String {
+    let body = put_lines(body, "policy_http", &values.policy_http);
+    let body = put_lines(&body, "policy", &values.policy);
     body.replace("{{domain}}", &values.domain)
         .replace("{{server_names}}", &values.server_names)
         .replace("{{docroot}}", &values.docroot)
@@ -233,6 +283,8 @@ pub struct Site<'a> {
     pub docroot: &'a Docroot,
     /// The PHP service, `name:port`.
     pub php_upstream: &'a str,
+    /// Rate limit and response headers.
+    pub policy: &'a Policy,
 }
 
 /// Makes the configuration of one site from a template.
@@ -256,15 +308,215 @@ pub fn render(template: &str, site: &Site<'_>) -> Result<String, VhostError> {
     } else {
         format!("{WEB_ROOT}/{}", site.docroot.as_str())
     };
-    Ok(render_with(
-        template,
-        &Values {
-            domain: site.domain.as_str().to_owned(),
-            server_names: names.join(" "),
-            docroot,
-            php_upstream: site.php_upstream.to_owned(),
-        },
-    ))
+    let mut values = Values::plain(
+        site.domain.as_str().to_owned(),
+        names.join(" "),
+        docroot,
+        site.php_upstream.to_owned(),
+    );
+    values.policy_http = site.policy.http_lines(site.domain);
+    values.policy = site.policy.server_lines(site.domain);
+    Ok(render_with(template, &values))
+}
+
+/// Most response headers one domain may add.
+pub const MAX_HEADERS: usize = 10;
+/// Highest rate limit that can be set (requests per second per visitor).
+pub const MAX_RATE_LIMIT: u16 = 1000;
+
+/// Headers a person may not set: the panel sets them itself, or they would break
+/// the response.
+const RESERVED_HEADERS: [&str; 12] = [
+    "strict-transport-security",
+    "content-length",
+    "content-type",
+    "content-encoding",
+    "transfer-encoding",
+    "connection",
+    "host",
+    "set-cookie",
+    "server",
+    "date",
+    "location",
+    "x-accel-redirect",
+];
+
+/// One response header a domain adds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Header {
+    /// The name, `X-Frame-Options`.
+    pub name: String,
+    /// The value, printable ASCII without `"`, `\` and `$`.
+    pub value: String,
+}
+
+/// What a domain's web server does besides serving files.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Policy {
+    /// Requests per second one visitor may make (`None`: no limit). Over the limit
+    /// the answer is 429.
+    pub rate_limit_per_second: Option<u16>,
+    /// Response headers to add.
+    pub headers: Vec<Header>,
+}
+
+impl Policy {
+    /// Checks what a person gave.
+    ///
+    /// # Errors
+    /// [`VhostError`] naming the first problem (`field` is in the message).
+    pub fn parse(rate_limit: Option<u16>, headers: Vec<Header>) -> Result<Self, VhostError> {
+        if rate_limit.is_some_and(|r| r == 0 || r > MAX_RATE_LIMIT) {
+            return Err(err(
+                "invalid_rate_limit",
+                format!("The rate limit is 1 to {MAX_RATE_LIMIT} requests per second."),
+            ));
+        }
+        if headers.len() > MAX_HEADERS {
+            return Err(err(
+                "too_many_headers",
+                format!("A domain may add at most {MAX_HEADERS} headers."),
+            ));
+        }
+        let mut seen: Vec<String> = Vec::new();
+        for h in &headers {
+            let plain_name = !h.name.is_empty()
+                && h.name.len() <= 64
+                && h.name.starts_with(|c: char| c.is_ascii_alphabetic())
+                && h.name
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-');
+            if !plain_name {
+                return Err(err(
+                    "invalid_header_name",
+                    "A header name is letters, digits and dashes, starting with a letter.",
+                ));
+            }
+            let lower = h.name.to_ascii_lowercase();
+            if RESERVED_HEADERS.contains(&lower.as_str()) {
+                return Err(err(
+                    "reserved_header",
+                    format!(
+                        "The header {} is set by the panel and cannot be changed.",
+                        h.name
+                    ),
+                ));
+            }
+            if seen.contains(&lower) {
+                return Err(err(
+                    "duplicate_header",
+                    format!("The header {} is given twice.", h.name),
+                ));
+            }
+            seen.push(lower);
+            let plain_value = !h.value.is_empty()
+                && h.value.len() <= 512
+                && h.value
+                    .chars()
+                    .all(|c| (' '..='~').contains(&c) && !matches!(c, '"' | '\\' | '$'));
+            if !plain_value {
+                return Err(err(
+                    "invalid_header_value",
+                    "A header value is printable ASCII without quotes, backslash or $.",
+                ));
+            }
+        }
+        Ok(Self {
+            rate_limit_per_second: rate_limit,
+            headers,
+        })
+    }
+
+    /// Whether it changes nothing.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.rate_limit_per_second.is_none() && self.headers.is_empty()
+    }
+
+    /// The name of the rate limit zone: letters, digits and `_`, one per domain.
+    fn zone(domain: &Fqdn) -> String {
+        let mut hash: u32 = 0x811c_9dc5;
+        for b in domain.as_str().bytes() {
+            hash = (hash ^ u32::from(b)).wrapping_mul(0x0100_0193);
+        }
+        let plain: String = domain
+            .as_str()
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+            .take(40)
+            .collect();
+        format!("rl_{plain}_{hash:08x}")
+    }
+
+    /// Lines for before the `server` block (the zone of the rate limit).
+    fn http_lines(&self, domain: &Fqdn) -> Vec<String> {
+        // Behind the panel's own front web server the visitor's address is in
+        // X-Forwarded-For, which that server sets itself.
+        self.rate_limit_per_second
+            .map(|r| {
+                vec![format!(
+                    "limit_req_zone $http_x_forwarded_for zone={}:1m rate={r}r/s;",
+                    Self::zone(domain)
+                )]
+            })
+            .unwrap_or_default()
+    }
+
+    /// Lines for inside the `server` block.
+    fn server_lines(&self, domain: &Fqdn) -> Vec<String> {
+        let mut lines = Vec::new();
+        if let Some(r) = self.rate_limit_per_second {
+            lines.push(format!(
+                "limit_req zone={} burst={} nodelay;",
+                Self::zone(domain),
+                u32::from(r) * 2
+            ));
+            lines.push("limit_req_status 429;".to_owned());
+        }
+        for h in &self.headers {
+            lines.push(format!("add_header {} \"{}\" always;", h.name, h.value));
+        }
+        lines
+    }
+}
+
+/// Checks the configuration of a site as a node is about to use it: no forbidden
+/// directive, and every `root` inside the tenant's web directory. The control
+/// plane makes these files from checked values; this is for the node not to rely
+/// on it.
+///
+/// # Errors
+/// [`VhostError`] for the first problem.
+pub fn check_site_config(text: &str) -> Result<(), VhostError> {
+    for (name, first) in directives(text) {
+        if forbidden(&name, first.as_deref()) {
+            return Err(err(
+                "forbidden_directive",
+                format!("The directive `{}` is not allowed.", name.trim()),
+            ));
+        }
+    }
+    let code: String = text
+        .lines()
+        .map(|l| l.split('#').next().unwrap_or(""))
+        .collect::<Vec<_>>()
+        .join("\n");
+    for statement in code.split([';', '{', '}']) {
+        let mut words = statement.split_whitespace();
+        if words.next() == Some("root") {
+            let inside = words.next().is_some_and(|path| {
+                (path == WEB_ROOT || path.starts_with(&format!("{WEB_ROOT}/")))
+                    && !path.split('/').any(|part| part == "..")
+            });
+            if !inside {
+                return Err(err(
+                    "root_outside",
+                    "A root must lie inside the tenant's web directory.",
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -289,6 +541,7 @@ mod tests {
                 aliases: &aliases,
                 docroot: &docroot,
                 php_upstream: "dh-alice-php:9000",
+                policy: &Policy::default(),
             },
         )
         .unwrap();
@@ -336,6 +589,7 @@ server {
                 aliases: &aliases,
                 docroot: &Docroot::default(),
                 php_upstream: "dh-alice-php:9000",
+                policy: &Policy::default(),
             },
         )
         .unwrap();
@@ -418,6 +672,7 @@ server {
                     aliases: &[],
                     docroot: &Docroot::default(),
                     php_upstream: bad,
+                    policy: &Policy::default(),
                 },
             )
             .unwrap_err();
@@ -433,9 +688,141 @@ server {
                 aliases: &many,
                 docroot: &Docroot::default(),
                 php_upstream: "dh-a-php:9000",
+                policy: &Policy::default(),
             },
         )
         .unwrap_err();
         assert_eq!(e.code, "too_many_names");
+    }
+
+    fn header(name: &str, value: &str) -> Header {
+        Header {
+            name: name.into(),
+            value: value.into(),
+        }
+    }
+
+    #[test]
+    fn a_policy_adds_a_rate_limit_and_headers_to_the_file() {
+        let policy = Policy::parse(
+            Some(10),
+            vec![
+                header("X-Frame-Options", "SAMEORIGIN"),
+                header("Content-Security-Policy", "default-src 'self'"),
+            ],
+        )
+        .unwrap();
+        let domain = fqdn("example.com");
+        let text = render(
+            DEFAULT_NGINX_TEMPLATE,
+            &Site {
+                domain: &domain,
+                aliases: &[],
+                docroot: &Docroot::default(),
+                php_upstream: "dh-alice-php:9000",
+                policy: &policy,
+            },
+        )
+        .unwrap();
+        let zone = Policy::zone(&domain);
+        assert!(zone.starts_with("rl_example_com_"), "{zone}");
+        let expected_top = format!(
+            "# Managed by DHPanel for example.com. Changes made here are overwritten.\nlimit_req_zone $http_x_forwarded_for zone={zone}:1m rate=10r/s;\nserver {{\n"
+        );
+        assert!(text.starts_with(&expected_top), "{text}");
+        let inside = format!(
+            "    index index.php index.html index.htm;\n    limit_req zone={zone} burst=20 nodelay;\n    limit_req_status 429;\n    add_header X-Frame-Options \"SAMEORIGIN\" always;\n    add_header Content-Security-Policy \"default-src 'self'\" always;\n\n    location / {{"
+        );
+        assert!(text.contains(&inside), "{text}");
+        check_site_config(&text).unwrap();
+        // An empty policy leaves the file as it was without one.
+        let plain = render(
+            DEFAULT_NGINX_TEMPLATE,
+            &Site {
+                domain: &domain,
+                aliases: &[],
+                docroot: &Docroot::default(),
+                php_upstream: "dh-alice-php:9000",
+                policy: &Policy::default(),
+            },
+        )
+        .unwrap();
+        assert!(!plain.contains("limit_req") && !plain.contains("add_header"));
+        assert!(Policy::default().is_empty() && !policy.is_empty());
+    }
+
+    #[test]
+    fn a_policy_that_could_break_or_escape_the_file_is_refused() {
+        let ok = |h: Vec<Header>| Policy::parse(None, h);
+        assert!(ok(vec![header("X-Robots-Tag", "noindex, nofollow")]).is_ok());
+        let cases: Vec<(Vec<Header>, &str)> = vec![
+            (vec![header("", "x")], "invalid_header_name"),
+            (vec![header("X Foo", "x")], "invalid_header_name"),
+            (vec![header("1Foo", "x")], "invalid_header_name"),
+            (vec![header("X-Foo", "")], "invalid_header_value"),
+            (
+                vec![header("X-Foo", "a\"; deny all; \"b")],
+                "invalid_header_value",
+            ),
+            (vec![header("X-Foo", "a\nb")], "invalid_header_value"),
+            (vec![header("X-Foo", "$host")], "invalid_header_value"),
+            (vec![header("X-Foo", "a\\b")], "invalid_header_value"),
+            (
+                vec![header("X-Foo", &"v".repeat(513))],
+                "invalid_header_value",
+            ),
+            (
+                vec![header("Strict-Transport-Security", "x")],
+                "reserved_header",
+            ),
+            (vec![header("set-cookie", "x")], "reserved_header"),
+            (
+                vec![header("X-Foo", "1"), header("x-foo", "2")],
+                "duplicate_header",
+            ),
+            (
+                (0..=MAX_HEADERS)
+                    .map(|i| header(&format!("X-H{i}"), "1"))
+                    .collect(),
+                "too_many_headers",
+            ),
+        ];
+        for (headers, code) in cases {
+            assert_eq!(ok(headers).unwrap_err().code, code, "{code}");
+        }
+        for bad in [0, MAX_RATE_LIMIT + 1] {
+            assert_eq!(
+                Policy::parse(Some(bad), vec![]).unwrap_err().code,
+                "invalid_rate_limit"
+            );
+        }
+        assert!(Policy::parse(Some(MAX_RATE_LIMIT), vec![]).is_ok());
+    }
+
+    #[test]
+    fn a_site_file_the_node_is_given_must_keep_to_the_tenants_directory() {
+        check_site_config("server { root /var/www/html; }").unwrap();
+        check_site_config("server { root /var/www/html/a/b; }").unwrap();
+        for (text, code) in [
+            ("server { root /etc; }", "root_outside"),
+            ("server { root /var/www/html/../../etc; }", "root_outside"),
+            ("server { root /var/www/htmlx; }", "root_outside"),
+            ("server { root; }", "root_outside"),
+            ("server { alias /etc/passwd; }", "forbidden_directive"),
+            (
+                "server { include /etc/nginx/x.conf; }",
+                "forbidden_directive",
+            ),
+            ("load_module x.so;", "forbidden_directive"),
+        ] {
+            assert_eq!(check_site_config(text).unwrap_err().code, code, "{text}");
+        }
+        // The files the control plane makes pass.
+        check_site_config(
+            DEFAULT_NGINX_TEMPLATE
+                .replace("{{docroot}}", "/var/www/html")
+                .as_str(),
+        )
+        .unwrap();
     }
 }

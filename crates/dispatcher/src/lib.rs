@@ -364,7 +364,10 @@ impl Dispatcher {
                 |t| t.body,
             );
         let php = dhpanel_tenant_stack::php_upstream(&username).map_err(|e| e.to_string())?;
-        let files = vhosts::build(&tenant.status, &template, &php, &domains);
+        let policies = dhpanel_database::domain_policies::of_tenant(db, tenant.id)
+            .await
+            .map_err(|e| e.to_string())?;
+        let files = vhosts::build(&tenant.status, &template, &php, &domains, &policies);
         for (domain, config) in &files {
             let mut attach = dhpanel_operations::Request::new(
                 tenant.node_id,

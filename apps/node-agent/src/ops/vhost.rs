@@ -66,7 +66,9 @@ fn check_config(config: &str) -> Result<(), AgentError> {
     {
         return Err(invalid("the configuration holds control characters"));
     }
-    Ok(())
+    // Whatever the control plane made, a file that reads other directories or
+    // loads code is not written.
+    dhpanel_domain::vhost::check_site_config(config).map_err(|e| invalid(e.message))
 }
 
 /// Puts `content` in `path` (or removes the file for `None`), all at once.
@@ -333,6 +335,10 @@ mod tests {
             attach("example.com", ""),
             attach("example.com", "server {\u{0}}"),
             attach("example.com", &"x".repeat(MAX_VHOST_CONFIG_BYTES + 1)),
+            attach("example.com", "server { root /etc; }"),
+            attach("example.com", "server { root /var/www/html/../../etc; }"),
+            attach("example.com", "server { alias /etc/passwd; }"),
+            attach("example.com", "server { include /etc/shadow; }"),
             Operation::AttachDomain {
                 username: "../root".into(),
                 domain: "example.com".into(),

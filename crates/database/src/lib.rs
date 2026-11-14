@@ -13,6 +13,7 @@ pub mod accounts;
 pub mod admins;
 pub mod certificates;
 pub mod dns;
+pub mod domain_policies;
 pub mod domains;
 pub mod feature_sets;
 pub mod mfa;

@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO domain_policies (domain_id, rate_limit_per_second, headers)\n         VALUES ($1, $2, $3)\n         ON CONFLICT (domain_id) DO UPDATE\n         SET rate_limit_per_second = EXCLUDED.rate_limit_per_second, headers = EXCLUDED.headers",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int2",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1a8594cabc58eaa7101e6ac08bc10beb2bca297a44382caeb5fad039670a6ed8"
+}

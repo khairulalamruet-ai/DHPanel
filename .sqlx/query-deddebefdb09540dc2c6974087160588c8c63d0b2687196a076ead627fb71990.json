@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT rate_limit_per_second, headers FROM domain_policies WHERE domain_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "rate_limit_per_second",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "domain_policies",
+            "name": "rate_limit_per_second"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "headers",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "domain_policies",
+            "name": "headers"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true,
+      false
+    ]
+  },
+  "hash": "deddebefdb09540dc2c6974087160588c8c63d0b2687196a076ead627fb71990"
+}

@@ -31,6 +31,7 @@
 
 pub mod dns;
 pub mod nameservers;
+pub mod policy;
 pub mod records;
 pub mod redirects;
 pub mod ssl;
@@ -110,7 +111,8 @@ impl FromRef<DomainsState> for SessionStore {
 
 /// Routes for administrators, with full paths.
 pub fn admin_router() -> Router<DomainsState> {
-    redirects::admin_router()
+    policy::admin_router()
+        .merge(redirects::admin_router())
         .merge(records::admin_router())
         .merge(nameservers::admin_router())
         .merge(ssl::admin_router())
@@ -129,7 +131,8 @@ pub fn admin_router() -> Router<DomainsState> {
 
 /// Routes for clients, with full paths.
 pub fn client_router() -> Router<DomainsState> {
-    redirects::client_router()
+    policy::client_router()
+        .merge(redirects::client_router())
         .merge(records::client_router())
         .merge(nameservers::client_router())
         .merge(ssl::client_router())
@@ -1134,6 +1137,7 @@ pub async fn client_delete(
     paths(
         admin_list, admin_get, admin_add, admin_update, admin_delete, admin_suspend,
         admin_unsuspend, client_list, client_get, client_add, client_update, client_delete,
+        policy::admin_get, policy::admin_set, policy::client_get, policy::client_set,
         redirects::admin_list, redirects::admin_add, redirects::admin_update,
         redirects::admin_delete, redirects::client_list, redirects::client_add,
         redirects::client_update, redirects::client_delete,
@@ -1147,7 +1151,7 @@ pub async fn client_delete(
     ),
     components(schemas(
         DomainView, DomainList, AddDomain, AdminAddDomain, UpdateDomain,
-        redirects::RedirectView, redirects::RedirectList, redirects::AddRedirect,
+        policy::PolicyView, policy::HeaderView, redirects::RedirectView, redirects::RedirectList, redirects::AddRedirect,
         redirects::UpdateRedirect, dns::TemplateLine, dns::TemplateView, dns::TemplateList,
         dns::TemplateInput, records::RecordView, records::RecordList, records::ZoneView,
         records::AddRecord, records::UpdateRecord, nameservers::Nameservers,
