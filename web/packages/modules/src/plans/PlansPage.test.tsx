@@ -125,4 +125,62 @@ describe("PlansPage (T04.04)", () => {
     const starterDeleteBtn = within(starterRow).getByRole("button", { name: /Delete|মুছে ফেলুন/i });
     expect(starterDeleteBtn).toBeDisabled();
   });
+
+  it("renders node group badges in the plans table (T16.03 DoD)", async () => {
+    renderWithProviders(<PlansPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Standard Business")).toBeInTheDocument();
+    });
+
+    // Check node group column header
+    expect(screen.getByText(/Node Group|নোড গ্রুপ/i)).toBeInTheDocument();
+
+    // Check node group badges
+    const badges = screen.getAllByTestId("plan-node-group-badge");
+    expect(badges.length).toBeGreaterThanOrEqual(4);
+
+    expect(screen.getByText("Global Cluster (Default)")).toBeInTheDocument();
+    expect(screen.getByText("US-East General Pool")).toBeInTheDocument();
+    expect(screen.getByText("Singapore High-RAM Pool")).toBeInTheDocument();
+    expect(screen.getByText("Frankfurt EU-West Group")).toBeInTheDocument();
+  });
+
+  it("binds a new plan to a selected node group (T16.03 DoD)", async () => {
+    renderWithProviders(<PlansPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Standard Business")).toBeInTheDocument();
+    });
+
+    const newBtn = screen.getByRole("button", { name: /New Plan|নতুন প্ল্যান/i });
+    fireEvent.click(newBtn);
+
+    const dialog = await screen.findByRole("dialog");
+
+    // Enter name
+    const nameInput = within(dialog).getByLabelText(/Plan Name|প্ল্যানের নাম/i);
+    fireEvent.change(nameInput, { target: { value: "APAC Enterprise" } });
+
+    // Select Singapore High-RAM Pool node group
+    const groupSelect = within(dialog).getByTestId("plan-node-group-select");
+    fireEvent.change(groupSelect, { target: { value: "ng_sgp_highmem" } });
+
+    // Verify tag badges appear
+    expect(within(dialog).getByText("ap-southeast-1")).toBeInTheDocument();
+    expect(within(dialog).getByText("highmem")).toBeInTheDocument();
+
+    // Save
+    const saveBtn = within(dialog).getByRole("button", { name: /Save Plan|সংরক্ষণ করুন/i });
+    fireEvent.click(saveBtn);
+
+    // Verify plan is listed with bound node group
+    await waitFor(() => {
+      expect(screen.getByText("APAC Enterprise")).toBeInTheDocument();
+    });
+
+    const row = screen.getByText("APAC Enterprise").closest("tr")!;
+    expect(within(row).getByTestId("plan-node-group-badge")).toHaveTextContent("Singapore High-RAM Pool");
+    expect(within(row).getByText("ap-southeast-1")).toBeInTheDocument();
+  });
 });

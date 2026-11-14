@@ -8,10 +8,12 @@ import {
   DialogDescription,
   Button,
   Input,
+  Badge,
 } from "@dhpanel/ui";
 import { useTranslation } from "@dhpanel/i18n";
-import { Layers, Cpu, Server, Save, HardDrive, Globe } from "lucide-react";
+import { Layers, Cpu, Server, Save, HardDrive, Globe, Network, MapPin, Tag } from "lucide-react";
 import { Plan, CreatePlanPayload, PlanResources, PlanLimits } from "./types";
+import { PRESET_NODE_GROUPS, getNodeGroupById } from "./node-groups";
 
 export interface PlanEditorDialogProps {
   open: boolean;
@@ -132,6 +134,12 @@ export function PlanEditorDialog({
     max_email_accounts: 20,
   });
 
+  // Node Group & Cluster State
+  const [nodeGroupId, setNodeGroupId] = useState("ng_global");
+  const [nodeGroupName, setNodeGroupName] = useState("Global Cluster (Default)");
+  const [targetRegion, setTargetRegion] = useState("global");
+  const [targetTags, setTargetTags] = useState<string[]>(["general", "standard"]);
+
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -143,6 +151,11 @@ export function PlanEditorDialog({
       setIsDefault(plan.is_default);
       setResources({ ...plan.resources });
       setLimits({ ...plan.limits });
+      const currentGroup = getNodeGroupById(plan.node_group_id);
+      setNodeGroupId(plan.node_group_id || currentGroup.id);
+      setNodeGroupName(plan.node_group_name || currentGroup.name);
+      setTargetRegion(plan.target_region || currentGroup.region);
+      setTargetTags(plan.target_tags || currentGroup.tags);
     } else {
       setName("");
       setDescription("");
@@ -163,9 +176,22 @@ export function PlanEditorDialog({
         max_ftp_accounts: 5,
         max_email_accounts: 20,
       });
+      const defaultGroup = PRESET_NODE_GROUPS[0];
+      setNodeGroupId(defaultGroup.id);
+      setNodeGroupName(defaultGroup.name);
+      setTargetRegion(defaultGroup.region);
+      setTargetTags(defaultGroup.tags);
     }
     setError(null);
   }, [plan, open]);
+
+  const handleNodeGroupChange = (groupId: string) => {
+    const selected = getNodeGroupById(groupId);
+    setNodeGroupId(selected.id);
+    setNodeGroupName(selected.name);
+    setTargetRegion(selected.region);
+    setTargetTags(selected.tags);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -183,6 +209,10 @@ export function PlanEditorDialog({
         is_default: isDefault,
         resources,
         limits,
+        node_group_id: nodeGroupId,
+        node_group_name: nodeGroupName,
+        target_region: targetRegion,
+        target_tags: targetTags,
       });
       onOpenChange(false);
     } catch (err: any) {
@@ -294,6 +324,82 @@ export function PlanEditorDialog({
                   />
                 </button>
               </div>
+            </div>
+          </div>
+
+          {/* Node Group & Cluster Placement Section */}
+          <div className="space-y-4">
+            <h3 className="text-sm font-semibold tracking-tight text-foreground uppercase border-b pb-1.5 flex items-center gap-2">
+              <Network className="h-4 w-4 text-muted-foreground" />
+              <span>{t("plans.dialog.nodeGroupSection")}</span>
+            </h3>
+
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <label htmlFor="plan-node-group" className="text-sm font-medium text-foreground flex items-center gap-1">
+                  <span>{t("plans.dialog.nodeGroupLabel")}</span>
+                </label>
+                <select
+                  id="plan-node-group"
+                  data-testid="plan-node-group-select"
+                  value={nodeGroupId}
+                  disabled={isSaving}
+                  onChange={(e) => handleNodeGroupChange(e.target.value)}
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-foreground"
+                >
+                  {PRESET_NODE_GROUPS.map((group) => (
+                    <option key={group.id} value={group.id}>
+                      {group.name} ({group.region})
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-muted-foreground">
+                  {t("plans.dialog.nodeGroupDesc")}
+                </p>
+              </div>
+
+              {/* Selected Node Group Details */}
+              {(() => {
+                const group = getNodeGroupById(nodeGroupId);
+                return (
+                  <div className="rounded-lg border bg-muted/20 p-3 space-y-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-semibold text-foreground">
+                          {group.name}
+                        </span>
+                        <Badge
+                          variant="secondary"
+                          data-testid="selected-group-region"
+                          className="text-[10px] px-1.5 py-0 flex items-center gap-1 font-mono"
+                        >
+                          <MapPin className="h-2.5 w-2.5" />
+                          {group.region}
+                        </Badge>
+                      </div>
+                      <span className="text-[11px] text-muted-foreground">
+                        {group.nodes_count} {t("plans.dialog.nodesCount", { count: group.nodes_count })}
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {group.description}
+                    </p>
+                    <div className="flex items-center gap-1.5 pt-1">
+                      <Tag className="h-3 w-3 text-muted-foreground shrink-0" />
+                      <span className="text-[11px] text-muted-foreground font-medium">
+                        {t("plans.dialog.tagsLabel")}:
+                      </span>
+                      <div className="flex flex-wrap gap-1">
+                        {group.tags.map((tag) => (
+                          <Badge key={tag} variant="outline" className="text-[10px] px-1.5 py-0 font-mono">
+                            {tag}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           </div>
 

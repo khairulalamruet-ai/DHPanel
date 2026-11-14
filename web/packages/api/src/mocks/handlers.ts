@@ -518,6 +518,10 @@ export interface MockPlan {
   limits: MockPlanLimits;
   created_at: string;
   updated_at: string;
+  node_group_id?: string | null;
+  node_group_name?: string | null;
+  target_tags?: string[];
+  target_region?: string | null;
 }
 
 export const getInitialPlans = (): MockPlan[] => [
@@ -529,6 +533,10 @@ export const getInitialPlans = (): MockPlan[] => [
     feature_set_name: "Basic Web",
     is_default: false,
     users_count: 8,
+    node_group_id: "ng_global",
+    node_group_name: "Global Cluster (Default)",
+    target_region: "global",
+    target_tags: ["general", "standard"],
     resources: {
       cpu: 1,
       memory_mb: 1024,
@@ -554,6 +562,10 @@ export const getInitialPlans = (): MockPlan[] => [
     feature_set_name: "Default (Full Stack)",
     is_default: true,
     users_count: 24,
+    node_group_id: "ng_us_east",
+    node_group_name: "US-East General Pool",
+    target_region: "us-east-1",
+    target_tags: ["us-east", "nvme", "ssd"],
     resources: {
       cpu: 2,
       memory_mb: 2048,
@@ -579,6 +591,10 @@ export const getInitialPlans = (): MockPlan[] => [
     feature_set_name: "Default (Full Stack)",
     is_default: false,
     users_count: 5,
+    node_group_id: "ng_sgp_highmem",
+    node_group_name: "Singapore High-RAM Pool",
+    target_region: "ap-southeast-1",
+    target_tags: ["apac", "highmem", "high-cpu"],
     resources: {
       cpu: 4,
       memory_mb: 4096,
@@ -604,6 +620,10 @@ export const getInitialPlans = (): MockPlan[] => [
     feature_set_name: "Default (Full Stack)",
     is_default: false,
     users_count: 2,
+    node_group_id: "ng_fra_isolated",
+    node_group_name: "Frankfurt EU-West Group",
+    target_region: "eu-central-1",
+    target_tags: ["eu", "gdpr", "dedicated"],
     resources: {
       cpu: -1,
       memory_mb: -1,
@@ -2782,6 +2802,49 @@ export const handlers = [
     return HttpResponse.json({ success: true });
   }),
 
+  // Node Groups: List available cluster node groups (GET /api/v1/admin/cluster/node-groups)
+  // TODO(api:T16.03): Replace with real backend cluster node-groups endpoint
+  http.get(/\/api\/v1\/admin\/cluster\/node-groups$/, () => {
+    return HttpResponse.json({
+      items: [
+        {
+          id: "ng_global",
+          name: "Global Cluster (Default)",
+          description: "Default multi-region pool matching all standard tenant nodes.",
+          region: "global",
+          tags: ["general", "standard"],
+          nodes_count: 4,
+          is_default: true,
+        },
+        {
+          id: "ng_us_east",
+          name: "US-East General Pool",
+          description: "North American low-latency cluster pool on NVMe storage.",
+          region: "us-east-1",
+          tags: ["us-east", "nvme", "ssd"],
+          nodes_count: 2,
+        },
+        {
+          id: "ng_sgp_highmem",
+          name: "Singapore High-RAM Pool",
+          description: "Asia-Pacific memory-optimized nodes for enterprise workloads.",
+          region: "ap-southeast-1",
+          tags: ["apac", "highmem", "high-cpu"],
+          nodes_count: 1,
+        },
+        {
+          id: "ng_fra_isolated",
+          name: "Frankfurt EU-West Group",
+          description: "GDPR-compliant isolated cluster strictly hosted in Frankfurt EU-West.",
+          region: "eu-central-1",
+          tags: ["eu", "gdpr", "dedicated"],
+          nodes_count: 1,
+        },
+      ],
+      total: 4,
+    });
+  }),
+
   // Plans: List all hosting plans (GET /api/v1/admin/plans)
   // TODO(api:T04.03): Replace with real backend plan endpoint
   http.get(/\/api\/v1\/admin\/plans$/, () => {
@@ -2803,6 +2866,10 @@ export const handlers = [
       is_default = false,
       resources = {},
       limits = {},
+      node_group_id = null,
+      node_group_name = null,
+      target_tags = [],
+      target_region = null,
     } = body || {};
 
     if (!name || typeof name !== "string" || !name.trim()) {
@@ -2826,6 +2893,10 @@ export const handlers = [
       feature_set_name,
       is_default: Boolean(is_default),
       users_count: 0,
+      node_group_id: node_group_id || "ng_global",
+      node_group_name: node_group_name || "Global Cluster (Default)",
+      target_tags: target_tags || ["general", "standard"],
+      target_region: target_region || "global",
       resources: {
         cpu: resources.cpu ?? 1,
         memory_mb: resources.memory_mb ?? 1024,
@@ -2853,7 +2924,19 @@ export const handlers = [
   http.put(/\/api\/v1\/admin\/plans\/([^/]+)$/, async ({ params, request }) => {
     const id = (params.id || params[0]) as string;
     const body = (await request.json().catch(() => ({}))) as any;
-    const { name, description, feature_set_id, feature_set_name, is_default, resources, limits } = body || {};
+    const {
+      name,
+      description,
+      feature_set_id,
+      feature_set_name,
+      is_default,
+      resources,
+      limits,
+      node_group_id,
+      node_group_name,
+      target_tags,
+      target_region,
+    } = body || {};
 
     const index = plans.findIndex((p) => p.id === id);
     if (index === -1) {
@@ -2886,6 +2969,10 @@ export const handlers = [
       is_default: is_default !== undefined ? Boolean(is_default) : current.is_default,
       resources: resources !== undefined ? { ...current.resources, ...resources } : current.resources,
       limits: limits !== undefined ? { ...current.limits, ...limits } : current.limits,
+      node_group_id: node_group_id !== undefined ? node_group_id : current.node_group_id,
+      node_group_name: node_group_name !== undefined ? node_group_name : current.node_group_name,
+      target_tags: target_tags !== undefined ? target_tags : current.target_tags,
+      target_region: target_region !== undefined ? target_region : current.target_region,
       updated_at: new Date().toISOString(),
     };
 

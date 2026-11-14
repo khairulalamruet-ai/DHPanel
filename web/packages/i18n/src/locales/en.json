@@ -464,7 +464,8 @@
       "limits": "Limits (Domains / DBs)",
       "featureSet": "Feature Set",
       "users": "Assigned Users",
-      "actions": "Actions"
+      "actions": "Actions",
+      "nodeGroup": "Node Group"
     },
     "dialog": {
       "createTitle": "Create Hosting Plan",
@@ -493,7 +494,12 @@
       "unlimitedToggle": "Unlimited",
       "cancel": "Cancel",
       "save": "Save Plan",
-      "saving": "Saving..."
+      "saving": "Saving...",
+      "nodeGroupSection": "Node Group & Cluster Placement",
+      "nodeGroupLabel": "Target Node Group",
+      "nodeGroupDesc": "Select the node group and region pool where accounts with this plan are deployed.",
+      "tagsLabel": "Placement Tags",
+      "nodesCount": "{{count}} nodes"
     },
     "deleteConfirm": {
       "title": "Delete Hosting Plan",
@@ -508,7 +514,8 @@
       "deleteSuccess": "Plan '{{name}}' deleted successfully.",
       "error": "Failed to save hosting plan."
     },
-    "empty": "No hosting plans found."
+    "empty": "No hosting plans found.",
+    "globalCluster": "Global Cluster"
   },
   "users": {
     "nav": "Users",
@@ -1640,7 +1647,7 @@
   "cron": {
     "nav": "Cron Jobs",
     "title": "Scheduled Cron Jobs",
-    "description": "Schedule recurring tasks and background commands for your web applications",
+    "description": "Description (Optional)",
     "createButton": "New Cron Job",
     "createTitle": "Create Scheduled Cron Job",
     "createSubtitle": "Configure execution command, 5-field cron interval, and execution timeout",
@@ -1655,7 +1662,6 @@
     "presetDaily": "Daily (Midnight)",
     "presetWeekly": "Weekly (Sunday)",
     "cronExpression": "Cron Expression (5-field)",
-    "description": "Description (Optional)",
     "descriptionPlaceholder": "Brief note about what this scheduled task does",
     "timeoutSec": "Timeout (Seconds)",
     "error5FieldsRequired": "Cron expression must contain exactly 5 space-separated fields (minute hour day-of-month month day-of-week)",
