@@ -54,5 +54,11 @@ jobs:
       - name: Test (Unit & Component)
         run: pnpm test
 
+      - name: Dependency Audit
+        run: pnpm audit --audit-level=high
+
       - name: Build (Admin & Client)
         run: pnpm build
+
+      - name: Verify SBOM Generation
+        run: pnpm run sbom
