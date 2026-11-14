@@ -159,6 +159,97 @@ async fn the_database_server_is_reached_from_its_tenants_network_and_nowhere_els
     .unwrap_err();
     assert_eq!(err.code, ErrorCode::InvalidArguments);
 
+    // Databases: made, found again, listed, injection refused, removed.
+    {
+        use dhpanel_node_agent::ops::db::{create_database, drop_database};
+        use mysql_async::prelude::Queryable as _;
+        let create = |name: &str| Operation::CreateDatabase { name: name.into() };
+        assert_eq!(
+            create_database(context.clone(), create("alice_shop"))
+                .await
+                .unwrap(),
+            Output::DatabaseCreated { created: true }
+        );
+        assert_eq!(
+            create_database(context.clone(), create("alice_shop"))
+                .await
+                .unwrap(),
+            Output::DatabaseCreated { created: false }
+        );
+        let opts: mysql_async::Opts = mysql_async::OptsBuilder::default()
+            .ip_or_hostname("127.0.0.1")
+            .tcp_port(port())
+            .user(Some("root"))
+            .pass(Some(password.trim()))
+            .into();
+        let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+        let names = |mut conn: mysql_async::Conn| async move {
+            let list: Vec<String> = conn.query("SHOW DATABASES").await.unwrap();
+            (conn, list)
+        };
+        let (c, list) = names(conn).await;
+        conn = c;
+        assert!(list.contains(&"alice_shop".to_owned()), "{list:?}");
+        let charset: Option<String> = conn
+            .query_first("SELECT DEFAULT_CHARACTER_SET_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = 'alice_shop'")
+            .await
+            .unwrap();
+        assert_eq!(charset.as_deref(), Some("utf8mb4"));
+        // Nothing but a plain identifier reaches the server: these are refused first,
+        // and the server's own databases are all still there.
+        for bad in [
+            "a; DROP DATABASE mysql",
+            "x` ; DROP DATABASE alice_shop; --",
+            "alice_shop' OR '1'='1",
+            "mysql",
+            "information_schema",
+            "",
+            "A",
+        ] {
+            for op in [
+                Operation::CreateDatabase { name: bad.into() },
+                Operation::DropDatabase { name: bad.into() },
+            ] {
+                let err = match op {
+                    Operation::CreateDatabase { .. } => create_database(context.clone(), op).await,
+                    _ => drop_database(context.clone(), op).await,
+                }
+                .unwrap_err();
+                assert_eq!(err.code, ErrorCode::InvalidArguments, "{bad:?}");
+                assert!(!err.retryable);
+            }
+        }
+        let (c, list) = names(conn).await;
+        conn = c;
+        for kept in ["mysql", "information_schema", "alice_shop"] {
+            assert!(list.contains(&kept.to_owned()), "{kept} is gone: {list:?}");
+        }
+        assert_eq!(
+            drop_database(
+                context.clone(),
+                Operation::DropDatabase {
+                    name: "alice_shop".into()
+                }
+            )
+            .await
+            .unwrap(),
+            Output::DatabaseDropped { existed: true }
+        );
+        assert_eq!(
+            drop_database(
+                context.clone(),
+                Operation::DropDatabase {
+                    name: "alice_shop".into()
+                }
+            )
+            .await
+            .unwrap(),
+            Output::DatabaseDropped { existed: false }
+        );
+        let (_, list) = names(conn).await;
+        assert!(!list.contains(&"alice_shop".to_owned()));
+    }
+
     // Clean up (the data volume too: this is a test server).
     let _ = docker.remove(&Name::parse(CONTAINER).unwrap(), true).await;
     let _ = docker

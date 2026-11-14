@@ -411,6 +411,19 @@ pub enum Operation {
     /// sent anywhere), and the container, published on the node's loopback address
     /// only. Safe to repeat. Answered with [`Output::DbServerReady`].
     EnsureDbServer,
+    /// Make a database in the node's shared database server (utf8mb4). The name
+    /// is checked as a plain identifier and put in the statement quoted; nothing
+    /// is concatenated. Safe to repeat. Answered with [`Output::DatabaseCreated`].
+    CreateDatabase {
+        /// The whole name, `alice_shop`.
+        name: String,
+    },
+    /// Remove a database and everything in it. Safe to repeat. Answered with
+    /// [`Output::DatabaseDropped`].
+    DropDatabase {
+        /// The whole name.
+        name: String,
+    },
     /// Let a tenant's containers reach the shared database server as `db` on their
     /// own network (the server is started first when it does not run). Safe to
     /// repeat. Answered with [`Output::TenantDbAllowed`].
@@ -581,6 +594,8 @@ impl Operation {
         "restart_service",
         "ensure_db_server",
         "allow_tenant_databases",
+        "create_database",
+        "drop_database",
         "set_up_tenant",
         "set_site_routes",
         "set_error_pages",
@@ -609,6 +624,8 @@ impl Operation {
             Self::RestartService { .. } => "restart_service",
             Self::EnsureDbServer => "ensure_db_server",
             Self::AllowTenantDatabases { .. } => "allow_tenant_databases",
+            Self::CreateDatabase { .. } => "create_database",
+            Self::DropDatabase { .. } => "drop_database",
             Self::SetUpTenant { .. } => "set_up_tenant",
             Self::SetSiteRoutes { .. } => "set_site_routes",
             Self::SetErrorPages { .. } => "set_error_pages",
@@ -772,6 +789,16 @@ pub enum Output {
         port: u16,
         /// Whether this call made the container.
         created: bool,
+    },
+    /// Answer to [`Operation::CreateDatabase`].
+    DatabaseCreated {
+        /// Whether this call made it (false: it was there).
+        created: bool,
+    },
+    /// Answer to [`Operation::DropDatabase`].
+    DatabaseDropped {
+        /// Whether there was one to remove.
+        existed: bool,
     },
     /// Answer to [`Operation::AllowTenantDatabases`].
     TenantDbAllowed {
@@ -1624,6 +1651,12 @@ mod tests {
             },
             Operation::SetErrorPages { pages: vec![] },
             Operation::EnsureDbServer,
+            Operation::CreateDatabase {
+                name: "alice_shop".into(),
+            },
+            Operation::DropDatabase {
+                name: "alice_shop".into(),
+            },
             Operation::AllowTenantDatabases {
                 username: "alice".into(),
             },
@@ -1653,7 +1686,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            22,
+            24,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }

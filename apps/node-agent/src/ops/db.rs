@@ -239,6 +239,104 @@ pub async fn ensure_server(context: &TenantContext) -> Result<bool, AgentError> 
     Ok(created)
 }
 
+/// A connection as the server's root, from the agent's secret store.
+async fn root_conn(context: &TenantContext) -> Result<mysql_async::Conn, AgentError> {
+    let password = root_password(&secrets_dir(context))?;
+    mysql_async::Conn::new(root_opts(&password))
+        .await
+        .map_err(|e| sql_error(&e))
+}
+
+/// What went wrong with a statement, said without quoting anything the server sent
+/// back (it may echo values).
+fn sql_error(err: &mysql_async::Error) -> AgentError {
+    let (message, retryable) = match err {
+        mysql_async::Error::Io(_) => ("the database server is not reachable", true),
+        mysql_async::Error::Server(e) if e.code == 1045 => {
+            ("the database server refused the agent's password", false)
+        }
+        mysql_async::Error::Server(_) => ("the database server refused the statement", false),
+        _ => ("the database server failed", true),
+    };
+    let error = AgentError::new(ErrorCode::Internal, message.to_owned());
+    if retryable { error.retryable() } else { error }
+}
+
+fn identifier(name: &str) -> Result<String, AgentError> {
+    dhpanel_domain::databases::check_identifier(name)
+        .map_err(|e| AgentError::new(ErrorCode::InvalidArguments, e.to_string()))?;
+    // Checked as plain letters, digits and `_` above, so nothing in it needs
+    // escaping; the quotes keep a word the server knows from being read as one.
+    Ok(format!("`{name}`"))
+}
+
+/// `create_database`.
+///
+/// # Errors
+/// [`AgentError`]: a name that is not a plain identifier (not retryable, nothing
+/// is sent to the server); the server not reachable (retryable).
+pub async fn create_database(
+    context: Arc<TenantContext>,
+    op: Operation,
+) -> Result<Output, AgentError> {
+    use mysql_async::prelude::Queryable as _;
+    let Operation::CreateDatabase { name } = op else {
+        return Err(super::wrong_operation());
+    };
+    let quoted = identifier(&name)?;
+    let mut conn = root_conn(&context).await?;
+    let existed: Option<String> = conn
+        .exec_first(
+            "SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = ?",
+            (&name,),
+        )
+        .await
+        .map_err(|e| sql_error(&e))?;
+    if existed.is_none() {
+        conn.query_drop(format!(
+            "CREATE DATABASE {quoted} CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci"
+        ))
+        .await
+        .map_err(|e| sql_error(&e))?;
+    }
+    let _ = conn.disconnect().await;
+    Ok(Output::DatabaseCreated {
+        created: existed.is_none(),
+    })
+}
+
+/// `drop_database`.
+///
+/// # Errors
+/// As [`create_database`].
+pub async fn drop_database(
+    context: Arc<TenantContext>,
+    op: Operation,
+) -> Result<Output, AgentError> {
+    use mysql_async::prelude::Queryable as _;
+    let Operation::DropDatabase { name } = op else {
+        return Err(super::wrong_operation());
+    };
+    let quoted = identifier(&name)?;
+    let mut conn = root_conn(&context).await?;
+    let existed: Option<String> = conn
+        .exec_first(
+            "SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = ?",
+            (&name,),
+        )
+        .await
+        .map_err(|e| sql_error(&e))?;
+    if existed.is_some() {
+        conn.query_drop(format!("DROP DATABASE {quoted}"))
+            .await
+            .map_err(|e| sql_error(&e))?;
+    }
+    let _ = conn.disconnect().await;
+    Ok(Output::DatabaseDropped {
+        existed: existed.is_some(),
+    })
+}
+
 /// `ensure_db_server`.
 ///
 /// # Errors

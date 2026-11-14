@@ -115,6 +115,14 @@ impl Registry {
                 let context = context.clone();
                 move |op| db::ensure_db_server(context.clone(), op)
             });
+            registry.register("create_database", {
+                let context = context.clone();
+                move |op| db::create_database(context.clone(), op)
+            });
+            registry.register("drop_database", {
+                let context = context.clone();
+                move |op| db::drop_database(context.clone(), op)
+            });
             registry.register("allow_tenant_databases", {
                 let context = context.clone();
                 move |op| db::allow_tenant_databases(context.clone(), op)

@@ -98,6 +98,26 @@ pub fn full_name(
     Ok(name)
 }
 
+/// Checks a database or user name as the node is about to use it in a statement:
+/// plain characters, within the length, and nothing that belongs to the server.
+/// (The account prefix is the control plane's business; the node only has to be
+/// sure the name cannot be anything but an identifier.)
+///
+/// # Errors
+/// [`DbNameError`].
+pub fn check_identifier(name: &str) -> Result<(), DbNameError> {
+    if !plain(name) {
+        return Err(DbNameError::Invalid);
+    }
+    if name.len() > MAX_NAME_LEN {
+        return Err(DbNameError::TooLong);
+    }
+    if RESERVED.contains(&name) {
+        return Err(DbNameError::Reserved);
+    }
+    Ok(())
+}
+
 /// What a user may do in a database.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Access {
@@ -216,6 +236,29 @@ mod tests {
             DbNameError::TooLong
         );
         assert_eq!(DbNameError::Reserved.code(), "reserved_db_name");
+    }
+
+    #[test]
+    fn the_node_accepts_only_plain_identifiers() {
+        for ok in ["alice_shop", "a", "x_1", &"a".repeat(MAX_NAME_LEN)] {
+            assert!(check_identifier(ok).is_ok(), "{ok}");
+        }
+        for bad in [
+            "",
+            "a;DROP DATABASE mysql",
+            "a`b",
+            "a b",
+            "a-b",
+            "A",
+            "a'b",
+            "a\\b",
+            "a\0b",
+            "mysql",
+            "root",
+            &"a".repeat(MAX_NAME_LEN + 1),
+        ] {
+            assert!(check_identifier(bad).is_err(), "{bad:?}");
+        }
     }
 
     #[test]
