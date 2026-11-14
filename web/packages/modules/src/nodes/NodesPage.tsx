@@ -34,6 +34,7 @@ import {
 import type { NodeItem, EnrollmentView, NodeStatus } from "./types";
 import { AddNodeDialog } from "./AddNodeDialog";
 import { NodeDetailDialog } from "./NodeDetailDialog";
+import { AgentUpdateDialog } from "./AgentUpdateDialog";
 
 export function NodesPage() {
   const { t } = useTranslation();
@@ -51,6 +52,7 @@ export function NodesPage() {
   const [selectedNode, setSelectedNode] = useState<NodeItem | null>(null);
   const [revokingNode, setRevokingNode] = useState<NodeItem | null>(null);
   const [cancellingEnrollmentId, setCancellingEnrollmentId] = useState<string | null>(null);
+  const [updatingAgentNode, setUpdatingAgentNode] = useState<NodeItem | null>(null);
 
   // List nodes - TODO(api:T02.08): replace mocked nodes with backend endpoint when implemented
   const fetchNodes = async () => {
@@ -327,6 +329,17 @@ export function NodesPage() {
                               <Info className="h-3.5 w-3.5" />
                               {t("nodes.table.viewDetails")}
                             </Button>
+                            {hasPermission("admin.nodes.write") && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                data-testid={`btn-update-agent-${node.id}`}
+                                onClick={() => setUpdatingAgentNode(node)}
+                                className="h-8 px-2 text-xs text-primary hover:bg-primary/10 border-primary/30"
+                              >
+                                {t("nodes.update.actionBtn")}
+                              </Button>
+                            )}
                             {hasPermission("admin.nodes.write") && node.status !== "revoked" && (
                               <Button
                                 variant="outline"
@@ -419,6 +432,14 @@ export function NodesPage() {
         node={selectedNode}
         open={!!selectedNode}
         onOpenChange={(open) => !open && setSelectedNode(null)}
+      />
+
+      {/* Agent Self-Update Dialog (T16.08) */}
+      <AgentUpdateDialog
+        node={updatingAgentNode}
+        open={!!updatingAgentNode}
+        onOpenChange={(open) => !open && setUpdatingAgentNode(null)}
+        onUpdateComplete={loadData}
       />
 
       {/* Revoke Node Confirmation Dialog (AGENTS.md typed-confirmation) */}
