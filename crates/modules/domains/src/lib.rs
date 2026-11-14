@@ -30,6 +30,7 @@
 //! `blocked_domains`) are read on every add, so a change takes effect at once.
 
 pub mod dns;
+pub mod error_pages;
 pub mod nameservers;
 pub mod php;
 pub mod php_settings;
@@ -118,7 +119,8 @@ impl FromRef<DomainsState> for SessionStore {
 
 /// Routes for administrators, with full paths.
 pub fn admin_router() -> Router<DomainsState> {
-    php::admin_router()
+    error_pages::admin_router()
+        .merge(php::admin_router())
         .merge(php_settings::admin_router())
         .merge(policy::admin_router())
         .merge(vhost::admin_router())
@@ -1153,7 +1155,7 @@ pub async fn client_delete(
         admin_list, admin_get, admin_add, admin_update, admin_delete, admin_suspend,
         admin_unsuspend, client_list, client_get, client_add, client_update, client_delete,
         php::admin_get, php::admin_set, php::client_get, php::client_set_account,
-        services::restart, php::client_set_domain, php_settings::admin_get, php_settings::admin_set,
+        error_pages::list, error_pages::set, error_pages::reset, services::restart, php::client_set_domain, php_settings::admin_get, php_settings::admin_set,
         php_settings::client_get, php_settings::client_set,
         policy::admin_get, policy::admin_set, policy::client_get, policy::client_set,
         vhost::admin_get, vhost::admin_set, vhost::client_get, vhost::client_set,
@@ -1173,7 +1175,7 @@ pub async fn client_delete(
     ),
     components(schemas(
         DomainView, DomainList, AddDomain, AdminAddDomain, UpdateDomain,
-        services::Restarted, php::PhpView, php::DomainPhp, php::SetVersion, php_settings::PhpSettingsView,
+        error_pages::PageView, error_pages::PageList, error_pages::PageInput, services::Restarted, php::PhpView, php::DomainPhp, php::SetVersion, php_settings::PhpSettingsView,
         php_settings::OptionView, php_settings::CapsView, php_settings::SetPhpSettings, policy::PolicyView, policy::HeaderView, vhost::VhostView, vhost::SetVhost, vhost_templates::TemplateSummary,
         vhost_templates::TemplateView, vhost_templates::TemplateList, vhost_templates::TemplateInput,
         vhost_templates::VersionView, vhost_templates::VersionList, vhost_templates::PreviewInput,

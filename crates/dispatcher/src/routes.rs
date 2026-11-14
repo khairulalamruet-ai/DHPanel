@@ -50,6 +50,15 @@ pub fn build(
                 .collect(),
             force_https: d.force_https,
             hsts: d.hsts,
+            // Who suspended it decides which page visitors see.
+            suspended_by: suspended[&d.id].then(|| {
+                if tenant_suspended {
+                    "account"
+                } else {
+                    "domain"
+                }
+                .to_owned()
+            }),
         };
         sites.push((d.id, route));
     }
@@ -226,5 +235,28 @@ mod tests {
             &manyr,
         );
         assert_eq!(routes[0].redirects.len(), MAX_REDIRECTS_PER_TENANT);
+    }
+
+    #[test]
+    fn who_suspended_a_site_decides_its_page() {
+        let domains = vec![
+            dom(1, "paused.org", "primary", None, "suspended"),
+            dom(2, "fine.org", "addon", None, "active"),
+        ];
+        let by_domain = build("active", UP, &domains, &[]);
+        let paused = by_domain
+            .iter()
+            .find(|s| s.hosts[0] == "paused.org")
+            .unwrap();
+        let fine = by_domain.iter().find(|s| s.hosts[0] == "fine.org").unwrap();
+        assert_eq!(paused.suspended_by.as_deref(), Some("domain"));
+        assert_eq!(fine.suspended_by, None);
+        // With the whole account suspended every site says so.
+        let by_account = build("suspended", UP, &domains, &[]);
+        assert!(
+            by_account
+                .iter()
+                .all(|s| s.suspended_by.as_deref() == Some("account"))
+        );
     }
 }

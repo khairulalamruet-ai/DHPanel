@@ -3298,6 +3298,185 @@
         ]
       }
     },
+    "/api/v1/admin/error-pages": {
+      "get": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "The pages visitors see, with the installation's own where none was set.",
+        "operationId": "listErrorPages",
+        "responses": {
+          "200": {
+            "description": "The four pages",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageList"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/error-pages/{kind}": {
+      "put": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "Replace a page.",
+        "operationId": "setErrorPage",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "description": "`suspended_domain`, `suspended_account`, `not_found` or `bad_gateway`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PageInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageList"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied`, `reauth_required` or `csrf_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such page",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`page_empty`, `page_too_large` or `page_characters`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "Go back to the installation's own page.",
+        "operationId": "resetErrorPage",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "description": "The kind of page",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Done (also when it already was the plain page)"
+          },
+          "403": {
+            "description": "`permission_denied`, `reauth_required` or `csrf_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such page",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/feature-sets": {
       "get": {
         "tags": [
@@ -11704,6 +11883,67 @@
           "kind": {
             "type": "string",
             "description": "`size` (like 64M), `int`, `flag` (true or false), `choice` or `timezone`."
+          }
+        }
+      },
+      "PageInput": {
+        "type": "object",
+        "description": "A page to keep.",
+        "required": [
+          "html"
+        ],
+        "properties": {
+          "html": {
+            "type": "string",
+            "description": "The HTML."
+          }
+        },
+        "additionalProperties": false
+      },
+      "PageList": {
+        "type": "object",
+        "description": "The pages.",
+        "required": [
+          "items",
+          "max_bytes"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PageView"
+            },
+            "description": "One of each kind."
+          },
+          "max_bytes": {
+            "type": "integer",
+            "description": "Longest page, in bytes.",
+            "example": 16384,
+            "minimum": 0
+          }
+        }
+      },
+      "PageView": {
+        "type": "object",
+        "description": "One page.",
+        "required": [
+          "kind",
+          "is_custom",
+          "html"
+        ],
+        "properties": {
+          "html": {
+            "type": "string",
+            "description": "The HTML visitors get."
+          },
+          "is_custom": {
+            "type": "boolean",
+            "description": "Whether an administrator replaced the installation's page."
+          },
+          "kind": {
+            "type": "string",
+            "description": "`suspended_domain`, `suspended_account`, `not_found` or `bad_gateway`.",
+            "example": "not_found"
           }
         }
       },

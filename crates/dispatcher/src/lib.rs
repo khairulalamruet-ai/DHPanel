@@ -181,7 +181,7 @@ impl Dispatcher {
                 _ = tick.tick() => { self.tick().await; }
                 _ = capabilities.tick() => { self.request_capabilities().await; }
                 _ = purges.tick() => { self.request_purges().await; }
-                _ = routes.tick() => { self.request_route_syncs().await; }
+                _ = routes.tick() => { self.request_route_syncs().await; self.request_error_pages().await; }
                 _ = certificates.tick() => { self.request_certificates().await; }
                 _ = expiry.tick() => { self.announce_expiring().await; }
                 Some(report) = results.recv() => self.handle_result(report).await,
@@ -503,6 +503,40 @@ impl Dispatcher {
         dhpanel_database::routes::mark_synced(db, tenant.id, tenant.version)
             .await
             .map_err(|e| e.to_string())
+    }
+
+    /// Sends the error pages to every connected node whenever they changed (the key
+    /// is made from their content, so each node is told once per version, and a
+    /// node that connects later is told too). Returns how many nodes were told.
+    pub async fn request_error_pages(&self) -> usize {
+        let custom = match dhpanel_database::error_pages::custom(self.ops.db()).await {
+            Ok(c) => c,
+            Err(err) => {
+                tracing::warn!(error = %err, "could not read the error pages");
+                return 0;
+            }
+        };
+        let version = short_hash(&format!("{custom:?}"));
+        let pages: Vec<dhpanel_node_protocol::ErrorPage> = custom
+            .into_iter()
+            .map(|(kind, html)| dhpanel_node_protocol::ErrorPage { kind, html })
+            .collect();
+        let mut told = 0;
+        for node in self.gateway.connected_nodes() {
+            let request = dhpanel_operations::Request::new(
+                node,
+                dhpanel_node_protocol::Operation::SetErrorPages {
+                    pages: pages.clone(),
+                },
+                format!("pages:{version:016x}"),
+            );
+            match self.ops.enqueue(&request).await {
+                Ok(dhpanel_operations::Enqueued::Created(_)) => told += 1,
+                Ok(dhpanel_operations::Enqueued::Existing(_)) => {}
+                Err(error) => tracing::warn!(%node, %error, "could not queue the error pages"),
+            }
+        }
+        told
     }
 
     /// Asks each connected node for the certificates its web server holds, once per

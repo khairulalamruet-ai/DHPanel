@@ -4017,3 +4017,141 @@ async fn an_account_may_restart_its_services_three_times_a_minute(pool: PgPool) 
         (StatusCode::CONFLICT, "tenant_not_running")
     );
 }
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn administrators_replace_and_reset_the_pages_visitors_see(pool: PgPool) {
+    let e = env(&pool).await;
+    let (alice, _) = client(&pool, "alice", 10_000).await;
+    let a = e.sign_in(alice).await;
+    let root = e
+        .sign_in(account(&pool, "rootuser", &["super_admin"]).await)
+        .await;
+    let plain = e
+        .sign_in(account(&pool, "plainadmin", &["admin"]).await)
+        .await;
+    const P: &str = "/api/v1/admin/error-pages";
+    assert_eq!(
+        e.call(Some(&plain), "GET", P, None, false).await.0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        e.call(Some(&a), "GET", P, None, false).await.0,
+        StatusCode::FORBIDDEN
+    );
+
+    let (status, list) = e.call(Some(&root), "GET", P, None, false).await;
+    assert_eq!(status, StatusCode::OK);
+    let kinds: Vec<&str> = list["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["kind"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            "suspended_domain",
+            "suspended_account",
+            "not_found",
+            "bad_gateway"
+        ]
+    );
+    assert!(
+        list["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|i| i["is_custom"] == false && i["html"].as_str().unwrap().contains("<h1>"))
+    );
+
+    let (status, saved) = e
+        .call(
+            Some(&root),
+            "PUT",
+            &format!("{P}/not_found"),
+            Some(json!({"html": "<p>gone</p>"})),
+            true,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    let item = saved["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["kind"] == "not_found")
+        .unwrap();
+    assert_eq!(
+        (item["is_custom"].clone(), item["html"].clone()),
+        (json!(true), json!("<p>gone</p>"))
+    );
+    for (path, body, want) in [
+        ("not_found", json!({"html": ""}), "page_empty"),
+        (
+            "not_found",
+            json!({"html": "x".repeat(20_000)}),
+            "page_too_large",
+        ),
+        ("not_found", json!({"html": "a\u{0}b"}), "page_characters"),
+    ] {
+        let (status, resp) = e
+            .call(Some(&root), "PUT", &format!("{P}/{path}"), Some(body), true)
+            .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{resp}");
+        assert_eq!(resp["errors"][0]["code"], want);
+    }
+    assert_eq!(
+        e.call(
+            Some(&root),
+            "PUT",
+            &format!("{P}/mystery"),
+            Some(json!({"html": "<p>x</p>"})),
+            true
+        )
+        .await
+        .0,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        e.call(
+            Some(&plain),
+            "PUT",
+            &format!("{P}/not_found"),
+            Some(json!({"html": "<p>x</p>"})),
+            true
+        )
+        .await
+        .0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        e.call(Some(&root), "DELETE", &format!("{P}/not_found"), None, true)
+            .await
+            .0,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        e.call(Some(&root), "DELETE", &format!("{P}/not_found"), None, true)
+            .await
+            .0,
+        StatusCode::NO_CONTENT
+    );
+    let (_, list) = e.call(Some(&root), "GET", P, None, false).await;
+    assert!(
+        list["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|i| i["is_custom"] == false)
+    );
+    let actions: Vec<String> = sqlx::query_scalar(
+        "SELECT action FROM audit_logs WHERE action LIKE 'admin.error_page%' ORDER BY at",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        actions,
+        ["admin.error_page_changed", "admin.error_page_reset"]
+    );
+}

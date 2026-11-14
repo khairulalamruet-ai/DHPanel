@@ -144,7 +144,24 @@ pub struct SiteRoute {
     /// `force_https`; the agent refuses it without.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub hsts: bool,
+    /// For a suspended site (no `upstream`): who suspended it, `domain` or
+    /// `account`, which picks the page visitors see. Empty means `domain`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suspended_by: Option<String>,
 }
+
+/// One page for the web server to show when a site cannot answer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ErrorPage {
+    /// `suspended_domain`, `suspended_account`, `not_found` or `bad_gateway`.
+    pub kind: String,
+    /// The page (HTML, at most [`MAX_ERROR_PAGE_BYTES`]).
+    pub html: String,
+}
+
+/// Longest error page.
+pub const MAX_ERROR_PAGE_BYTES: usize = 16 * 1024;
 
 /// A certificate a person uploaded for one of their names, for the web server to use.
 ///
@@ -447,6 +464,13 @@ pub enum Operation {
         /// The certificates, each with its key.
         items: Vec<CustomCertificate>,
     },
+    /// Set the pages the node's web server shows when a site cannot answer.
+    /// Replaces what it had; a kind that is not listed uses the installation's
+    /// own page. Kept by the agent. Answered with [`Output::ErrorPagesSet`].
+    SetErrorPages {
+        /// At most one page of each kind.
+        pages: Vec<ErrorPage>,
+    },
     /// Put one domain's web server configuration (rendered by the control plane)
     /// into the tenant's web container and have it reloaded. The file is checked
     /// by the web server itself before it is used; when it is refused the
@@ -545,6 +569,7 @@ impl Operation {
         "restart_service",
         "set_up_tenant",
         "set_site_routes",
+        "set_error_pages",
         "report_certificates",
         "set_custom_certificates",
         "attach_domain",
@@ -570,6 +595,7 @@ impl Operation {
             Self::RestartService { .. } => "restart_service",
             Self::SetUpTenant { .. } => "set_up_tenant",
             Self::SetSiteRoutes { .. } => "set_site_routes",
+            Self::SetErrorPages { .. } => "set_error_pages",
             Self::ReportCertificates => "report_certificates",
             Self::SetCustomCertificates { .. } => "set_custom_certificates",
             Self::AttachDomain { .. } => "attach_domain",
@@ -716,6 +742,13 @@ pub enum Output {
         containers: Vec<String>,
         /// How storage limits are enforced (`xfs`), or `None` when they are not.
         storage_quota: Option<String>,
+    },
+    /// Answer to [`Operation::SetErrorPages`].
+    ErrorPagesSet {
+        /// Pages that are not the installation's own.
+        custom: usize,
+        /// Whether the web server has them (they are kept either way).
+        applied: bool,
     },
     /// Answer to [`Operation::RestartService`].
     ServiceRestarted {
@@ -1534,6 +1567,7 @@ mod tests {
                     redirects: vec![],
                     force_https: false,
                     hsts: false,
+                    suspended_by: None,
                 }],
             },
             Operation::SuspendTenant {
@@ -1560,6 +1594,7 @@ mod tests {
                 username: "alice".into(),
                 service: "web".into(),
             },
+            Operation::SetErrorPages { pages: vec![] },
             Operation::AttachDomain {
                 username: "alice".into(),
                 domain: "example.com".into(),
@@ -1586,7 +1621,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            19,
+            20,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }

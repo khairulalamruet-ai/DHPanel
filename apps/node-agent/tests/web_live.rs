@@ -9,9 +9,11 @@
 
 use std::{process::Command, time::Duration};
 
-use dhpanel_node_agent::web::{Settings, WebContext, set_custom_certificates, set_site_routes};
+use dhpanel_node_agent::web::{
+    Settings, WebContext, set_custom_certificates, set_error_pages, set_site_routes,
+};
 use dhpanel_node_protocol::{
-    CustomCertificate, ErrorCode, Operation, Output, RouteRedirect, SiteRoute,
+    CustomCertificate, ErrorCode, ErrorPage, Operation, Output, RouteRedirect, SiteRoute,
 };
 
 fn env(name: &str) -> Option<String> {
@@ -56,6 +58,7 @@ fn site(hosts: &[&str], upstream: Option<&str>, redirects: Vec<RouteRedirect>) -
         redirects,
         force_https: false,
         hsts: false,
+        suspended_by: None,
     }
 }
 
@@ -622,5 +625,117 @@ async fn an_uploaded_certificate_is_served_until_it_is_removed() {
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
     assert!(after.contains("Caddy Local"), "{after}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+#[ignore = "needs a Caddy and a site behind it (see the file header)"]
+async fn error_pages_are_the_installations_until_an_administrator_replaces_them() {
+    let (Some(admin), Some(url)) = (
+        env("DHPANEL_TEST_CADDY_ADMIN"),
+        env("DHPANEL_TEST_CADDY_URL"),
+    ) else {
+        eprintln!("skipped: no Caddy (see the script)");
+        return;
+    };
+    let dir = std::env::temp_dir().join(format!("dh-web-pages-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let web = WebContext::new(
+        Settings {
+            admin,
+            listen: vec![":18080".into(), ":18443".into()],
+            automatic_https: false,
+            data_dir: None,
+        },
+        &dir,
+    );
+    let mut by_domain = site(&["domain-off.example.com"], None, vec![]);
+    by_domain.suspended_by = Some("domain".into());
+    let mut by_account = site(&["account-off.example.com"], None, vec![]);
+    by_account.suspended_by = Some("account".into());
+    let broken = site(&["broken.example.com"], Some("dh-alice-gone:8080"), vec![]);
+    set_site_routes(
+        web.clone(),
+        set("alice", vec![by_domain, by_account, broken]),
+    )
+    .await
+    .unwrap();
+
+    // Out of the box: plain pages that differ where they should.
+    let (status, _, domain_page) = get(&url, "domain-off.example.com", "/").await;
+    assert_eq!(status, 503);
+    assert!(
+        domain_page.contains("This site is suspended"),
+        "{domain_page}"
+    );
+    let (_, _, account_page) = get(&url, "account-off.example.com", "/").await;
+    assert!(
+        account_page.contains("This account is suspended"),
+        "{account_page}"
+    );
+    let (status, _, nothing) = get(&url, "nobody.example.com", "/").await;
+    assert_eq!(status, 404);
+    assert!(nothing.contains("Nothing here"));
+    let (status, _, down) = get(&url, "broken.example.com", "/").await;
+    assert_eq!(status, 502, "{down}");
+    assert!(down.contains("This site is not answering"), "{down}");
+
+    // An administrator's pages replace them, kind by kind.
+    let page = |kind: &str, html: &str| ErrorPage {
+        kind: kind.into(),
+        html: html.into(),
+    };
+    let done = set_error_pages(
+        web.clone(),
+        Operation::SetErrorPages {
+            pages: vec![
+                page("suspended_domain", "<p>domain paused</p>"),
+                page("not_found", "<p>no such site</p>"),
+                page("bad_gateway", "<p>back soon</p>"),
+            ],
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        done,
+        Output::ErrorPagesSet {
+            custom: 3,
+            applied: true
+        }
+    );
+    let (_, _, text) = get(&url, "domain-off.example.com", "/").await;
+    assert_eq!(text, "<p>domain paused</p>");
+    let (_, _, text) = get(&url, "account-off.example.com", "/").await;
+    assert!(
+        text.contains("This account is suspended"),
+        "not replaced: {text}"
+    );
+    let (status, _, text) = get(&url, "nobody.example.com", "/").await;
+    assert_eq!((status, text.as_str()), (404, "<p>no such site</p>"));
+    let (status, _, text) = get(&url, "broken.example.com", "/").await;
+    assert_eq!((status, text.as_str()), (502, "<p>back soon</p>"));
+    // A working site is not touched.
+    let (status, _, text) = get(&url, "x.example.com", "/").await;
+    assert_eq!(status, 404);
+    assert_eq!(text, "<p>no such site</p>");
+
+    // Bad pages and kinds are refused; an empty list goes back to the plain pages.
+    for bad in [
+        vec![page("mystery", "<p>x</p>")],
+        vec![page("not_found", "")],
+        vec![page("not_found", "<p>a</p>"), page("not_found", "<p>b</p>")],
+        vec![page("not_found", &"x".repeat(20_000))],
+    ] {
+        let err = set_error_pages(web.clone(), Operation::SetErrorPages { pages: bad })
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, ErrorCode::InvalidArguments);
+    }
+    set_error_pages(web.clone(), Operation::SetErrorPages { pages: vec![] })
+        .await
+        .unwrap();
+    let (_, _, text) = get(&url, "nobody.example.com", "/").await;
+    assert!(text.contains("Nothing here"), "{text}");
     let _ = std::fs::remove_dir_all(&dir);
 }

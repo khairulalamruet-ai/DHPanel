@@ -25,7 +25,10 @@ use std::{
     time::Duration,
 };
 
-use dhpanel_domain::{Fqdn, SourcePath, Target, TenantUsername};
+use dhpanel_domain::{
+    Fqdn, SourcePath, Target, TenantUsername,
+    error_pages::{self, Kind as ErrorKind},
+};
 use dhpanel_node_protocol::{
     AgentError, CertificateInfo, CustomCertificate, ErrorCode, MAX_CERTIFICATES_PER_REPORT,
     MAX_CUSTOM_CERTIFICATES_PER_TENANT, MAX_HOSTS_PER_TENANT, MAX_REDIRECTS_PER_TENANT,
@@ -84,6 +87,8 @@ pub struct WebContext {
     dir: PathBuf,
     /// Where the uploaded certificates and their keys are kept (mode 0600).
     certs_dir: PathBuf,
+    /// The error pages an administrator set.
+    pages_file: PathBuf,
     agent: ureq::Agent,
     /// One change at a time: files and Caddy move together.
     busy: Mutex<()>,
@@ -103,10 +108,30 @@ impl WebContext {
             settings,
             dir: state_dir.join("routes"),
             certs_dir: state_dir.join("certs"),
+            pages_file: state_dir.join("error-pages.json"),
             agent,
             busy: Mutex::new(()),
         })
     }
+}
+
+// ------------------------------------------------------------- error pages
+
+/// The pages an administrator set (none if there is no file or it is unusable).
+fn load_pages(file: &Path) -> Pages {
+    let Ok(bytes) = std::fs::read(file) else {
+        return Pages::default();
+    };
+    let Ok(map) = serde_json::from_slice::<BTreeMap<String, String>>(&bytes) else {
+        eprintln!("dhpanel-agent: ignoring the unusable error pages file");
+        return Pages::default();
+    };
+    // Only kinds and pages that pass today's checks.
+    Pages(
+        map.into_iter()
+            .filter(|(k, v)| ErrorKind::parse(k).is_some() && error_pages::check(v).is_ok())
+            .collect(),
+    )
 }
 
 // --------------------------------------------------------------- the checks
@@ -178,8 +203,19 @@ fn validate(username: &TenantUsername, routes: &[SiteRoute]) -> Result<(), Agent
 
 // ------------------------------------------------------------ the compiling
 
-const SUSPENDED_PAGE: &str = "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Site suspended</title></head><body style=\"font-family:system-ui,sans-serif;display:grid;place-items:center;min-height:100vh;margin:0;background:#f5f6f8;color:#1d2330\"><main style=\"text-align:center;padding:2rem\"><h1>This site is suspended</h1><p>The owner of this address has been asked to contact their hosting provider.</p></main></body></html>";
-const NOT_FOUND_PAGE: &str = "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Not found</title></head><body style=\"font-family:system-ui,sans-serif;display:grid;place-items:center;min-height:100vh;margin:0;background:#f5f6f8;color:#1d2330\"><main style=\"text-align:center;padding:2rem\"><h1>Nothing here</h1><p>No site is set up for this address.</p></main></body></html>";
+/// The pages the web server shows when a site cannot answer: what an
+/// administrator set, and the installation's own for the rest.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Pages(BTreeMap<String, String>);
+
+impl Pages {
+    fn get(&self, kind: ErrorKind) -> String {
+        self.0
+            .get(kind.as_str())
+            .cloned()
+            .unwrap_or_else(|| kind.default_page())
+    }
+}
 
 fn page(status: u16, body: &str, extra: &[(&str, &str)]) -> Value {
     let mut headers = serde_json::Map::new();
@@ -192,7 +228,7 @@ fn page(status: u16, body: &str, extra: &[(&str, &str)]) -> Value {
 }
 
 /// One site as a Caddy route.
-fn site_route(site: &SiteRoute) -> Value {
+fn site_route(site: &SiteRoute, pages: &Pages) -> Value {
     let mut inner: Vec<Value> = Vec::new();
     if site.force_https {
         // Visitors on plain HTTP go to the same address over HTTPS. The
@@ -233,9 +269,14 @@ fn site_route(site: &SiteRoute) -> Value {
         Some(upstream) => json!({
             "handle": [{"handler": "reverse_proxy", "upstreams": [{"dial": upstream}]}]
         }),
-        None => json!({
-            "handle": [page(503, SUSPENDED_PAGE, &[("Retry-After", "3600")])]
-        }),
+        None => {
+            let kind = if site.suspended_by.as_deref() == Some("account") {
+                ErrorKind::SuspendedAccount
+            } else {
+                ErrorKind::SuspendedDomain
+            };
+            json!({"handle": [page(503, &pages.get(kind), &[("Retry-After", "3600")])]})
+        }
     });
     json!({
         "match": [{"host": site.hosts}],
@@ -251,11 +292,24 @@ fn compile(
     all: &BTreeMap<String, Vec<SiteRoute>>,
     uploaded: &BTreeSet<String>,
     settings: &Settings,
+    pages: &Pages,
 ) -> Value {
-    let mut routes: Vec<Value> = all.values().flatten().map(site_route).collect();
+    let mut routes: Vec<Value> = all
+        .values()
+        .flatten()
+        .map(|site| site_route(site, pages))
+        .collect();
     // Anything else: a plain "no such site", never another tenant's page.
-    routes.push(json!({"handle": [page(404, NOT_FOUND_PAGE, &[])]}));
+    routes.push(json!({"handle": [page(404, &pages.get(ErrorKind::NotFound), &[])]}));
     let mut server = json!({"listen": settings.listen, "routes": routes});
+    // A site whose web server does not answer.
+    let mut gateway = page(502, &pages.get(ErrorKind::BadGateway), &[]);
+    gateway["status_code"] = json!("{http.error.status_code}");
+    server["errors"] = json!({"routes": [{
+        "match": [{"expression": "{http.error.status_code} in [502, 503, 504]"}],
+        "handle": [gateway],
+        "terminal": true
+    }]});
     server["automatic_https"] = if settings.automatic_https {
         // The sites that want HTTPS say so themselves (`force_https`); Caddy's own
         // blanket redirect would make that choice for everyone.
@@ -525,7 +579,12 @@ impl WebContext {
             .flatten()
             .map(|c| c.host.clone())
             .collect();
-        let config = compile(&load_all(&self.dir), &uploaded, &self.settings);
+        let config = compile(
+            &load_all(&self.dir),
+            &uploaded,
+            &self.settings,
+            &load_pages(&self.pages_file),
+        );
         let wanted = config
             .pointer(&format!("/apps/http/servers/{SERVER}"))
             .cloned()
@@ -703,6 +762,60 @@ pub async fn set_custom_certificates(
     }
 }
 
+/// `set_error_pages`.
+///
+/// # Errors
+/// [`AgentError`]: an unknown kind, a kind twice or a page that fails the checks
+/// (not retryable); kept for the next pass when Caddy cannot be reached.
+pub async fn set_error_pages(
+    context: Arc<WebContext>,
+    op: Operation,
+) -> Result<Output, AgentError> {
+    let Operation::SetErrorPages { pages } = op else {
+        return Err(crate::ops::wrong_operation());
+    };
+    let mut map = BTreeMap::new();
+    for page in pages {
+        let Some(kind) = ErrorKind::parse(&page.kind) else {
+            return Err(invalid("an unknown kind of page"));
+        };
+        error_pages::check(&page.html).map_err(|(_, message)| invalid(message))?;
+        if map.insert(kind.as_str().to_owned(), page.html).is_some() {
+            return Err(invalid("a kind of page is given twice"));
+        }
+    }
+    let _guard = context.busy.lock().await;
+    let custom = map.len();
+    let tmp = context.pages_file.with_extension("json.tmp");
+    let write = || -> std::io::Result<()> {
+        std::fs::write(
+            &tmp,
+            serde_json::to_vec(&map).map_err(std::io::Error::other)?,
+        )?;
+        std::fs::rename(&tmp, &context.pages_file)
+    };
+    write().map_err(|e| {
+        AgentError::new(
+            ErrorCode::Internal,
+            format!("cannot keep the pages: {}", e.kind()),
+        )
+        .retryable()
+    })?;
+    match context.reconcile_locked().await {
+        Ok(_) => Ok(Output::ErrorPagesSet {
+            custom,
+            applied: true,
+        }),
+        Err(message) if message.starts_with("Caddy refused") => {
+            Err(AgentError::new(ErrorCode::Internal, message))
+        }
+        Err(_) => Ok(Output::ErrorPagesSet {
+            custom,
+            applied: false,
+        }),
+    }
+}
+
 // ------------------------------------------------------------- certificates
 
 /// The common name (or, failing that, the whole name) of an issuer.
@@ -801,6 +914,7 @@ mod tests {
             redirects: vec![],
             force_https: false,
             hsts: false,
+            suspended_by: None,
         }
     }
 
@@ -897,7 +1011,7 @@ mod tests {
             "bobby".to_owned(),
             vec![site(&["bobs.net"], Some("dh-bobby-web:8080"))],
         );
-        let config = compile(&all, &BTreeSet::new(), &settings());
+        let config = compile(&all, &BTreeSet::new(), &settings(), &Pages::default());
         let server = &config["apps"]["http"]["servers"]["dhpanel"];
         assert_eq!(server["listen"], json!([":80", ":443"]));
         let routes = server["routes"].as_array().unwrap();
@@ -929,12 +1043,15 @@ mod tests {
         assert_eq!(routes[3]["handle"][0]["status_code"], 404);
         // Nothing the control plane supplies can be read as a placeholder: the
         // fixed pages have none and the supplied values were checked for braces.
-        let fixed = format!("{SUSPENDED_PAGE}{NOT_FOUND_PAGE}");
+        let fixed: String = error_pages::KINDS
+            .iter()
+            .map(|k| k.default_page())
+            .collect();
         assert!(!fixed.contains('{') && !fixed.contains('}'));
         // The same input gives the same output.
         assert_eq!(
-            compile(&all, &BTreeSet::new(), &settings()),
-            compile(&all, &BTreeSet::new(), &settings())
+            compile(&all, &BTreeSet::new(), &settings(), &Pages::default()),
+            compile(&all, &BTreeSet::new(), &settings(), &Pages::default())
         );
         // Automatic HTTPS can be turned off.
         let off = compile(
@@ -944,6 +1061,7 @@ mod tests {
                 automatic_https: false,
                 ..settings()
             },
+            &Pages::default(),
         );
         assert_eq!(
             off["apps"]["http"]["servers"]["dhpanel"]["automatic_https"]["disable"],
@@ -972,7 +1090,7 @@ mod tests {
             "alice".to_owned(),
             vec![secure, only_redirect, site(&["http-only.net"], None)],
         )]);
-        let config = compile(&all, &BTreeSet::new(), &settings());
+        let config = compile(&all, &BTreeSet::new(), &settings(), &Pages::default());
         let routes = config["apps"]["http"]["servers"]["dhpanel"]["routes"]
             .as_array()
             .unwrap();
@@ -1112,12 +1230,12 @@ mod tests {
     fn names_with_an_uploaded_certificate_are_left_out_of_caddys_own() {
         let all = BTreeMap::from([("alice".to_owned(), vec![site(&["a.org"], None)])]);
         let uploaded = BTreeSet::from(["a.org".to_owned()]);
-        let config = compile(&all, &uploaded, &settings());
+        let config = compile(&all, &uploaded, &settings(), &Pages::default());
         assert_eq!(
             config["apps"]["http"]["servers"][SERVER]["automatic_https"],
             json!({"disable_redirects": true, "skip_certificates": ["a.org"]})
         );
-        let none = compile(&all, &BTreeSet::new(), &settings());
+        let none = compile(&all, &BTreeSet::new(), &settings(), &Pages::default());
         assert_eq!(
             none["apps"]["http"]["servers"][SERVER]["automatic_https"],
             json!({"disable_redirects": true})

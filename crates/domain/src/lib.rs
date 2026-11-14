@@ -6,6 +6,7 @@
 pub mod account;
 pub mod dns;
 pub mod domains;
+pub mod error_pages;
 pub mod php_ini;
 pub mod redirects;
 pub mod tenant;

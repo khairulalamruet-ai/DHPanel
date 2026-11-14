@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM error_pages WHERE kind = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8edcc7709217eeb1b0bb15afe3c0ac355f235526d34704adb2aee8e7c4a560bb"
+}

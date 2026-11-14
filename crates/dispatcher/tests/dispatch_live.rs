@@ -1464,3 +1464,37 @@ async fn php_containers_are_set_before_the_files_that_point_to_them(pool: PgPool
         "nothing more is asked of a suspended account"
     );
 }
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs PostgreSQL"]
+async fn error_pages_go_to_every_connected_node_once_per_version(pool: PgPool) {
+    let p = plane(&pool).await;
+    let d = Dispatcher::new(p.ops.clone(), p.gateway.clone(), None, dispatch_settings());
+    let node = make_node(&p, &pool, "pages").await;
+    let (agent_stop, agent) = node.start_agent(p.addr);
+    wait_connected(&p, node.id).await;
+    // Nothing set: the node is still told once (an empty list), then left alone.
+    assert_eq!(d.request_error_pages().await, 1);
+    assert_eq!(d.request_error_pages().await, 0);
+    let mut conn = pool.acquire().await.unwrap();
+    dhpanel_database::error_pages::set(&mut conn, "not_found", "<p>gone</p>", None)
+        .await
+        .unwrap();
+    drop(conn);
+    assert_eq!(
+        d.request_error_pages().await,
+        1,
+        "a change is a new version"
+    );
+    assert_eq!(d.request_error_pages().await, 0);
+    let payload: serde_json::Value = sqlx::query_scalar(
+        "SELECT payload FROM operations WHERE kind = 'set_error_pages' ORDER BY created_at DESC LIMIT 1",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(payload["pages"][0]["kind"], "not_found");
+    assert_eq!(payload["pages"][0]["html"], "<p>gone</p>");
+    agent_stop.send(true).unwrap();
+    agent.await.unwrap();
+}

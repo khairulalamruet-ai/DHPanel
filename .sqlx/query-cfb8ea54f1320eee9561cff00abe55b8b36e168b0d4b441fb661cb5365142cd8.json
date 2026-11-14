@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO error_pages (kind, body, updated_by) VALUES ($1, $2, $3)\n         ON CONFLICT (kind) DO UPDATE SET body = EXCLUDED.body, updated_by = EXCLUDED.updated_by",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "cfb8ea54f1320eee9561cff00abe55b8b36e168b0d4b441fb661cb5365142cd8"
+}
