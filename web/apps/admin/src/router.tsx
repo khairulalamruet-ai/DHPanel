@@ -59,6 +59,7 @@ import {
   CommandPaletteTrigger,
   UpdatePage,
   ApiTokensPage,
+  SupportReportPage,
   filterNavItems,
   registeredFrontendModules,
 } from "@dhpanel/modules";
@@ -553,6 +554,19 @@ const adminApiTokensRoute = createRoute({
   path: "/admin/api-tokens",
   component: ApiTokensPage,
 });
+const adminSupportReportRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/support-report",
+  component: SupportReportPage,
+});
+
+const supportReportRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/support-report",
+  component: SupportReportPage,
+});
+
+// 18. Login route
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/login",
@@ -627,6 +641,8 @@ const routeTree = rootRoute.addChildren([
   adminUpdateRoute,
   apiTokensRoute,
   adminApiTokensRoute,
+  adminSupportReportRoute,
+  supportReportRoute,
   loginRoute,
 ]);
 

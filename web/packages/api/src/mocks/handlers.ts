@@ -4951,11 +4951,9 @@ export const handlers = [
     });
   }),
 
-  // ==========================================
-  // File Manager: T08.09 Handlers
+  // ===================================  // File Manager: T08.09 Handlers
   // TODO(api:T08.08): Real backend agent file system endpoints
-  // ==========================================
-  ...(() => {
+  // ===================================  ...(() => {
     interface MockFsItem {
       id: string;
       name: string;
@@ -5436,11 +5434,9 @@ export const handlers = [
         });
       }),
 
-      // ==========================================
-      // FTP Accounts: T08.13 Handlers
+      // ===================================      // FTP Accounts: T08.13 Handlers
       // TODO(api:T08.12): Real FTPS account management endpoints
-      // ==========================================
-      ...(() => {
+      // ===================================      ...(() => {
         interface MockFtpAccount {
           id: string;
           username: string;
@@ -5558,11 +5554,9 @@ export const handlers = [
             return HttpResponse.json({ success: true });
           }),
 
-          // ==========================================
-          // Backup & Restore: T09.09 Handlers
+          // ===================================          // Backup & Restore: T09.09 Handlers
           // TODO(api:T09.08): Real agent backup creation and restoration endpoints
-          // ==========================================
-          ...(() => {
+          // ===================================          ...(() => {
             interface MockBackupItem {
               id: string;
               name: string;
@@ -5693,10 +5687,8 @@ export const handlers = [
                 return HttpResponse.json({ success: true });
               }),
 
-              // ==========================================
-              // ADMIN BACKUPS (TODO(api:T09.08))
-              // ==========================================
-              ...(() => {
+              // ===================================              // ADMIN BACKUPS (TODO(api:T09.08))
+              // ===================================              ...(() => {
                 interface MockAdminDestination {
                   id: string;
                   name: string;
@@ -5969,10 +5961,8 @@ export const handlers = [
                     });
                   }),
 
-                  // ==========================================
-                  // CRON JOBS (TODO(api:T10.01, T10.02))
-                  // ==========================================
-                  ...(() => {
+                  // ===================================                  // CRON JOBS (TODO(api:T10.01, T10.02))
+                  // ===================================                  ...(() => {
                     interface MockCronJob {
                       id: string;
                       name: string;
@@ -6142,10 +6132,8 @@ export const handlers = [
                         return HttpResponse.json({ success: true });
                       }),
 
-                      // ==========================================
-                      // LOG VIEWER (TODO(api:T10.04))
-                      // ==========================================
-                      ...(() => {
+                      // ===================================                      // LOG VIEWER (TODO(api:T10.04))
+                      // ===================================                      ...(() => {
                         const mockDomainOverviews = [
                           {
                             domain: "demo.dhpanel.test",
@@ -6291,10 +6279,8 @@ export const handlers = [
                             return HttpResponse.json(logs);
                           }),
 
-                          // ==========================================
-                          // ADMIN SYSTEM LOGS (TODO(api:T10.07))
-                          // ==========================================
-                          ...(() => {
+                          // ===================================                          // ADMIN SYSTEM LOGS (TODO(api:T10.07))
+                          // ===================================                          ...(() => {
                             const mockServiceStats = [
                               {
                                 service: "control-plane",
@@ -6406,10 +6392,8 @@ export const handlers = [
                                 return HttpResponse.json(logs);
                               }),
 
-                              // ==========================================
-                              // USAGE ANALYTICS (TODO(api:T10.09))
-                              // ==========================================
-                              ...(() => {
+                              // ===================================                              // USAGE ANALYTICS (TODO(api:T10.09))
+                              // ===================================                              ...(() => {
                                 const generateHistoryPoints = (range: string, isNode = false) => {
                                   const points: any[] = [];
                                   const count = range === "24h" ? 24 : range === "7d" ? 28 : 30;
@@ -6519,10 +6503,8 @@ export const handlers = [
                                     });
                                   }),
 
-                                  // ==========================================
-                                  // PROCESS MANAGER (TODO(api:T10.14))
-                                  // ==========================================
-                                  ...(() => {
+                                  // ===================================                                  // PROCESS MANAGER (TODO(api:T10.14))
+                                  // ===================================                                  ...(() => {
                                     interface MockProcess {
                                       pid: number;
                                       ppid: number;
@@ -8689,10 +8671,8 @@ export const handlers = [
                                                        })(),
                                                      ];
                                                    })(),
-                                              // ==========================================
-                                              // T18.06 — Branding & Live Theming Handlers (TODO(api:T18.06))
-                                              // ==========================================
-                                              ...(() => {
+                                              // ===================================                                              // T18.06 — Branding & Live Theming Handlers (TODO(api:T18.06))
+                                              // ===================================                                              ...(() => {
                                                 let mockBrandingState = {
                                                   companyName: "DHPanel",
                                                   logoUrl: "",
@@ -8722,10 +8702,8 @@ export const handlers = [
                                                   }),
                                                 ];
                                               })(),
-                                              // ==========================================
-                                              // T18.07: Onboarding & Tour Handlers
-                                              // ==========================================
-                                              ...(() => {
+                                              // ===================================                                              // T18.07: Onboarding & Tour Handlers
+                                              // ===================================                                              ...(() => {
                                                 let adminDismissed = false;
                                                 let clientDismissed = false;
                                                 let completedSteps = ["add_node"];
@@ -8770,10 +8748,8 @@ export const handlers = [
                                                   }),
                                                 ];
                                               })(),
-                                              // ==========================================
-                                              // T18.10: Panel Update Handlers
-                                              // ==========================================
-                                              ...(() => {
+                                              // ===================================                                              // T18.10: Panel Update Handlers
+                                              // ===================================                                              ...(() => {
                                                 let currentVersion = "0.1.0";
                                                 let previousVersion: string | null = null;
                                                 let channel: "stable" | "beta" = "stable";
@@ -8959,10 +8935,8 @@ export const handlers = [
                                                   }),
                                                 ];
                                               })(),
-                                              // ==========================================
-                                              // T18.11: API Tokens & Scoped Execution
-                                              // ==========================================
-                                              ...(() => {
+                                              // ===================================                                              // T18.11: API Tokens & Scoped Execution
+                                              // ===================================                                              ...(() => {
                                                 let mockTokens: Array<{
                                                   id: string;
                                                   name: string;
@@ -9121,6 +9095,75 @@ export const handlers = [
                                                   }),
                                                 ];
                                               })(),
+
+                                              // ===================================                                              // T18.12 — Support Report Diagnostic Bundle (TODO(api:T18.12))
+                                              // ===================================                                              http.get(/\/api(?:\/v1\/admin)?\/support\/report$/, () => {
+                                                return HttpResponse.json({
+                                                  metadata: {
+                                                    bundle_id: "diag-20261114-8841",
+                                                    generated_at: new Date().toISOString(),
+                                                    panel_version: "0.1.0",
+                                                    node_id: "node-primary-ams01",
+                                                    environment: "production",
+                                                  },
+                                                  system: {
+                                                    os: "Ubuntu 24.04 LTS (Noble Numbat)",
+                                                    kernel: "6.8.0-40-generic",
+                                                    architecture: "x86_64",
+                                                    uptime_seconds: 489201,
+                                                    load_average: [0.18, 0.24, 0.28],
+                                                    memory: { total_mb: 16384, used_mb: 6144, free_mb: 10240 },
+                                                    disk: { total_gb: 512, used_gb: 142, available_gb: 370 },
+                                                  },
+                                                  services: [
+                                                    { name: "nginx", status: "active", uptime: "5d 14h", description: "Edge Reverse Proxy" },
+                                                    { name: "postgresql", status: "active", uptime: "5d 14h", description: "Relational Storage" },
+                                                    { name: "redis", status: "active", uptime: "5d 14h", description: "In-memory cache & pub/sub" },
+                                                    { name: "docker", status: "active", uptime: "5d 14h", description: "Container Runtime" },
+                                                    { name: "coraza-waf", status: "active", uptime: "5d 14h", description: "Web Application Firewall" },
+                                                  ],
+                                                  sanitized_config: {
+                                                    database: {
+                                                      driver: "postgres",
+                                                      host: "127.0.0.1",
+                                                      port: 5432,
+                                                      database: "dhpanel_db",
+                                                      password: "[REDACTED_CONFIDENTIAL]",
+                                                    },
+                                                    redis: {
+                                                      host: "127.0.0.1",
+                                                      port: 6379,
+                                                      password: "[REDACTED_CONFIDENTIAL]",
+                                                    },
+                                                    cluster: { mode: "standalone_master", enrolled_nodes: 3 },
+                                                    storage: {
+                                                      data_path: "/var/lib/dhpanel/data",
+                                                      backup_path: "/var/lib/dhpanel/backups",
+                                                    },
+                                                    features: ["domains", "databases", "waf", "cron", "ssl", "backups"],
+                                                  },
+                                                  sanitized_logs: [
+                                                    {
+                                                      timestamp: new Date(Date.now() - 300000).toISOString(),
+                                                      level: "info",
+                                                      service: "panel-core",
+                                                      message: "Health check completed successfully for all active cluster nodes.",
+                                                    },
+                                                    {
+                                                      timestamp: new Date(Date.now() - 180000).toISOString(),
+                                                      level: "info",
+                                                      service: "auth-gateway",
+                                                      message: "User session authenticated via Bearer [REDACTED_TOKEN] from remote IP 192.168.1.10",
+                                                    },
+                                                    {
+                                                      timestamp: new Date(Date.now() - 60000).toISOString(),
+                                                      level: "info",
+                                                      service: "waf-engine",
+                                                      message: "OWASP CRS rule 942100 evaluated without exceptions on vhost demo.example.com",
+                                                    },
+                                                  ],
+                                                });
+                                              }),
                                             ];
                                           })(),
 ...(() => {
