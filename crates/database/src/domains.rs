@@ -454,6 +454,9 @@ pub async fn certificate_allowed(pool: &PgPool, fqdn: &str) -> Result<bool, sqlx
         r#"SELECT EXISTS (
                SELECT 1 FROM domains d JOIN tenants t ON t.id = d.tenant_id
                WHERE d.fqdn = $1 AND d.status = 'active' AND t.status IN ('active', 'suspended')
+           ) OR EXISTS (
+               SELECT 1 FROM preview_links p JOIN tenants t ON t.id = p.tenant_id
+               WHERE p.host = $1 AND p.expires_at > now() AND t.status IN ('active', 'suspended')
            ) AS "allowed!""#,
         fqdn,
     )

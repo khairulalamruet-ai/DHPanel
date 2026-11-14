@@ -79,10 +79,20 @@ pub async fn pending(pool: &PgPool, limit: i64) -> Result<Vec<Pending>, sqlx::Er
 /// # Errors
 /// Database errors.
 pub async fn domains(pool: &PgPool, tenant_id: Uuid) -> Result<Vec<RoutedDomain>, sqlx::Error> {
+    // A preview link that has not expired answers for its domain like an alias.
     sqlx::query_as!(
         RoutedDomain,
-        r#"SELECT id, fqdn, kind, parent_domain_id AS parent_id, status, force_https, hsts, docroot, php_version
-           FROM domains WHERE tenant_id = $1 ORDER BY fqdn"#,
+        r#"SELECT id AS "id!", fqdn AS "fqdn!", kind AS "kind!", parent_id, status AS "status!",
+                  force_https AS "force_https!", hsts AS "hsts!", docroot AS "docroot!", php_version
+           FROM (
+               SELECT id, fqdn, kind, parent_domain_id AS parent_id, status, force_https, hsts,
+                      docroot, php_version
+               FROM domains WHERE tenant_id = $1
+               UNION ALL
+               SELECT id, host, 'alias', domain_id, 'active', false, false, '', NULL
+               FROM preview_links WHERE tenant_id = $1 AND expires_at > now()
+           ) AS all_names
+           ORDER BY fqdn"#,
         tenant_id,
     )
     .fetch_all(pool)

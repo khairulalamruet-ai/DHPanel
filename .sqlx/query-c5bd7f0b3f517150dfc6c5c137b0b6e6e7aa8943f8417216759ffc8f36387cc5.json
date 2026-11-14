@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS (\n               SELECT 1 FROM domains d JOIN tenants t ON t.id = d.tenant_id\n               WHERE d.fqdn = $1 AND d.status = 'active' AND t.status IN ('active', 'suspended')\n           ) OR EXISTS (\n               SELECT 1 FROM preview_links p JOIN tenants t ON t.id = p.tenant_id\n               WHERE p.host = $1 AND p.expires_at > now() AND t.status IN ('active', 'suspended')\n           ) AS \"allowed!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "allowed!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "c5bd7f0b3f517150dfc6c5c137b0b6e6e7aa8943f8417216759ffc8f36387cc5"
+}

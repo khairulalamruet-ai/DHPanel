@@ -35,6 +35,7 @@ pub mod nameservers;
 pub mod php;
 pub mod php_settings;
 pub mod policy;
+pub mod previews;
 pub mod records;
 pub mod redirects;
 pub mod services;
@@ -145,6 +146,7 @@ pub fn admin_router() -> Router<DomainsState> {
 /// Routes for clients, with full paths.
 pub fn client_router() -> Router<DomainsState> {
     php::client_router()
+        .merge(previews::client_router())
         .merge(services::client_router())
         .merge(php_settings::client_router())
         .merge(policy::client_router())
@@ -1155,7 +1157,7 @@ pub async fn client_delete(
         admin_list, admin_get, admin_add, admin_update, admin_delete, admin_suspend,
         admin_unsuspend, client_list, client_get, client_add, client_update, client_delete,
         php::admin_get, php::admin_set, php::client_get, php::client_set_account,
-        error_pages::list, error_pages::set, error_pages::reset, services::restart, php::client_set_domain, php_settings::admin_get, php_settings::admin_set,
+        previews::list, previews::create, previews::remove, error_pages::list, error_pages::set, error_pages::reset, services::restart, php::client_set_domain, php_settings::admin_get, php_settings::admin_set,
         php_settings::client_get, php_settings::client_set,
         policy::admin_get, policy::admin_set, policy::client_get, policy::client_set,
         vhost::admin_get, vhost::admin_set, vhost::client_get, vhost::client_set,
@@ -1175,7 +1177,7 @@ pub async fn client_delete(
     ),
     components(schemas(
         DomainView, DomainList, AddDomain, AdminAddDomain, UpdateDomain,
-        error_pages::PageView, error_pages::PageList, error_pages::PageInput, services::Restarted, php::PhpView, php::DomainPhp, php::SetVersion, php_settings::PhpSettingsView,
+        previews::PreviewView, previews::PreviewList, error_pages::PageView, error_pages::PageList, error_pages::PageInput, services::Restarted, php::PhpView, php::DomainPhp, php::SetVersion, php_settings::PhpSettingsView,
         php_settings::OptionView, php_settings::CapsView, php_settings::SetPhpSettings, policy::PolicyView, policy::HeaderView, vhost::VhostView, vhost::SetVhost, vhost_templates::TemplateSummary,
         vhost_templates::TemplateView, vhost_templates::TemplateList, vhost_templates::TemplateInput,
         vhost_templates::VersionView, vhost_templates::VersionList, vhost_templates::PreviewInput,

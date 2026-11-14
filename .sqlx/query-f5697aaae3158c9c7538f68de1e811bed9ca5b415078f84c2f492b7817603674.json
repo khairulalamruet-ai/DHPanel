@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM preview_links WHERE id = $1 AND domain_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f5697aaae3158c9c7538f68de1e811bed9ca5b415078f84c2f492b7817603674"
+}

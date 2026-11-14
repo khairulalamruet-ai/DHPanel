@@ -8418,6 +8418,209 @@
         ]
       }
     },
+    "/api/v1/client/domains/{id}/previews": {
+      "get": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "See the preview links of one of your domains.",
+        "operationId": "clientListPreviews",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Domain id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The links that still work",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreviewList"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such domain (or it is not yours)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "Make a preview link for one of your domains.",
+        "operationId": "clientCreatePreview",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Domain id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Made; it works until `expires_at`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreviewView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only` or `csrf_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such domain (or it is not yours)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`previews_off`, `preview_domain_invalid`, `limit_reached`, `no_preview_for_alias` or `domain_suspended`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/domains/{id}/previews/{preview_id}": {
+      "delete": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "Remove a preview link before it expires.",
+        "operationId": "clientDeletePreview",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Domain id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "preview_id",
+            "in": "path",
+            "description": "Link id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed"
+          },
+          "403": {
+            "description": "`client_only` or `csrf_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such domain or link",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/client/domains/{id}/redirects": {
       "get": {
         "tags": [
@@ -12249,6 +12452,53 @@
           }
         },
         "additionalProperties": false
+      },
+      "PreviewList": {
+        "type": "object",
+        "description": "The links of a domain.",
+        "required": [
+          "items",
+          "enabled"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether the panel offers previews at all."
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PreviewView"
+            },
+            "description": "Newest first; expired ones are gone."
+          }
+        }
+      },
+      "PreviewView": {
+        "type": "object",
+        "description": "A preview link.",
+        "required": [
+          "id",
+          "host",
+          "expires_at"
+        ],
+        "properties": {
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "It stops working at this time (RFC 3339, UTC)."
+          },
+          "host": {
+            "type": "string",
+            "description": "The address to open (over http or https).",
+            "example": "k3j9x0a1b2c3d4e5.preview.example.net"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Id."
+          }
+        }
       },
       "ProblemDetails": {
         "type": "object",

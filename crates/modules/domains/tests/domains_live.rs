@@ -4155,3 +4155,222 @@ async fn administrators_replace_and_reset_the_pages_visitors_see(pool: PgPool) {
         ["admin.error_page_changed", "admin.error_page_reset"]
     );
 }
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn a_preview_link_shows_the_site_until_it_expires(pool: PgPool) {
+    let e = env(&pool).await;
+    let (alice, tenant) = client(&pool, "alice", 10_000).await;
+    let (bobby, _) = client(&pool, "bobby", 10_001).await;
+    let (a, b) = (e.sign_in(alice).await, e.sign_in(bobby).await);
+    let (_, main) = e
+        .call(Some(&a), "POST", CLIENT, Some(domain("example.com")), true)
+        .await;
+    let (_, alias) = e
+        .call(
+            Some(&a),
+            "POST",
+            CLIENT,
+            Some(json!({"fqdn": "example.net", "kind": "alias", "parent_domain_id": main["id"]})),
+            true,
+        )
+        .await;
+    let path = format!("{CLIENT}/{}/previews", main["id"].as_str().unwrap());
+
+    // No preview domain set: no previews.
+    let (status, list) = e.call(Some(&a), "GET", &path, None, false).await;
+    assert_eq!(
+        (status, list["enabled"].clone()),
+        (StatusCode::OK, json!(false))
+    );
+    let (status, body) = e.call(Some(&a), "POST", &path, None, true).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "previews_off")
+    );
+    let mut tx = pool.begin().await.unwrap();
+    dhpanel_settings::set(
+        &e.settings,
+        &mut tx,
+        "domains",
+        Scope::Global,
+        json!({"preview_domain": "preview.panel-test.com", "preview_hours": 2})
+            .as_object()
+            .unwrap(),
+        None,
+    )
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+
+    let before: i64 = sqlx::query_scalar("SELECT routes_version FROM tenants WHERE id = $1")
+        .bind(tenant)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let (status, link) = e.call(Some(&a), "POST", &path, None, true).await;
+    assert_eq!(status, StatusCode::CREATED, "{link}");
+    let host = link["host"].as_str().unwrap().to_owned();
+    assert!(
+        host.ends_with(".preview.panel-test.com")
+            && host.len() == 16 + 1 + "preview.panel-test.com".len(),
+        "{host}"
+    );
+    let left: i64 = sqlx::query_scalar(
+        "SELECT extract(epoch FROM expires_at - now())::bigint FROM preview_links",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!((7000..=7200).contains(&left), "two hours: {left}");
+    let after: i64 = sqlx::query_scalar("SELECT routes_version FROM tenants WHERE id = $1")
+        .bind(tenant)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!(after > before, "the web server is told");
+
+    // While it lives the site answers for it (like an alias), and a certificate may be made.
+    let routed = dhpanel_database::routes::domains(&pool, tenant)
+        .await
+        .unwrap();
+    let preview = routed.iter().find(|d| d.fqdn == host).unwrap();
+    assert_eq!(
+        (preview.kind.as_str(), preview.parent_id),
+        ("alias", Some(main["id"].as_str().unwrap().parse().unwrap()))
+    );
+    let files = dhpanel_web_config::site_files(&pool, tenant, "alice", "active")
+        .await
+        .unwrap();
+    assert!(
+        files[0]
+            .1
+            .contains(&format!("server_name example.com example.net {host};"))
+            || files[0].1.contains(&host),
+        "{}",
+        files[0].1
+    );
+    assert!(
+        dhpanel_database::domains::certificate_allowed(&pool, &host)
+            .await
+            .unwrap()
+    );
+    let (_, list) = e.call(Some(&a), "GET", &path, None, false).await;
+    assert_eq!(
+        (
+            list["items"].as_array().unwrap().len(),
+            list["enabled"].clone()
+        ),
+        (1, json!(true))
+    );
+
+    // Not for an alias, not another account's; at most five at a time.
+    let (status, body) = e
+        .call(
+            Some(&a),
+            "POST",
+            &format!("{CLIENT}/{}/previews", alias["id"].as_str().unwrap()),
+            None,
+            true,
+        )
+        .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "no_preview_for_alias")
+    );
+    assert_eq!(
+        e.call(Some(&b), "POST", &path, None, true).await.0,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        e.call(Some(&b), "GET", &path, None, false).await.0,
+        StatusCode::NOT_FOUND
+    );
+    for _ in 0..4 {
+        assert_eq!(
+            e.call(Some(&a), "POST", &path, None, true).await.0,
+            StatusCode::CREATED
+        );
+    }
+    let (status, body) = e.call(Some(&a), "POST", &path, None, true).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "limit_reached")
+    );
+
+    // Removed by hand.
+    let id = link["id"].as_str().unwrap();
+    assert_eq!(
+        e.call(Some(&b), "DELETE", &format!("{path}/{id}"), None, true)
+            .await
+            .0,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        e.call(Some(&a), "DELETE", &format!("{path}/{id}"), None, true)
+            .await
+            .0,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        e.call(Some(&a), "DELETE", &format!("{path}/{id}"), None, true)
+            .await
+            .0,
+        StatusCode::NOT_FOUND
+    );
+    assert!(
+        !dhpanel_database::domains::certificate_allowed(&pool, &host)
+            .await
+            .unwrap()
+    );
+
+    // Expired: gone from the list, the routes and the certificate check at once,
+    // and the sweep removes the rows and tells the web server.
+    sqlx::query("UPDATE preview_links SET expires_at = now() - interval '1 minute'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (_, list) = e.call(Some(&a), "GET", &path, None, false).await;
+    assert_eq!(list["items"], json!([]));
+    let routed = dhpanel_database::routes::domains(&pool, tenant)
+        .await
+        .unwrap();
+    assert!(
+        routed
+            .iter()
+            .all(|d| !d.fqdn.ends_with(".preview.panel-test.com"))
+    );
+    let (_, files) = (
+        0,
+        dhpanel_web_config::site_files(&pool, tenant, "alice", "active")
+            .await
+            .unwrap(),
+    );
+    assert!(!files[0].1.contains("preview.panel-test.com"));
+    let other: String = sqlx::query_scalar("SELECT host FROM preview_links LIMIT 1")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!(
+        !dhpanel_database::domains::certificate_allowed(&pool, &other)
+            .await
+            .unwrap()
+    );
+    let version: i64 = sqlx::query_scalar("SELECT routes_version FROM tenants WHERE id = $1")
+        .bind(tenant)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        dhpanel_database::previews::remove_expired(&pool)
+            .await
+            .unwrap(),
+        4
+    );
+    let swept: i64 = sqlx::query_scalar("SELECT routes_version FROM tenants WHERE id = $1")
+        .bind(tenant)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!(swept > version);
+}

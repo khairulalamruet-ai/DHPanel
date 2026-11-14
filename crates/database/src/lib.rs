@@ -26,6 +26,7 @@ pub mod outbox;
 pub mod permissions;
 pub mod php;
 pub mod plans;
+pub mod previews;
 pub mod rbac;
 pub mod redirects;
 pub mod routes;

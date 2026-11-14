@@ -181,7 +181,7 @@ impl Dispatcher {
                 _ = tick.tick() => { self.tick().await; }
                 _ = capabilities.tick() => { self.request_capabilities().await; }
                 _ = purges.tick() => { self.request_purges().await; }
-                _ = routes.tick() => { self.request_route_syncs().await; self.request_error_pages().await; }
+                _ = routes.tick() => { self.expire_previews().await; self.request_route_syncs().await; self.request_error_pages().await; }
                 _ = certificates.tick() => { self.request_certificates().await; }
                 _ = expiry.tick() => { self.announce_expiring().await; }
                 Some(report) = results.recv() => self.handle_result(report).await,
@@ -503,6 +503,18 @@ impl Dispatcher {
         dhpanel_database::routes::mark_synced(db, tenant.id, tenant.version)
             .await
             .map_err(|e| e.to_string())
+    }
+
+    /// Removes the preview links that have expired (which puts their accounts on
+    /// the list of accounts whose routes are out of date). Returns how many.
+    pub async fn expire_previews(&self) -> u64 {
+        match dhpanel_database::previews::remove_expired(self.ops.db()).await {
+            Ok(n) => n,
+            Err(err) => {
+                tracing::warn!(error = %err, "could not remove expired preview links");
+                0
+            }
+        }
     }
 
     /// Sends the error pages to every connected node whenever they changed (the key
