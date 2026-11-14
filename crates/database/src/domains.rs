@@ -35,6 +35,10 @@ pub struct Domain {
     pub docroot: String,
     /// Whether it is served.
     pub status: DomainStatus,
+    /// Visitors on plain HTTP are sent to HTTPS.
+    pub force_https: bool,
+    /// Answers over HTTPS carry the HSTS header (needs `force_https`).
+    pub hsts: bool,
     /// Creation time (Unix seconds).
     pub created_at: i64,
 }
@@ -93,6 +97,8 @@ struct Row {
     parent_domain_id: Option<Uuid>,
     docroot: String,
     status: String,
+    force_https: bool,
+    hsts: bool,
     created_at: i64,
 }
 
@@ -106,6 +112,8 @@ impl From<Row> for Domain {
             parent_domain_id: r.parent_domain_id,
             docroot: r.docroot,
             status: DomainStatus::parse(&r.status).unwrap_or(DomainStatus::Active),
+            force_https: r.force_https,
+            hsts: r.hsts,
             created_at: r.created_at,
         }
     }
@@ -180,7 +188,7 @@ pub async fn add(
         Row,
         r#"INSERT INTO domains (tenant_id, fqdn, kind, parent_domain_id, docroot)
            VALUES ($1, $2, $3, $4, $5)
-           RETURNING id, tenant_id, fqdn, kind, parent_domain_id, docroot, status,
+           RETURNING id, tenant_id, fqdn, kind, parent_domain_id, docroot, status, force_https, hsts,
                      extract(epoch FROM created_at)::bigint AS "created_at!""#,
         new.tenant_id,
         new.fqdn.as_str(),
@@ -208,7 +216,7 @@ pub async fn add(
 pub async fn get(pool: &PgPool, id: Uuid) -> Result<Option<Domain>, sqlx::Error> {
     let row = sqlx::query_as!(
         Row,
-        r#"SELECT id, tenant_id, fqdn, kind, parent_domain_id, docroot, status,
+        r#"SELECT id, tenant_id, fqdn, kind, parent_domain_id, docroot, status, force_https, hsts,
                   extract(epoch FROM created_at)::bigint AS "created_at!"
            FROM domains WHERE id = $1"#,
         id,
@@ -225,7 +233,7 @@ pub async fn get(pool: &PgPool, id: Uuid) -> Result<Option<Domain>, sqlx::Error>
 pub async fn find(pool: &PgPool, fqdn: &Fqdn) -> Result<Option<Domain>, sqlx::Error> {
     let row = sqlx::query_as!(
         Row,
-        r#"SELECT id, tenant_id, fqdn, kind, parent_domain_id, docroot, status,
+        r#"SELECT id, tenant_id, fqdn, kind, parent_domain_id, docroot, status, force_https, hsts,
                   extract(epoch FROM created_at)::bigint AS "created_at!"
            FROM domains WHERE fqdn = $1"#,
         fqdn.as_str(),
@@ -299,6 +307,7 @@ pub async fn list(
     .await?;
     let rows = sqlx::query!(
         r#"SELECT d.id, d.tenant_id, d.fqdn, d.kind, d.parent_domain_id, d.docroot, d.status,
+                  d.force_https, d.hsts,
                   extract(epoch FROM d.created_at)::bigint AS "created_at!",
                   extract(epoch FROM d.suspended_at)::bigint AS suspended_at,
                   t.username AS tenant_username
@@ -329,6 +338,8 @@ pub async fn list(
                 parent_domain_id: r.parent_domain_id,
                 docroot: r.docroot,
                 status: r.status,
+                force_https: r.force_https,
+                hsts: r.hsts,
                 created_at: r.created_at,
             }),
             tenant_username: r.tenant_username,
@@ -448,4 +459,26 @@ pub async fn certificate_allowed(pool: &PgPool, fqdn: &str) -> Result<bool, sqlx
     )
     .fetch_one(pool)
     .await
+}
+
+/// Changes a domain's HTTPS settings (HSTS needs forced HTTPS: the table refuses
+/// the other combination). Returns whether it exists.
+///
+/// # Errors
+/// Database errors.
+pub async fn set_https(
+    conn: &mut PgConnection,
+    id: Uuid,
+    force_https: bool,
+    hsts: bool,
+) -> Result<bool, sqlx::Error> {
+    let done = sqlx::query!(
+        "UPDATE domains SET force_https = $2, hsts = $3 WHERE id = $1",
+        id,
+        force_https,
+        hsts,
+    )
+    .execute(conn)
+    .await?;
+    Ok(done.rows_affected() == 1)
 }

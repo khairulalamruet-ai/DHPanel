@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO domains (tenant_id, fqdn, kind, parent_domain_id, docroot)\n           VALUES ($1, $2, $3, $4, $5)\n           RETURNING id, tenant_id, fqdn, kind, parent_domain_id, docroot, status,\n                     extract(epoch FROM created_at)::bigint AS \"created_at!\"",
+  "query": "SELECT id, tenant_id, fqdn, kind, parent_domain_id, docroot, status, force_https, hsts,\n                  extract(epoch FROM created_at)::bigint AS \"created_at!\"\n           FROM domains WHERE id = $1",
   "describe": {
     "columns": [
       {
@@ -82,6 +82,28 @@
       },
       {
         "ordinal": 7,
+        "name": "force_https",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "domains",
+            "name": "force_https"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "hsts",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "domains",
+            "name": "hsts"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
         "name": "created_at!",
         "type_info": "Int8",
         "origin": "Expression"
@@ -89,11 +111,7 @@
     ],
     "parameters": {
       "Left": [
-        "Uuid",
-        "Text",
-        "Text",
-        "Uuid",
-        "Text"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -104,8 +122,10 @@
       true,
       false,
       false,
+      false,
+      false,
       null
     ]
   },
-  "hash": "6ef8caab4ac9edd6fae7c135457424d6e1f4d86856b5cedd09c13e313e44822f"
+  "hash": "6041664711cee83fa27356f82e3ea0a798c75955ecbbd48cf97e362e6f65b545"
 }

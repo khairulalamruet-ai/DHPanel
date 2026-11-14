@@ -52,6 +52,8 @@ fn site(hosts: &[&str], upstream: Option<&str>, redirects: Vec<RouteRedirect>) -
         hosts: hosts.iter().map(|h| (*h).to_owned()).collect(),
         upstream: upstream.map(str::to_owned),
         redirects,
+        force_https: false,
+        hsts: false,
     }
 }
 
@@ -293,5 +295,147 @@ async fn routes_are_kept_when_caddy_cannot_be_reached_and_applied_later() {
     );
     assert!(dir.join("routes/alice.json").exists());
     assert!(web.reconcile().await.is_err());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// One HTTPS request through `curl`, which can be told where a name lives and not to
+/// trust Caddy's local CA: `(status, headers lower-cased, body)`.
+fn https_get(port: &str, host: &str, path: &str) -> (u16, String, String) {
+    let out = Command::new("curl")
+        .args([
+            "-sk",
+            "--max-time",
+            "10",
+            "--resolve",
+            &format!("{host}:{port}:127.0.0.1"),
+            "-D",
+            "-",
+            &format!("https://{host}:{port}{path}"),
+        ])
+        .output()
+        .expect("curl");
+    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+    let (head, body) = text.split_once("\r\n\r\n").unwrap_or((&text, ""));
+    let status = head
+        .lines()
+        .next()
+        .and_then(|l| l.split_whitespace().nth(1))
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+    (status, head.to_ascii_lowercase(), body.to_owned())
+}
+
+#[tokio::test]
+#[ignore = "needs a Caddy with HTTP and HTTPS ports (see the file header)"]
+async fn force_https_redirects_plain_requests_and_hsts_is_sent_over_https_only() {
+    let (Some(admin), Some(url), Some(tls_port)) = (
+        env("DHPANEL_TEST_CADDY_ADMIN"),
+        env("DHPANEL_TEST_CADDY_URL"),
+        env("DHPANEL_TEST_CADDY_TLS_PORT"),
+    ) else {
+        eprintln!("skipped: no Caddy (see the script)");
+        return;
+    };
+    let dir = std::env::temp_dir().join(format!("dh-web-https-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let web = WebContext::new(
+        Settings {
+            admin,
+            listen: vec![":18080".into(), ":18443".into()],
+            automatic_https: true,
+            data_dir: None,
+        },
+        &dir,
+    );
+    let secure = |hosts: &[&str], force: bool, hsts: bool| {
+        let mut s = site(hosts, Some("dh-alice-web:8080"), vec![]);
+        s.force_https = force;
+        s.hsts = hsts;
+        s
+    };
+    set_site_routes(
+        web.clone(),
+        set(
+            "alice",
+            vec![
+                secure(&["forced.example.com"], true, true),
+                secure(&["redirect-only.example.com"], true, false),
+                secure(&["open.example.com"], false, false),
+            ],
+        ),
+    )
+    .await
+    .unwrap();
+    // Certificates are made when the first visitor arrives: give Caddy a moment.
+    let mut first = (0, String::new(), String::new());
+    for _ in 0..30 {
+        first = https_get(&tls_port, "forced.example.com", "/");
+        if first.0 == 200 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    assert_eq!(first.0, 200, "{first:?}");
+    assert_eq!(first.2.trim(), "hello from alice");
+    // Over HTTPS the header is there, with a year.
+    assert!(
+        first
+            .1
+            .contains("strict-transport-security: max-age=31536000"),
+        "{}",
+        first.1
+    );
+
+    // Over plain HTTP the visitor is sent to the same address over HTTPS, method kept (308).
+    let (status, location, _) = get(&url, "forced.example.com", "/some/page").await;
+    assert_eq!(
+        (status, location.as_deref()),
+        (308, Some("https://forced.example.com/some/page"))
+    );
+    let (status, location, _) = get(&url, "redirect-only.example.com", "/x?y=1").await;
+    assert_eq!(
+        (status, location.as_deref()),
+        (308, Some("https://redirect-only.example.com/x?y=1"))
+    );
+    // Redirect without HSTS: no header over HTTPS.
+    let mut second = (0, String::new(), String::new());
+    for _ in 0..30 {
+        second = https_get(&tls_port, "redirect-only.example.com", "/");
+        if second.0 == 200 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    assert_eq!(second.0, 200, "{second:?}");
+    assert!(
+        !second.1.contains("strict-transport-security"),
+        "{}",
+        second.1
+    );
+    // A domain that did not ask is served over plain HTTP as before, never redirected.
+    let (status, location, body) = get(&url, "open.example.com", "/").await;
+    assert_eq!(
+        (status, location, body.trim()),
+        (200, None, "hello from alice")
+    );
+
+    // Turning it off takes effect on the next load.
+    set_site_routes(
+        web.clone(),
+        set("alice", vec![secure(&["forced.example.com"], false, false)]),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        get(&url, "forced.example.com", "/").await.0,
+        200,
+        "no redirect any more"
+    );
+    let (status, headers, _) = https_get(&tls_port, "forced.example.com", "/");
+    assert_eq!(status, 200);
+    assert!(!headers.contains("strict-transport-security"), "{headers}");
+    set_site_routes(web.clone(), set("alice", vec![]))
+        .await
+        .unwrap();
     let _ = std::fs::remove_dir_all(&dir);
 }

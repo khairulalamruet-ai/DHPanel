@@ -165,6 +165,10 @@ pub struct DomainView {
     pub docroot: String,
     /// `active` or `suspended`.
     pub status: String,
+    /// Visitors on plain HTTP are sent to HTTPS.
+    pub force_https: bool,
+    /// Answers over HTTPS carry the HSTS header (one year). Needs `force_https`.
+    pub hsts: bool,
     /// When it was suspended (RFC 3339, UTC).
     #[schema(format = DateTime)]
     pub suspended_at: Option<String>,
@@ -188,6 +192,8 @@ fn view(listing: DomainListing) -> DomainView {
         parent_domain_id: d.parent_domain_id,
         docroot: d.docroot,
         status: d.status.as_str().to_owned(),
+        force_https: d.force_https,
+        hsts: d.hsts,
         suspended_at: listing.suspended_at.map(rfc3339),
         tenant_id: d.tenant_id,
         tenant_username: listing.tenant_username,
@@ -527,29 +533,66 @@ async fn delete_domain(
     Ok(())
 }
 
-async fn change_docroot(
+async fn change_domain(
     state: &DomainsState,
     who: &Principal,
     hosting: &Hosting,
     id: Uuid,
-    docroot: &str,
+    req: UpdateDomain,
 ) -> Result<DomainView, AppError> {
-    let docroot = Docroot::parse(docroot).map_err(|e| field("docroot", &e))?;
+    if req.docroot.is_none() && req.force_https.is_none() && req.hsts.is_none() {
+        return Err(AppError::validation(vec![FieldError::new(
+            "docroot",
+            "nothing_to_change",
+            "Give a document root, force_https or hsts to change.",
+        )]));
+    }
+    let docroot = req
+        .docroot
+        .as_deref()
+        .map(|d| Docroot::parse(d).map_err(|e| field("docroot", &e)))
+        .transpose()?;
     let before = owned_domain(state, hosting.tenant.id, id).await?;
+    let force_https = req.force_https.unwrap_or(before.domain.force_https);
+    let hsts = req.hsts.unwrap_or(before.domain.hsts);
+    if hsts && !force_https {
+        return Err(AppError::validation(vec![FieldError::new(
+            "hsts",
+            "hsts_requires_https",
+            "HSTS needs forced HTTPS: turn on force_https too (and turn HSTS off before forced HTTPS).",
+        )]));
+    }
     let mut tx = state.db.begin().await.map_err(internal)?;
-    domains::set_docroot(&mut tx, id, &docroot)
+    if let Some(docroot) = &docroot {
+        domains::set_docroot(&mut tx, id, docroot)
+            .await
+            .map_err(internal)?;
+        dhpanel_audit::insert(
+            &mut *tx,
+            &entry("domain.docroot_changed", who, hosting, id).metadata(serde_json::json!({
+                "fqdn": before.domain.fqdn,
+                "from": before.domain.docroot,
+                "to": docroot.as_str(),
+            })),
+        )
         .await
         .map_err(internal)?;
-    dhpanel_audit::insert(
-        &mut *tx,
-        &entry("domain.docroot_changed", who, hosting, id).metadata(serde_json::json!({
-            "fqdn": before.domain.fqdn,
-            "from": before.domain.docroot,
-            "to": docroot.as_str(),
-        })),
-    )
-    .await
-    .map_err(internal)?;
+    }
+    if force_https != before.domain.force_https || hsts != before.domain.hsts {
+        domains::set_https(&mut tx, id, force_https, hsts)
+            .await
+            .map_err(internal)?;
+        dhpanel_audit::insert(
+            &mut *tx,
+            &entry("domain.https_changed", who, hosting, id).metadata(serde_json::json!({
+                "fqdn": before.domain.fqdn,
+                "force_https": force_https,
+                "hsts": hsts,
+            })),
+        )
+        .await
+        .map_err(internal)?;
+    }
     tx.commit().await.map_err(internal)?;
     Ok(view(owned_domain(state, hosting.tenant.id, id).await?))
 }
@@ -622,7 +665,14 @@ pub struct AdminAddDomain {
 #[serde(deny_unknown_fields)]
 pub struct UpdateDomain {
     /// The new document root, relative to the web directory (empty: the directory itself).
-    pub docroot: String,
+    pub docroot: Option<String>,
+    /// Send visitors who arrive over plain HTTP to HTTPS.
+    pub force_https: Option<bool>,
+    /// Tell browsers to use HTTPS for this name for a year (the
+    /// `Strict-Transport-Security` header on HTTPS answers). Only with `force_https`;
+    /// it cannot be turned on without it, nor can forced HTTPS be turned off while
+    /// it is on.
+    pub hsts: Option<bool>,
 }
 
 /// Filters and paging of the lists.
@@ -848,9 +898,7 @@ pub async fn admin_update(
     Json(req): Json<UpdateDomain>,
 ) -> Result<Json<DomainView>, AppError> {
     let h = tenant_of_domain(&state, id).await?;
-    Ok(Json(
-        change_docroot(&state, &who, &h, id, &req.docroot).await?,
-    ))
+    Ok(Json(change_domain(&state, &who, &h, id, req).await?))
 }
 
 /// Remove a domain and what hangs off it.
@@ -1049,9 +1097,7 @@ pub async fn client_update(
     Json(req): Json<UpdateDomain>,
 ) -> Result<Json<DomainView>, AppError> {
     let h = client_hosting(&state, &who).await?;
-    Ok(Json(
-        change_docroot(&state, &who, &h, id, &req.docroot).await?,
-    ))
+    Ok(Json(change_domain(&state, &who, &h, id, req).await?))
 }
 
 /// Remove one of the signed-in client's domains and what hangs off it.

@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE domains SET force_https = $2, hsts = $3 WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bool",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "818bcf9925cb817af8bfa0d6a9ea294724d186c81e701d7ae3a373fc45ea4006"
+}

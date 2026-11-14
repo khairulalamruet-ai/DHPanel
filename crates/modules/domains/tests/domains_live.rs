@@ -2676,3 +2676,135 @@ async fn an_uploaded_certificate_is_checked_kept_sealed_and_never_given_back(poo
         "the log never holds key material"
     );
 }
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn force_https_and_hsts_are_per_domain_and_hsts_needs_force_https(pool: PgPool) {
+    let e = env(&pool).await;
+    let (alice, tenant) = client(&pool, "alice", 10_000).await;
+    let (bobby, _) = client(&pool, "bobby", 10_001).await;
+    let (a, b) = (e.sign_in(alice).await, e.sign_in(bobby).await);
+    let (_, main) = e
+        .call(Some(&a), "POST", CLIENT, Some(domain("example.com")), true)
+        .await;
+    let (_, other) = e
+        .call(Some(&a), "POST", CLIENT, Some(domain("other.org")), true)
+        .await;
+    let path = format!("{CLIENT}/{}", main["id"].as_str().unwrap());
+    assert_eq!(
+        (main["force_https"].clone(), main["hsts"].clone()),
+        (json!(false), json!(false)),
+        "off until asked for"
+    );
+    let patch = |body: Value| {
+        let (e, a, path) = (&e, &a, path.clone());
+        async move { e.call(Some(a), "PATCH", &path, Some(body), true).await }
+    };
+    let version = || {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_scalar::<_, i64>("SELECT routes_version FROM tenants WHERE id = $1")
+                .bind(tenant)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+        }
+    };
+
+    // HSTS alone would lock visitors out of a site that still answers on plain HTTP.
+    let (status, body) = patch(json!({"hsts": true})).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(
+        (
+            body["errors"][0]["field"].clone(),
+            body["errors"][0]["code"].clone()
+        ),
+        (json!("hsts"), json!("hsts_requires_https"))
+    );
+    let before = version().await;
+    let (status, on) = patch(json!({"force_https": true})).await;
+    assert_eq!(status, StatusCode::OK, "{on}");
+    assert_eq!(
+        (on["force_https"].clone(), on["hsts"].clone()),
+        (json!(true), json!(false))
+    );
+    assert!(
+        version().await > before,
+        "a change reaches the web server through the route sync"
+    );
+    let (status, both) = patch(json!({"hsts": true})).await;
+    assert_eq!(
+        (status, both["hsts"].clone()),
+        (StatusCode::OK, json!(true))
+    );
+    // Forced HTTPS cannot be turned off under HSTS; both together can.
+    let (status, body) = patch(json!({"force_https": false})).await;
+    assert_eq!(
+        (status, body["errors"][0]["code"].clone()),
+        (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            json!("hsts_requires_https")
+        )
+    );
+    let still = version().await;
+    let (status, off) = patch(json!({"force_https": false, "hsts": false})).await;
+    assert_eq!(
+        (status, off["force_https"].clone(), off["hsts"].clone()),
+        (StatusCode::OK, json!(false), json!(false))
+    );
+    assert!(version().await > still);
+    // Setting what is already so changes nothing; with a document root too, both are applied.
+    let same = version().await;
+    assert_eq!(patch(json!({"force_https": false})).await.0, StatusCode::OK);
+    assert_eq!(version().await, same, "nothing changed, nothing to send");
+    let (status, mixed) =
+        patch(json!({"docroot": "site", "force_https": true, "hsts": true})).await;
+    assert_eq!(status, StatusCode::OK, "{mixed}");
+    assert_eq!(
+        (
+            mixed["docroot"].clone(),
+            mixed["force_https"].clone(),
+            mixed["hsts"].clone()
+        ),
+        (json!("site"), json!(true), json!(true))
+    );
+    assert_eq!(patch(json!({})).await.0, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        patch(json!({"force_https": "yes"})).await.0,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+
+    // One domain's settings are not another's, nor another account's.
+    let (_, listed) = e
+        .call(
+            Some(&a),
+            "GET",
+            &format!("{CLIENT}/{}", other["id"].as_str().unwrap()),
+            None,
+            false,
+        )
+        .await;
+    assert_eq!(
+        (listed["force_https"].clone(), listed["hsts"].clone()),
+        (json!(false), json!(false))
+    );
+    assert_eq!(
+        e.call(
+            Some(&b),
+            "PATCH",
+            &path,
+            Some(json!({"force_https": false})),
+            true
+        )
+        .await
+        .0,
+        StatusCode::NOT_FOUND
+    );
+
+    let actions: Vec<String> =
+        sqlx::query_scalar("SELECT action FROM audit_logs WHERE action = 'domain.https_changed'")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(actions.len(), 4, "on, hsts on, both off, both on");
+}

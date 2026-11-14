@@ -137,6 +137,13 @@ pub struct SiteRoute {
     /// Redirects, answered before the site is asked.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub redirects: Vec<RouteRedirect>,
+    /// Visitors who come over plain HTTP are sent to the same address over HTTPS.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub force_https: bool,
+    /// Answers over HTTPS carry `Strict-Transport-Security` (one year). Only with
+    /// `force_https`; the agent refuses it without.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hsts: bool,
 }
 
 /// A certificate the web server holds.
@@ -1340,6 +1347,8 @@ mod tests {
                     hosts: vec!["example.com".into()],
                     upstream: Some("dh-alice-web:8080".into()),
                     redirects: vec![],
+                    force_https: false,
+                    hsts: false,
                 }],
             },
             Operation::SuspendTenant {

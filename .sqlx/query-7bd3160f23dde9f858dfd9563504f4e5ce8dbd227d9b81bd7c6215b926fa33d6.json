@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT d.id, d.tenant_id, d.fqdn, d.kind, d.parent_domain_id, d.docroot, d.status,\n                  extract(epoch FROM d.created_at)::bigint AS \"created_at!\",\n                  extract(epoch FROM d.suspended_at)::bigint AS suspended_at,\n                  t.username AS tenant_username\n           FROM domains d JOIN tenants t ON t.id = d.tenant_id\n           WHERE ($1::uuid IS NULL OR d.tenant_id = $1)\n             AND ($2::text IS NULL OR d.kind = $2)\n             AND ($3::text IS NULL OR d.status = $3)\n             AND ($4::text IS NULL OR d.fqdn ILIKE $4)\n           ORDER BY d.fqdn, d.id\n           LIMIT $5 OFFSET $6",
+  "query": "SELECT d.id, d.tenant_id, d.fqdn, d.kind, d.parent_domain_id, d.docroot, d.status,\n                  d.force_https, d.hsts,\n                  extract(epoch FROM d.created_at)::bigint AS \"created_at!\",\n                  extract(epoch FROM d.suspended_at)::bigint AS suspended_at,\n                  t.username AS tenant_username\n           FROM domains d JOIN tenants t ON t.id = d.tenant_id\n           WHERE ($1::uuid IS NULL OR d.tenant_id = $1)\n             AND ($2::text IS NULL OR d.kind = $2)\n             AND ($3::text IS NULL OR d.status = $3)\n             AND ($4::text IS NULL OR d.fqdn ILIKE $4)\n           ORDER BY d.fqdn, d.id\n           LIMIT $5 OFFSET $6",
   "describe": {
     "columns": [
       {
@@ -82,18 +82,40 @@
       },
       {
         "ordinal": 7,
+        "name": "force_https",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "domains",
+            "name": "force_https"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "hsts",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "domains",
+            "name": "hsts"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
         "name": "created_at!",
         "type_info": "Int8",
         "origin": "Expression"
       },
       {
-        "ordinal": 8,
+        "ordinal": 10,
         "name": "suspended_at",
         "type_info": "Int8",
         "origin": "Expression"
       },
       {
-        "ordinal": 9,
+        "ordinal": 11,
         "name": "tenant_username",
         "type_info": "Text",
         "origin": {
@@ -122,10 +144,12 @@
       true,
       false,
       false,
+      false,
+      false,
       null,
       null,
       false
     ]
   },
-  "hash": "51da9717abe7981762fe7a301c6988bb454c27f8c764d0f838cd91ab6986836c"
+  "hash": "7bd3160f23dde9f858dfd9563504f4e5ce8dbd227d9b81bd7c6215b926fa33d6"
 }

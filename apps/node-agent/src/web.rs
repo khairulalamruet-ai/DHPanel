@@ -122,6 +122,9 @@ fn validate(username: &TenantUsername, routes: &[SiteRoute]) -> Result<(), Agent
         if site.hosts.is_empty() || site.hosts.len() > 100 {
             return Err(invalid("a site needs 1 to 100 names"));
         }
+        if site.hsts && !site.force_https {
+            return Err(invalid("hsts needs force_https"));
+        }
         for host in &site.hosts {
             let canonical = Fqdn::parse(host).map_err(|_| invalid("a name is not valid"))?;
             if canonical.as_str() != host {
@@ -185,21 +188,42 @@ fn page(status: u16, body: &str, extra: &[(&str, &str)]) -> Value {
 
 /// One site as a Caddy route.
 fn site_route(site: &SiteRoute) -> Value {
-    let mut inner: Vec<Value> = site
-        .redirects
-        .iter()
-        .map(|r| {
-            json!({
-                "match": [{"path": [r.path]}],
-                "handle": [{
-                    "handler": "static_response",
-                    "status_code": r.code,
-                    "headers": {"Location": [r.target]}
-                }],
-                "terminal": true
-            })
+    let mut inner: Vec<Value> = Vec::new();
+    if site.force_https {
+        // Visitors on plain HTTP go to the same address over HTTPS. The
+        // placeholders are Caddy's own and fixed here: nothing the control plane
+        // supplies is ever read as one.
+        inner.push(json!({
+            "match": [{"protocol": "http"}],
+            "handle": [{
+                "handler": "static_response",
+                "status_code": 308,
+                "headers": {"Location": ["https://{http.request.host}{http.request.uri}"]}
+            }],
+            "terminal": true
+        }));
+    }
+    if site.hsts {
+        // Not terminal: the header is added to whatever answers next.
+        inner.push(json!({
+            "match": [{"protocol": "https"}],
+            "handle": [{
+                "handler": "headers",
+                "response": {"set": {"Strict-Transport-Security": ["max-age=31536000"]}}
+            }]
+        }));
+    }
+    inner.extend(site.redirects.iter().map(|r| {
+        json!({
+            "match": [{"path": [r.path]}],
+            "handle": [{
+                "handler": "static_response",
+                "status_code": r.code,
+                "headers": {"Location": [r.target]}
+            }],
+            "terminal": true
         })
-        .collect();
+    }));
     inner.push(match &site.upstream {
         Some(upstream) => json!({
             "handle": [{"handler": "reverse_proxy", "upstreams": [{"dial": upstream}]}]
@@ -222,9 +246,13 @@ fn compile(all: &BTreeMap<String, Vec<SiteRoute>>, settings: &Settings) -> Value
     // Anything else: a plain "no such site", never another tenant's page.
     routes.push(json!({"handle": [page(404, NOT_FOUND_PAGE, &[])]}));
     let mut server = json!({"listen": settings.listen, "routes": routes});
-    if !settings.automatic_https {
-        server["automatic_https"] = json!({"disable": true});
-    }
+    server["automatic_https"] = if settings.automatic_https {
+        // The sites that want HTTPS say so themselves (`force_https`); Caddy's own
+        // blanket redirect would make that choice for everyone.
+        json!({"disable_redirects": true})
+    } else {
+        json!({"disable": true})
+    };
     json!({"apps": {"http": {"servers": {SERVER: server}}}})
 }
 
@@ -534,6 +562,8 @@ mod tests {
             hosts: hosts.iter().map(|h| (*h).to_owned()).collect(),
             upstream: upstream.map(str::to_owned),
             redirects: vec![],
+            force_https: false,
+            hsts: false,
         }
     }
 
@@ -678,11 +708,67 @@ mod tests {
             off["apps"]["http"]["servers"]["dhpanel"]["automatic_https"]["disable"],
             true
         );
-        assert!(
-            config["apps"]["http"]["servers"]["dhpanel"]
-                .get("automatic_https")
-                .is_none()
+        // Caddy's blanket redirect is off: each site decides for itself.
+        assert_eq!(
+            config["apps"]["http"]["servers"]["dhpanel"]["automatic_https"],
+            json!({"disable_redirects": true})
         );
+    }
+
+    #[test]
+    fn force_https_and_hsts_become_a_redirect_and_a_header_in_front_of_the_site() {
+        let mut secure = site(&["example.com"], Some("dh-alice-web:8080"));
+        secure.force_https = true;
+        secure.hsts = true;
+        secure.redirects.push(RouteRedirect {
+            path: "/old".into(),
+            target: "/new".into(),
+            code: 301,
+        });
+        let mut only_redirect = site(&["plain.org"], Some("dh-alice-web:8080"));
+        only_redirect.force_https = true;
+        let all = BTreeMap::from([(
+            "alice".to_owned(),
+            vec![secure, only_redirect, site(&["http-only.net"], None)],
+        )]);
+        let config = compile(&all, &settings());
+        let routes = config["apps"]["http"]["servers"]["dhpanel"]["routes"]
+            .as_array()
+            .unwrap();
+        let inner = |i: usize| routes[i]["handle"][0]["routes"].as_array().unwrap().clone();
+        // Order: the HTTP redirect, the header on HTTPS answers, the site's redirects, the site.
+        let first = inner(0);
+        assert_eq!(first.len(), 4);
+        assert_eq!(first[0]["match"][0]["protocol"], "http");
+        assert_eq!(first[0]["handle"][0]["status_code"], 308);
+        assert_eq!(
+            first[0]["handle"][0]["headers"]["Location"],
+            json!(["https://{http.request.host}{http.request.uri}"])
+        );
+        assert_eq!(first[0]["terminal"], true);
+        assert_eq!(first[1]["match"][0]["protocol"], "https");
+        assert_eq!(
+            first[1]["handle"][0]["response"]["set"]["Strict-Transport-Security"],
+            json!(["max-age=31536000"])
+        );
+        assert!(
+            first[1].get("terminal").is_none(),
+            "the header is added to what answers next"
+        );
+        assert_eq!(first[2]["match"][0]["path"], json!(["/old"]));
+        assert_eq!(first[3]["handle"][0]["handler"], "reverse_proxy");
+        // Redirect without the header; and a site with neither has neither.
+        assert_eq!(inner(1).len(), 2);
+        assert!(
+            inner(1)
+                .iter()
+                .all(|r| r["match"][0]["protocol"] != "https")
+        );
+        assert_eq!(inner(2).len(), 1);
+        // HSTS without the redirect is refused.
+        let mut lone = site(&["a.com"], None);
+        lone.hsts = true;
+        assert!(validate(&alice(), &[lone]).is_err());
     }
 
     fn write_cert(dir: &Path, issuer_dir: &str, host: &str, days: i64, issuer_cn: &str) {

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, tenant_id, fqdn, kind, parent_domain_id, docroot, status,\n                  extract(epoch FROM created_at)::bigint AS \"created_at!\"\n           FROM domains WHERE id = $1",
+  "query": "SELECT id, tenant_id, fqdn, kind, parent_domain_id, docroot, status, force_https, hsts,\n                  extract(epoch FROM created_at)::bigint AS \"created_at!\"\n           FROM domains WHERE fqdn = $1",
   "describe": {
     "columns": [
       {
@@ -82,6 +82,28 @@
       },
       {
         "ordinal": 7,
+        "name": "force_https",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "domains",
+            "name": "force_https"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "hsts",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "domains",
+            "name": "hsts"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
         "name": "created_at!",
         "type_info": "Int8",
         "origin": "Expression"
@@ -89,7 +111,7 @@
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Text"
       ]
     },
     "nullable": [
@@ -100,8 +122,10 @@
       true,
       false,
       false,
+      false,
+      false,
       null
     ]
   },
-  "hash": "db9b3169811dd56483307eaa7070152a0a262e6f22994b75704b05e13befda1d"
+  "hash": "a3a63f69fee33d23e7000c774802f2db16b9d2e5edebd12fac72fd8686bb3e2c"
 }

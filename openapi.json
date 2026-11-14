@@ -8697,6 +8697,8 @@
           "kind",
           "docroot",
           "status",
+          "force_https",
+          "hsts",
           "tenant_id",
           "tenant_username",
           "created_at"
@@ -8711,10 +8713,18 @@
             "type": "string",
             "description": "Where its files are, relative to the web directory (empty: the directory itself)."
           },
+          "force_https": {
+            "type": "boolean",
+            "description": "Visitors on plain HTTP are sent to HTTPS."
+          },
           "fqdn": {
             "type": "string",
             "description": "The name as stored (lower-case ASCII; punycode for international names).",
             "example": "example.com"
+          },
+          "hsts": {
+            "type": "boolean",
+            "description": "Answers over HTTPS carry the HSTS header (one year). Needs `force_https`."
           },
           "id": {
             "type": "string",
@@ -10853,13 +10863,27 @@
       "UpdateDomain": {
         "type": "object",
         "description": "Changes to a domain.",
-        "required": [
-          "docroot"
-        ],
         "properties": {
           "docroot": {
-            "type": "string",
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "The new document root, relative to the web directory (empty: the directory itself)."
+          },
+          "force_https": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Send visitors who arrive over plain HTTP to HTTPS."
+          },
+          "hsts": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Tell browsers to use HTTPS for this name for a year (the\n`Strict-Transport-Security` header on HTTPS answers). Only with `force_https`;\nit cannot be turned on without it, nor can forced HTTPS be turned off while\nit is on."
           }
         },
         "additionalProperties": false

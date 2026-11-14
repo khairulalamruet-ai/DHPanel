@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, fqdn, kind, parent_domain_id AS parent_id, status\n           FROM domains WHERE tenant_id = $1 ORDER BY fqdn",
+  "query": "SELECT id, fqdn, kind, parent_domain_id AS parent_id, status, force_https, hsts\n           FROM domains WHERE tenant_id = $1 ORDER BY fqdn",
   "describe": {
     "columns": [
       {
@@ -57,6 +57,28 @@
             "name": "status"
           }
         }
+      },
+      {
+        "ordinal": 5,
+        "name": "force_https",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "domains",
+            "name": "force_https"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "hsts",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "domains",
+            "name": "hsts"
+          }
+        }
       }
     ],
     "parameters": {
@@ -69,8 +91,10 @@
       false,
       false,
       true,
+      false,
+      false,
       false
     ]
   },
-  "hash": "17af5e4570cc4656ebbbe0bd57037d49966a2969d78fbd8d55edba9fcc7f84ea"
+  "hash": "69c6b3fee5f73fef2f969092d2c3f3ec2c4fe85a917c6a08c61f7beead6b179b"
 }

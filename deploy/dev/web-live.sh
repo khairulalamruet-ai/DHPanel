@@ -29,18 +29,30 @@ cleanup_first || true
 mkdir -p "$WORK/www"
 echo "hello from alice" > "$WORK/www/index.html"
 echo "the new page" > "$WORK/www/new.html"
-printf '{"admin":{"listen":"0.0.0.0:2019","origins":["127.0.0.1:12019","127.0.0.1:2019"]}}' > "$WORK/caddy.json"
+# Admin API reachable from the host; HTTP on 18080 and HTTPS on 18443 (so the
+# automatic HTTPS of the agent's server uses those); certificates from Caddy's own
+# local CA, which is all a test with made-up names can use.
+cat > "$WORK/caddy.json" <<'JSON'
+{
+  "admin": {"listen": "0.0.0.0:2019", "origins": ["127.0.0.1:12019", "127.0.0.1:2019"]},
+  "apps": {
+    "http": {"http_port": 18080, "https_port": 18443},
+    "tls": {"automation": {"policies": [{"issuers": [{"module": "internal"}]}]}}
+  }
+}
+JSON
 docker network create "$NET" >/dev/null
 docker run -d --name "$BACKEND" --network "$NET" -v "$WORK/www:/www:ro" "$BUSYBOX" httpd -f -p 8080 -h /www >/dev/null
 # `--restart unless-stopped`: the test stops Caddy through its API, as a crash would.
 docker run -d --name "$CADDY" --network "$NET" --restart unless-stopped \
   -v "$WORK/caddy.json:/etc/caddy/init.json:ro" \
-  -p 127.0.0.1:12019:2019 -p 127.0.0.1:18080:18080 \
+  -p 127.0.0.1:12019:2019 -p 127.0.0.1:18080:18080 -p 127.0.0.1:18443:18443 \
   "$CADDY_IMAGE" caddy run --config /etc/caddy/init.json >/dev/null
 for _ in $(seq 1 30); do curl -sf http://127.0.0.1:12019/config/ >/dev/null && break; sleep 1; done
 
 DHPANEL_TEST_CADDY_ADMIN=http://127.0.0.1:12019 \
 DHPANEL_TEST_CADDY_URL=http://127.0.0.1:18080 \
+DHPANEL_TEST_CADDY_TLS_PORT=18443 \
 DHPANEL_TEST_CADDY_CONTAINER="$CADDY" \
   "$TEST_BIN" --include-ignored --nocapture --test-threads=1 2>&1 | grep -E "^test |test result|panicked|left|right|skipped|Caddy" -A3
 exit "${PIPESTATUS[0]}"

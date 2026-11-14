@@ -48,6 +48,8 @@ pub fn build(
                     })
                 })
                 .collect(),
+            force_https: d.force_https,
+            hsts: d.hsts,
         };
         sites.push((d.id, route));
     }
@@ -82,6 +84,7 @@ pub fn build(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
@@ -92,6 +95,8 @@ mod tests {
             kind: kind.into(),
             parent_id: parent.map(Uuid::from_u128),
             status: status.into(),
+            force_https: false,
+            hsts: false,
         }
     }
 
@@ -135,6 +140,27 @@ mod tests {
             ("/old", 301)
         );
         assert!(routes[0].redirects.is_empty());
+    }
+
+    #[test]
+    fn the_https_settings_of_a_domain_go_to_its_site_and_its_aliases_share_them() {
+        let mut main = dom(1, "example.com", "primary", None, "active");
+        main.force_https = true;
+        main.hsts = true;
+        let mut forced = dom(3, "forced.org", "addon", None, "active");
+        forced.force_https = true;
+        let domains = vec![
+            main,
+            dom(2, "example.net", "alias", Some(1), "active"),
+            forced,
+            dom(4, "plain.org", "addon", None, "active"),
+        ];
+        let routes = build("active", UP, &domains, &[]);
+        let by_host = |h: &str| routes.iter().find(|r| r.hosts[0] == h).unwrap();
+        assert!(by_host("example.com").force_https && by_host("example.com").hsts);
+        assert_eq!(by_host("example.com").hosts, ["example.com", "example.net"]);
+        assert!(by_host("forced.org").force_https && !by_host("forced.org").hsts);
+        assert!(!by_host("plain.org").force_https && !by_host("plain.org").hsts);
     }
 
     #[test]

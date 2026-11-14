@@ -32,6 +32,10 @@ pub struct RoutedDomain {
     pub parent_id: Option<Uuid>,
     /// `active` or `suspended`.
     pub status: String,
+    /// Visitors on plain HTTP are sent to HTTPS.
+    pub force_https: bool,
+    /// Answers over HTTPS carry the HSTS header.
+    pub hsts: bool,
 }
 
 /// A redirect of a domain.
@@ -73,7 +77,7 @@ pub async fn pending(pool: &PgPool, limit: i64) -> Result<Vec<Pending>, sqlx::Er
 pub async fn domains(pool: &PgPool, tenant_id: Uuid) -> Result<Vec<RoutedDomain>, sqlx::Error> {
     sqlx::query_as!(
         RoutedDomain,
-        r#"SELECT id, fqdn, kind, parent_domain_id AS parent_id, status
+        r#"SELECT id, fqdn, kind, parent_domain_id AS parent_id, status, force_https, hsts
            FROM domains WHERE tenant_id = $1 ORDER BY fqdn"#,
         tenant_id,
     )
