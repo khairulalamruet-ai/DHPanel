@@ -434,3 +434,120 @@ pub async fn remote_union(
     .fetch_all(conn)
     .await
 }
+
+/// One node's databases, for the administrator's overview.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NodeOverview {
+    /// The node.
+    pub node_id: Uuid,
+    /// Its name.
+    pub node: String,
+    /// Databases on it.
+    pub databases: i64,
+    /// Database users on it.
+    pub users: i64,
+    /// Total size of its databases, as last measured (bytes).
+    pub size_bytes: i64,
+    /// The oldest measurement among them (Unix seconds); none if some database was
+    /// never measured or it has none.
+    pub measured_at: Option<i64>,
+}
+
+/// Every node with its database figures (nodes without databases show zeros).
+///
+/// # Errors
+/// Database errors.
+pub async fn overview(pool: &PgPool) -> Result<Vec<NodeOverview>, sqlx::Error> {
+    let rows = sqlx::query!(
+        r#"SELECT n.id AS node_id, n.name AS node,
+                  COALESCE(d.databases, 0)::bigint AS "databases!",
+                  COALESCE(u.users, 0)::bigint AS "users!",
+                  COALESCE(d.size_bytes, 0)::bigint AS "size_bytes!",
+                  d.measured_at
+           FROM nodes n
+           LEFT JOIN (
+               SELECT t.node_id, count(*) AS databases, sum(db.size_bytes) AS size_bytes,
+                      CASE WHEN bool_and(db.size_checked_at IS NOT NULL)
+                           THEN extract(epoch FROM min(db.size_checked_at))::bigint END AS measured_at
+               FROM databases db JOIN tenants t ON t.id = db.tenant_id
+               GROUP BY t.node_id) d ON d.node_id = n.id
+           LEFT JOIN (
+               SELECT t.node_id, count(*) AS users
+               FROM db_users du JOIN tenants t ON t.id = du.tenant_id
+               GROUP BY t.node_id) u ON u.node_id = n.id
+           ORDER BY n.name"#,
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| NodeOverview {
+            node_id: r.node_id,
+            node: r.node,
+            databases: r.databases,
+            users: r.users,
+            size_bytes: r.size_bytes,
+            measured_at: r.measured_at,
+        })
+        .collect())
+}
+
+/// A database with whose it is and where it is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BigDb {
+    /// Id.
+    pub id: Uuid,
+    /// Whole name.
+    pub name: String,
+    /// `pending`, `ready`, `failed` or `deleting`.
+    pub status: String,
+    /// Size as last measured (bytes).
+    pub size_bytes: i64,
+    /// When it was measured (Unix seconds).
+    pub size_checked_at: Option<i64>,
+    /// The account's system name.
+    pub tenant: String,
+    /// The node.
+    pub node_id: Uuid,
+    /// The node's name.
+    pub node: String,
+}
+
+/// The biggest databases first, optionally on one node.
+///
+/// # Errors
+/// Database errors.
+pub async fn biggest(
+    pool: &PgPool,
+    node_id: Option<Uuid>,
+    limit: i64,
+) -> Result<Vec<BigDb>, sqlx::Error> {
+    let rows = sqlx::query!(
+        r#"SELECT db.id, db.name, db.status, db.size_bytes,
+                  extract(epoch FROM db.size_checked_at)::bigint AS size_checked_at,
+                  t.username AS tenant, n.id AS node_id, n.name AS node
+           FROM databases db
+           JOIN tenants t ON t.id = db.tenant_id
+           JOIN nodes n ON n.id = t.node_id
+           WHERE ($1::uuid IS NULL OR n.id = $1)
+           ORDER BY db.size_bytes DESC, db.name
+           LIMIT $2"#,
+        node_id,
+        limit,
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| BigDb {
+            id: r.id,
+            name: r.name,
+            status: r.status,
+            size_bytes: r.size_bytes,
+            size_checked_at: r.size_checked_at,
+            tenant: r.tenant,
+            node_id: r.node_id,
+            node: r.node,
+        })
+        .collect())
+}

@@ -859,6 +859,116 @@
         ]
       }
     },
+    "/api/v1/admin/databases/biggest": {
+      "get": {
+        "tags": [
+          "databases"
+        ],
+        "summary": "The biggest databases of the panel, or of one node.",
+        "operationId": "adminBiggestDatabases",
+        "parameters": [
+          {
+            "name": "node_id",
+            "in": "path",
+            "description": "Only this node's.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "path",
+            "description": "How many (1..=200, default 20).",
+            "required": true,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The biggest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BigDatabaseList"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied` (needs admin.databases.read)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`invalid_limit`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/databases/overview": {
+      "get": {
+        "tags": [
+          "databases"
+        ],
+        "summary": "Databases per node: how many, how big.",
+        "operationId": "adminDatabasesOverview",
+        "responses": {
+          "200": {
+            "description": "Every node's figures",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseOverview"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied` (needs admin.databases.read)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/dns/nameservers": {
       "get": {
         "tags": [
@@ -12046,6 +12156,77 @@
           }
         }
       },
+      "BigDatabase": {
+        "type": "object",
+        "description": "A database, with whose it is.",
+        "required": [
+          "id",
+          "name",
+          "status",
+          "size_bytes",
+          "account",
+          "node_id",
+          "node"
+        ],
+        "properties": {
+          "account": {
+            "type": "string",
+            "description": "The hosting account's system name."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Id."
+          },
+          "name": {
+            "type": "string",
+            "description": "The whole name.",
+            "example": "alice_shop"
+          },
+          "node": {
+            "type": "string",
+            "description": "The node's name."
+          },
+          "node_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The node."
+          },
+          "size_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Size in bytes, as last measured."
+          },
+          "size_checked_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When it was measured (RFC 3339, UTC)."
+          },
+          "status": {
+            "type": "string",
+            "description": "`pending`, `ready`, `failed` or `deleting`."
+          }
+        }
+      },
+      "BigDatabaseList": {
+        "type": "object",
+        "description": "The biggest databases.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BigDatabase"
+            },
+            "description": "Biggest first."
+          }
+        }
+      },
       "Bootstrap": {
         "type": "object",
         "description": "What the admin interface needs to start.",
@@ -12538,6 +12719,40 @@
           "prefix": {
             "type": "string",
             "description": "What every name starts with (`alice_`), or empty when names are as typed."
+          }
+        }
+      },
+      "DatabaseOverview": {
+        "type": "object",
+        "description": "The databases of every node.",
+        "required": [
+          "nodes",
+          "databases",
+          "users",
+          "size_bytes"
+        ],
+        "properties": {
+          "databases": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Databases on the whole panel."
+          },
+          "nodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NodeDatabases"
+            },
+            "description": "By node name."
+          },
+          "size_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Total size, in bytes."
+          },
+          "users": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Database users on the whole panel."
           }
         }
       },
@@ -13911,6 +14126,51 @@
           }
         },
         "additionalProperties": false
+      },
+      "NodeDatabases": {
+        "type": "object",
+        "description": "One node's databases.",
+        "required": [
+          "node_id",
+          "node",
+          "databases",
+          "users",
+          "size_bytes"
+        ],
+        "properties": {
+          "databases": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Databases on it."
+          },
+          "measured_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the oldest of those sizes was measured (RFC 3339, UTC); none when a\ndatabase has not been measured yet or there are none."
+          },
+          "node": {
+            "type": "string",
+            "description": "Its name."
+          },
+          "node_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The node."
+          },
+          "size_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Total size of its databases, in bytes, as last measured."
+          },
+          "users": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Database users on it."
+          }
+        }
       },
       "NodeList": {
         "type": "object",

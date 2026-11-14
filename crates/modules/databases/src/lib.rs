@@ -8,6 +8,7 @@
 //! | GET, POST | `/api/v1/client/db-users` | a client; the `databases` feature to add |
 //! | PUT | `/api/v1/client/db-users/{id}/password` | the owner |
 //! | DELETE | `/api/v1/client/db-users/{id}` | the owner |
+//! | GET | `/api/v1/admin/databases/overview`, `/api/v1/admin/databases/biggest` | `admin.databases.read` |
 //! | GET, PUT | `/api/v1/client/db-users/{id}/remote-hosts` | the owner; the `db_remote` feature to change |
 //! | POST, GET, PUT | `.../databases/{id}/imports`, `/api/v1/client/imports...` | SQL imports, see [`imports`] |
 //! | POST, GET, DELETE | `.../databases/{id}/exports`, `/api/v1/client/exports...` | SQL exports, see [`exports`] |
@@ -28,7 +29,7 @@ use std::{path::PathBuf, sync::Arc};
 
 use axum::{
     Json, Router,
-    extract::{FromRef, Path, State},
+    extract::{FromRef, Path, Query, State},
     http::StatusCode,
     routing::{delete, get, put},
 };
@@ -45,7 +46,7 @@ use dhpanel_database::{
 use dhpanel_domain::databases::{Access, check_password, full_name, host_for_remote};
 use dhpanel_http_kit::{AppError, FieldError, ProblemDetails};
 use dhpanel_node_protocol::{DbPassword, MAX_DB_REMOTE_HOSTS, Operation};
-use dhpanel_rbac::Principal;
+use dhpanel_rbac::{Principal, Require, permissions::DatabasesRead};
 use dhpanel_session::{SessionStore, rfc3339};
 use dhpanel_settings::{Scope, SettingsRegistry};
 use serde::{Deserialize, Serialize};
@@ -123,9 +124,11 @@ pub fn public_router() -> Router<DatabasesState> {
     imports::public_router().merge(exports::public_router())
 }
 
-/// Routes for administrators (the overview arrives with T07.11).
+/// Routes for administrators.
 pub fn admin_router() -> Router<DatabasesState> {
     Router::new()
+        .route("/api/v1/admin/databases/overview", get(admin_overview))
+        .route("/api/v1/admin/databases/biggest", get(admin_biggest))
 }
 
 fn internal(err: impl Into<Box<dyn std::error::Error + Send + Sync + 'static>>) -> AppError {
@@ -578,6 +581,164 @@ pub async fn create_database(
         .await?
         .remove(0);
     Ok((StatusCode::CREATED, Json(view)))
+}
+
+// ------------------------------------------------------------ administrators
+
+/// One node's databases.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct NodeDatabases {
+    /// The node.
+    pub node_id: Uuid,
+    /// Its name.
+    pub node: String,
+    /// Databases on it.
+    pub databases: i64,
+    /// Database users on it.
+    pub users: i64,
+    /// Total size of its databases, in bytes, as last measured.
+    pub size_bytes: i64,
+    /// When the oldest of those sizes was measured (RFC 3339, UTC); none when a
+    /// database has not been measured yet or there are none.
+    #[schema(format = DateTime)]
+    pub measured_at: Option<String>,
+}
+
+/// The databases of every node.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct DatabaseOverview {
+    /// By node name.
+    pub nodes: Vec<NodeDatabases>,
+    /// Databases on the whole panel.
+    pub databases: i64,
+    /// Database users on the whole panel.
+    pub users: i64,
+    /// Total size, in bytes.
+    pub size_bytes: i64,
+}
+
+/// A database, with whose it is.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct BigDatabase {
+    /// Id.
+    pub id: Uuid,
+    /// The whole name.
+    #[schema(example = "alice_shop")]
+    pub name: String,
+    /// `pending`, `ready`, `failed` or `deleting`.
+    pub status: String,
+    /// Size in bytes, as last measured.
+    pub size_bytes: i64,
+    /// When it was measured (RFC 3339, UTC).
+    #[schema(format = DateTime)]
+    pub size_checked_at: Option<String>,
+    /// The hosting account's system name.
+    pub account: String,
+    /// The node.
+    pub node_id: Uuid,
+    /// The node's name.
+    pub node: String,
+}
+
+/// The biggest databases.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct BigDatabaseList {
+    /// Biggest first.
+    pub items: Vec<BigDatabase>,
+}
+
+/// Which databases to list.
+#[derive(Debug, Deserialize, utoipa::IntoParams)]
+pub struct BiggestQuery {
+    /// Only this node's.
+    pub node_id: Option<Uuid>,
+    /// How many (1..=200, default 20).
+    pub limit: Option<i64>,
+}
+
+/// Databases per node: how many, how big.
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/databases/overview",
+    tag = "databases",
+    operation_id = "adminDatabasesOverview",
+    security(("session" = [])),
+    responses(
+        (status = 200, description = "Every node's figures", body = DatabaseOverview),
+        (status = 403, description = "`permission_denied` (needs admin.databases.read)", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+pub async fn admin_overview(
+    State(state): State<DatabasesState>,
+    _who: Require<DatabasesRead>,
+) -> Result<Json<DatabaseOverview>, AppError> {
+    let nodes = store::overview(&state.db).await.map_err(internal)?;
+    let (databases, users, size_bytes) = nodes.iter().fold((0, 0, 0_i64), |(d, u, s), n| {
+        (d + n.databases, u + n.users, s.saturating_add(n.size_bytes))
+    });
+    Ok(Json(DatabaseOverview {
+        nodes: nodes
+            .into_iter()
+            .map(|n| NodeDatabases {
+                node_id: n.node_id,
+                node: n.node,
+                databases: n.databases,
+                users: n.users,
+                size_bytes: n.size_bytes,
+                measured_at: n.measured_at.map(rfc3339),
+            })
+            .collect(),
+        databases,
+        users,
+        size_bytes,
+    }))
+}
+
+/// The biggest databases of the panel, or of one node.
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/databases/biggest",
+    tag = "databases",
+    operation_id = "adminBiggestDatabases",
+    security(("session" = [])),
+    params(BiggestQuery),
+    responses(
+        (status = 200, description = "The biggest first", body = BigDatabaseList),
+        (status = 403, description = "`permission_denied` (needs admin.databases.read)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 422, description = "`invalid_limit`", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+pub async fn admin_biggest(
+    State(state): State<DatabasesState>,
+    _who: Require<DatabasesRead>,
+    Query(q): Query<BiggestQuery>,
+) -> Result<Json<BigDatabaseList>, AppError> {
+    let limit = q.limit.unwrap_or(20);
+    if !(1..=200).contains(&limit) {
+        return Err(AppError::validation(vec![FieldError::new(
+            "limit",
+            "invalid_limit",
+            "The limit is 1 to 200.",
+        )]));
+    }
+    let rows = store::biggest(&state.db, q.node_id, limit)
+        .await
+        .map_err(internal)?;
+    Ok(Json(BigDatabaseList {
+        items: rows
+            .into_iter()
+            .map(|d| BigDatabase {
+                id: d.id,
+                name: d.name,
+                status: d.status,
+                size_bytes: d.size_bytes,
+                size_checked_at: d.size_checked_at.map(rfc3339),
+                account: d.tenant,
+                node_id: d.node_id,
+                node: d.node,
+            })
+            .collect(),
+    }))
 }
 
 /// Remove a database and everything in it.
@@ -1210,7 +1371,7 @@ pub async fn set_remote(
     paths(
         list_databases, create_database, delete_database, list_users, create_user,
         change_password, delete_user, set_grant, remove_grant, get_remote, set_remote,
-        imports::start_import, imports::list_imports, imports::get_import,
+        admin_overview, admin_biggest, imports::start_import, imports::list_imports, imports::get_import,
         imports::put_chunk, imports::complete_import, imports::cancel_import,
         exports::start_export, exports::list_exports, exports::get_export,
         exports::make_link, exports::delete_export,
@@ -1219,7 +1380,7 @@ pub async fn set_remote(
     components(schemas(
         GrantView, DatabaseView, DatabaseList, UserGrantView, DbUserView, DbUserList,
         DbUserCreated, AddDatabase, AddDbUser, NewPassword, SetAccess, RemoteHosts,
-        imports::ImportView, imports::ImportList, imports::StartImport,
+        NodeDatabases, DatabaseOverview, BigDatabase, BigDatabaseList, imports::ImportView, imports::ImportList, imports::StartImport,
         exports::ExportView, exports::ExportList, exports::DownloadLink,
         phpmyadmin::PhpMyAdminLink
     )),

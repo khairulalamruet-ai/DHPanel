@@ -1,0 +1,66 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT n.id AS node_id, n.name AS node,\n                  COALESCE(d.databases, 0)::bigint AS \"databases!\",\n                  COALESCE(u.users, 0)::bigint AS \"users!\",\n                  COALESCE(d.size_bytes, 0)::bigint AS \"size_bytes!\",\n                  d.measured_at\n           FROM nodes n\n           LEFT JOIN (\n               SELECT t.node_id, count(*) AS databases, sum(db.size_bytes) AS size_bytes,\n                      CASE WHEN bool_and(db.size_checked_at IS NOT NULL)\n                           THEN extract(epoch FROM min(db.size_checked_at))::bigint END AS measured_at\n               FROM databases db JOIN tenants t ON t.id = db.tenant_id\n               GROUP BY t.node_id) d ON d.node_id = n.id\n           LEFT JOIN (\n               SELECT t.node_id, count(*) AS users\n               FROM db_users du JOIN tenants t ON t.id = du.tenant_id\n               GROUP BY t.node_id) u ON u.node_id = n.id\n           ORDER BY n.name",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "node_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "nodes",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "node",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "nodes",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "databases!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "users!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "size_bytes!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "measured_at",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "c5c1b1e761b81183ce5300604b5bace7614ec130784a83ba7f4ebfec88a88ab1"
+}

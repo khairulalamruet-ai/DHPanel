@@ -13,7 +13,9 @@ use dhpanel_auth_core::secretbox::MasterKey;
 use dhpanel_cache::RedisHandle;
 use dhpanel_database::modules as db;
 use dhpanel_kernel::{Manifest, Module, ModuleMount, ModuleRoutes, Registry};
-use dhpanel_mod_databases::{DatabasesState, SETTINGS_SCHEMA, client_router, public_router};
+use dhpanel_mod_databases::{
+    DatabasesState, SETTINGS_SCHEMA, admin_router, client_router, public_router,
+};
 use dhpanel_session::{CSRF_HEADER, NewSession, SessionConfig, SessionStore, set_cookie};
 use dhpanel_settings::{Scope, SettingsRegistry};
 use secrecy::SecretString;
@@ -87,9 +89,9 @@ async fn env(pool: &PgPool) -> Env {
                     agent_url: Some("https://panel.example.com:8443".to_owned()),
                 };
                 ModuleRoutes {
+                    admin: Some(admin_router().with_state(state.clone())),
                     client: Some(client_router().with_state(state.clone())),
                     public: Some(public_router().with_state(state)),
-                    ..ModuleRoutes::none()
                 }
             }
         }),
@@ -1748,4 +1750,150 @@ async fn phpmyadmin_links_are_made_once_per_sign_in_and_the_token_never_reaches_
         "{got}"
     );
     node.abort();
+}
+
+async fn admin_with(pool: &PgPool, name: &str, roles: &[&str]) -> Uuid {
+    let id: Uuid = sqlx::query_scalar(
+        "INSERT INTO accounts (kind, username, email, password_hash)
+         VALUES ('admin', $1, $1 || '@example.com', $2) RETURNING id",
+    )
+    .bind(name)
+    .bind(HASH)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    for role in roles {
+        dhpanel_database::rbac::assign_role(pool, id, role, None)
+            .await
+            .unwrap();
+    }
+    id
+}
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn the_administrator_sees_databases_per_node_and_the_biggest_ones(pool: PgPool) {
+    let e = env(&pool).await;
+    let (alice, tenant) = client(&pool, "alice", 10_000).await;
+    let (_, other) = client(&pool, "bobby", 10_001).await;
+    let a = e.sign_in(alice).await;
+    let root = e
+        .sign_in(admin_with(&pool, "rootuser", &["super_admin"]).await)
+        .await;
+    let nobody = e.sign_in(admin_with(&pool, "plain", &[]).await).await;
+    // A second node with a tenant of its own.
+    let node2: Uuid = sqlx::query_scalar("INSERT INTO nodes (name) VALUES ('node2') RETURNING id")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE tenants SET node_id = $1 WHERE id = $2")
+        .bind(node2)
+        .bind(other)
+        .execute(&pool)
+        .await
+        .unwrap();
+    for (t, name, size) in [
+        (tenant, "alice_small", 1_000_i64),
+        (tenant, "alice_big", 9_000_000),
+        (other, "bobby_mid", 500_000),
+    ] {
+        sqlx::query(
+            "INSERT INTO databases (tenant_id, name, status, size_bytes, size_checked_at)
+             VALUES ($1, $2, 'ready', $3, now())",
+        )
+        .bind(t)
+        .bind(name)
+        .bind(size)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    sqlx::query(
+        "INSERT INTO databases (tenant_id, name, status) VALUES ($1, 'bobby_new', 'pending')",
+    )
+    .bind(other)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO db_users (tenant_id, name, status) VALUES ($1, 'alice_web', 'ready')")
+        .bind(tenant)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // Only with the permission.
+    for who in [&a, &nobody] {
+        let (status, _) = e
+            .call(who, "GET", "/api/v1/admin/databases/overview", None)
+            .await;
+        assert!(status == StatusCode::FORBIDDEN, "{status}");
+    }
+    let (status, overview) = e
+        .call(&root, "GET", "/api/v1/admin/databases/overview", None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{overview}");
+    assert_eq!(
+        (
+            overview["databases"].clone(),
+            overview["users"].clone(),
+            overview["size_bytes"].clone()
+        ),
+        (json!(4), json!(1), json!(9_501_000))
+    );
+    let nodes = overview["nodes"].as_array().unwrap();
+    let n1 = nodes.iter().find(|n| n["node"] == "node1").unwrap();
+    assert_eq!(
+        (
+            n1["databases"].clone(),
+            n1["users"].clone(),
+            n1["size_bytes"].clone()
+        ),
+        (json!(2), json!(1), json!(9_001_000))
+    );
+    assert!(n1["measured_at"].is_string());
+    let n2 = nodes.iter().find(|n| n["node"] == "node2").unwrap();
+    assert_eq!(
+        (n2["databases"].clone(), n2["size_bytes"].clone()),
+        (json!(2), json!(500_000))
+    );
+    assert!(
+        n2["measured_at"].is_null(),
+        "one database was never measured"
+    );
+
+    let (_, big) = e
+        .call(
+            &root,
+            "GET",
+            "/api/v1/admin/databases/biggest?limit=2",
+            None,
+        )
+        .await;
+    let names: Vec<&str> = big["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| d["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["alice_big", "bobby_mid"]);
+    assert_eq!(big["items"][0]["account"], "alice");
+    assert_eq!(big["items"][0]["node"], "node1");
+    let (_, on2) = e
+        .call(
+            &root,
+            "GET",
+            &format!("/api/v1/admin/databases/biggest?node_id={node2}"),
+            None,
+        )
+        .await;
+    assert_eq!(on2["items"].as_array().unwrap().len(), 2);
+    let (status, _) = e
+        .call(
+            &root,
+            "GET",
+            "/api/v1/admin/databases/biggest?limit=0",
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
 }
