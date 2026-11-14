@@ -123,6 +123,22 @@ impl Registry {
                 let context = context.clone();
                 move |op| db::drop_database(context.clone(), op)
             });
+            registry.register("upsert_db_user", {
+                let context = context.clone();
+                move |op| db::upsert_db_user(context.clone(), op)
+            });
+            registry.register("grant_db", {
+                let context = context.clone();
+                move |op| db::grant_db(context.clone(), op)
+            });
+            registry.register("revoke_db", {
+                let context = context.clone();
+                move |op| db::revoke_db(context.clone(), op)
+            });
+            registry.register("drop_db_user", {
+                let context = context.clone();
+                move |op| db::drop_db_user(context.clone(), op)
+            });
             registry.register("allow_tenant_databases", {
                 let context = context.clone();
                 move |op| db::allow_tenant_databases(context.clone(), op)

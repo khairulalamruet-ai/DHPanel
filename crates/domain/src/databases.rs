@@ -118,6 +118,91 @@ pub fn check_identifier(name: &str) -> Result<(), DbNameError> {
     Ok(())
 }
 
+/// Shortest and longest password of a database user.
+pub const PASSWORD_LEN: std::ops::RangeInclusive<usize> = 12..=128;
+
+/// Why a password was refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum PasswordError {
+    /// Shorter than 12 or longer than 128 characters.
+    #[error("a password is 12 to 128 characters")]
+    Length,
+    /// Not printable ASCII.
+    #[error("a password is made of printable ASCII characters")]
+    Characters,
+    /// Fewer than three of: lower case, upper case, digits, symbols.
+    #[error("a password mixes at least three of: lower case, upper case, digits, symbols")]
+    Weak,
+}
+
+impl PasswordError {
+    /// Stable machine code.
+    #[must_use]
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Length => "password_length",
+            Self::Characters => "password_characters",
+            Self::Weak => "password_weak",
+        }
+    }
+}
+
+/// Checks the password of a database user.
+///
+/// # Errors
+/// [`PasswordError`].
+pub fn check_password(password: &str) -> Result<(), PasswordError> {
+    if !PASSWORD_LEN.contains(&password.chars().count()) {
+        return Err(PasswordError::Length);
+    }
+    if !password.chars().all(|c| (' '..='~').contains(&c)) {
+        return Err(PasswordError::Characters);
+    }
+    let classes = [
+        password.chars().any(|c| c.is_ascii_lowercase()),
+        password.chars().any(|c| c.is_ascii_uppercase()),
+        password.chars().any(|c| c.is_ascii_digit()),
+        password.chars().any(|c| !c.is_ascii_alphanumeric()),
+    ]
+    .into_iter()
+    .filter(|present| *present)
+    .count();
+    if classes < 3 {
+        return Err(PasswordError::Weak);
+    }
+    Ok(())
+}
+
+/// The host part of a database user for connections from one network (an IPv4
+/// range like `172.18.0.0/16`), as the server writes it: `172.18.0.0/255.255.0.0`.
+///
+/// # Errors
+/// `None` for anything but an IPv4 range with a prefix of 8 to 30.
+#[must_use]
+pub fn host_for_network(cidr: &str) -> Option<String> {
+    let (ip, bits) = cidr.split_once('/')?;
+    let bits: u32 = bits.parse().ok().filter(|b| (8..=30).contains(b))?;
+    let parts: Vec<u8> = ip
+        .split('.')
+        .map(str::parse)
+        .collect::<Result<_, _>>()
+        .ok()?;
+    if parts.len() != 4 || ip.split('.').any(|p| p.len() > 1 && p.starts_with('0')) {
+        return None;
+    }
+    let mask = u32::MAX << (32 - bits);
+    let m = mask.to_be_bytes();
+    // The address must be the start of the range (host bits zero).
+    let addr = u32::from_be_bytes([parts[0], parts[1], parts[2], parts[3]]);
+    if addr & !mask != 0 {
+        return None;
+    }
+    Some(format!(
+        "{}.{}.{}.{}/{}.{}.{}.{}",
+        parts[0], parts[1], parts[2], parts[3], m[0], m[1], m[2], m[3]
+    ))
+}
+
 /// What a user may do in a database.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Access {
@@ -258,6 +343,65 @@ mod tests {
             &"a".repeat(MAX_NAME_LEN + 1),
         ] {
             assert!(check_identifier(bad).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn passwords_are_long_printable_and_mixed() {
+        for ok in [
+            "Abcdef123456",
+            "correct-Horse-9",
+            "aaaaaaaaaa1A",
+            &format!("Aa1{}", "x".repeat(125)),
+        ] {
+            assert!(check_password(ok).is_ok(), "{ok}");
+        }
+        for (bad, err) in [
+            ("", PasswordError::Length),
+            ("Short1!", PasswordError::Length),
+            (&format!("Aa1{}", "x".repeat(126)), PasswordError::Length),
+            ("Abcdef12345\n", PasswordError::Characters),
+            ("Abcdef12345\u{e9}", PasswordError::Characters),
+            ("alllowercaseonly", PasswordError::Weak),
+            (
+                "ALLUPPERCASE1234"[..12].to_lowercase().as_str(),
+                PasswordError::Weak,
+            ),
+            ("abcdefghijkl12", PasswordError::Weak),
+        ] {
+            assert_eq!(check_password(bad).unwrap_err(), err, "{bad:?}");
+        }
+        assert_eq!(PasswordError::Weak.code(), "password_weak");
+    }
+
+    #[test]
+    fn a_network_becomes_the_host_part_of_a_user() {
+        assert_eq!(
+            host_for_network("172.18.0.0/16").as_deref(),
+            Some("172.18.0.0/255.255.0.0")
+        );
+        assert_eq!(
+            host_for_network("10.1.2.0/24").as_deref(),
+            Some("10.1.2.0/255.255.255.0")
+        );
+        assert_eq!(
+            host_for_network("192.168.0.0/20").as_deref(),
+            Some("192.168.0.0/255.255.240.0")
+        );
+        for bad in [
+            "172.18.0.1/16",
+            "172.18.0.0/7",
+            "172.18.0.0/31",
+            "172.18.0.0",
+            "fd00::/64",
+            "172.18.0/16",
+            "172.18.0.0.0/16",
+            "172.18.0.256/16",
+            "172.018.0.0/16",
+            "%",
+            "172.18.0.0/16'; DROP",
+        ] {
+            assert_eq!(host_for_network(bad), None, "{bad}");
         }
     }
 

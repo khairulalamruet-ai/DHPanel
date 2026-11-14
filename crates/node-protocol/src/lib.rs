@@ -189,6 +189,19 @@ impl std::fmt::Debug for CustomCertificate {
     }
 }
 
+/// A database user's password. It is not part of what the control plane records
+/// in its ledger (there it is absent): the dispatcher puts it in at the moment the
+/// message is sent. `Debug` never shows it.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct DbPassword(pub String);
+
+impl std::fmt::Debug for DbPassword {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("DbPassword(..)")
+    }
+}
+
 /// Longest php.ini file the control plane sends.
 pub const MAX_PHP_INI_BYTES: usize = 4096;
 
@@ -424,6 +437,45 @@ pub enum Operation {
         /// The whole name.
         name: String,
     },
+    /// Make a database user, or change its password, for connections from the
+    /// tenant's own network only (never from `%`). The user is created with the
+    /// password; for a user that exists the password is changed when one is given.
+    /// Safe to repeat. Answered with [`Output::DbUserSet`].
+    UpsertDbUser {
+        /// The tenant's system name (its network says where the user may connect from).
+        username: String,
+        /// The user's whole name, `alice_web`.
+        name: String,
+        /// The password; absent in the ledger, present on the wire.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        password: Option<DbPassword>,
+    },
+    /// Give a user an access level in one database (replacing what it had there):
+    /// `read_only`, `read_write` or `all`, each a fixed list of privileges, never
+    /// `GRANT OPTION` or anything outside that one database. Safe to repeat.
+    /// Answered with [`Output::DbGranted`].
+    GrantDb {
+        /// The database's whole name.
+        database: String,
+        /// The user's whole name.
+        user: String,
+        /// The access level.
+        access: String,
+    },
+    /// Take a user's access to one database away. Safe to repeat. Answered with
+    /// [`Output::DbRevoked`].
+    RevokeDb {
+        /// The database's whole name.
+        database: String,
+        /// The user's whole name.
+        user: String,
+    },
+    /// Remove a database user (from every address it could connect from). Safe to
+    /// repeat. Answered with [`Output::DbUserDropped`].
+    DropDbUser {
+        /// The user's whole name.
+        name: String,
+    },
     /// Let a tenant's containers reach the shared database server as `db` on their
     /// own network (the server is started first when it does not run). Safe to
     /// repeat. Answered with [`Output::TenantDbAllowed`].
@@ -596,6 +648,10 @@ impl Operation {
         "allow_tenant_databases",
         "create_database",
         "drop_database",
+        "upsert_db_user",
+        "grant_db",
+        "revoke_db",
+        "drop_db_user",
         "set_up_tenant",
         "set_site_routes",
         "set_error_pages",
@@ -626,6 +682,10 @@ impl Operation {
             Self::AllowTenantDatabases { .. } => "allow_tenant_databases",
             Self::CreateDatabase { .. } => "create_database",
             Self::DropDatabase { .. } => "drop_database",
+            Self::UpsertDbUser { .. } => "upsert_db_user",
+            Self::GrantDb { .. } => "grant_db",
+            Self::RevokeDb { .. } => "revoke_db",
+            Self::DropDbUser { .. } => "drop_db_user",
             Self::SetUpTenant { .. } => "set_up_tenant",
             Self::SetSiteRoutes { .. } => "set_site_routes",
             Self::SetErrorPages { .. } => "set_error_pages",
@@ -797,6 +857,22 @@ pub enum Output {
     },
     /// Answer to [`Operation::DropDatabase`].
     DatabaseDropped {
+        /// Whether there was one to remove.
+        existed: bool,
+    },
+    /// Answer to [`Operation::UpsertDbUser`].
+    DbUserSet {
+        /// Whether this call made the user.
+        created: bool,
+        /// Where it may connect from (the tenant's network, as the server writes it).
+        host: String,
+    },
+    /// Answer to [`Operation::GrantDb`].
+    DbGranted,
+    /// Answer to [`Operation::RevokeDb`].
+    DbRevoked,
+    /// Answer to [`Operation::DropDbUser`].
+    DbUserDropped {
         /// Whether there was one to remove.
         existed: bool,
     },
@@ -1657,6 +1733,23 @@ mod tests {
             Operation::DropDatabase {
                 name: "alice_shop".into(),
             },
+            Operation::UpsertDbUser {
+                username: "alice".into(),
+                name: "alice_web".into(),
+                password: None,
+            },
+            Operation::GrantDb {
+                database: "alice_shop".into(),
+                user: "alice_web".into(),
+                access: "all".into(),
+            },
+            Operation::RevokeDb {
+                database: "alice_shop".into(),
+                user: "alice_web".into(),
+            },
+            Operation::DropDbUser {
+                name: "alice_web".into(),
+            },
             Operation::AllowTenantDatabases {
                 username: "alice".into(),
             },
@@ -1686,7 +1779,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            24,
+            28,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }
@@ -1736,6 +1829,27 @@ mod tests {
         };
         // Quotes double in JSON: the worst case still fits the ledger (64 KiB) and the helper (64 KiB).
         assert!(serde_json::to_string(&worst).unwrap().len() < 56 * 1024);
+    }
+
+    #[test]
+    fn a_database_password_is_never_shown_and_the_ledger_form_has_none() {
+        let op = Operation::UpsertDbUser {
+            username: "alice".into(),
+            name: "alice_web".into(),
+            password: Some(DbPassword("Sup3r-secret-pass".into())),
+        };
+        assert!(!format!("{op:?}").contains("secret"));
+        let wire = serde_json::to_string(&op).unwrap();
+        assert!(wire.contains("Sup3r-secret-pass"), "the wire has it");
+        let ledger = Operation::UpsertDbUser {
+            username: "alice".into(),
+            name: "alice_web".into(),
+            password: None,
+        };
+        assert!(!serde_json::to_string(&ledger).unwrap().contains("password"));
+        let back: Operation =
+            serde_json::from_str(&serde_json::to_string(&ledger).unwrap()).unwrap();
+        assert_eq!(back, ledger);
     }
 
     #[test]

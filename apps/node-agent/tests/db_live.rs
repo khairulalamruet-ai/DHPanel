@@ -29,10 +29,26 @@ fn docker_socket() -> PathBuf {
 
 /// Runs a shell snippet in a throw-away container on `network`; returns its exit code.
 async fn probe(docker: &DockerManager, network: &Name, n: u32, script: &str) -> i64 {
+    probe_with(docker, BUSYBOX, network, n, script, &[]).await
+}
+
+/// The same with a chosen image and environment.
+async fn probe_with(
+    docker: &DockerManager,
+    image: &str,
+    network: &Name,
+    n: u32,
+    script: &str,
+    env: &[(&str, &str)],
+) -> i64 {
     let mut spec = ContainerSpec::new(
         Name::parse(&format!("dh-dbprobe-{}-{n}", std::process::id())).unwrap(),
-        ImageRef::parse(BUSYBOX).unwrap(),
+        ImageRef::parse(image).unwrap(),
     );
+    spec.env = env
+        .iter()
+        .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+        .collect();
     spec.command = vec!["sh".into(), "-c".into(), script.into()];
     spec.network = Network::Named(network.clone());
     docker.pull_image(&spec.image).await.unwrap();
@@ -248,6 +264,224 @@ async fn the_database_server_is_reached_from_its_tenants_network_and_nowhere_els
         );
         let (_, list) = names(conn).await;
         assert!(!list.contains(&"alice_shop".to_owned()));
+    }
+
+    // Users and grants, seen from inside the tenant's own network.
+    {
+        use dhpanel_node_agent::ops::db::{
+            create_database, drop_db_user, grant_db, revoke_db, upsert_db_user,
+        };
+        use mysql_async::prelude::Queryable as _;
+        let image = dhpanel_tenant_stack::Allowlist::embedded()
+            .unwrap()
+            .current(dhpanel_tenant_stack::Role::Db)
+            .unwrap()
+            .as_str()
+            .to_owned();
+        for name in ["dbtest_shop", "dbtest_blog"] {
+            create_database(
+                context.clone(),
+                Operation::CreateDatabase { name: name.into() },
+            )
+            .await
+            .unwrap();
+        }
+        let opts: mysql_async::Opts = mysql_async::OptsBuilder::default()
+            .ip_or_hostname("127.0.0.1")
+            .tcp_port(port())
+            .user(Some("root"))
+            .pass(Some(password.trim()))
+            .into();
+        let mut root = mysql_async::Conn::new(opts).await.unwrap();
+        root.query_drop("CREATE TABLE dbtest_shop.t (a int)")
+            .await
+            .unwrap();
+        root.query_drop("CREATE TABLE dbtest_blog.t (a int)")
+            .await
+            .unwrap();
+        let (net_a, net_b) = (network_name(&a).unwrap(), network_name(&b).unwrap());
+        // As the user, from a container on a network, with a statement; the exit code says if it worked.
+        let sql = |n: u32, net: &Name, pass: &'static str, statement: &'static str| {
+            let (docker, image) = (docker.clone(), image.clone());
+            let net = net.clone();
+            async move {
+                let script = format!("mariadb -h db -u dbtest_web -N -e \"{statement}\"");
+                probe_with(&docker, &image, &net, n, &script, &[("MYSQL_PWD", pass)]).await == 0
+            }
+        };
+        let user = |password: Option<&str>| Operation::UpsertDbUser {
+            username: a.as_str().to_owned(),
+            name: "dbtest_web".into(),
+            password: password.map(|p| dhpanel_node_protocol::DbPassword(p.into())),
+        };
+        let upsert = |op: Operation| upsert_db_user(context.clone(), op);
+        // A new user needs a password, and a good one.
+        for (bad, why) in [
+            (None, "needed"),
+            (Some("short"), "12"),
+            (Some("alllowercaseonly"), "mixes"),
+        ] {
+            let err = upsert(user(bad)).await.unwrap_err();
+            assert_eq!(err.code, ErrorCode::InvalidArguments);
+            assert!(err.message.contains(why), "{}", err.message);
+            assert!(!err.message.contains("alllowercase"));
+        }
+        let first = "First-Passw0rd!";
+        let made = upsert(user(Some(first))).await.unwrap();
+        let Output::DbUserSet { created, host } = made else {
+            panic!("{made:?}")
+        };
+        assert!(created && host.contains('/'), "{host}");
+        assert!(!host.contains('%'), "never from anywhere");
+        // It is held for the tenant's network only.
+        let hosts: Vec<String> = root
+            .query("SELECT Host FROM mysql.user WHERE User = 'dbtest_web'")
+            .await
+            .unwrap();
+        assert_eq!(hosts, std::slice::from_ref(&host));
+
+        let grant = |access: &str, db: &str| Operation::GrantDb {
+            database: db.into(),
+            user: "dbtest_web".into(),
+            access: access.into(),
+        };
+        let g = |op: Operation| grant_db(context.clone(), op);
+        g(grant("read_write", "dbtest_shop")).await.unwrap();
+        // It sees its own database and nobody else's.
+        let sees = |n: u32,
+                    net: &Name,
+                    pass: &'static str,
+                    want: &'static str,
+                    not: &'static str| {
+            let (docker, image) = (docker.clone(), image.clone());
+            let net = net.clone();
+            async move {
+                let script = format!(
+                    "mariadb -h db -u dbtest_web -N -e 'SHOW DATABASES' | tee /dev/stderr | grep -qx {want} && ! mariadb -h db -u dbtest_web -N -e 'SHOW DATABASES' | grep -qxE '{not}'"
+                );
+                probe_with(&docker, &image, &net, n, &script, &[("MYSQL_PWD", pass)]).await == 0
+            }
+        };
+        assert!(
+            sees(
+                11,
+                &net_a,
+                first,
+                "dbtest_shop",
+                "dbtest_blog|mysql|information_schema_x"
+            )
+            .await
+        );
+        assert!(
+            sql(12, &net_a, first, "INSERT INTO dbtest_shop.t VALUES (1)").await,
+            "read_write writes"
+        );
+        assert!(
+            !sql(13, &net_a, first, "CREATE TABLE dbtest_shop.u (a int)").await,
+            "but does not change the schema"
+        );
+        assert!(
+            !sql(14, &net_a, first, "SELECT * FROM dbtest_blog.t").await,
+            "and cannot read another database"
+        );
+        // From another tenant's network the server is not even there.
+        assert!(!sql(15, &net_b, first, "SELECT 1").await);
+        g(grant("read_only", "dbtest_shop")).await.unwrap();
+        assert!(sql(16, &net_a, first, "SELECT * FROM dbtest_shop.t").await);
+        assert!(
+            !sql(17, &net_a, first, "INSERT INTO dbtest_shop.t VALUES (2)").await,
+            "read_only cannot write"
+        );
+        g(grant("all", "dbtest_shop")).await.unwrap();
+        assert!(
+            sql(18, &net_a, first, "CREATE TABLE dbtest_shop.u (a int)").await,
+            "all may"
+        );
+        assert!(
+            !sql(19, &net_a, first, "CREATE DATABASE dbtest_extra").await,
+            "but not beyond its database"
+        );
+        assert!(
+            !sql(
+                20,
+                &net_a,
+                first,
+                "GRANT SELECT ON dbtest_shop.* TO 'x'@'%'"
+            )
+            .await,
+            "and cannot pass it on"
+        );
+        // Refusals: unknown level, unknown user, injection in a name.
+        for op in [
+            grant("superuser", "dbtest_shop"),
+            grant("all", "x; DROP DATABASE mysql"),
+            Operation::GrantDb {
+                database: "dbtest_shop".into(),
+                user: "nobody_here".into(),
+                access: "all".into(),
+            },
+            Operation::GrantDb {
+                database: "dbtest_shop".into(),
+                user: "u'@'%' --".into(),
+                access: "all".into(),
+            },
+        ] {
+            assert_eq!(g(op).await.unwrap_err().code, ErrorCode::InvalidArguments);
+        }
+        // Revoked: no longer reads it.
+        revoke_db(
+            context.clone(),
+            Operation::RevokeDb {
+                database: "dbtest_shop".into(),
+                user: "dbtest_web".into(),
+            },
+        )
+        .await
+        .unwrap();
+        revoke_db(
+            context.clone(),
+            Operation::RevokeDb {
+                database: "dbtest_shop".into(),
+                user: "dbtest_web".into(),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(!sql(21, &net_a, first, "SELECT * FROM dbtest_shop.t").await);
+        // A new password replaces the old one.
+        g(grant("read_only", "dbtest_shop")).await.unwrap();
+        let second = "Second-Passw0rd!";
+        let again = upsert(user(Some(second))).await.unwrap();
+        assert!(
+            matches!(again, Output::DbUserSet { created: false, .. }),
+            "{again:?}"
+        );
+        assert!(
+            !sql(22, &net_a, first, "SELECT 1").await,
+            "the old password is dead"
+        );
+        assert!(sql(23, &net_a, second, "SELECT * FROM dbtest_shop.t").await);
+        // Gone.
+        let dropped = drop_db_user(
+            context.clone(),
+            Operation::DropDbUser {
+                name: "dbtest_web".into(),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(dropped, Output::DbUserDropped { existed: true });
+        assert!(!sql(24, &net_a, second, "SELECT 1").await);
+        let dropped = drop_db_user(
+            context.clone(),
+            Operation::DropDbUser {
+                name: "dbtest_web".into(),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(dropped, Output::DbUserDropped { existed: false });
+        let _ = root.disconnect().await;
     }
 
     // Clean up (the data volume too: this is a test server).
