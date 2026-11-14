@@ -58,6 +58,7 @@ import {
   ResellerPortalPage,
   AdminResellersPage,
   MigrationPage,
+  LicensePage,
   filterNavItems,
   registeredFrontendModules,
 } from "@dhpanel/modules";
@@ -454,65 +455,6 @@ const adminWafRoute = createRoute({
   component: AdminWafPage,
 });
 
-// 39. Firewall routes (T11.08)
-const clientFirewallRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/firewall",
-  component: ClientFirewallPage,
-});
-
-const adminFirewallRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/admin/firewall",
-  component: AdminFirewallPage,
-});
-
-// 40. Security Center route (T11.11)
-const adminSecurityCenterRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/admin/security",
-  component: AdminSecurityCenterPage,
-});
-
-// 41. Apps routes (T12.06)
-const adminAppsRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/admin/apps",
-  component: AppsPage,
-});
-
-const appsRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/apps",
-  component: AppsPage,
-});
-
-// 42. Email routes (T13.12, T13.10, T13.11)
-const adminMailRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/admin/mail",
-  component: AdminMailQueuePage,
-});
-
-const clientEmailRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/email",
-  component: ClientEmailPage,
-});
-
-// 43. Reseller routes (T14.05, T14.02)
-const adminResellersRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/admin/resellers",
-  component: AdminResellersPage,
-});
-
-const resellerRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/reseller",
-  component: ResellerPortalPage,
-});
-
 // 44. Migration & Transfer routes (T15.06)
 const adminMigrationRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -524,6 +466,20 @@ const clientMigrationRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/migration",
   component: MigrationPage,
+});
+
+// 45. License routes (T17.13)
+const adminLicenseRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/license",
+  component: LicensePage,
+});
+
+const licenseRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/license",
+  component: LicensePage,
+});
 });
 
 // 18. Login route
@@ -604,6 +560,8 @@ const routeTree = rootRoute.addChildren([
   resellerRoute,
   adminMigrationRoute,
   clientMigrationRoute,
+  adminLicenseRoute,
+  licenseRoute,
   loginRoute,
 ]);
 

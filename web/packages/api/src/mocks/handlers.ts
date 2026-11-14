@@ -8680,6 +8680,85 @@ export const handlers = [
                                               })(),
                                             ];
                                           })(),
+...(() => {
+  // License Management Handlers (T17.08, T17.09, T17.10, T17.13)
+  const mockLicenseState = {
+    license_id: "LIC-88241-ENTERPRISE",
+    license_key: "DHP-ENT-8492-9182-AA19",
+    installation_id: "8c4d9102-5e93-42fa-9b32-fa9921bc810b",
+    customer_name: "Apex Cloud Services LLC",
+    customer_email: "license@apexcloud.io",
+    product_name: "DHPanel Enterprise Edition",
+    plan_tier: "enterprise" as const,
+    status: "active" as "active" | "grace_period" | "expired" | "suspended" | "restricted",
+    issued_at: new Date(Date.now() - 30 * 86400000).toISOString(),
+    expires_at: new Date(Date.now() + 335 * 86400000).toISOString(),
+    last_heartbeat_at: new Date(Date.now() - 3600000).toISOString(),
+    next_refresh_at: new Date(Date.now() + 39600000).toISOString(),
+    signing_key_id: "key-ed25519-prod-v1",
+    signature_valid: true,
+    features: {
+      reseller_enabled: true,
+      clustering_enabled: true,
+      advanced_backups: true,
+      commercial_waf: true,
+      whitelabel_enabled: true,
+      api_access: true,
+      max_nodes: 10,
+      max_tenants: 100,
+      max_domains: 500,
+    },
+    usage: {
+      nodes_used: 2,
+      tenants_used: 18,
+      domains_used: 42,
+    },
+    offline_grace_hours_remaining: 72,
+  };
+
+  return [
+    // GET /api/v1/license/status (TODO(api:T17.09), TODO(api:T17.13))
+    http.get(/\/api\/v1\/license\/status$/, () => {
+      return HttpResponse.json(mockLicenseState);
+    }),
+
+    // POST /api/v1/license/activate (TODO(api:T17.08), TODO(api:T17.13))
+    http.post(/\/api\/v1\/license\/activate$/, async ({ request }) => {
+      const body = (await request.json().catch(() => ({}))) as any;
+      const key = String(body.license_key || "").trim().toUpperCase();
+      if (!key.startsWith("DHP-")) {
+        return HttpResponse.json(
+          { title: "Invalid License Key", detail: "License keys must start with DHP- prefix." },
+          { status: 400 }
+        );
+      }
+      mockLicenseState.license_key = key;
+      mockLicenseState.status = "active";
+      mockLicenseState.last_heartbeat_at = new Date().toISOString();
+      mockLicenseState.next_refresh_at = new Date(Date.now() + 43200000).toISOString();
+      return HttpResponse.json(mockLicenseState);
+    }),
+
+    // POST /api/v1/license/validate (TODO(api:T17.09), TODO(api:T17.10))
+    http.post(/\/api\/v1\/license\/validate$/, () => {
+      mockLicenseState.last_heartbeat_at = new Date().toISOString();
+      mockLicenseState.next_refresh_at = new Date(Date.now() + 43200000).toISOString();
+      return HttpResponse.json(mockLicenseState);
+    }),
+
+    // POST /api/v1/license/recovery (TODO(api:T17.13))
+    http.post(/\/api\/v1\/license\/recovery$/, async ({ request }) => {
+      const body = (await request.json().catch(() => ({}))) as any;
+      const ticketId = `REC-${Math.floor(1000 + Math.random() * 9000)}-${body.reason ? body.reason.slice(0, 3).toUpperCase() : "REQ"}`;
+      return HttpResponse.json({
+        ticket_id: ticketId,
+        status: "pending",
+        created_at: new Date().toISOString(),
+        message: "Recovery request dispatched to License Authority. An integrity audit token has been generated.",
+      });
+    }),
+  ];
+})(),
                                         ];
                                       })(),
                                     ];
