@@ -23,6 +23,7 @@
 //! deleting, moving, copying, restoring, permissions, packing and unpacking are
 //! put in the audit log.
 
+pub mod ftp;
 pub mod transfers;
 
 use std::{path::PathBuf, sync::Arc, time::Duration};
@@ -118,6 +119,7 @@ pub fn client_router() -> Router<FilesState> {
         .route("/api/v1/client/files/operations/{id}", get(operation))
         .route("/api/v1/client/files/usage", get(usage).post(measure_now))
         .merge(transfers::client_router())
+        .merge(ftp::client_router())
 }
 
 /// Routes without a session: the node, with a transfer's token, and a download link.
@@ -136,11 +138,21 @@ fn internal(err: impl Into<Box<dyn std::error::Error + Send + Sync + 'static>>) 
 
 pub(crate) struct Hosting {
     pub(crate) tenant: tenants::Tenant,
+    pub(crate) plan: plans::Plan,
 }
 
 pub(crate) async fn client_hosting(
     state: &FilesState,
     who: &Principal,
+) -> Result<Hosting, AppError> {
+    client_hosting_for(state, who, "files").await
+}
+
+/// The signed-in client's hosting account, when its plan includes `feature`.
+pub(crate) async fn client_hosting_for(
+    state: &FilesState,
+    who: &Principal,
+    feature: &'static str,
 ) -> Result<Hosting, AppError> {
     if who.kind != DbAccountKind::Client {
         return Err(AppError::forbidden(
@@ -162,13 +174,13 @@ pub(crate) async fn client_hosting(
         .await
         .map_err(internal)?
         .ok_or_else(|| internal(std::io::Error::other("the plan of a tenant vanished")))?;
-    if !plans::includes_feature(&state.db, plan.id, "files")
+    if !plans::includes_feature(&state.db, plan.id, feature)
         .await
         .map_err(internal)?
     {
         return Err(AppError::forbidden(
             "feature_disabled",
-            "The file manager is not included in this plan.",
+            "This is not included in the plan.",
         ));
     }
     if tenant.status.as_str() != "active" {
@@ -177,7 +189,7 @@ pub(crate) async fn client_hosting(
             "Only a running account can use the file manager.",
         ));
     }
-    Ok(Hosting { tenant })
+    Ok(Hosting { tenant, plan })
 }
 
 /// The settings the file manager reads.
@@ -1380,13 +1392,15 @@ pub async fn purge_trash(db: &PgPool, settings: &SettingsRegistry) -> Result<usi
 #[openapi(
     paths(
         list, stat, read, write, mkdir, rename, copy, remove, trash_list, trash_empty, restore,
-        chmod, fix_permissions, archive, extract, operation, usage, measure_now, transfers::start_upload,
+        chmod, fix_permissions, archive, extract, operation, usage, measure_now, ftp::list_accounts,
+        ftp::create_account, ftp::change_account, ftp::set_password, ftp::delete_account, transfers::start_upload,
         transfers::put_chunk, transfers::complete_upload, transfers::start_download,
         transfers::get_transfer, transfers::cancel_transfer, transfers::make_link
     ),
     components(schemas(
         EntryView, DirectoryPage, FileContent, TrashEntry, TrashList, Changed, Pending, SaveFile,
-        OnePath, FromTo, SetMode, PackRequest, UnpackRequest, FolderUse, DiskUsageView, transfers::StartUpload,
+        OnePath, FromTo, SetMode, PackRequest, UnpackRequest, FolderUse, DiskUsageView, ftp::FtpAccountView, ftp::FtpAccountList, ftp::AddFtpAccount,
+        ftp::ChangeFtpAccount, ftp::NewFtpPassword, ftp::FtpAccountCreated, transfers::StartUpload,
         transfers::TransferView, transfers::DownloadLink
     )),
     tags((name = "files", description = "The file manager"))

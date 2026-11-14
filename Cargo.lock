@@ -1303,6 +1303,7 @@ dependencies = [
  "dhpanel-auth-core",
  "dhpanel-cache",
  "dhpanel-database",
+ "dhpanel-domain",
  "dhpanel-fileops",
  "dhpanel-http-kit",
  "dhpanel-kernel",

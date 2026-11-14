@@ -20,6 +20,7 @@ pub mod error_pages;
 pub mod exports;
 pub mod feature_sets;
 pub mod file_transfers;
+pub mod ftp_accounts;
 pub mod imports;
 pub mod mfa;
 pub mod modules;

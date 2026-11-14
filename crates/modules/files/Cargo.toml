@@ -14,6 +14,7 @@ workspace = true
 dhpanel-audit.workspace = true
 dhpanel-auth-core.workspace = true
 dhpanel-database.workspace = true
+dhpanel-domain.workspace = true
 dhpanel-http-kit.workspace = true
 dhpanel-node-protocol.workspace = true
 dhpanel-rbac.workspace = true

@@ -116,6 +116,53 @@ pub fn operation_secrets(
                         )),
                     });
                 }
+                // An FTP account's password: sealed by the API, opened here for this one
+                // message. Without one (it was delivered already) the account keeps it.
+                Operation::UpsertFtpAccount {
+                    tenant_id,
+                    uid,
+                    name,
+                    home,
+                    password: None,
+                    sftp,
+                    ftps,
+                    ftp_plain,
+                    read_only,
+                    quota_mb,
+                    enabled,
+                } => {
+                    let found = dhpanel_database::ftp_accounts::sealed_password_of(&db, &name)
+                        .await
+                        .map_err(|_| "could not read an FTP password".to_owned())?;
+                    let password = match found {
+                        Some((account_id, sealed)) => {
+                            let bytes = master_key
+                                .open(
+                                    &dhpanel_database::ftp_accounts::password_context(account_id),
+                                    &sealed,
+                                )
+                                .map_err(|_| "an FTP password does not open".to_owned())?;
+                            Some(dhpanel_node_protocol::DbPassword(
+                                String::from_utf8(bytes)
+                                    .map_err(|_| "an FTP password is not text".to_owned())?,
+                            ))
+                        }
+                        None => None,
+                    };
+                    return Ok(Operation::UpsertFtpAccount {
+                        tenant_id,
+                        uid,
+                        name,
+                        home,
+                        password,
+                        sftp,
+                        ftps,
+                        ftp_plain,
+                        read_only,
+                        quota_mb,
+                        enabled,
+                    });
+                }
                 // The credential of a big file transfer, sealed by the API and opened
                 // for this one message.
                 Operation::FetchFile {

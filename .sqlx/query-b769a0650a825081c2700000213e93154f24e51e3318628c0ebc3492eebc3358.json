@@ -1,0 +1,149 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE ftp_accounts SET status = 'deleting', updated_at = now()\n         WHERE tenant_id = $1 AND id = $2 AND status <> 'deleting'\n         RETURNING id, tenant_id, name, home, sftp, ftps, ftp_plain, read_only, quota_mb, enabled, status",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "ftp_accounts",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "ftp_accounts",
+            "name": "tenant_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ftp_accounts",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "home",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ftp_accounts",
+            "name": "home"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "sftp",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "ftp_accounts",
+            "name": "sftp"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "ftps",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "ftp_accounts",
+            "name": "ftps"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "ftp_plain",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "ftp_accounts",
+            "name": "ftp_plain"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "read_only",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "ftp_accounts",
+            "name": "read_only"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "quota_mb",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "ftp_accounts",
+            "name": "quota_mb"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "enabled",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "ftp_accounts",
+            "name": "enabled"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ftp_accounts",
+            "name": "status"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "b769a0650a825081c2700000213e93154f24e51e3318628c0ebc3492eebc3358"
+}

@@ -12157,6 +12157,309 @@
         ]
       }
     },
+    "/api/v1/client/ftp-accounts": {
+      "get": {
+        "tags": [
+          "files"
+        ],
+        "summary": "The accounts of the signed-in client.",
+        "operationId": "clientListFtpAccounts",
+        "responses": {
+          "200": {
+            "description": "The accounts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FtpAccountList"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only` or `feature_disabled`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "files"
+        ],
+        "summary": "Make an account.",
+        "operationId": "clientCreateFtpAccount",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddFtpAccount"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Queued; `status` becomes `ready` when the node has made it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FtpAccountCreated"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only`, `csrf_failed` or `feature_disabled`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`limit_reached`, `name_taken` or `tenant_not_running`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`invalid_name`, `invalid_path`, `plain_ftp_disabled`, a bad password or quota",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/ftp-accounts/{id}": {
+      "put": {
+        "tags": [
+          "files"
+        ],
+        "summary": "Change an account.",
+        "operationId": "clientChangeFtpAccount",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Account id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangeFtpAccount"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FtpAccountView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such account",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`invalid_path`, `plain_ftp_disabled`, `no_protocol` or a bad quota",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "files"
+        ],
+        "summary": "Remove an account.",
+        "operationId": "clientDeleteFtpAccount",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Account id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Queued; the account disappears from the list when the node has removed it"
+          },
+          "404": {
+            "description": "No such account",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/ftp-accounts/{id}/password": {
+      "put": {
+        "tags": [
+          "files"
+        ],
+        "summary": "Change an account's password.",
+        "operationId": "clientSetFtpPassword",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Account id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewFtpPassword"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Queued; the new password if it was made here",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FtpAccountCreated"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such account",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/client/imports": {
       "get": {
         "tags": [
@@ -13293,6 +13596,65 @@
         },
         "additionalProperties": false
       },
+      "AddFtpAccount": {
+        "type": "object",
+        "description": "An account to make.",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "ftp_plain": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Allow FTP without TLS (default no; refused unless the panel allows it)."
+          },
+          "ftps": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Allow FTP with TLS (default yes)."
+          },
+          "home": {
+            "type": "string",
+            "description": "The home, relative to the account's files (default: all of them)."
+          },
+          "name": {
+            "type": "string",
+            "description": "The name; the hosting account's prefix is put in front when it is not there.",
+            "example": "site"
+          },
+          "password": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The password; a strong one is made (and shown once) when it is left out."
+          },
+          "quota_mb": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Disk limit in MB."
+          },
+          "read_only": {
+            "type": "boolean",
+            "description": "Only read (default no)."
+          },
+          "sftp": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Allow SFTP (default yes)."
+          }
+        },
+        "additionalProperties": false
+      },
       "AddRecord": {
         "type": "object",
         "description": "A record to add.",
@@ -13956,6 +14318,63 @@
             "minimum": 0
           }
         }
+      },
+      "ChangeFtpAccount": {
+        "type": "object",
+        "description": "What to change; what is left out stays.",
+        "properties": {
+          "enabled": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "May log in at all."
+          },
+          "ftp_plain": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Allow FTP without TLS."
+          },
+          "ftps": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Allow FTP with TLS."
+          },
+          "home": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The home."
+          },
+          "quota_mb": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Disk limit in MB (`0` removes it)."
+          },
+          "read_only": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Only read."
+          },
+          "sftp": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Allow SFTP."
+          }
+        },
+        "additionalProperties": false
       },
       "ChangePlan": {
         "type": "object",
@@ -15234,6 +15653,140 @@
         },
         "additionalProperties": false
       },
+      "FtpAccountCreated": {
+        "type": "object",
+        "description": "A new account, with the password if one was made.",
+        "required": [
+          "account"
+        ],
+        "properties": {
+          "account": {
+            "$ref": "#/components/schemas/FtpAccountView",
+            "description": "The account."
+          },
+          "password": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The password, shown this once (only when it was made here)."
+          }
+        }
+      },
+      "FtpAccountList": {
+        "type": "object",
+        "description": "The accounts, and how to connect.",
+        "required": [
+          "items",
+          "prefix",
+          "host",
+          "sftp_port",
+          "ftp_port",
+          "plain_allowed"
+        ],
+        "properties": {
+          "ftp_port": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The FTP port (use TLS: explicit FTPS)."
+          },
+          "host": {
+            "type": "string",
+            "description": "The address to connect to (empty when the panel has not been told)."
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FtpAccountView"
+            },
+            "description": "By name."
+          },
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Most accounts the plan allows (`null`: no limit)."
+          },
+          "plain_allowed": {
+            "type": "boolean",
+            "description": "Whether plain FTP (no TLS) may be allowed to accounts."
+          },
+          "prefix": {
+            "type": "string",
+            "description": "What every name starts with (`alice_`)."
+          },
+          "sftp_port": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The SFTP port."
+          }
+        }
+      },
+      "FtpAccountView": {
+        "type": "object",
+        "description": "An account.",
+        "required": [
+          "id",
+          "name",
+          "home",
+          "sftp",
+          "ftps",
+          "ftp_plain",
+          "read_only",
+          "enabled",
+          "status"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "May log in at all."
+          },
+          "ftp_plain": {
+            "type": "boolean",
+            "description": "May log in over FTP without TLS."
+          },
+          "ftps": {
+            "type": "boolean",
+            "description": "May log in over FTP with TLS (FTPS)."
+          },
+          "home": {
+            "type": "string",
+            "description": "Its home, relative to the account's files (`\"\"`: all of them)."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Id."
+          },
+          "name": {
+            "type": "string",
+            "description": "The whole name (log in with it).",
+            "example": "alice_site"
+          },
+          "quota_mb": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Disk limit in MB."
+          },
+          "read_only": {
+            "type": "boolean",
+            "description": "May only read."
+          },
+          "sftp": {
+            "type": "boolean",
+            "description": "May log in over SFTP."
+          },
+          "status": {
+            "type": "string",
+            "description": "`pending`, `ready`, `failed` or `deleting`."
+          }
+        }
+      },
       "GrantView": {
         "type": "object",
         "description": "A user's access to a database.",
@@ -15810,6 +16363,20 @@
             ]
           }
         }
+      },
+      "NewFtpPassword": {
+        "type": "object",
+        "description": "A new password.",
+        "properties": {
+          "password": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The password; a strong one is made (and shown once) when it is left out."
+          }
+        },
+        "additionalProperties": false
       },
       "NewPassword": {
         "type": "object",

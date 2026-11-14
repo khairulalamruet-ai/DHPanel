@@ -44,6 +44,55 @@
         "bn": "মুছে ফেলা ফাইল এত দিন অ্যাকাউন্টের ট্র্যাশে থাকে, তারপর স্থায়ীভাবে যায়। 0: নিজে থেকে কখনও মুছে না।"
       }
     },
+    "ftp_plain_allowed": {
+      "type": "boolean",
+      "title": "Allow FTP without TLS",
+      "default": false,
+      "x-scope": "global",
+      "x-title": { "en": "Allow FTP without TLS", "bn": "TLS ছাড়া FTP চালু" },
+      "x-description": {
+        "en": "Off: FTP accounts can only log in with TLS (FTPS) and SFTP. On: an account may also be allowed plain FTP, which sends its password in the clear.",
+        "bn": "বন্ধ: FTP অ্যাকাউন্ট শুধু TLS (FTPS) ও SFTP দিয়ে ঢুকতে পারে। চালু: কোনো অ্যাকাউন্টকে TLS ছাড়া FTP-ও দেওয়া যায়, যাতে পাসওয়ার্ড সরাসরি যায়।"
+      }
+    },
+    "connect_host": {
+      "type": "string",
+      "title": "Address for SFTP and FTP",
+      "default": "",
+      "maxLength": 253,
+      "x-scope": "global",
+      "x-title": { "en": "Address for SFTP and FTP", "bn": "SFTP ও FTP-র ঠিকানা" },
+      "x-description": {
+        "en": "The host name clients are told to connect to (shown next to their accounts).",
+        "bn": "ক্লায়েন্টদের যে host name-এ connect করতে বলা হয় (অ্যাকাউন্টের পাশে দেখানো হয়)।"
+      }
+    },
+    "sftp_port": {
+      "type": "integer",
+      "title": "SFTP port",
+      "default": 2222,
+      "minimum": 1,
+      "maximum": 65535,
+      "x-scope": "global",
+      "x-title": { "en": "SFTP port", "bn": "SFTP পোর্ট" },
+      "x-description": {
+        "en": "The port shown to clients. It must match the node agent's DHPANEL_AGENT_SFTP_PORT (default 2222), and the node's firewall must allow it.",
+        "bn": "ক্লায়েন্টদের যে পোর্ট দেখানো হয়। এটি নোড এজেন্টের DHPANEL_AGENT_SFTP_PORT (ডিফল্ট 2222)-এর সাথে মিলতে হবে, আর নোডের firewall-এ খোলা থাকতে হবে।"
+      }
+    },
+    "ftp_port": {
+      "type": "integer",
+      "title": "FTP port",
+      "default": 2121,
+      "minimum": 1,
+      "maximum": 65535,
+      "x-scope": "global",
+      "x-title": { "en": "FTP port", "bn": "FTP পোর্ট" },
+      "x-description": {
+        "en": "The FTP (explicit FTPS) port shown to clients. It must match DHPANEL_AGENT_FTP_PORT (default 2121); the passive data ports 21100-21119 must be open too.",
+        "bn": "ক্লায়েন্টদের দেখানো FTP (explicit FTPS) পোর্ট। এটি DHPANEL_AGENT_FTP_PORT (ডিফল্ট 2121)-এর সাথে মিলতে হবে; passive data পোর্ট 21100-21119-ও খোলা থাকতে হবে।"
+      }
+    },
     "max_upload_mb": {
       "type": "integer",
       "title": "Biggest upload (MB)",

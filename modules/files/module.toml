@@ -11,7 +11,11 @@ depends_on = ["auth", "rbac", "audit", "system", "plans", "users"]
 keys = []
 
 [features]
-keys = ["files"]
+keys = ["files", "ftp"]
+
+# A plan without these keys gets the defaults.
+[limits]
+max_ftp_accounts = { type = "int", default = 5, unlimited = -1 }
 
 [ui]
 admin_nav  = { group = "Data", order = 20, icon = "folder" }

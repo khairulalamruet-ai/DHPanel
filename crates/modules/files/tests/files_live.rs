@@ -1150,3 +1150,238 @@ async fn the_disk_usage_is_measured_by_the_node_and_kept_for_the_client(pool: Pg
     assert_eq!(one["operation_id"], two["operation_id"]);
     let _ = std::fs::remove_dir_all(&base);
 }
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn ftp_accounts_are_made_on_the_node_in_the_background_and_passwords_never_stay(
+    pool: PgPool,
+) {
+    let e = env(&pool, Duration::from_secs(20)).await;
+    let (alice, tenant) = client(&pool, "alice", 10_000).await;
+    let (bobby, _) = client(&pool, "bobby", 10_001).await;
+    let (a, b) = (e.sign_in(alice).await, e.sign_in(bobby).await);
+    let path = "/api/v1/client/ftp-accounts";
+    sqlx::query("UPDATE plans SET limits = '{\"max_ftp_accounts\": 2}' WHERE id = (SELECT plan_id FROM tenants WHERE id = $1)")
+        .bind(tenant)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let (status, list) = e.call(&a, "GET", path, None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(
+        (
+            list["prefix"].clone(),
+            list["limit"].clone(),
+            list["plain_allowed"].clone()
+        ),
+        (json!("alice_"), json!(2), json!(false))
+    );
+    assert_eq!(
+        (list["sftp_port"].clone(), list["ftp_port"].clone()),
+        (json!(2222), json!(2121))
+    );
+
+    // A password is made and shown once; the node gets it sealed, never in the ledger.
+    let (status, made) = e
+        .call(
+            &a,
+            "POST",
+            path,
+            Some(json!({"name": "site", "home": "www"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{made}");
+    assert_eq!(
+        (
+            made["account"]["name"].clone(),
+            made["account"]["status"].clone()
+        ),
+        (json!("alice_site"), json!("pending"))
+    );
+    let password = made["password"].as_str().unwrap().to_owned();
+    let id: Uuid = made["account"]["id"].as_str().unwrap().parse().unwrap();
+    let (op, payload): (Uuid, Value) =
+        sqlx::query_as("SELECT id, payload FROM operations WHERE kind = 'upsert_ftp_account'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        (
+            payload["name"].clone(),
+            payload["home"].clone(),
+            payload["uid"].clone()
+        ),
+        (json!("alice_site"), json!("www"), json!(10_000))
+    );
+    assert_eq!(
+        (
+            payload["sftp"].clone(),
+            payload["ftps"].clone(),
+            payload["ftp_plain"].clone()
+        ),
+        (json!(true), json!(true), json!(false))
+    );
+    assert!(payload.get("password").is_none_or(Value::is_null));
+    let in_ledger: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM operations WHERE payload::text LIKE '%' || $1 || '%'",
+    )
+    .bind(&password)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(in_ledger, 0);
+    let sealed: Vec<u8> =
+        sqlx::query_scalar("SELECT sealed FROM ftp_account_passwords WHERE account_id = $1")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let opened = MasterKey::from_bytes(&KEY)
+        .open(
+            &dhpanel_database::ftp_accounts::password_context(id),
+            &sealed,
+        )
+        .unwrap();
+    assert_eq!(opened, password.as_bytes());
+    sqlx::query("UPDATE operations SET status = 'dispatched', attempts = 1 WHERE id = $1")
+        .bind(op)
+        .execute(&pool)
+        .await
+        .unwrap();
+    dhpanel_database::operations::succeed(
+        &pool,
+        op,
+        &json!({"type": "ftp_account_set", "created": true}),
+    )
+    .await
+    .unwrap();
+    let (_, list) = e.call(&a, "GET", path, None).await;
+    assert_eq!(list["items"][0]["status"], "ready");
+    let left: i64 = sqlx::query_scalar("SELECT count(*) FROM ftp_account_passwords")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(left, 0, "the password goes when the node has it");
+
+    // What cannot be.
+    for (body, why) in [
+        (json!({"name": "Bad Name"}), "invalid_name"),
+        (json!({"name": "x", "home": "../b"}), "invalid_path"),
+        (json!({"name": "x", "home": ".trash"}), "invalid_path"),
+        (
+            json!({"name": "x", "ftp_plain": true}),
+            "plain_ftp_disabled",
+        ),
+        (
+            json!({"name": "x", "sftp": false, "ftps": false}),
+            "no_protocol",
+        ),
+        (json!({"name": "x", "password": "weak"}), "too_short"),
+    ] {
+        let (status, got) = e.call(&a, "POST", path, Some(body)).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{why}: {got}");
+        assert!(
+            got.to_string().contains(why) || why == "too_short",
+            "{why}: {got}"
+        );
+    }
+    let (status, got) = e
+        .call(&a, "POST", path, Some(json!({"name": "alice_site"})))
+        .await;
+    assert_eq!((status, code(&got)), (StatusCode::CONFLICT, "name_taken"));
+    let (status, _) = e
+        .call(&a, "POST", path, Some(json!({"name": "second"})))
+        .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let (status, got) = e
+        .call(&a, "POST", path, Some(json!({"name": "third"})))
+        .await;
+    assert_eq!(
+        (status, code(&got)),
+        (StatusCode::CONFLICT, "limit_reached")
+    );
+
+    // Changing: the node is told the new settings, not the password.
+    let (status, got) = e
+        .call(
+            &a,
+            "PUT",
+            &format!("{path}/{id}"),
+            Some(json!({"read_only": true, "quota_mb": 50, "home": "www/sub"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{got}");
+    assert_eq!(
+        (
+            got["read_only"].clone(),
+            got["quota_mb"].clone(),
+            got["status"].clone()
+        ),
+        (json!(true), json!(50), json!("pending"))
+    );
+    let last: Value = sqlx::query_scalar("SELECT payload FROM operations WHERE kind = 'upsert_ftp_account' ORDER BY created_at DESC LIMIT 1").fetch_one(&pool).await.unwrap();
+    assert_eq!(
+        (
+            last["read_only"].clone(),
+            last["quota_mb"].clone(),
+            last["home"].clone()
+        ),
+        (json!(true), json!(50), json!("www/sub"))
+    );
+    let (status, got) = e
+        .call(
+            &a,
+            "PUT",
+            &format!("{path}/{id}"),
+            Some(json!({"ftp_plain": true})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{got}");
+    // A new password.
+    let (status, got) = e
+        .call(&a, "PUT", &format!("{path}/{id}/password"), Some(json!({})))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{got}");
+    assert!(got["password"].is_string());
+    // Others cannot touch it.
+    for (m, p) in [
+        ("PUT", format!("{path}/{id}")),
+        ("DELETE", format!("{path}/{id}")),
+        ("PUT", format!("{path}/{id}/password")),
+    ] {
+        let (status, _) = e.call(&b, m, &p, Some(json!({}))).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{m} {p}");
+    }
+    let (_, theirs) = e.call(&b, "GET", path, None).await;
+    assert_eq!(theirs["items"].as_array().unwrap().len(), 0);
+    // Removing.
+    let (status, _) = e.call(&a, "DELETE", &format!("{path}/{id}"), None).await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    let drop_op: Uuid =
+        sqlx::query_scalar("SELECT id FROM operations WHERE kind = 'drop_ftp_account'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    sqlx::query("UPDATE operations SET status = 'dispatched', attempts = 1 WHERE id = $1")
+        .bind(drop_op)
+        .execute(&pool)
+        .await
+        .unwrap();
+    dhpanel_database::operations::succeed(
+        &pool,
+        drop_op,
+        &json!({"type": "ftp_account_dropped", "existed": true}),
+    )
+    .await
+    .unwrap();
+    let (_, list) = e.call(&a, "GET", path, None).await;
+    assert_eq!(list["items"].as_array().unwrap().len(), 1, "{list}");
+    // A plan without the feature has none.
+    sqlx::query("UPDATE feature_sets SET all_features = false, features = ARRAY['files']::feature_key[] WHERE id = (SELECT feature_set_id FROM plans WHERE is_default)").execute(&pool).await.unwrap();
+    let (status, got) = e.call(&a, "GET", path, None).await;
+    assert_eq!(
+        (status, code(&got)),
+        (StatusCode::FORBIDDEN, "feature_disabled")
+    );
+}
