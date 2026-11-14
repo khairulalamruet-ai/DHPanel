@@ -28,10 +28,14 @@ RestartSec=2
 NoNewPrivileges=yes
 # CAP_CHOWN: hand the socket file and tenant directories to their owners.
 # CAP_SYS_ADMIN: set project quota limits (quotactl); nothing else here needs it.
+# CAP_SETUID, CAP_SETGID: file manager workers drop to the tenant's own user.
 # CAP_NET_ADMIN: write the one nftables table that guards the database's public
 # port (set_db_firewall, T07.05b); the table, the port and the shape of every rule
 # are fixed in the helper, and no request can name anything else.
-CapabilityBoundingSet=CAP_CHOWN CAP_SYS_ADMIN CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_CHOWN CAP_SYS_ADMIN CAP_NET_ADMIN CAP_SETUID CAP_SETGID
+# With NoNewPrivileges, systemd starts the process without CAP_SETUID unless the
+# capabilities are also ambient (checked on a real machine: CapEff lacked it).
+AmbientCapabilities=CAP_CHOWN CAP_SYS_ADMIN CAP_NET_ADMIN CAP_SETUID CAP_SETGID
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
@@ -60,6 +64,9 @@ SystemCallArchitectures=native
 SystemCallFilter=@system-service
 SystemCallFilter=~@privileged @resources
 SystemCallFilter=chown fchown fchownat lchown quotactl quotactl_fd
+# The file manager's workers run as the tenant's own user (`setpriv`): they need to
+# drop to it.
+SystemCallFilter=setuid setgid setgroups setresuid setresgid setreuid setregid capget capset
 UMask=0077
 
 [Install]

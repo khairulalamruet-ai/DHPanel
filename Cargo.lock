@@ -1515,6 +1515,9 @@ name = "dhpanel-priv-helper"
 version = "0.1.0"
 dependencies = [
  "dhpanel-common",
+ "dhpanel-fileops",
+ "dhpanel-node-protocol",
+ "dhpanel-safe-fs",
  "rustix",
  "serde",
  "serde_json",

@@ -23,6 +23,7 @@
 pub mod cache;
 pub mod capabilities;
 pub mod db;
+pub mod files;
 pub mod pma;
 pub mod sqlexport;
 pub mod sqlimport;
@@ -146,6 +147,10 @@ impl Registry {
             registry.register("export_sql", {
                 let context = context.clone();
                 move |op| sqlexport::export_sql(context.clone(), op)
+            });
+            registry.register("file_op", {
+                let context = context.clone();
+                move |op| files::file_op(context.clone(), op)
             });
             registry.register("open_phpmyadmin", {
                 let context = context.clone();

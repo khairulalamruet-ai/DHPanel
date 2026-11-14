@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Largest request line accepted, in bytes.
-pub const MAX_REQUEST_BYTES: usize = 64 * 1024;
+pub const MAX_REQUEST_BYTES: usize = 1024 * 1024;
 
 /// One default file of a new tenant.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -53,6 +53,16 @@ pub enum Action {
         /// `a.b.c.d/n`, n from 8 to 32, at most 2000.
         cidrs: Vec<String>,
     },
+    /// Does one file manager request on a tenant's files, as the tenant's own user
+    /// id, in a process of its own (see [`crate::files`]).
+    FileOp {
+        /// The tenant's id (a lower-case UUID).
+        tenant_id: String,
+        /// The tenant's numeric id (10000..59999).
+        uid: u32,
+        /// What to do.
+        request: dhpanel_node_protocol::files::FileRequest,
+    },
     /// Removes a tenant's two (empty) directories after its files were
     /// deleted. Never deletes any file: a non-empty directory is a failure.
     RemoveTenant {
@@ -72,6 +82,7 @@ impl Action {
             Self::PrepareTenant { .. } => "prepare_tenant",
             Self::SetStorageQuota { .. } => "set_storage_quota",
             Self::SetDbFirewall { .. } => "set_db_firewall",
+            Self::FileOp { .. } => "file_op",
             Self::RemoveTenant { .. } => "remove_tenant",
         }
     }
@@ -116,6 +127,9 @@ pub struct Response {
     /// Present when `ok` is false.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<ResponseError>,
+    /// What the action has to say, when it has something (a file manager answer).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data: Option<serde_json::Value>,
 }
 
 /// Failure detail. Messages are fixed texts, never echoes of the input.
@@ -135,6 +149,16 @@ impl Response {
             id: id.to_owned(),
             ok: true,
             error: None,
+            data: None,
+        }
+    }
+
+    /// Success with something to say.
+    #[must_use]
+    pub fn with_data(id: &str, data: serde_json::Value) -> Self {
+        Self {
+            data: Some(data),
+            ..Self::done(id)
         }
     }
 
@@ -148,6 +172,7 @@ impl Response {
                 code,
                 message: message.to_owned(),
             }),
+            data: None,
         }
     }
 }
@@ -167,6 +192,7 @@ fn allowed_fields(action: &str) -> Option<&'static [&'static str]> {
         "prepare_tenant" => Some(&["type", "tenant_id", "uid", "skeleton"]),
         "set_storage_quota" => Some(&["type", "tenant_id", "uid", "disk_bytes", "inodes"]),
         "set_db_firewall" => Some(&["type", "cidrs"]),
+        "file_op" => Some(&["type", "tenant_id", "uid", "request"]),
         "remove_tenant" => Some(&["type", "tenant_id", "uid"]),
         _ => None,
     }

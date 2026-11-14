@@ -54,6 +54,17 @@ pub struct TenantContext {
 /// # Errors
 /// A connection or protocol failure (retryable) or the helper's own refusal.
 pub fn ask_helper(socket: &Path, action: Action) -> Result<(), AgentError> {
+    ask_helper_data(socket, action).map(|_| ())
+}
+
+/// [`ask_helper`], and what the helper answered with besides "done".
+///
+/// # Errors
+/// As [`ask_helper`].
+pub fn ask_helper_data(
+    socket: &Path,
+    action: Action,
+) -> Result<Option<serde_json::Value>, AgentError> {
     let unavailable = |what: &str| {
         AgentError::new(
             ErrorCode::Internal,
@@ -84,7 +95,7 @@ pub fn ask_helper(socket: &Path, action: Action) -> Result<(), AgentError> {
     let response: Response =
         serde_json::from_str(&answer).map_err(|_| unavailable("unreadable answer"))?;
     if response.ok {
-        return Ok(());
+        return Ok(response.data);
     }
     let error = response.error;
     Err(match error.as_ref().map(|e| e.code) {

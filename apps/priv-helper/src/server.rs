@@ -8,7 +8,10 @@ use std::{
         net::{UnixListener, UnixStream},
     },
     path::{Path, PathBuf},
-    sync::atomic::{AtomicBool, Ordering},
+    sync::{
+        Mutex,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+    },
     time::Duration,
 };
 
@@ -100,22 +103,35 @@ pub fn serve(
     stop: &AtomicBool,
 ) -> io::Result<()> {
     listener.set_nonblocking(true)?;
-    while !stop.load(Ordering::Acquire) {
-        match listener.accept() {
-            Ok((stream, _)) => {
-                if let Err(err) = handle(stream, config, log) {
-                    log.line(&format!("connection error: {}", err.kind()));
+    // Each connection has a thread (a file manager request may take a while), but
+    // everything except file requests runs one at a time, as before.
+    std::thread::scope(|scope| {
+        while !stop.load(Ordering::Acquire) {
+            match listener.accept() {
+                Ok((stream, _)) => {
+                    scope.spawn(move || {
+                        if let Err(err) = handle(stream, config, log) {
+                            log.line(&format!("connection error: {}", err.kind()));
+                        }
+                    });
                 }
+                Err(err) if err.kind() == io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                Err(err) if err.kind() == io::ErrorKind::Interrupted => {}
+                Err(err) => return Err(err),
             }
-            Err(err) if err.kind() == io::ErrorKind::WouldBlock => {
-                std::thread::sleep(Duration::from_millis(50));
-            }
-            Err(err) if err.kind() == io::ErrorKind::Interrupted => {}
-            Err(err) => return Err(err),
         }
-    }
-    Ok(())
+        Ok(())
+    })
 }
+
+/// Actions other than file requests run one at a time.
+static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
+/// File requests running now.
+static FILE_REQUESTS: AtomicUsize = AtomicUsize::new(0);
+/// Most file requests at once.
+const MAX_FILE_REQUESTS: usize = 16;
 
 /// Whether a peer with this uid may use the helper: the agent, nobody else
 /// (not even root: root does not need the helper, and a confused root process
@@ -163,13 +179,16 @@ fn handle(stream: UnixStream, config: &Config, log: &dyn Log) -> io::Result<()> 
         }
     };
     let response = match execute(&request.action, config) {
-        Ok(()) => {
+        Ok(data) => {
             log.line(&format!(
                 "DONE uid={peer_uid} id={} action={}",
                 request.id,
                 request.action.name()
             ));
-            Response::done(&request.id)
+            match data {
+                Some(data) => Response::with_data(&request.id, data),
+                None => Response::done(&request.id),
+            }
         }
         Err((code, message)) => {
             log.line(&format!(
@@ -185,9 +204,37 @@ fn handle(stream: UnixStream, config: &Config, log: &dyn Log) -> io::Result<()> 
 
 /// Carries out an action. Each arm validates its own arguments: the helper
 /// never relies on what the agent checked.
-fn execute(action: &Action, config: &Config) -> Result<(), (ErrorCode, &'static str)> {
+fn execute(
+    action: &Action,
+    config: &Config,
+) -> Result<Option<serde_json::Value>, (ErrorCode, &'static str)> {
+    if let Action::FileOp {
+        tenant_id,
+        uid,
+        request,
+    } = action
+    {
+        if FILE_REQUESTS.fetch_add(1, Ordering::AcqRel) >= MAX_FILE_REQUESTS {
+            FILE_REQUESTS.fetch_sub(1, Ordering::AcqRel);
+            return Err((ErrorCode::Failed, "too many file requests at once"));
+        }
+        let result = crate::files::run(&config.tenants, tenant_id, *uid, request);
+        FILE_REQUESTS.fetch_sub(1, Ordering::AcqRel);
+        return result
+            .and_then(|r| {
+                serde_json::to_value(r).map_err(|_| (ErrorCode::Failed, "unreadable answer"))
+            })
+            .map(Some);
+    }
+    let _only_one = ONE_AT_A_TIME
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    execute_one(action, config).map(|()| None)
+}
+
+fn execute_one(action: &Action, config: &Config) -> Result<(), (ErrorCode, &'static str)> {
     match action {
-        Action::Noop => Ok(()),
+        Action::Noop | Action::FileOp { .. } => Ok(()),
         Action::PrepareTenant {
             tenant_id,
             uid,

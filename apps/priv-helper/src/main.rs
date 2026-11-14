@@ -20,6 +20,20 @@ const USAGE: &str = "usage: dhpanel-priv-helper [--socket PATH] [--tenants-root 
 #[allow(clippy::print_stdout)]
 fn main() -> ExitCode {
     let log = StderrLog;
+    // The file worker: started by the helper itself, as the tenant's user id.
+    if std::env::args().nth(1).as_deref() == Some("fileop") {
+        let root = std::env::args().nth(3).map(PathBuf::from);
+        return match (std::env::args().nth(2).as_deref(), root) {
+            (Some("--root"), Some(root)) => {
+                match dhpanel_priv_helper::files::worker(&root, std::io::stdin(), std::io::stdout())
+                {
+                    Ok(()) => ExitCode::SUCCESS,
+                    Err(_) => ExitCode::FAILURE,
+                }
+            }
+            _ => ExitCode::from(64),
+        };
+    }
     let mut socket = PathBuf::from(DEFAULT_SOCKET);
     let mut user = String::from("dhpanel-agent");
     let mut tenants_root = PathBuf::from("/srv/tenants");

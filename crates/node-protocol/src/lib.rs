@@ -593,6 +593,16 @@ pub enum Operation {
         /// How long the session lasts, in minutes (5..=720).
         session_minutes: u32,
     },
+    /// One file manager request on a tenant's files, done as the tenant's own user
+    /// id. Answered with [`Output::File`].
+    FileOp {
+        /// The tenant.
+        tenant_id: Uuid,
+        /// The tenant's numeric user id.
+        uid: u32,
+        /// What to do.
+        request: files::FileRequest,
+    },
     /// How far an import has come. Answered with [`Output::ImportProgress`].
     ReportImportProgress {
         /// The import.
@@ -772,6 +782,7 @@ impl Operation {
         "drop_database",
         "import_sql",
         "export_sql",
+        "file_op",
         "set_phpmyadmin_host",
         "open_phpmyadmin",
         "report_import_progress",
@@ -814,6 +825,7 @@ impl Operation {
             Self::DropDatabase { .. } => "drop_database",
             Self::ImportSql { .. } => "import_sql",
             Self::ExportSql { .. } => "export_sql",
+            Self::FileOp { .. } => "file_op",
             Self::SetPhpMyAdminHost { .. } => "set_phpmyadmin_host",
             Self::OpenPhpMyAdmin { .. } => "open_phpmyadmin",
             Self::ReportImportProgress { .. } => "report_import_progress",
@@ -1015,6 +1027,11 @@ pub enum Output {
     PhpMyAdminOpened {
         /// Until when the sign-in link works (Unix seconds).
         link_expires_at: i64,
+    },
+    /// Answer to [`Operation::FileOp`].
+    File {
+        /// What came of it.
+        result: files::FileResult,
     },
     /// Answer to [`Operation::ExportSql`].
     SqlExported {
@@ -1950,6 +1967,11 @@ mod tests {
                 token_hash: "0".repeat(64),
                 session_minutes: 60,
             },
+            Operation::FileOp {
+                tenant_id: id(),
+                uid: 10_000,
+                request: files::FileRequest::TrashList,
+            },
             Operation::ReportImportProgress { import_id: id() },
             Operation::CreateDatabase {
                 name: "alice_shop".into(),
@@ -2011,7 +2033,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            36,
+            37,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }
