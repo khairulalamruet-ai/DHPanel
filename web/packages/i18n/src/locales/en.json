@@ -2674,5 +2674,28 @@
         "compromise": "Cryptographic key compromise"
       }
     }
+  },
+  "dashboard": {
+    "customizeLayout": "Customize Layout",
+    "customizeLayoutTitle": "Customize Dashboard Layout",
+    "customizeLayoutDesc": "Reorder and toggle visibility of widgets. Your layout is automatically persisted.",
+    "widgetNodes": "Cluster Nodes Status",
+    "widgetNodesDesc": "Online vs total nodes and cluster health.",
+    "nodesOnlineLabel": "Nodes Active & Heartbeat OK",
+    "viewNodes": "View Nodes",
+    "widgetTenants": "Tenants & Hosted Domains",
+    "widgetTenantsDesc": "Active tenant accounts, domains, and MySQL databases.",
+    "manageTenants": "Manage Tenants",
+    "widgetResources": "Resource Consumption (CPU / RAM / Disk)",
+    "widgetResourcesDesc": "Real-time hardware utilization meters.",
+    "widgetOperations": "Recent Operations Ledger",
+    "widgetOperationsDesc": "Live async job statuses, durations, and logs.",
+    "widgetSecurity": "Security & Threat Alerts",
+    "widgetSecurityDesc": "Coraza WAF blocks, Fail2ban jails, and login anomalies.",
+    "threatsBlocked24h": "Threats Blocked (24h)",
+    "inspectWaf": "WAF Console",
+    "widgetLicense": "License Authority Status",
+    "widgetLicenseDesc": "Ed25519 signature validity and capacity quotas.",
+    "manageLicense": "Manage License"
   }
 }

@@ -1,4 +1,7 @@
+export * from "./types";
 export * from "./HealthCard";
+export * from "./DashboardWidgets";
+export * from "./DashboardLayoutDialog";
 export * from "./DashboardPage";
 
 export const dashboardModule = {
