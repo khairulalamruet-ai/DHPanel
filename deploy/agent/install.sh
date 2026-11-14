@@ -90,6 +90,9 @@ else
 fi
 AGENT_UID="$(id -u "$AGENT_USER")"
 install -d -m 0700 -o "$AGENT_USER" -g "$AGENT_USER" "$STATE_DIR" "$STATE_DIR/home"
+# Files on their way between the network and a tenant's files: the agent and (through its
+# group) the privileged helper only.
+install -d -m 0770 -o "$AGENT_USER" -g "$AGENT_USER" /var/lib/dhpanel-transfers
 
 # --- binary and unit --------------------------------------------------------
 say "installing $BIN_DST"

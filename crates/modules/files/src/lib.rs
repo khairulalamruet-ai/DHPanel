@@ -23,7 +23,9 @@
 //! deleting, moving, copying, restoring, permissions, packing and unpacking are
 //! put in the audit log.
 
-use std::{sync::Arc, time::Duration};
+pub mod transfers;
+
+use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use axum::{
     Json, Router,
@@ -72,6 +74,12 @@ pub struct FilesState {
     pub settings: Arc<SettingsRegistry>,
     /// How long a request waits for the node before answering `202`.
     pub wait: Duration,
+    /// Seals the tokens of transfers until the node has them.
+    pub master_key: dhpanel_auth_core::secretbox::MasterKey,
+    /// Where big files wait for the node, or for the client (`imports.spool_dir`).
+    pub spool_dir: PathBuf,
+    /// Where nodes reach this panel (`agent.public_url`); without it no transfers.
+    pub agent_url: Option<String>,
 }
 
 impl FromRef<FilesState> for PgPool {
@@ -108,6 +116,12 @@ pub fn client_router() -> Router<FilesState> {
         .route("/api/v1/client/files/archive", post(archive))
         .route("/api/v1/client/files/extract", post(extract))
         .route("/api/v1/client/files/operations/{id}", get(operation))
+        .merge(transfers::client_router())
+}
+
+/// Routes without a session: the node, with a transfer's token, and a download link.
+pub fn public_router() -> Router<FilesState> {
+    transfers::public_router()
 }
 
 /// Routes for administrators (none yet).
@@ -119,11 +133,14 @@ fn internal(err: impl Into<Box<dyn std::error::Error + Send + Sync + 'static>>) 
     AppError::internal(err)
 }
 
-struct Hosting {
-    tenant: tenants::Tenant,
+pub(crate) struct Hosting {
+    pub(crate) tenant: tenants::Tenant,
 }
 
-async fn client_hosting(state: &FilesState, who: &Principal) -> Result<Hosting, AppError> {
+pub(crate) async fn client_hosting(
+    state: &FilesState,
+    who: &Principal,
+) -> Result<Hosting, AppError> {
     if who.kind != DbAccountKind::Client {
         return Err(AppError::forbidden(
             "client_only",
@@ -363,7 +380,7 @@ fn respond(result: FileResult) -> Result<Response, AppError> {
 
 // ------------------------------------------------------------ running things
 
-fn audit(
+pub(crate) fn audit(
     action: &'static str,
     who: &Principal,
     hosting: &Hosting,
@@ -1184,11 +1201,14 @@ pub async fn purge_trash(db: &PgPool, settings: &SettingsRegistry) -> Result<usi
 #[openapi(
     paths(
         list, stat, read, write, mkdir, rename, copy, remove, trash_list, trash_empty, restore,
-        chmod, fix_permissions, archive, extract, operation
+        chmod, fix_permissions, archive, extract, operation, transfers::start_upload,
+        transfers::put_chunk, transfers::complete_upload, transfers::start_download,
+        transfers::get_transfer, transfers::cancel_transfer, transfers::make_link
     ),
     components(schemas(
         EntryView, DirectoryPage, FileContent, TrashEntry, TrashList, Changed, Pending, SaveFile,
-        OnePath, FromTo, SetMode, PackRequest, UnpackRequest
+        OnePath, FromTo, SetMode, PackRequest, UnpackRequest, transfers::StartUpload,
+        transfers::TransferView, transfers::DownloadLink
     )),
     tags((name = "files", description = "The file manager"))
 )]

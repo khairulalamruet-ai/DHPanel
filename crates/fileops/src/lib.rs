@@ -804,3 +804,141 @@ fn remove_tree(dir: &OwnedFd, name: &str, depth: usize, count: &mut u32) -> Out<
     *count += 1;
     Ok(())
 }
+
+// ---------------------------------------------------------------- transfers
+
+/// Puts the bytes of `input` (at most `max_bytes`) into the file `dest`, made
+/// beside its place and moved in at the end, so a cut transfer leaves nothing
+/// half done. The folders above `dest` are made when missing. Never over something
+/// unless `overwrite`. Returns the number of bytes.
+///
+/// # Errors
+/// The usual refusals of the file operations; [`FileErrorCode::TooLarge`] when `input`
+/// has more than `max_bytes`.
+pub fn place(
+    root: &Root,
+    dest: &str,
+    overwrite: bool,
+    max_bytes: u64,
+    input: &mut dyn std::io::Read,
+) -> Out<u64> {
+    let parts = fs(dhpanel_safe_fs::parts(user_path(dest)?).map_err(FsError::Path))?;
+    let (name, folders) = parts.split_last().ok_or_else(|| {
+        (
+            FileErrorCode::InvalidPath,
+            "the path names nothing".to_owned(),
+        )
+    })?;
+    let mut so_far = String::new();
+    for folder in folders {
+        if !so_far.is_empty() {
+            so_far.push('/');
+        }
+        so_far.push_str(folder);
+        let (parent, leaf) = fs(root.parent(&so_far))?;
+        match rustix::fs::mkdirat(&parent, leaf.as_str(), Mode::from_raw_mode(0o755)) {
+            Ok(()) | Err(rustix::io::Errno::EXIST) => {}
+            Err(e) => return Err(from_fs(FsError::from(e))),
+        }
+    }
+    let (dir, name) = fs(root.parent(&if folders.is_empty() {
+        (*name).to_owned()
+    } else {
+        format!("{}/{name}", folders.join("/"))
+    }))?;
+    match stat_at(&dir, &name) {
+        Ok(st) => {
+            if !overwrite {
+                return fail(FileErrorCode::Exists, "already exists");
+            }
+            if kind_of(FileType::from_raw_mode(st.st_mode)) != EntryKind::File {
+                return fail(FileErrorCode::IsDir, "it is not a file");
+            }
+        }
+        Err((FileErrorCode::NotFound, _)) => {}
+        Err(other) => return Err(other),
+    }
+    let tmp = format!(".dh-up-{}", random_hex(8)?);
+    let fd = sys(rustix::fs::openat(
+        &dir,
+        tmp.as_str(),
+        OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+        Mode::from_raw_mode(0o600),
+    ))?;
+    let copied = (|| -> std::io::Result<u64> {
+        let mut file = std::fs::File::from(fd);
+        let n = std::io::copy(&mut input.take(max_bytes.saturating_add(1)), &mut file)?;
+        if n <= max_bytes {
+            rustix::fs::fchmod(&file, Mode::from_raw_mode(0o644))?;
+            file.sync_all()?;
+        }
+        Ok(n)
+    })();
+    let size = match copied {
+        Ok(n) if n <= max_bytes => n,
+        Ok(_) => {
+            let _ = dhpanel_safe_fs::remove(&dir, &tmp, false);
+            return fail(FileErrorCode::TooLarge, "the file is bigger than the limit");
+        }
+        Err(e) => {
+            let _ = dhpanel_safe_fs::remove(&dir, &tmp, false);
+            // A full disk or a quota shows here.
+            return Err((
+                FileErrorCode::Failed,
+                format!("cannot write the file: {}", e.kind()),
+            ));
+        }
+    };
+    let moved = if overwrite {
+        rustix::fs::renameat(&dir, tmp.as_str(), &dir, name.as_str())
+    } else {
+        rustix::fs::renameat_with(
+            &dir,
+            tmp.as_str(),
+            &dir,
+            name.as_str(),
+            RenameFlags::NOREPLACE,
+        )
+    };
+    if let Err(e) = moved {
+        let _ = dhpanel_safe_fs::remove(&dir, &tmp, false);
+        return Err(from_fs(FsError::from(e)));
+    }
+    Ok(size)
+}
+
+/// Copies the file `path` (at most `max_bytes`) into `out`. Returns the number of bytes.
+///
+/// # Errors
+/// The usual refusals; [`FileErrorCode::TooLarge`] for a bigger file.
+pub fn take(root: &Root, path: &str, max_bytes: u64, out: &mut dyn std::io::Write) -> Out<u64> {
+    let fd = fs(root.open_at(
+        user_path(path)?,
+        OFlags::RDONLY | OFlags::NONBLOCK,
+        Mode::empty(),
+    ))?;
+    let st = sys(fstat(&fd))?;
+    match kind_of(FileType::from_raw_mode(st.st_mode)) {
+        EntryKind::File => {}
+        EntryKind::Dir => return fail(FileErrorCode::IsDir, "is a directory"),
+        _ => return fail(FileErrorCode::InvalidArguments, "not a regular file"),
+    }
+    if u64::try_from(st.st_size).unwrap_or(0) > max_bytes {
+        return fail(FileErrorCode::TooLarge, "the file is bigger than the limit");
+    }
+    let n = std::io::copy(
+        &mut std::fs::File::from(fd).take(max_bytes.saturating_add(1)),
+        out,
+    )
+    .or_else(|_| fail(FileErrorCode::Failed, "cannot read the file"))?;
+    if n > max_bytes {
+        return fail(FileErrorCode::TooLarge, "the file is bigger than the limit");
+    }
+    Ok(n)
+}
+
+/// A failure of [`place`] or [`take`] as an answer.
+#[must_use]
+pub fn failure(code: FileErrorCode, message: String) -> FileResult {
+    FileResult::Error { code, message }
+}

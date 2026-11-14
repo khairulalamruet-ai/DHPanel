@@ -10,10 +10,11 @@ use axum::{
     body::Body,
     http::{Request, StatusCode, header},
 };
+use dhpanel_auth_core::secretbox::MasterKey;
 use dhpanel_cache::RedisHandle;
 use dhpanel_database::modules as db;
 use dhpanel_kernel::{Manifest, Module, ModuleMount, ModuleRoutes, Registry};
-use dhpanel_mod_files::{FilesState, SETTINGS_SCHEMA, client_router};
+use dhpanel_mod_files::{FilesState, SETTINGS_SCHEMA, client_router, public_router};
 use dhpanel_node_protocol::{Operation, Output};
 use dhpanel_session::{CSRF_HEADER, NewSession, SessionConfig, SessionStore, set_cookie};
 use dhpanel_settings::{Scope, SettingsRegistry};
@@ -22,6 +23,12 @@ use serde_json::{Value, json};
 use sqlx::PgPool;
 use tower::ServiceExt as _;
 use uuid::Uuid;
+
+const KEY: [u8; 32] = [9u8; 32];
+
+fn spool_dir() -> PathBuf {
+    std::env::temp_dir().join(format!("dh-files-spool-{}", std::process::id()))
+}
 
 const HASH: &str = "$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHQ$aGFzaGhhc2hoYXNoaGFzaA";
 
@@ -70,14 +77,21 @@ async fn env(pool: &PgPool, wait: Duration) -> Env {
         manifest,
         routes: Box::new({
             let (pool, sessions, settings) = (pool.clone(), sessions.clone(), settings.clone());
-            move || ModuleRoutes {
-                client: Some(client_router().with_state(FilesState {
+            move || {
+                let state = FilesState {
                     db: pool.clone(),
                     sessions: sessions.clone(),
                     settings: settings.clone(),
                     wait,
-                })),
-                ..ModuleRoutes::none()
+                    master_key: MasterKey::from_bytes(&KEY),
+                    spool_dir: spool_dir(),
+                    agent_url: Some("https://panel.example.com:8443".to_owned()),
+                };
+                ModuleRoutes {
+                    client: Some(client_router().with_state(state.clone())),
+                    public: Some(public_router().with_state(state)),
+                    ..ModuleRoutes::none()
+                }
             }
         }),
     });
@@ -155,6 +169,36 @@ impl Env {
             status,
             serde_json::from_slice(&bytes).unwrap_or(Value::Null),
         )
+    }
+
+    async fn raw(
+        &self,
+        who: Option<&Browser>,
+        method: &str,
+        path: &str,
+        headers: &[(&str, &str)],
+        body: Vec<u8>,
+    ) -> (StatusCode, axum::http::HeaderMap, Vec<u8>) {
+        let mut req = Request::builder().method(method).uri(path);
+        if let Some(who) = who {
+            req = req
+                .header(header::COOKIE, &who.cookie)
+                .header(CSRF_HEADER, &who.csrf);
+        }
+        for (k, v) in headers {
+            req = req.header(*k, *v);
+        }
+        let res = self
+            .app
+            .clone()
+            .oneshot(req.body(Body::from(body)).unwrap())
+            .await
+            .unwrap();
+        let (status, headers) = (res.status(), res.headers().clone());
+        let bytes = axum::body::to_bytes(res.into_body(), 1 << 24)
+            .await
+            .unwrap();
+        (status, headers, bytes.to_vec())
     }
 
     async fn set(&self, pool: &PgPool, values: Value) {
@@ -641,4 +685,399 @@ async fn slow_work_answers_202_and_the_answer_is_asked_for_later_by_its_owner_on
     );
     node.abort();
     let _ = std::fs::remove_dir_all(&base);
+}
+
+fn sha(data: &[u8]) -> String {
+    use sha2::{Digest as _, Sha256};
+    Sha256::digest(data)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn big_files_go_up_in_chunks_that_can_be_resumed_and_come_down_through_a_five_minute_link(
+    pool: PgPool,
+) {
+    let e = env(&pool, Duration::from_secs(20)).await;
+    let (alice, tenant) = client(&pool, "alice", 10_000).await;
+    let (bobby, _) = client(&pool, "bobby", 10_001).await;
+    let (a, b) = (e.sign_in(alice).await, e.sign_in(bobby).await);
+    let f = "/api/v1/client/files";
+    let data: Vec<u8> = (0..30_000u32).flat_map(|i| i.to_le_bytes()).collect();
+
+    // What cannot start.
+    for (body, why) in [
+        (json!({"path": "../x", "size_bytes": 10}), "invalid_path"),
+        (
+            json!({"path": ".trash/x", "size_bytes": 10}),
+            "invalid_path",
+        ),
+        (json!({"path": "a.bin", "size_bytes": 0}), "empty_file"),
+        (
+            json!({"path": "a.bin", "size_bytes": 10, "sha256": "zz"}),
+            "invalid_checksum",
+        ),
+    ] {
+        let (status, got) = e
+            .call(&a, "POST", &format!("{f}/uploads"), Some(body))
+            .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{why}: {got}");
+        assert!(got.to_string().contains(why), "{why}: {got}");
+    }
+    let (status, got) = e
+        .call(
+            &a,
+            "POST",
+            &format!("{f}/uploads"),
+            Some(json!({"path": "a.bin", "size_bytes": 5_000_000_000_u64})),
+        )
+        .await;
+    assert_eq!(
+        (status, code(&got)),
+        (StatusCode::PAYLOAD_TOO_LARGE, "too_large")
+    );
+
+    // A real upload, with a break in the middle: ask where it stands, go on from there.
+    let (status, up) = e
+        .call(
+            &a,
+            "POST",
+            &format!("{f}/uploads"),
+            Some(json!({"path": "www/big/a.bin", "size_bytes": data.len(), "sha256": sha(&data)})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{up}");
+    let id = up["id"].as_str().unwrap().to_owned();
+    let chunk = |n: i32| format!("{f}/uploads/{id}/chunks/{n}");
+    let (status, _, _) = e
+        .raw(Some(&b), "PUT", &chunk(0), &[], data[..1000].to_vec())
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "not yours");
+    let (status, _, _) = e
+        .raw(Some(&a), "PUT", &chunk(1), &[], data[..1000].to_vec())
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let (status, _, body) = e
+        .raw(Some(&a), "PUT", &chunk(0), &[], data[..50_000].to_vec())
+        .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    // "The tab was closed": the new page asks, and goes on.
+    let (_, now) = e
+        .call(&a, "GET", &format!("{f}/transfers/{id}"), None)
+        .await;
+    assert_eq!(
+        (now["received_bytes"].clone(), now["next_chunk"].clone()),
+        (json!(50_000), json!(1))
+    );
+    let (status, got) = e
+        .call(&a, "POST", &format!("{f}/uploads/{id}/complete"), None)
+        .await;
+    assert_eq!((status, code(&got)), (StatusCode::CONFLICT, "incomplete"));
+    let (status, _, _) = e
+        .raw(Some(&a), "PUT", &chunk(1), &[], data[50_000..].to_vec())
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, done) = e
+        .call(&a, "POST", &format!("{f}/uploads/{id}/complete"), None)
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{done}");
+    assert_eq!(done["status"], "queued");
+
+    // The node's side: a token only for it, ranges work, never in the ledger.
+    let uuid: Uuid = id.parse().unwrap();
+    let (op, payload): (Uuid, Value) =
+        sqlx::query_as("SELECT id, payload FROM operations WHERE kind = 'fetch_file'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(payload["dest"], "www/big/a.bin");
+    assert!(payload.get("token").is_none_or(Value::is_null), "{payload}");
+    let sealed: Vec<u8> =
+        sqlx::query_scalar("SELECT sealed_token FROM file_transfers WHERE id = $1")
+            .bind(uuid)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let token = String::from_utf8(
+        MasterKey::from_bytes(&KEY)
+            .open(
+                &dhpanel_database::file_transfers::token_context(uuid),
+                &sealed,
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    let bearer = format!("Bearer {token}");
+    let data_url = format!("/api/v1/public/files/transfers/{id}/data");
+    let (status, _, _) = e.raw(None, "GET", &data_url, &[], Vec::new()).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, _, body) = e
+        .raw(
+            None,
+            "GET",
+            &data_url,
+            &[("authorization", &bearer), ("accept-encoding", "gzip")],
+            Vec::new(),
+        )
+        .await;
+    assert_eq!((status, body == data), (StatusCode::OK, true));
+    let (status, _, body) = e
+        .raw(
+            None,
+            "GET",
+            &data_url,
+            &[("authorization", &bearer), ("range", "bytes=100000-")],
+            Vec::new(),
+        )
+        .await;
+    assert_eq!(
+        (status, body),
+        (StatusCode::PARTIAL_CONTENT, data[100_000..].to_vec())
+    );
+    sqlx::query("UPDATE operations SET status = 'dispatched', attempts = 1 WHERE id = $1")
+        .bind(op)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (_, now) = e
+        .call(&a, "GET", &format!("{f}/transfers/{id}"), None)
+        .await;
+    assert_eq!(now["status"], "running");
+    dhpanel_database::operations::succeed(
+        &pool,
+        op,
+        &json!({"type": "file_fetched", "size_bytes": data.len()}),
+    )
+    .await
+    .unwrap();
+    let (_, now) = e
+        .call(&a, "GET", &format!("{f}/transfers/{id}"), None)
+        .await;
+    assert_eq!(now["status"], "done", "{now}");
+    let (status, _, _) = e
+        .raw(
+            None,
+            "GET",
+            &data_url,
+            &[("authorization", &bearer)],
+            Vec::new(),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "no more after the end");
+    let spooled = spool_dir().join(format!("{}.upload", id.replace('-', "")));
+    assert!(spooled.exists());
+    assert_eq!(
+        dhpanel_mod_files::transfers::sweep(&pool, &spool_dir())
+            .await
+            .unwrap(),
+        1
+    );
+    assert!(
+        !spooled.exists(),
+        "the spooled file is removed once the node has it"
+    );
+
+    // A file that does not match its checksum ends the transfer at once.
+    let (_, up) = e
+        .call(
+            &a,
+            "POST",
+            &format!("{f}/uploads"),
+            Some(json!({"path": "x.bin", "size_bytes": 4, "sha256": sha(b"nope")})),
+        )
+        .await;
+    let bad = up["id"].as_str().unwrap().to_owned();
+    let (status, _, _) = e
+        .raw(
+            Some(&a),
+            "PUT",
+            &format!("{f}/uploads/{bad}/chunks/0"),
+            &[],
+            b"data".to_vec(),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, got) = e
+        .call(&a, "POST", &format!("{f}/uploads/{bad}/complete"), None)
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{got}");
+    // An upload can be given up.
+    let (_, up) = e
+        .call(
+            &a,
+            "POST",
+            &format!("{f}/uploads"),
+            Some(json!({"path": "y.bin", "size_bytes": 4})),
+        )
+        .await;
+    let giveup = up["id"].as_str().unwrap().to_owned();
+    let (status, _) = e
+        .call(&a, "DELETE", &format!("{f}/transfers/{giveup}"), None)
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    // A download: the node sends the file, the client gets a five-minute link.
+    let (status, dl) = e
+        .call(
+            &a,
+            "POST",
+            &format!("{f}/downloads"),
+            Some(json!({"path": "www/big/a.bin"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{dl}");
+    let did = dl["id"].as_str().unwrap().to_owned();
+    let duuid: Uuid = did.parse().unwrap();
+    let (op, payload): (Uuid, Value) =
+        sqlx::query_as("SELECT id, payload FROM operations WHERE kind = 'send_file'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        payload["url"],
+        format!("https://panel.example.com:8443/api/v1/public/files/transfers/{did}")
+    );
+    assert!(payload.get("token").is_none_or(Value::is_null));
+    let sealed: Vec<u8> =
+        sqlx::query_scalar("SELECT sealed_token FROM file_transfers WHERE id = $1")
+            .bind(duuid)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let dtoken = String::from_utf8(
+        MasterKey::from_bytes(&KEY)
+            .open(
+                &dhpanel_database::file_transfers::token_context(duuid),
+                &sealed,
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    let dbearer = format!("Bearer {dtoken}");
+    sqlx::query("UPDATE operations SET status = 'dispatched', attempts = 1 WHERE id = $1")
+        .bind(op)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let up_url = |n: i32| format!("/api/v1/public/files/transfers/{did}/chunks/{n}");
+    let (status, _, _) = e
+        .raw(None, "PUT", &up_url(0), &[], data[..100].to_vec())
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, _, _) = e
+        .raw(
+            None,
+            "PUT",
+            &up_url(0),
+            &[("authorization", &dbearer)],
+            data[..70_000].to_vec(),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _, _) = e
+        .raw(
+            None,
+            "PUT",
+            &up_url(1),
+            &[("authorization", &dbearer)],
+            data[70_000..].to_vec(),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, got) = e
+        .call(&a, "POST", &format!("{f}/transfers/{did}/link"), None)
+        .await;
+    assert_eq!((status, code(&got)), (StatusCode::CONFLICT, "not_ready"));
+    let done_url = format!("/api/v1/public/files/transfers/{did}/complete");
+    let (status, _, _) = e
+        .raw(
+            None,
+            "POST",
+            &done_url,
+            &[
+                ("authorization", &dbearer),
+                ("content-type", "application/json"),
+            ],
+            json!({"size_bytes": data.len(), "sha256": sha(&data)})
+                .to_string()
+                .into_bytes(),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    dhpanel_database::operations::succeed(
+        &pool,
+        op,
+        &json!({"type": "file_sent", "size_bytes": data.len()}),
+    )
+    .await
+    .unwrap();
+    let (_, now) = e
+        .call(&a, "GET", &format!("{f}/transfers/{did}"), None)
+        .await;
+    assert_eq!(
+        (now["status"].clone(), now["size_bytes"].clone()),
+        (json!("ready"), json!(data.len())),
+        "{now}"
+    );
+    let (status, _) = e
+        .call(&b, "POST", &format!("{f}/transfers/{did}/link"), None)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, link) = e
+        .call(&a, "POST", &format!("{f}/transfers/{did}/link"), None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{link}");
+    let url = link["url"].as_str().unwrap().to_owned();
+    let (status, headers, body) = e
+        .raw(
+            None,
+            "GET",
+            &url,
+            &[("accept-encoding", "gzip")],
+            Vec::new(),
+        )
+        .await;
+    assert_eq!((status, body == data), (StatusCode::OK, true));
+    assert_eq!(
+        headers["content-disposition"],
+        "attachment; filename=\"a.bin\""
+    );
+    let (status, _, body) = e
+        .raw(None, "GET", &url, &[("range", "bytes=1000-")], Vec::new())
+        .await;
+    assert_eq!(
+        (status, body),
+        (StatusCode::PARTIAL_CONTENT, data[1000..].to_vec())
+    );
+    let (status, _, _) = e
+        .raw(
+            None,
+            "GET",
+            &url.replace("token=", "token=x"),
+            &[],
+            Vec::new(),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    sqlx::query(
+        "UPDATE file_transfers SET link_expires_at = now() - interval '1 second' WHERE id = $1",
+    )
+    .bind(duuid)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (status, _, _) = e.raw(None, "GET", &url, &[], Vec::new()).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "the link has run out");
+    let (status, link) = e
+        .call(&a, "POST", &format!("{f}/transfers/{did}/link"), None)
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "a new link can be asked for: {link}"
+    );
+    let _ = tenant;
+    let _ = std::fs::remove_dir_all(spool_dir());
 }

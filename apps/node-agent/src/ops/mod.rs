@@ -29,6 +29,7 @@ pub mod sqlexport;
 pub mod sqlimport;
 pub mod sqlsplit;
 pub mod tenant;
+pub mod transfer;
 pub mod vhost;
 
 use std::{
@@ -147,6 +148,14 @@ impl Registry {
             registry.register("export_sql", {
                 let context = context.clone();
                 move |op| sqlexport::export_sql(context.clone(), op)
+            });
+            registry.register("fetch_file", {
+                let context = context.clone();
+                move |op| transfer::fetch_file(context.clone(), op)
+            });
+            registry.register("send_file", {
+                let context = context.clone();
+                move |op| transfer::send_file(context.clone(), op)
             });
             registry.register("file_op", {
                 let context = context.clone();

@@ -132,7 +132,7 @@ pub async fn report_import_progress(
 
 /// Downloads the dump into `path`, picking up a partial file, and returns when the
 /// whole `size` is there.
-fn download(
+pub(super) fn download(
     url: &str,
     token: &str,
     size: u64,
@@ -165,10 +165,14 @@ fn download(
         }
         _ => return Err(failed("the control plane did not give the dump").retryable()),
     };
+    use std::os::unix::fs::OpenOptionsExt as _;
+    // Readable by the agent's group: the privileged helper reads what is fetched for
+    // a tenant's files.
     let mut out = std::fs::OpenOptions::new()
         .create(true)
         .write(true)
         .truncate(start == 0)
+        .mode(0o660)
         .open(path)
         .map_err(|e| failed(&format!("cannot keep the dump: {}", e.kind())).retryable())?;
     out.seek(SeekFrom::Start(start))

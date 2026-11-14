@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE file_transfers SET received_bytes = $4, next_chunk = next_chunk + 1, updated_at = now()\n         WHERE tenant_id = $1 AND id = $2 AND kind = 'upload' AND status = 'uploading'\n           AND next_chunk = $3 AND $4 <= size_bytes",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int4",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b933ecac9dc481df04ed36d5a4564f0e3487ae04f573624046522bdb09748cb7"
+}

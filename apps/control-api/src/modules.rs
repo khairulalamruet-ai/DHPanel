@@ -318,8 +318,13 @@ pub fn mount(
                     })
                 }
                 "files" => {
-                    let (db, sessions, late_settings) =
-                        (db.clone(), sessions.clone(), late_settings.clone());
+                    let (db, sessions, late_settings, master_key) = (
+                        db.clone(),
+                        sessions.clone(),
+                        late_settings.clone(),
+                        master_key.clone(),
+                    );
+                    let (spool_dir, agent_url) = (spool_dir.clone(), agent_url.clone());
                     Box::new(move || match late_settings.get() {
                         Some(settings) => {
                             let state = dhpanel_mod_files::FilesState {
@@ -327,13 +332,18 @@ pub fn mount(
                                 sessions: sessions.clone(),
                                 settings: settings.clone(),
                                 wait: dhpanel_mod_files::DEFAULT_WAIT,
+                                master_key: master_key.clone(),
+                                spool_dir: spool_dir.clone(),
+                                agent_url: agent_url.clone(),
                             };
                             ModuleRoutes {
                                 admin: Some(
                                     dhpanel_mod_files::admin_router().with_state(state.clone()),
                                 ),
-                                client: Some(dhpanel_mod_files::client_router().with_state(state)),
-                                ..ModuleRoutes::none()
+                                client: Some(
+                                    dhpanel_mod_files::client_router().with_state(state.clone()),
+                                ),
+                                public: Some(dhpanel_mod_files::public_router().with_state(state)),
                             }
                         }
                         None => ModuleRoutes::none(),

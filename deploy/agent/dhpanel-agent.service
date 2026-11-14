@@ -33,7 +33,8 @@ NoNewPrivileges=yes
 CapabilityBoundingSet=
 AmbientCapabilities=
 ProtectSystem=strict
-ReadWritePaths=/var/lib/dhpanel-agent
+ReadWritePaths=/var/lib/dhpanel-agent /var/lib/dhpanel-transfers
+Environment=DHPANEL_AGENT_TRANSFERS=/var/lib/dhpanel-transfers
 ProtectHome=yes
 PrivateTmp=yes
 PrivateDevices=yes

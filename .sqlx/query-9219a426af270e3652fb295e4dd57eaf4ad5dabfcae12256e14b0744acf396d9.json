@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE file_transfers SET status = 'cancelled', error = 'the upload was left unfinished',\n                                   finished_at = now(), updated_at = now()\n         WHERE status = 'uploading' AND updated_at < now() - make_interval(hours => $1::int)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9219a426af270e3652fb295e4dd57eaf4ad5dabfcae12256e14b0744acf396d9"
+}

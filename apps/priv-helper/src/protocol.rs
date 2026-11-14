@@ -63,6 +63,36 @@ pub enum Action {
         /// What to do.
         request: dhpanel_node_protocol::files::FileRequest,
     },
+    /// Puts a staged file into a tenant's files as the tenant's own user: written
+    /// beside its place and moved in, never over something unless `overwrite`.
+    PlaceFile {
+        /// The tenant's id (a lower-case UUID).
+        tenant_id: String,
+        /// The tenant's numeric id (10000..59999).
+        uid: u32,
+        /// The staged file: a plain name in the agent's transfer folder.
+        staged: String,
+        /// Where it goes, relative to the tenant's files.
+        dest: String,
+        /// Replace a file that is there.
+        overwrite: bool,
+        /// Refuse a file bigger than this.
+        max_bytes: u64,
+    },
+    /// Copies a file of a tenant's, read as the tenant's own user, to a new staged
+    /// file in the agent's transfer folder.
+    TakeFile {
+        /// The tenant's id (a lower-case UUID).
+        tenant_id: String,
+        /// The tenant's numeric id (10000..59999).
+        uid: u32,
+        /// The file, relative to the tenant's files.
+        path: String,
+        /// The staged file to make: a plain name in the agent's transfer folder.
+        staged: String,
+        /// Refuse a file bigger than this.
+        max_bytes: u64,
+    },
     /// Removes a tenant's two (empty) directories after its files were
     /// deleted. Never deletes any file: a non-empty directory is a failure.
     RemoveTenant {
@@ -83,6 +113,8 @@ impl Action {
             Self::SetStorageQuota { .. } => "set_storage_quota",
             Self::SetDbFirewall { .. } => "set_db_firewall",
             Self::FileOp { .. } => "file_op",
+            Self::PlaceFile { .. } => "place_file",
+            Self::TakeFile { .. } => "take_file",
             Self::RemoveTenant { .. } => "remove_tenant",
         }
     }
@@ -193,6 +225,16 @@ fn allowed_fields(action: &str) -> Option<&'static [&'static str]> {
         "set_storage_quota" => Some(&["type", "tenant_id", "uid", "disk_bytes", "inodes"]),
         "set_db_firewall" => Some(&["type", "cidrs"]),
         "file_op" => Some(&["type", "tenant_id", "uid", "request"]),
+        "place_file" => Some(&[
+            "type",
+            "tenant_id",
+            "uid",
+            "staged",
+            "dest",
+            "overwrite",
+            "max_bytes",
+        ]),
+        "take_file" => Some(&["type", "tenant_id", "uid", "path", "staged", "max_bytes"]),
         "remove_tenant" => Some(&["type", "tenant_id", "uid"]),
         _ => None,
     }

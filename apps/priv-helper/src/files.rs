@@ -158,6 +158,273 @@ pub fn worker(
     out.write_all(&json).map_err(|e| e.to_string())
 }
 
+// ---------------------------------------------------------------- transfers
+
+use std::{fs::File, os::fd::OwnedFd};
+
+use dhpanel_safe_fs::Root;
+
+/// Opens the transfer folder (the agent's, handed to us by the unit).
+fn staged_root(dir: &Path) -> Result<Root, Failure> {
+    Root::open(dir).map_err(|_| (ErrorCode::Failed, "the transfer folder is not usable"))
+}
+
+fn host_ids(
+    env: &TenantEnv,
+    tenant_id: &str,
+    uid: u32,
+) -> Result<(u32, std::path::PathBuf), Failure> {
+    if !valid_tenant_id(tenant_id) {
+        return Err((ErrorCode::InvalidArguments, "bad tenant id"));
+    }
+    let text = std::fs::read_to_string(&env.subuid_file)
+        .map_err(|_| (ErrorCode::Failed, "cannot read the subordinate ids"))?;
+    let range = subuid_range(&text, &env.agent_name)
+        .ok_or((ErrorCode::Failed, "the agent has no subordinate ids"))?;
+    Ok((host_uid(range, uid)?, env.root.join(tenant_id)))
+}
+
+/// Runs `setpriv ... helper <mode> --root DIR <args>` as `uid`, with the given input
+/// and output, and waits for it. Returns whether it succeeded and what it printed
+/// on stdout (only if it was a pipe) and stderr.
+fn run_worker(
+    uid: u32,
+    mode: &str,
+    root: &Path,
+    args: &[String],
+    stdin: Stdio,
+    stdout: Stdio,
+) -> Result<(bool, Vec<u8>, String), Failure> {
+    let program = std::env::current_exe()
+        .map_err(|_| (ErrorCode::Failed, "cannot find the helper itself"))?;
+    let setpriv = ["/usr/bin/setpriv", "/bin/setpriv"]
+        .into_iter()
+        .find(|p| Path::new(p).exists())
+        .ok_or((ErrorCode::Failed, "setpriv (util-linux) is missing"))?;
+    let mut child = Command::new(setpriv)
+        .arg(format!("--reuid={uid}"))
+        .arg(format!("--regid={uid}"))
+        .arg("--clear-groups")
+        .arg("--no-new-privs")
+        .arg("--")
+        .arg(program)
+        .arg(mode)
+        .arg("--root")
+        .arg(root)
+        .args(args)
+        .env_clear()
+        .stdin(stdin)
+        .stdout(stdout)
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|_| (ErrorCode::Failed, "cannot start the file worker"))?;
+    let out = child.stdout.take();
+    let err = child.stderr.take();
+    let out_reader = std::thread::spawn(move || {
+        let mut text = Vec::new();
+        if let Some(o) = out {
+            let _ = o.take(MAX_ANSWER).read_to_end(&mut text);
+        }
+        text
+    });
+    let err_reader = std::thread::spawn(move || {
+        let mut text = String::new();
+        if let Some(e) = err {
+            let _ = e.take(4096).read_to_string(&mut text);
+        }
+        text
+    });
+    let started = Instant::now();
+    let ok = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status.success(),
+            Ok(None) if started.elapsed() > TIME_LIMIT => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break false;
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(5)),
+            Err(_) => break false,
+        }
+    };
+    Ok((
+        ok,
+        out_reader.join().unwrap_or_default(),
+        err_reader.join().unwrap_or_default(),
+    ))
+}
+
+/// What the worker said (as JSON on its stdout or stderr) as a result.
+fn said(ok: bool, out: &[u8], err: &str) -> Result<(), Failure> {
+    let parsed = serde_json::from_slice::<FileResult>(out)
+        .ok()
+        .or_else(|| serde_json::from_str::<FileResult>(err.trim()).ok());
+    match (ok, parsed) {
+        (true, Some(FileResult::Done { .. })) | (true, None) => Ok(()),
+        (_, Some(FileResult::Error { code, .. })) => Err((
+            match code {
+                FileErrorCode::TooLarge => ErrorCode::InvalidArguments,
+                FileErrorCode::Exists | FileErrorCode::Failed => ErrorCode::Failed,
+                _ => ErrorCode::InvalidArguments,
+            },
+            match code {
+                FileErrorCode::Exists => "a file is already there",
+                FileErrorCode::TooLarge => "the file is bigger than the limit",
+                FileErrorCode::NotFound => "not found",
+                FileErrorCode::Denied => "not allowed",
+                FileErrorCode::IsDir => "it is a directory",
+                FileErrorCode::InvalidPath | FileErrorCode::Link | FileErrorCode::NotDir => {
+                    "the path is not usable"
+                }
+                _ => "the file worker refused",
+            },
+        )),
+        _ => Err((ErrorCode::Failed, "the file worker failed")),
+    }
+}
+
+/// `place_file`.
+///
+/// # Errors
+/// Bad arguments, the worker's refusal (for example `exists`) or a failure.
+#[allow(clippy::too_many_arguments)]
+pub fn place_file(
+    env: &TenantEnv,
+    transfers: &Path,
+    tenant_id: &str,
+    uid: u32,
+    staged: &str,
+    dest: &str,
+    overwrite: bool,
+    max_bytes: u64,
+) -> Result<(), Failure> {
+    let (host, root) = host_ids(env, tenant_id, uid)?;
+    dhpanel_safe_fs::check_name(staged)
+        .map_err(|_| (ErrorCode::InvalidArguments, "bad staged name"))?;
+    let fd = staged_root(transfers)?
+        .open_at(
+            staged,
+            rustix::fs::OFlags::RDONLY,
+            rustix::fs::Mode::empty(),
+        )
+        .map_err(|_| (ErrorCode::Failed, "the staged file is not usable"))?;
+    let mut args = vec![
+        "--dest".to_owned(),
+        dest.to_owned(),
+        "--max-bytes".to_owned(),
+        max_bytes.to_string(),
+    ];
+    if overwrite {
+        args.push("--overwrite".to_owned());
+    }
+    let (ok, out, err) = run_worker(
+        host,
+        "fileput",
+        &root,
+        &args,
+        Stdio::from(File::from(fd)),
+        Stdio::piped(),
+    )?;
+    said(ok, &out, &err)
+}
+
+/// `take_file`.
+///
+/// # Errors
+/// As [`place_file`].
+#[allow(clippy::too_many_arguments)]
+pub fn take_file(
+    env: &TenantEnv,
+    transfers: &Path,
+    agent: (u32, u32),
+    tenant_id: &str,
+    uid: u32,
+    path: &str,
+    staged: &str,
+    max_bytes: u64,
+) -> Result<(), Failure> {
+    let (host, root) = host_ids(env, tenant_id, uid)?;
+    dhpanel_safe_fs::check_name(staged)
+        .map_err(|_| (ErrorCode::InvalidArguments, "bad staged name"))?;
+    let folder = staged_root(transfers)?;
+    let out: OwnedFd = rustix::fs::openat(
+        folder.fd(),
+        staged,
+        rustix::fs::OFlags::WRONLY
+            | rustix::fs::OFlags::CREATE
+            | rustix::fs::OFlags::EXCL
+            | rustix::fs::OFlags::NOFOLLOW
+            | rustix::fs::OFlags::CLOEXEC,
+        rustix::fs::Mode::from_raw_mode(0o600),
+    )
+    .map_err(|_| (ErrorCode::Failed, "cannot make the staged file"))?;
+    // The agent reads it afterwards; the worker only writes to the descriptor it is given.
+    rustix::fs::fchown(
+        &out,
+        Some(rustix::fs::Uid::from_raw(agent.0)),
+        Some(rustix::fs::Gid::from_raw(agent.1)),
+    )
+    .map_err(|_| (ErrorCode::Failed, "cannot hand the staged file over"))?;
+    let args = vec![
+        "--path".to_owned(),
+        path.to_owned(),
+        "--max-bytes".to_owned(),
+        max_bytes.to_string(),
+    ];
+    let result = run_worker(
+        host,
+        "fileget",
+        &root,
+        &args,
+        Stdio::null(),
+        Stdio::from(File::from(out)),
+    )
+    .and_then(|(ok, out, err)| said(ok, &out, &err));
+    if result.is_err() {
+        let _ = dhpanel_safe_fs::remove(folder.fd(), staged, false);
+    }
+    result
+}
+
+/// The worker of `fileput`: the staged file arrives on stdin.
+///
+/// # Errors
+/// Never; the answer says what happened.
+pub fn put_worker(
+    root: &Path,
+    dest: &str,
+    overwrite: bool,
+    max_bytes: u64,
+    mut input: impl std::io::Read,
+    mut out: impl std::io::Write,
+) {
+    let result = match Root::open(root) {
+        Ok(root) => match dhpanel_fileops::place(&root, dest, overwrite, max_bytes, &mut input) {
+            Ok(_) => FileResult::Done { count: 1 },
+            Err((code, message)) => FileResult::error(code, message),
+        },
+        Err(_) => FileResult::error(FileErrorCode::NotFound, "the files are not there"),
+    };
+    let _ = out.write_all(&serde_json::to_vec(&result).unwrap_or_default());
+}
+
+/// The worker of `fileget`: the file goes to stdout, a refusal is said on stderr.
+///
+/// # Errors
+/// The refusal, as the answer to print on stderr.
+pub fn get_worker(
+    root: &Path,
+    path: &str,
+    max_bytes: u64,
+    out: &mut dyn std::io::Write,
+) -> Result<(), FileResult> {
+    let root = Root::open(root)
+        .map_err(|_| FileResult::error(FileErrorCode::NotFound, "the files are not there"))?;
+    dhpanel_fileops::take(&root, path, max_bytes, out)
+        .map(|_| ())
+        .map_err(|(code, message)| FileResult::error(code, message))
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::unwrap_used)]
 mod tests {

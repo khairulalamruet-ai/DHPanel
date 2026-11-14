@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE file_transfers SET status = 'queued', token_hash = $2, sealed_token = $3, updated_at = now()\n         WHERE id = $1 AND kind = 'upload' AND status = 'uploading'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bytea",
+        "Bytea"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b7fd7f097b9d8f7b32bd253c86d092077b0aed300791fa22773256632aec1cc8"
+}

@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE file_transfers SET status = $2, error = left($3, 500), finished_at = now(), updated_at = now(),\n                                   sealed_token = NULL, token_hash = NULL\n         WHERE id = $1 AND status IN ('uploading', 'queued', 'running')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5a2729b3ff7a203951fa9d3cb7b70966cb928350433c126c2f51a841a58b3887"
+}

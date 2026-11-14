@@ -54,6 +54,8 @@ pub struct Config {
     pub tenants: TenantEnv,
     /// The one port the firewall action may filter (the database's public port).
     pub db_port: u16,
+    /// The agent's folder for files on their way (see [`crate::files`]).
+    pub transfers: PathBuf,
 }
 
 /// Creates the socket: owned by the agent, mode 0600. A stale socket file from
@@ -248,6 +250,39 @@ fn execute_one(action: &Action, config: &Config) -> Result<(), (ErrorCode, &'sta
         } => tenant::set_storage_quota(&config.tenants, tenant_id, *uid, *disk_bytes, *inodes),
         Action::SetDbFirewall { cidrs } => crate::firewall::set(config.db_port, cidrs),
         Action::RemoveTenant { tenant_id, uid } => tenant::remove(&config.tenants, tenant_id, *uid),
+        Action::PlaceFile {
+            tenant_id,
+            uid,
+            staged,
+            dest,
+            overwrite,
+            max_bytes,
+        } => crate::files::place_file(
+            &config.tenants,
+            &config.transfers,
+            tenant_id,
+            *uid,
+            staged,
+            dest,
+            *overwrite,
+            *max_bytes,
+        ),
+        Action::TakeFile {
+            tenant_id,
+            uid,
+            path,
+            staged,
+            max_bytes,
+        } => crate::files::take_file(
+            &config.tenants,
+            &config.transfers,
+            (config.agent_uid, config.agent_gid),
+            tenant_id,
+            *uid,
+            path,
+            staged,
+            *max_bytes,
+        ),
     }
 }
 
@@ -343,6 +378,7 @@ mod tests {
                 agent_gid: gid,
                 tenants: test_tenants(gid),
                 db_port: 13306,
+                transfers: std::env::temp_dir(),
             };
             let listener = bind(&bind_config).unwrap();
             let config = Config {
@@ -523,6 +559,7 @@ mod tests {
             agent_gid: gid,
             tenants: test_tenants(gid),
             db_port: 13306,
+            transfers: std::env::temp_dir(),
         };
         drop(bind(&config).unwrap()); // leaves the socket file behind
         assert!(path.exists());

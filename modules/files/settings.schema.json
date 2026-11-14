@@ -44,6 +44,32 @@
         "bn": "মুছে ফেলা ফাইল এত দিন অ্যাকাউন্টের ট্র্যাশে থাকে, তারপর স্থায়ীভাবে যায়। 0: নিজে থেকে কখনও মুছে না।"
       }
     },
+    "max_upload_mb": {
+      "type": "integer",
+      "title": "Biggest upload (MB)",
+      "default": 4096,
+      "minimum": 1,
+      "maximum": 102400,
+      "x-scope": "global",
+      "x-title": { "en": "Biggest upload (MB)", "bn": "সর্বোচ্চ আপলোড (MB)" },
+      "x-description": {
+        "en": "The biggest file a client may upload. Uploads wait in the control plane's spool folder (imports.spool_dir) until the node has taken them, so keep room for a few at a time.",
+        "bn": "একজন ক্লায়েন্ট সর্বোচ্চ যত বড় ফাইল আপলোড করতে পারবে। নোড নেওয়া পর্যন্ত আপলোড কন্ট্রোল প্লেনের spool ফোল্ডারে (imports.spool_dir) থাকে, তাই একসাথে কয়েকটির জায়গা রাখুন।"
+      }
+    },
+    "max_download_mb": {
+      "type": "integer",
+      "title": "Biggest download (MB)",
+      "default": 4096,
+      "minimum": 1,
+      "maximum": 102400,
+      "x-scope": "global",
+      "x-title": { "en": "Biggest download (MB)", "bn": "সর্বোচ্চ ডাউনলোড (MB)" },
+      "x-description": {
+        "en": "The biggest file a client may download through the panel (the node sends it to the spool folder first; it waits there a day).",
+        "bn": "প্যানেলের মাধ্যমে যত বড় ফাইল ডাউনলোড করা যাবে (নোড আগে spool ফোল্ডারে পাঠায়; সেখানে একদিন থাকে)।"
+      }
+    },
     "max_archive_mb": {
       "type": "integer",
       "title": "Biggest archive to pack (MB)",

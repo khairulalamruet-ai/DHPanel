@@ -1,0 +1,53 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT token_hash, received_bytes, next_chunk FROM file_transfers\n         WHERE id = $1 AND kind = $2 AND status IN ('queued', 'running')",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "token_hash",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "file_transfers",
+            "name": "token_hash"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "received_bytes",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "file_transfers",
+            "name": "received_bytes"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "next_chunk",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "file_transfers",
+            "name": "next_chunk"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "a0f9cce02dd342f2ada1fcdaa9227a96ebc472beb02f9dc24a37a396260a39c3"
+}

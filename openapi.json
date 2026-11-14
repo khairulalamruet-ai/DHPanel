@@ -11077,6 +11077,73 @@
         ]
       }
     },
+    "/api/v1/client/files/downloads": {
+      "post": {
+        "tags": [
+          "files"
+        ],
+        "summary": "Start a download: the node sends the file here; when the transfer is `ready` ask for a link.",
+        "operationId": "clientStartDownload",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartDownload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Queued; follow `status` until `ready`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransferView"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`transfers_unavailable`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`invalid_path`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/client/files/extract": {
       "post": {
         "tags": [
@@ -11487,6 +11554,159 @@
         ]
       }
     },
+    "/api/v1/client/files/transfers/{id}": {
+      "get": {
+        "tags": [
+          "files"
+        ],
+        "summary": "Where a transfer stands.",
+        "operationId": "clientGetTransfer",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Transfer id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The transfer (for an upload: where to go on from)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransferView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such transfer (or not yours)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "files"
+        ],
+        "summary": "Give up (an upload not yet taken by the node, a download not yet fetched) or remove a finished download.",
+        "operationId": "clientCancelTransfer",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Transfer id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Gone; the spooled data is removed"
+          },
+          "409": {
+            "description": "`transfer_running` or `already_ended`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/files/transfers/{id}/link": {
+      "post": {
+        "tags": [
+          "files"
+        ],
+        "summary": "A link that downloads the finished file; it works for five minutes.",
+        "operationId": "clientTransferLink",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Transfer id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The link (a new one replaces the last)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DownloadLink"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`not_ready`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/client/files/trash": {
       "get": {
         "tags": [
@@ -11614,6 +11834,252 @@
           },
           "409": {
             "description": "`exists`: something is there now",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/files/uploads": {
+      "post": {
+        "tags": [
+          "files"
+        ],
+        "summary": "Start an upload: say where the file goes and how big it is, then send its chunks.",
+        "operationId": "clientStartUpload",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartUpload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Send the chunks next",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransferView"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`transfers_unavailable`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "`too_large`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`invalid_path`, `empty_file` or `invalid_checksum`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/files/uploads/{id}/chunks/{n}": {
+      "put": {
+        "tags": [
+          "files"
+        ],
+        "summary": "Send the next chunk (the body is the raw bytes).",
+        "operationId": "clientPutUploadChunk",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Transfer id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "n",
+            "in": "path",
+            "description": "Chunk number, from 0; the one the transfer expects",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Kept; `next_chunk` is the one to send now",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransferView"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`not_uploading` or `wrong_chunk` (ask for the transfer to see which is expected)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Bigger than `max_chunk_bytes`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`empty_chunk` or `too_much_data`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/files/uploads/{id}/complete": {
+      "post": {
+        "tags": [
+          "files"
+        ],
+        "summary": "The file is whole: the node is asked to take it.",
+        "operationId": "clientCompleteUpload",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Transfer id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Queued; follow `status` (`queued`, `running`, `done`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransferView"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`not_uploading` or `incomplete`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`checksum_mismatch`: the transfer has ended; start again",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -16787,6 +17253,21 @@
           }
         }
       },
+      "StartDownload": {
+        "type": "object",
+        "description": "A file to download.",
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "The file in the account's files.",
+            "example": "www/backup.zip"
+          }
+        },
+        "additionalProperties": false
+      },
       "StartImport": {
         "type": "object",
         "description": "A dump to import.",
@@ -16807,6 +17288,39 @@
             "type": "integer",
             "format": "int64",
             "description": "Size of the file in bytes (as uploaded: compressed, if it is).",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "StartUpload": {
+        "type": "object",
+        "description": "A file to upload.",
+        "required": [
+          "path",
+          "size_bytes"
+        ],
+        "properties": {
+          "overwrite": {
+            "type": "boolean",
+            "description": "Replace a file that is already there."
+          },
+          "path": {
+            "type": "string",
+            "description": "Where it goes in the account's files (the folders are made if missing).",
+            "example": "www/backup.zip"
+          },
+          "sha256": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The file's SHA-256 (64 hex digits), if the browser has it: checked at the end."
+          },
+          "size_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Its size in bytes.",
             "minimum": 0
           }
         },
@@ -17113,6 +17627,83 @@
           "secret": {
             "type": "string",
             "description": "Base32 secret for manual entry."
+          }
+        }
+      },
+      "TransferView": {
+        "type": "object",
+        "description": "A transfer.",
+        "required": [
+          "id",
+          "kind",
+          "path",
+          "status",
+          "received_bytes",
+          "next_chunk",
+          "max_chunk_bytes",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it was started (RFC 3339, UTC)."
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it failed."
+          },
+          "expires_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When a finished download goes (RFC 3339, UTC)."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Id."
+          },
+          "kind": {
+            "type": "string",
+            "description": "`upload` or `download`."
+          },
+          "max_chunk_bytes": {
+            "type": "integer",
+            "description": "The largest chunk accepted, in bytes.",
+            "minimum": 0
+          },
+          "next_chunk": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The chunk to send next (an upload that is `uploading`)."
+          },
+          "path": {
+            "type": "string",
+            "description": "The file in the account's files.",
+            "example": "www/backup.zip"
+          },
+          "received_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Bytes the panel has received."
+          },
+          "size_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Size in bytes (a download: known when it is `ready`)."
+          },
+          "status": {
+            "type": "string",
+            "description": "`uploading`, `queued`, `running`, `ready` (a download), `done` (an upload),\n`failed`, `cancelled` or `expired`."
           }
         }
       },

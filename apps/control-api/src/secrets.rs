@@ -116,6 +116,50 @@ pub fn operation_secrets(
                         )),
                     });
                 }
+                // The credential of a big file transfer, sealed by the API and opened
+                // for this one message.
+                Operation::FetchFile {
+                    tenant_id,
+                    uid,
+                    transfer_id,
+                    dest,
+                    url,
+                    size_bytes,
+                    overwrite,
+                    token: None,
+                } => {
+                    let token = transfer_token(&db, &master_key, transfer_id).await?;
+                    return Ok(Operation::FetchFile {
+                        tenant_id,
+                        uid,
+                        transfer_id,
+                        dest,
+                        url,
+                        size_bytes,
+                        overwrite,
+                        token: Some(token),
+                    });
+                }
+                Operation::SendFile {
+                    tenant_id,
+                    uid,
+                    transfer_id,
+                    path,
+                    url,
+                    max_bytes,
+                    token: None,
+                } => {
+                    let token = transfer_token(&db, &master_key, transfer_id).await?;
+                    return Ok(Operation::SendFile {
+                        tenant_id,
+                        uid,
+                        transfer_id,
+                        path,
+                        url,
+                        max_bytes,
+                        token: Some(token),
+                    });
+                }
                 other => return Ok(other),
             };
             let mut filled = Vec::with_capacity(items.len());
@@ -147,4 +191,25 @@ pub fn operation_secrets(
             })
         })
     })
+}
+
+/// The opened token of a file transfer that is still wanted.
+async fn transfer_token(
+    db: &dhpanel_database::sqlx::PgPool,
+    master_key: &MasterKey,
+    transfer_id: dhpanel_database::sqlx::types::Uuid,
+) -> Result<dhpanel_node_protocol::DbPassword, String> {
+    let sealed = dhpanel_database::file_transfers::sealed_token_of(db, transfer_id)
+        .await
+        .map_err(|_| "could not read a transfer token".to_owned())?
+        .ok_or_else(|| "this transfer has ended".to_owned())?;
+    let bytes = master_key
+        .open(
+            &dhpanel_database::file_transfers::token_context(transfer_id),
+            &sealed,
+        )
+        .map_err(|_| "a transfer token does not open".to_owned())?;
+    Ok(dhpanel_node_protocol::DbPassword(
+        String::from_utf8(bytes).map_err(|_| "a transfer token is not text".to_owned())?,
+    ))
 }

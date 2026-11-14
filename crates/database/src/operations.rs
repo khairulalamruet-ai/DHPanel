@@ -494,7 +494,7 @@ pub async fn time_out_dispatched(
                    THEN NULL ELSE now() END
            WHERE status = 'dispatched'
              AND dispatched_at < now() - make_interval(
-                     secs => CASE WHEN kind IN ('import_sql', 'export_sql', 'open_phpmyadmin')
+                     secs => CASE WHEN kind IN ('import_sql', 'export_sql', 'open_phpmyadmin', 'fetch_file', 'send_file')
                                   OR (kind = 'file_op' AND payload #>> '{request,type}'
                                       IN ('archive', 'extract', 'copy', 'fix_permissions', 'chmod', 'empty_trash'))
                               THEN $3::int ELSE $1::int END)

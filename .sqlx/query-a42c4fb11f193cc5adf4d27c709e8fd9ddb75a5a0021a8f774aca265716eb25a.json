@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE file_transfers SET received_bytes = $3, next_chunk = next_chunk + 1, updated_at = now()\n         WHERE id = $1 AND kind = 'download' AND status IN ('queued', 'running') AND next_chunk = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a42c4fb11f193cc5adf4d27c709e8fd9ddb75a5a0021a8f774aca265716eb25a"
+}

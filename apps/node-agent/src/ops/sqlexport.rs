@@ -197,7 +197,7 @@ async fn dump(
 }
 
 /// Sends the file in chunks, then says it is whole.
-fn upload(url: &str, token: &str, path: &Path) -> Result<u64, AgentError> {
+pub(super) fn upload(url: &str, token: &str, path: &Path) -> Result<u64, AgentError> {
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .http_status_as_error(false)
         .timeout_connect(Some(Duration::from_secs(20)))

@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE file_transfers SET status = 'ready', size_bytes = $2, sha256 = $3, finished_at = now(),\n                                   updated_at = now(), expires_at = now() + make_interval(hours => $4::int),\n                                   sealed_token = NULL, token_hash = NULL\n         WHERE id = $1 AND kind = 'download' AND status IN ('queued', 'running')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8",
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "17d1771cb0b3f4d8cd6de9492085d6be1f94aeb904f167466de54bb3e476be83"
+}

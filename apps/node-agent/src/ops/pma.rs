@@ -430,5 +430,6 @@ pub async fn sweep_forever(context: Arc<TenantContext>) {
     loop {
         tick.tick().await;
         sweep(&context).await;
+        super::transfer::sweep(&context);
     }
 }

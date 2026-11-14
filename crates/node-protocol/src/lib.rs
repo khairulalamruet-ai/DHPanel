@@ -593,6 +593,50 @@ pub enum Operation {
         /// How long the session lasts, in minutes (5..=720).
         session_minutes: u32,
     },
+    /// Fetches an uploaded file from the control plane (resuming a cut download, size
+    /// checked) and puts it in the tenant's files as the tenant's own user, atomically
+    /// and, unless `overwrite`, never over something. Answered with [`Output::FileFetched`].
+    FetchFile {
+        /// The tenant.
+        tenant_id: Uuid,
+        /// The tenant's numeric user id.
+        uid: u32,
+        /// This transfer's id.
+        transfer_id: Uuid,
+        /// Where it goes, relative to the tenant's files.
+        dest: String,
+        /// Where the file is fetched from (`https`, or `http` for loopback).
+        url: String,
+        /// Its size in bytes.
+        size_bytes: u64,
+        /// Replace a file that is already there.
+        #[serde(default)]
+        overwrite: bool,
+        /// The credential for the download; absent in the ledger, present on the wire.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        token: Option<DbPassword>,
+    },
+    /// Reads a file of the tenant's (as the tenant's own user) and sends it to the
+    /// control plane in chunks of at most 8 MiB (`PUT {url}/chunks/{n}`, then
+    /// `POST {url}/complete`) with the token as a Bearer credential. Answered with
+    /// [`Output::FileSent`].
+    SendFile {
+        /// The tenant.
+        tenant_id: Uuid,
+        /// The tenant's numeric user id.
+        uid: u32,
+        /// This transfer's id.
+        transfer_id: Uuid,
+        /// The file, relative to the tenant's files.
+        path: String,
+        /// Where it goes (`https`, or `http` for loopback).
+        url: String,
+        /// Refuse a file bigger than this.
+        max_bytes: u64,
+        /// The credential for the upload; absent in the ledger, present on the wire.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        token: Option<DbPassword>,
+    },
     /// One file manager request on a tenant's files, done as the tenant's own user
     /// id. Answered with [`Output::File`].
     FileOp {
@@ -783,6 +827,8 @@ impl Operation {
         "import_sql",
         "export_sql",
         "file_op",
+        "fetch_file",
+        "send_file",
         "set_phpmyadmin_host",
         "open_phpmyadmin",
         "report_import_progress",
@@ -826,6 +872,8 @@ impl Operation {
             Self::ImportSql { .. } => "import_sql",
             Self::ExportSql { .. } => "export_sql",
             Self::FileOp { .. } => "file_op",
+            Self::FetchFile { .. } => "fetch_file",
+            Self::SendFile { .. } => "send_file",
             Self::SetPhpMyAdminHost { .. } => "set_phpmyadmin_host",
             Self::OpenPhpMyAdmin { .. } => "open_phpmyadmin",
             Self::ReportImportProgress { .. } => "report_import_progress",
@@ -1027,6 +1075,16 @@ pub enum Output {
     PhpMyAdminOpened {
         /// Until when the sign-in link works (Unix seconds).
         link_expires_at: i64,
+    },
+    /// Answer to [`Operation::FetchFile`].
+    FileFetched {
+        /// Size of the file that was put in place.
+        size_bytes: u64,
+    },
+    /// Answer to [`Operation::SendFile`].
+    FileSent {
+        /// Size of the file that was sent.
+        size_bytes: u64,
     },
     /// Answer to [`Operation::FileOp`].
     File {
@@ -1972,6 +2030,25 @@ mod tests {
                 uid: 10_000,
                 request: files::FileRequest::TrashList,
             },
+            Operation::FetchFile {
+                tenant_id: id(),
+                uid: 10_000,
+                transfer_id: id(),
+                dest: "www/a.zip".into(),
+                url: "https://panel.example.com/api/v1/public/files/transfers/x".into(),
+                size_bytes: 10,
+                overwrite: false,
+                token: None,
+            },
+            Operation::SendFile {
+                tenant_id: id(),
+                uid: 10_000,
+                transfer_id: id(),
+                path: "www/a.zip".into(),
+                url: "https://panel.example.com/api/v1/public/files/transfers/x".into(),
+                max_bytes: 10,
+                token: None,
+            },
             Operation::ReportImportProgress { import_id: id() },
             Operation::CreateDatabase {
                 name: "alice_shop".into(),
@@ -2033,7 +2110,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            37,
+            39,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }

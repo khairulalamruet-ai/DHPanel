@@ -317,6 +317,9 @@ async fn main() -> ExitCode {
                 if let Err(error) = dhpanel_mod_databases::imports::sweep(&db, &spool_dir).await {
                     tracing::warn!(%error, "could not sweep the import spool");
                 }
+                if let Err(error) = dhpanel_mod_files::transfers::sweep(&db, &spool_dir).await {
+                    tracing::warn!(%error, "could not sweep the file transfers");
+                }
             }
         }
     });
