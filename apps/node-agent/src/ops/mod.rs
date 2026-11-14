@@ -150,8 +150,12 @@ impl Registry {
     #[must_use]
     pub fn with_web(mut self, web: Option<Arc<crate::web::WebContext>>) -> Self {
         if let Some(context) = web {
-            self.register("set_site_routes", move |op| {
-                crate::web::set_site_routes(context.clone(), op)
+            self.register("set_site_routes", {
+                let context = context.clone();
+                move |op| crate::web::set_site_routes(context.clone(), op)
+            });
+            self.register("report_certificates", move |op| {
+                crate::web::report_certificates(context.clone(), op)
             });
         }
         self

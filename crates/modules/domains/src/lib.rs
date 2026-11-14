@@ -33,6 +33,7 @@ pub mod dns;
 pub mod nameservers;
 pub mod records;
 pub mod redirects;
+pub mod ssl;
 pub mod tls;
 
 use std::sync::Arc;
@@ -110,6 +111,7 @@ pub fn admin_router() -> Router<DomainsState> {
     redirects::admin_router()
         .merge(records::admin_router())
         .merge(nameservers::admin_router())
+        .merge(ssl::admin_router())
         .merge(dns::admin_router())
         .route("/api/v1/admin/domains", get(admin_list).post(admin_add))
         .route(
@@ -128,6 +130,7 @@ pub fn client_router() -> Router<DomainsState> {
     redirects::client_router()
         .merge(records::client_router())
         .merge(nameservers::client_router())
+        .merge(ssl::client_router())
         .route("/api/v1/client/domains", get(client_list).post(client_add))
         .route(
             "/api/v1/client/domains/{id}",
@@ -418,6 +421,16 @@ async fn add_domain(
     .await
     .map_err(add_error)?;
     let dns_note = dns::provision(&mut tx, hosting, &added, &fqdn).await?;
+    dhpanel_events::publish(
+        &mut tx,
+        &dhpanel_kernel::Event::DomainAdded {
+            tenant_id: hosting.tenant.id,
+            domain_id: added.id,
+            name: added.fqdn.clone(),
+        },
+    )
+    .await
+    .map_err(internal)?;
     dhpanel_audit::insert(
         &mut *tx,
         &entry("domain.added", who, hosting, added.id).metadata(serde_json::json!({
@@ -489,6 +502,16 @@ async fn delete_domain(
     if !domains::delete(&mut tx, id).await.map_err(internal)? {
         return Err(AppError::not_found("domain"));
     }
+    dhpanel_events::publish(
+        &mut tx,
+        &dhpanel_kernel::Event::DomainRemoved {
+            tenant_id: hosting.tenant.id,
+            domain_id: id,
+            name: target.domain.fqdn.clone(),
+        },
+    )
+    .await
+    .map_err(internal)?;
     dhpanel_audit::insert(
         &mut *tx,
         &entry("domain.deleted", who, hosting, id).metadata(serde_json::json!({
@@ -1070,7 +1093,8 @@ pub async fn client_delete(
         dns::delete_template, records::admin_list, records::admin_add, records::admin_update,
         records::admin_delete, records::client_list, records::client_add, records::client_update,
         records::client_delete, nameservers::admin_nameservers, nameservers::client_nameservers,
-        nameservers::admin_check, nameservers::client_check, tls::ask
+        nameservers::admin_check, nameservers::client_check, tls::ask, ssl::admin_ssl,
+        ssl::client_ssl
     ),
     components(schemas(
         DomainView, DomainList, AddDomain, AdminAddDomain, UpdateDomain,
@@ -1078,7 +1102,7 @@ pub async fn client_delete(
         redirects::UpdateRedirect, dns::TemplateLine, dns::TemplateView, dns::TemplateList,
         dns::TemplateInput, records::RecordView, records::RecordList, records::ZoneView,
         records::AddRecord, records::UpdateRecord, nameservers::Nameservers,
-        nameservers::DelegationView
+        nameservers::DelegationView, ssl::SslView
     )),
     tags((name = "domains", description = "The names a hosting account serves"))
 )]

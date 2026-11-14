@@ -2379,6 +2379,64 @@
         ]
       }
     },
+    "/api/v1/admin/domains/{id}/ssl": {
+      "get": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "The certificate of a domain.",
+        "operationId": "adminDomainSsl",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Domain id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The certificate, or `none`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SslView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such domain",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/domains/{id}/suspend": {
       "post": {
         "tags": [
@@ -6961,6 +7019,64 @@
         ]
       }
     },
+    "/api/v1/client/domains/{id}/ssl": {
+      "get": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "The certificate of one of your domains.",
+        "operationId": "clientDomainSsl",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Domain id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The certificate, or `none`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SslView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such domain (or it is not yours)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/public/auth/impersonate": {
       "post": {
         "tags": [
@@ -10086,6 +10202,67 @@
             "type": "string",
             "format": "date-time",
             "description": "Last change (RFC 3339, UTC)."
+          }
+        }
+      },
+      "SslView": {
+        "type": "object",
+        "description": "A domain's certificate.",
+        "required": [
+          "state"
+        ],
+        "properties": {
+          "days_left": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Whole days until it ends (negative once it has)."
+          },
+          "issuer": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Who issued it.",
+            "example": "R11"
+          },
+          "kind": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`acme` (obtained by the web server) or `custom` (uploaded)."
+          },
+          "last_seen_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When a node last reported it (RFC 3339, UTC)."
+          },
+          "not_after": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Valid until (RFC 3339, UTC)."
+          },
+          "not_before": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Valid from (RFC 3339, UTC)."
+          },
+          "state": {
+            "type": "string",
+            "description": "`none` (no certificate yet), `valid`, `expiring` (ends within 14 days) or `expired`.",
+            "example": "valid"
           }
         }
       },

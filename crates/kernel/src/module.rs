@@ -119,6 +119,18 @@ pub enum Event {
         /// The domain name.
         name: String,
     },
+    /// A domain's certificate ends soon (or has ended) and its owner has not been
+    /// told yet. Sent once per certificate; a renewed one starts afresh.
+    CertificateExpiring {
+        /// The tenant.
+        tenant_id: Uuid,
+        /// The domain's id.
+        domain_id: Uuid,
+        /// The domain name.
+        name: String,
+        /// When the certificate ends (Unix seconds).
+        not_after: i64,
+    },
 }
 
 impl Event {
@@ -133,6 +145,7 @@ impl Event {
             Self::TenantDeleted { .. } => "tenant_deleted",
             Self::DomainAdded { .. } => "domain_added",
             Self::DomainRemoved { .. } => "domain_removed",
+            Self::CertificateExpiring { .. } => "certificate_expiring",
         }
     }
 }

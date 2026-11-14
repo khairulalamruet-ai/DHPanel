@@ -27,8 +27,8 @@ use std::{
 
 use dhpanel_domain::{Fqdn, SourcePath, Target, TenantUsername};
 use dhpanel_node_protocol::{
-    AgentError, ErrorCode, MAX_HOSTS_PER_TENANT, MAX_REDIRECTS_PER_TENANT, MAX_SITES_PER_TENANT,
-    Operation, Output, SiteRoute,
+    AgentError, CertificateInfo, ErrorCode, MAX_CERTIFICATES_PER_REPORT, MAX_HOSTS_PER_TENANT,
+    MAX_REDIRECTS_PER_TENANT, MAX_SITES_PER_TENANT, Operation, Output, SiteRoute,
 };
 use serde_json::{Value, json};
 use tokio::sync::Mutex;
@@ -47,6 +47,9 @@ pub struct Settings {
     pub listen: Vec<String>,
     /// Let Caddy fetch certificates for the names it serves.
     pub automatic_https: bool,
+    /// Caddy's data directory (where it keeps its certificates), so they can be
+    /// listed. `DHPANEL_AGENT_CADDY_DATA`; without it no certificates are reported.
+    pub data_dir: Option<PathBuf>,
 }
 
 impl Settings {
@@ -68,6 +71,7 @@ impl Settings {
             admin: admin.trim_end_matches('/').to_owned(),
             listen,
             automatic_https,
+            data_dir: std::env::var_os("DHPANEL_AGENT_CADDY_DATA").map(PathBuf::from),
         })
     }
 }
@@ -434,6 +438,90 @@ pub async fn set_site_routes(
     }
 }
 
+// ------------------------------------------------------------- certificates
+
+/// The common name (or, failing that, the whole name) of an issuer.
+fn issuer_name(cert: &x509_parser::certificate::X509Certificate<'_>) -> String {
+    let issuer = cert.issuer();
+    let name = issuer
+        .iter_common_name()
+        .next()
+        .and_then(|cn| cn.as_str().ok())
+        .map_or_else(|| issuer.to_string(), str::to_owned);
+    name.chars().filter(|c| !c.is_control()).take(200).collect()
+}
+
+/// Reads one certificate file (the first certificate in it).
+fn read_certificate(path: &Path, host: &str) -> Option<CertificateInfo> {
+    let bytes = std::fs::read(path).ok()?;
+    let (_, pem) = x509_parser::pem::parse_x509_pem(&bytes).ok()?;
+    let cert = pem.parse_x509().ok()?;
+    Some(CertificateInfo {
+        host: host.to_owned(),
+        issuer: issuer_name(&cert),
+        not_before: cert.validity().not_before.timestamp(),
+        not_after: cert.validity().not_after.timestamp(),
+    })
+}
+
+/// The certificates Caddy keeps under `<data>/certificates/<issuer>/<host>/<host>.crt`.
+/// A name that has certificates from several issuers is listed once, with the one
+/// that lasts longest; wildcard certificates and anything unreadable are skipped.
+fn scan_certificates(data_dir: &Path) -> Vec<CertificateInfo> {
+    let mut best: BTreeMap<String, CertificateInfo> = BTreeMap::new();
+    let Ok(issuers) = std::fs::read_dir(data_dir.join("certificates")) else {
+        return Vec::new();
+    };
+    for issuer in issuers.flatten() {
+        let Ok(hosts) = std::fs::read_dir(issuer.path()) else {
+            continue;
+        };
+        for entry in hosts.flatten() {
+            let host = entry.file_name().to_string_lossy().into_owned();
+            // Only names this panel could have: plain host names.
+            if Fqdn::parse(&host).map_or(true, |f| f.as_str() != host) {
+                continue;
+            }
+            let Some(info) = read_certificate(&entry.path().join(format!("{host}.crt")), &host)
+            else {
+                continue;
+            };
+            match best.get(&host) {
+                Some(have) if have.not_after >= info.not_after => {}
+                _ => {
+                    best.insert(host, info);
+                }
+            }
+        }
+    }
+    best.into_values()
+        .take(MAX_CERTIFICATES_PER_REPORT)
+        .collect()
+}
+
+/// `report_certificates`.
+///
+/// # Errors
+/// [`AgentError`] `unsupported_operation` when no data directory is configured.
+pub async fn report_certificates(
+    context: Arc<WebContext>,
+    op: Operation,
+) -> Result<Output, AgentError> {
+    let Operation::ReportCertificates = op else {
+        return Err(crate::ops::wrong_operation());
+    };
+    let Some(dir) = context.settings.data_dir.clone() else {
+        return Err(AgentError::new(
+            ErrorCode::UnsupportedOperation,
+            "this node does not tell where its web server keeps certificates",
+        ));
+    };
+    let items = tokio::task::spawn_blocking(move || scan_certificates(&dir))
+        .await
+        .map_err(|_| AgentError::new(ErrorCode::Internal, "the scan was cancelled").retryable())?;
+    Ok(Output::Certificates { items })
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::unwrap_used)]
 mod tests {
@@ -458,6 +546,7 @@ mod tests {
             admin: "http://127.0.0.1:2019".into(),
             listen: vec![":80".into(), ":443".into()],
             automatic_https: true,
+            data_dir: None,
         }
     }
 
@@ -594,6 +683,75 @@ mod tests {
                 .get("automatic_https")
                 .is_none()
         );
+    }
+
+    fn write_cert(dir: &Path, issuer_dir: &str, host: &str, days: i64, issuer_cn: &str) {
+        let mut ca_params = rcgen::CertificateParams::new(Vec::<String>::new()).unwrap();
+        ca_params
+            .distinguished_name
+            .push(rcgen::DnType::CommonName, issuer_cn);
+        ca_params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+        let ca_key = rcgen::KeyPair::generate().unwrap();
+        let ca = rcgen::Issuer::new(ca_params, ca_key);
+        let mut params = rcgen::CertificateParams::new(vec![host.to_owned()]).unwrap();
+        let now = time::OffsetDateTime::now_utc();
+        params.not_before = now - time::Duration::days(1);
+        params.not_after = now + time::Duration::days(days);
+        let key = rcgen::KeyPair::generate().unwrap();
+        let cert = params.signed_by(&key, &ca).unwrap();
+        let folder = dir.join("certificates").join(issuer_dir).join(host);
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join(format!("{host}.crt")), cert.pem()).unwrap();
+        // The private key sits beside it; it must never be read or reported.
+        std::fs::write(folder.join(format!("{host}.key")), key.serialize_pem()).unwrap();
+    }
+
+    #[test]
+    fn certificates_are_listed_from_caddys_storage_without_touching_keys() {
+        let dir = std::env::temp_dir().join(format!("dh-certs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        write_cert(
+            &dir,
+            "acme-v02.api.letsencrypt.org-directory",
+            "example.com",
+            60,
+            "R11",
+        );
+        write_cert(
+            &dir,
+            "acme-v02.api.letsencrypt.org-directory",
+            "www.example.com",
+            5,
+            "R11",
+        );
+        // The same name from another issuer: the one that lasts longer is reported.
+        write_cert(
+            &dir,
+            "acme.zerossl.com-v2-DV90",
+            "example.com",
+            90,
+            "ZeroSSL ECC Domain Secure Site CA",
+        );
+        // Things that are not ours or not usable.
+        write_cert(&dir, "local", "localhost", 30, "Caddy Local Authority");
+        std::fs::create_dir_all(dir.join("certificates/local/wildcard_.example.org")).unwrap();
+        std::fs::create_dir_all(dir.join("certificates/local/broken.org")).unwrap();
+        std::fs::write(
+            dir.join("certificates/local/broken.org/broken.org.crt"),
+            b"not a certificate",
+        )
+        .unwrap();
+        let found = scan_certificates(&dir);
+        let hosts: Vec<&str> = found.iter().map(|c| c.host.as_str()).collect();
+        assert_eq!(hosts, ["example.com", "www.example.com"], "{found:?}");
+        let main = &found[0];
+        assert_eq!(main.issuer, "ZeroSSL ECC Domain Secure Site CA");
+        let days = (main.not_after - main.not_before) / 86_400;
+        assert!((90..=92).contains(&days), "{days}");
+        assert_eq!(found[1].issuer, "R11");
+        // Nothing there at all is an empty list, not an error.
+        assert!(scan_certificates(&dir.join("missing")).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

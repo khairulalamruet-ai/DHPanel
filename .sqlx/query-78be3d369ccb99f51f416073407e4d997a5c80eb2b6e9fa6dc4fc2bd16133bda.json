@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE certificates SET expiry_notified_at = now() WHERE domain_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "78be3d369ccb99f51f416073407e4d997a5c80eb2b6e9fa6dc4fc2bd16133bda"
+}

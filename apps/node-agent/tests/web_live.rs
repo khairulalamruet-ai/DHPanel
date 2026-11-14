@@ -80,6 +80,7 @@ async fn sites_are_served_suspended_redirected_and_put_back_after_caddy_forgets_
             admin,
             listen: vec![":18080".into()],
             automatic_https: false,
+            data_dir: None,
         },
         &dir,
     );
@@ -268,6 +269,7 @@ async fn routes_are_kept_when_caddy_cannot_be_reached_and_applied_later() {
             admin: "http://127.0.0.1:9".into(),
             listen: vec![":18080".into()],
             automatic_https: false,
+            data_dir: None,
         },
         &dir,
     );

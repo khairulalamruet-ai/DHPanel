@@ -139,6 +139,23 @@ pub struct SiteRoute {
     pub redirects: Vec<RouteRedirect>,
 }
 
+/// A certificate the web server holds.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CertificateInfo {
+    /// The name it is for (lower-case ASCII).
+    pub host: String,
+    /// Who issued it (the issuer's common name).
+    pub issuer: String,
+    /// Valid from (Unix seconds).
+    pub not_before: i64,
+    /// Valid until (Unix seconds).
+    pub not_after: i64,
+}
+
+/// Most certificates one report holds.
+pub const MAX_CERTIFICATES_PER_REPORT: usize = 4000;
+
 /// Most sites one tenant may have on a node.
 pub const MAX_SITES_PER_TENANT: usize = 200;
 /// Most names in all of a tenant's sites.
@@ -330,6 +347,9 @@ pub enum Operation {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         skeleton: Vec<SkeletonFile>,
     },
+    /// List the certificates the node's web server holds (name, issuer, validity).
+    /// Answered with [`Output::Certificates`].
+    ReportCertificates,
     /// Set the web server's routes for one tenant: which names it answers for and
     /// what it does for each (proxy to the tenant's web container, show the
     /// "suspended" page, redirect paths). Replaces what the tenant had; an empty
@@ -391,6 +411,7 @@ impl Operation {
         "set_resource_limits",
         "set_up_tenant",
         "set_site_routes",
+        "report_certificates",
         "suspend_tenant",
         "resume_tenant",
         "delete_tenant",
@@ -408,6 +429,7 @@ impl Operation {
             Self::SetResourceLimits { .. } => "set_resource_limits",
             Self::SetUpTenant { .. } => "set_up_tenant",
             Self::SetSiteRoutes { .. } => "set_site_routes",
+            Self::ReportCertificates => "report_certificates",
             Self::SuspendTenant { .. } => "suspend_tenant",
             Self::ResumeTenant { .. } => "resume_tenant",
             Self::DeleteTenant { .. } => "delete_tenant",
@@ -549,6 +571,11 @@ pub enum Output {
         containers: Vec<String>,
         /// How storage limits are enforced (`xfs`), or `None` when they are not.
         storage_quota: Option<String>,
+    },
+    /// Answer to [`Operation::ReportCertificates`].
+    Certificates {
+        /// The certificates, by name (at most [`MAX_CERTIFICATES_PER_REPORT`]).
+        items: Vec<CertificateInfo>,
     },
     /// Answer to [`Operation::SetSiteRoutes`].
     SiteRoutesSet {
@@ -1306,6 +1333,7 @@ mod tests {
                 pids: Some(100),
                 skeleton: Vec::new(),
             },
+            Operation::ReportCertificates,
             Operation::SetSiteRoutes {
                 username: "alice".into(),
                 routes: vec![SiteRoute {
@@ -1333,7 +1361,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            11,
+            12,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }

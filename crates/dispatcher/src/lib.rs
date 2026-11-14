@@ -52,6 +52,12 @@ pub struct Settings {
     pub purge_check: Duration,
     /// How often tenants whose web routes changed are looked for.
     pub route_check: Duration,
+    /// How often connected nodes are asked which certificates their web server holds.
+    pub certificates_every: Duration,
+    /// How often certificates that end soon are looked for.
+    pub expiry_check: Duration,
+    /// How many days before its end a certificate is announced.
+    pub expiry_warning_days: i32,
 }
 
 impl Default for Settings {
@@ -66,6 +72,9 @@ impl Default for Settings {
             capabilities_max_age: Duration::from_secs(3600),
             purge_check: Duration::from_secs(600),
             route_check: Duration::from_secs(5),
+            certificates_every: Duration::from_secs(6 * 3600),
+            expiry_check: Duration::from_secs(3600),
+            expiry_warning_days: 14,
         }
     }
 }
@@ -134,6 +143,10 @@ impl Dispatcher {
         purges.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut routes = tokio::time::interval(self.settings.route_check);
         routes.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut certificates = tokio::time::interval(self.settings.capabilities_check);
+        certificates.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut expiry = tokio::time::interval(self.settings.expiry_check);
+        expiry.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             tokio::select! {
                 () = stopped(&mut shutdown) => return,
@@ -141,6 +154,8 @@ impl Dispatcher {
                 _ = capabilities.tick() => { self.request_capabilities().await; }
                 _ = purges.tick() => { self.request_purges().await; }
                 _ = routes.tick() => { self.request_route_syncs().await; }
+                _ = certificates.tick() => { self.request_certificates().await; }
+                _ = expiry.tick() => { self.announce_expiring().await; }
                 Some(report) = results.recv() => self.handle_result(report).await,
             }
         }
@@ -305,6 +320,100 @@ impl Dispatcher {
             .map_err(|e| e.to_string())
     }
 
+    /// Asks each connected node for the certificates its web server holds, once per
+    /// `certificates_every` (the key carries the time slot, so however often this
+    /// runs a node is asked once per slot). A node without a web server answers
+    /// "unsupported", which is recorded and not asked about again until the next slot.
+    /// Returns how many nodes were asked.
+    pub async fn request_certificates(&self) -> usize {
+        let slot = u64::try_from(unix_now()).unwrap_or(0)
+            / self.settings.certificates_every.as_secs().max(1);
+        let mut asked = 0;
+        for node in self.gateway.connected_nodes() {
+            let request = dhpanel_operations::Request::new(
+                node,
+                dhpanel_node_protocol::Operation::ReportCertificates,
+                format!("certificates:{slot}"),
+            );
+            match self.ops.enqueue(&request).await {
+                Ok(dhpanel_operations::Enqueued::Created(_)) => asked += 1,
+                Ok(dhpanel_operations::Enqueued::Existing(_)) => {}
+                Err(err) => tracing::warn!(%node, error = %err, "could not request certificates"),
+            }
+        }
+        asked
+    }
+
+    async fn store_certificates(
+        &self,
+        node_id: Uuid,
+        items: &[dhpanel_node_protocol::CertificateInfo],
+    ) {
+        let reported: Vec<dhpanel_database::certificates::Reported<'_>> = items
+            .iter()
+            .map(|c| dhpanel_database::certificates::Reported {
+                host: &c.host,
+                issuer: &c.issuer,
+                not_before: c.not_before,
+                not_after: c.not_after,
+            })
+            .collect();
+        let result = async {
+            let mut tx = self.ops.db().begin().await?;
+            let n = dhpanel_database::certificates::record_reported(&mut tx, node_id, &reported)
+                .await?;
+            tx.commit().await?;
+            Ok::<_, dhpanel_database::sqlx::Error>(n)
+        }
+        .await;
+        if let Err(err) = result {
+            tracing::warn!(%node_id, error = %err, "could not keep the certificates a node reported");
+        }
+    }
+
+    /// Announces certificates that end within `expiry_warning_days` days (or have
+    /// ended) and have not been announced: one `certificate_expiring` event each,
+    /// written in the same transaction that records it as announced, so none is
+    /// lost or sent twice. Returns how many were announced.
+    pub async fn announce_expiring(&self) -> usize {
+        let result = async {
+            let mut tx = self.ops.db().begin().await.map_err(|e| e.to_string())?;
+            let due = dhpanel_database::certificates::expiring(
+                &mut tx,
+                self.settings.expiry_warning_days,
+                200,
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+            for c in &due {
+                dhpanel_events::publish(
+                    &mut tx,
+                    &dhpanel_kernel::Event::CertificateExpiring {
+                        tenant_id: c.tenant_id,
+                        domain_id: c.domain_id,
+                        name: c.fqdn.clone(),
+                        not_after: c.not_after,
+                    },
+                )
+                .await
+                .map_err(|e| e.to_string())?;
+                dhpanel_database::certificates::mark_notified(&mut tx, c.domain_id)
+                    .await
+                    .map_err(|e| e.to_string())?;
+            }
+            tx.commit().await.map_err(|e| e.to_string())?;
+            Ok::<_, String>(due.len())
+        }
+        .await;
+        match result {
+            Ok(n) => n,
+            Err(error) => {
+                tracing::warn!(%error, "could not announce expiring certificates");
+                0
+            }
+        }
+    }
+
     /// One pass; see the module documentation.
     pub async fn tick(&self) -> TickStats {
         let mut stats = TickStats::default();
@@ -420,6 +529,9 @@ impl Dispatcher {
             ResultStatus::Succeeded => {
                 if let Some(dhpanel_node_protocol::Output::Capabilities(report)) = &output {
                     self.store_capabilities(node_id, report).await;
+                }
+                if let Some(dhpanel_node_protocol::Output::Certificates { items }) = &output {
+                    self.store_certificates(node_id, items).await;
                 }
                 let output = output
                     .and_then(|o| serde_json::to_value(o).ok())

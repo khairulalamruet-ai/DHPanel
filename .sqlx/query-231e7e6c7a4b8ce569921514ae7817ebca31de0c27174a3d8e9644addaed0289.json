@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO certificates (domain_id, kind, issuer, not_before, not_after, source_node_id)\n               SELECT d.id, 'acme', $2, to_timestamp($3::bigint), to_timestamp($4::bigint), $5\n               FROM domains d JOIN tenants t ON t.id = d.tenant_id\n               WHERE d.fqdn = $1 AND t.node_id = $5\n               ON CONFLICT (domain_id) DO UPDATE\n               SET issuer = EXCLUDED.issuer,\n                   not_before = EXCLUDED.not_before,\n                   not_after = EXCLUDED.not_after,\n                   source_node_id = EXCLUDED.source_node_id,\n                   last_seen_at = now(),\n                   expiry_notified_at = CASE\n                       WHEN certificates.not_after IS DISTINCT FROM EXCLUDED.not_after THEN NULL\n                       ELSE certificates.expiry_notified_at END\n               WHERE certificates.kind = 'acme'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Int8",
+        "Int8",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "231e7e6c7a4b8ce569921514ae7817ebca31de0c27174a3d8e9644addaed0289"
+}

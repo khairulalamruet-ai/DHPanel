@@ -43,6 +43,9 @@ fn dispatch_settings() -> Settings {
         capabilities_max_age: Duration::from_secs(3600),
         purge_check: Duration::from_secs(3600),
         route_check: Duration::from_secs(3600),
+        certificates_every: Duration::from_secs(3600),
+        expiry_check: Duration::from_secs(3600),
+        expiry_warning_days: 14,
     }
 }
 
@@ -828,4 +831,162 @@ async fn a_tenants_routes_are_sent_when_anything_they_are_made_of_changes(pool: 
         "in this slot the failed request is not repeated"
     );
     let _ = Op::ReportCapabilities;
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs PostgreSQL"]
+async fn reported_certificates_are_kept_and_an_ending_one_is_announced_once(pool: PgPool) {
+    use dhpanel_node_protocol::{CertificateInfo, Output};
+    let p = plane(&pool).await;
+    let d = Dispatcher::new(p.ops.clone(), p.gateway.clone(), None, dispatch_settings());
+    let node = make_node(&p, &pool, "certs").await;
+    let other = make_node(&p, &pool, "certs-other").await;
+    let account: Uuid = sqlx::query_scalar(
+        "INSERT INTO accounts (kind, username, email, password_hash)
+         VALUES ('client', 'zed', 'zed@example.com',
+                 '$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHQ$aGFzaGhhc2hoYXNoaGFzaA') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let plan: Uuid = sqlx::query_scalar("SELECT id FROM plans WHERE is_default")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let tenant: Uuid = sqlx::query_scalar(
+        "INSERT INTO tenants (owner_account_id, node_id, plan_id, username, uid, status)
+         VALUES ($1, $2, $3, 'zedhost', 10000, 'active') RETURNING id",
+    )
+    .bind(account)
+    .bind(node.id)
+    .bind(plan)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    for name in ["soon.com", "later.com", "custom.com"] {
+        sqlx::query("INSERT INTO domains (tenant_id, fqdn, kind) VALUES ($1, $2, 'addon')")
+            .bind(tenant)
+            .bind(name)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    let day = 86_400;
+    let cert = |host: &str, ends_in_days: i64| CertificateInfo {
+        host: host.into(),
+        issuer: "R11".into(),
+        not_before: now - 30 * day,
+        not_after: now + ends_in_days * day,
+    };
+    let ops = p.ops.clone();
+    let report = |node_id: Uuid, items: Vec<CertificateInfo>| {
+        let (d, ops) = (d.clone(), ops.clone());
+        async move {
+            let op = p_enqueue(&ops, node_id).await;
+            d.handle_result(NodeResult {
+                node_id,
+                result: dhpanel_node_protocol::OperationResult {
+                    op_id: op,
+                    status: dhpanel_node_protocol::ResultStatus::Succeeded,
+                    output: Some(Output::Certificates { items }),
+                    error: None,
+                },
+            })
+            .await;
+        }
+    };
+    async fn p_enqueue(ops: &Operations, node: Uuid) -> Uuid {
+        let r = Request::new(
+            node,
+            dhpanel_node_protocol::Operation::ReportCertificates,
+            format!("c-{}", Uuid::now_v7().simple()),
+        );
+        let row = ops.enqueue(&r).await.unwrap();
+        let id = row.operation().id;
+        sqlx::query("UPDATE operations SET status = 'dispatched', attempts = 1 WHERE id = $1")
+            .bind(id)
+            .execute(ops.db())
+            .await
+            .unwrap();
+        id
+    }
+    report(
+        node.id,
+        vec![
+            cert("soon.com", 5),
+            cert("later.com", 60),
+            cert("unknown.org", 30),
+            cert("custom.com", 90),
+        ],
+    )
+    .await;
+
+    // Only names that are domains of tenants on that node are kept.
+    let kept: Vec<(String, String)> = sqlx::query_as(
+        "SELECT d.fqdn, c.issuer FROM certificates c JOIN domains d ON d.id = c.domain_id ORDER BY d.fqdn",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        kept.iter().map(|k| k.0.as_str()).collect::<Vec<_>>(),
+        ["custom.com", "later.com", "soon.com"]
+    );
+    // A report from a node that does not host them changes nothing.
+    report(other.id, vec![cert("soon.com", 400)]).await;
+    let days: f64 = sqlx::query_scalar("SELECT (extract(epoch FROM c.not_after - now()) / 86400)::float8 FROM certificates c JOIN domains d ON d.id = c.domain_id WHERE d.fqdn = 'soon.com'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!((4.0..6.0).contains(&days), "{days}");
+
+    // A custom certificate is never replaced by a report.
+    sqlx::query("UPDATE certificates SET kind = 'custom', issuer = 'My CA' WHERE domain_id = (SELECT id FROM domains WHERE fqdn = 'custom.com')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    report(node.id, vec![cert("custom.com", 10)]).await;
+    let issuer: String = sqlx::query_scalar("SELECT issuer FROM certificates c JOIN domains d ON d.id = c.domain_id WHERE d.fqdn = 'custom.com'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(issuer, "My CA");
+
+    // The one ending in 5 days is announced, once, and only that one.
+    assert_eq!(d.announce_expiring().await, 1);
+    assert_eq!(d.announce_expiring().await, 0, "not twice");
+    let events: Vec<serde_json::Value> =
+        sqlx::query_scalar("SELECT payload FROM outbox WHERE event_type = 'certificate_expiring'")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0]["name"], "soon.com");
+    assert_eq!(events[0]["tenant_id"], tenant.to_string());
+
+    // The certificate is renewed: it is announced again when that one nears its end.
+    report(node.id, vec![cert("soon.com", 3)]).await;
+    assert_eq!(
+        d.announce_expiring().await,
+        1,
+        "another end date, another notice"
+    );
+    report(node.id, vec![cert("soon.com", 3)]).await;
+    assert_eq!(
+        d.announce_expiring().await,
+        0,
+        "the same certificate reported again is not news"
+    );
+
+    // Tenants that are on their way out are not told.
+    sqlx::query("UPDATE tenants SET status = 'deleting', deleted_at = now(), purge_after = now() + interval '7 days' WHERE id = $1").bind(tenant).execute(&pool).await.unwrap();
+    sqlx::query("UPDATE certificates SET expiry_notified_at = NULL")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(d.announce_expiring().await, 0);
 }

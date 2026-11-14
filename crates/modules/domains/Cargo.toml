@@ -16,6 +16,8 @@ dhpanel-cache.workspace = true
 dhpanel-database.workspace = true
 dhpanel-dns.workspace = true
 dhpanel-domain.workspace = true
+dhpanel-events.workspace = true
+dhpanel-kernel.workspace = true
 dhpanel-http-kit.workspace = true
 dhpanel-rbac.workspace = true
 dhpanel-session.workspace = true
@@ -27,7 +29,6 @@ utoipa = { version = "6", features = ["uuid"] }
 uuid = { version = "1", features = ["serde"] }
 
 [dev-dependencies]
-dhpanel-kernel.workspace = true
 secrecy = "0.10"
 sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "postgres", "macros", "uuid", "json", "migrate"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }

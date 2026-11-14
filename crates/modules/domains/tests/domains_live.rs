@@ -2304,3 +2304,124 @@ async fn an_address_that_asks_too_often_is_told_to_wait(pool: PgPool) {
         (StatusCode::TOO_MANY_REQUESTS, "too_many_requests")
     );
 }
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn a_domains_certificate_is_shown_to_its_owner_and_domain_events_are_published(pool: PgPool) {
+    let e = env(&pool).await;
+    let (alice, _) = client(&pool, "alice", 10_000).await;
+    let (bobby, _) = client(&pool, "bobby", 10_001).await;
+    let (a, b) = (e.sign_in(alice).await, e.sign_in(bobby).await);
+    let root = e
+        .sign_in(account(&pool, "rootuser", &["super_admin"]).await)
+        .await;
+    let (_, main) = e
+        .call(Some(&a), "POST", CLIENT, Some(domain("example.com")), true)
+        .await;
+    let id = main["id"].as_str().unwrap().to_owned();
+    let path = format!("{CLIENT}/{id}/ssl");
+
+    // None yet.
+    let (status, none) = e.call(Some(&a), "GET", &path, None, false).await;
+    assert_eq!(status, StatusCode::OK, "{none}");
+    assert_eq!(none["state"], "none");
+    assert_eq!(none["issuer"], Value::Null);
+
+    // A node reports one: valid, then ending soon, then ended.
+    let put = |days: i64| {
+        let (pool, id) = (pool.clone(), id.clone());
+        async move {
+            sqlx::query(
+                "INSERT INTO certificates (domain_id, issuer, not_before, not_after)
+                 VALUES ($1, 'R11', now() - interval '30 days', now() + make_interval(days => $2::int))
+                 ON CONFLICT (domain_id) DO UPDATE SET not_after = EXCLUDED.not_after, not_before = EXCLUDED.not_before",
+            )
+            .bind(id.parse::<Uuid>().unwrap())
+            .bind(days as i32)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+    };
+    put(60).await;
+    let (_, valid) = e.call(Some(&a), "GET", &path, None, false).await;
+    assert_eq!(
+        (
+            valid["state"].clone(),
+            valid["kind"].clone(),
+            valid["issuer"].clone()
+        ),
+        (json!("valid"), json!("acme"), json!("R11"))
+    );
+    assert!(
+        (59..=60).contains(&valid["days_left"].as_i64().unwrap()),
+        "{valid}"
+    );
+    assert!(valid["not_after"].is_string());
+    put(5).await;
+    assert_eq!(
+        e.call(Some(&a), "GET", &path, None, false).await.1["state"],
+        "expiring"
+    );
+    put(-2).await;
+    let (_, ended) = e.call(Some(&a), "GET", &path, None, false).await;
+    assert_eq!(ended["state"], "expired");
+    assert!(ended["days_left"].as_i64().unwrap() < 0);
+
+    // Someone else's domain is not there; administrators see it.
+    assert_eq!(
+        e.call(Some(&b), "GET", &path, None, false).await.0,
+        StatusCode::NOT_FOUND
+    );
+    let (status, seen) = e
+        .call(
+            Some(&root),
+            "GET",
+            &format!("{ADMIN}/{id}/ssl"),
+            None,
+            false,
+        )
+        .await;
+    assert_eq!(
+        (status, seen["state"].clone()),
+        (StatusCode::OK, json!("expired"))
+    );
+    assert_eq!(
+        e.call(
+            Some(&root),
+            "GET",
+            &format!("{ADMIN}/{}/ssl", Uuid::now_v7()),
+            None,
+            false
+        )
+        .await
+        .0,
+        StatusCode::NOT_FOUND
+    );
+
+    // Adding and removing a domain are announced to the other modules.
+    let (_, extra) = e
+        .call(Some(&a), "POST", CLIENT, Some(domain("second.org")), true)
+        .await;
+    e.call(
+        Some(&a),
+        "DELETE",
+        &format!("{CLIENT}/{}", extra["id"].as_str().unwrap()),
+        None,
+        true,
+    )
+    .await;
+    let events: Vec<(String, Value)> =
+        sqlx::query_as("SELECT event_type, payload FROM outbox ORDER BY created_at, id")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    let kinds: Vec<&str> = events.iter().map(|e| e.0.as_str()).collect();
+    assert_eq!(
+        kinds,
+        ["domain_added", "domain_added", "domain_removed"],
+        "{events:?}"
+    );
+    assert_eq!(events[1].1["name"], "second.org");
+    assert_eq!(events[2].1["domain_id"], extra["id"]);
+}
