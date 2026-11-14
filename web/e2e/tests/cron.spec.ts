@@ -41,7 +41,7 @@ test.describe("Cron Jobs Management UI (T10.03)", () => {
     await page.getByTestId("btn-submit-cron").click();
     await expect(page.getByTestId("create-cron-dialog-title")).not.toBeVisible();
     await expect(
-      page.getByText(/Cron job created successfully|ক্রন জব সফলভাবে তৈরি/i)
+      page.getByText(/Cron job created successfully|ক্রন জব সফলভাবে তৈরি/i).first()
     ).toBeVisible();
 
     // 2. Toggle job enabled state
@@ -57,7 +57,7 @@ test.describe("Cron Jobs Management UI (T10.03)", () => {
     await expect(runBtn).toBeVisible();
     await runBtn.click();
     await expect(
-      page.getByText(/Cron job executed successfully|ক্রন জব .* সফলভাবে সম্পন্ন/i)
+      page.getByText(/Cron job executed successfully|ক্রন জব .* সফলভাবে সম্পন্ন/i).first()
     ).toBeVisible();
 
     // 4. View Terminal Output

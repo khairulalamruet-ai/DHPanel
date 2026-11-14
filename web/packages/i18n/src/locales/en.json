@@ -791,7 +791,19 @@
     },
     "toast": {
       "loadError": "Failed to load dashboard data"
-    }
+    },
+    "sslWarningTitle": "SSL Certificate Expiring Soon",
+    "sslWarningDesc": "The SSL certificate for {{domain}} expires in {{days}} days. Renew now to avoid service interruption.",
+    "renewSsl": "Renew Certificate",
+    "lastBackupTitle": "Latest Backup",
+    "lastBackupDesc": "Snapshot state and automatic backup protection",
+    "createBackup": "Create Backup",
+    "manageBackups": "Manage Backups",
+    "noBackups": "No backups created yet",
+    "favoritesTitle": "Favorite Tools",
+    "favoritesDesc": "Your pinned quick tools for rapid access",
+    "addToFavorites": "Add to favorites",
+    "removeFromFavorites": "Remove from favorites"
   },
   "domains": {
     "nav": "Domains",
