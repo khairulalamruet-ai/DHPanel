@@ -4,6 +4,7 @@
 //! that every layer (HTTP validation, CLI, repositories) must agree on.
 
 pub mod account;
+pub mod databases;
 pub mod dns;
 pub mod domains;
 pub mod error_pages;
