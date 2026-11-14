@@ -2453,6 +2453,47 @@ export const handlers = [
           message: "Node revoked successfully",
         });
       }),
+
+      // Get Signed Release Manifest (GET /api/v1/admin/cluster/agent/release-manifest) TODO(api:T16.08)
+      http.get(/\/api\/v1\/admin\/cluster\/agent\/release-manifest$/, () => {
+        return HttpResponse.json({
+          version: "0.2.0",
+          channel: "stable",
+          signing_key_id: "ed25519-release-2026-v1",
+          signature: "ed25519:7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b",
+          checksum_sha256: "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9",
+          release_notes: "Hardened syscall sandbox & signed self-updater (Phase 16)",
+        });
+      }),
+
+      // Apply Signed Agent Self-Update (POST /api/v1/admin/cluster/nodes/:id/update-agent) TODO(api:T16.08)
+      http.post(/\/api\/v1\/admin\/cluster\/nodes\/([^/]+)\/update-agent$/, async ({ params, request }) => {
+        const { 0: nodeId } = params as any;
+        const body = (await request.json().catch(() => ({}))) as any;
+        const target = mockNodes.find((n) => n.id === nodeId || n.name === nodeId);
+
+        if (!target) {
+          return HttpResponse.json({ error: "node_not_found", message: "Node not found" }, { status: 404 });
+        }
+
+        // Signature verification (DoD T16.08: invalid signature rejected)
+        if (body.corrupt_signature || body.manifest_signature?.includes("invalid")) {
+          return HttpResponse.json(
+            {
+              error: "invalid_signature",
+              message: "ERR_SIGNATURE_MISMATCH: Agent binary signature verification failed. Update rejected.",
+            },
+            { status: 422 }
+          );
+        }
+
+        target.version = body.version || "0.2.0";
+        return HttpResponse.json({
+          success: true,
+          version: target.version,
+          message: "Agent self-update verified and applied successfully",
+        });
+      }),
     ];
   })(),
   // Operations Ledger (T02.10, T02.11, T02.17) TODO(api:T02.17)

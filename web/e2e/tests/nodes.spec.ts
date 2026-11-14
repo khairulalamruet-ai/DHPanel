@@ -99,4 +99,49 @@ test.describe("Node Management UI (T02.16)", () => {
     // Verify modal closes
     await expect(page.getByText(/Revoke Node Certificate|নোড সার্টিফিকেট বাতিল করুন/i)).not.toBeVisible();
   });
+
+  test("rejects agent self-update when binary signature is invalid (T16.08)", async ({ page }) => {
+    // Look for Update Agent button on node-master-01
+    const updateBtn = page.getByTestId("btn-update-agent-00000000-0000-0000-0000-0000000000aa");
+    await expect(updateBtn).toBeVisible();
+    await updateBtn.click();
+
+    // Verify dialog opens
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByText(/Signed Agent Self-Update|সাইন্ড এজেন্ট সেলফ-আপডেট/i)).toBeVisible();
+
+    // Toggle corrupt signature
+    const corruptCheckbox = page.getByTestId("toggle-corrupt-signature");
+    await expect(corruptCheckbox).toBeVisible();
+    await corruptCheckbox.check();
+
+    // Click Apply Signed Update
+    const applyBtn = page.getByTestId("btn-apply-agent-update");
+    await applyBtn.click();
+
+    // Verify rejection alert (DoD T16.08)
+    const rejectAlert = page.getByTestId("agent-update-rejected-alert");
+    await expect(rejectAlert).toBeVisible();
+    await expect(rejectAlert).toContainText(/ERR_SIGNATURE_MISMATCH|স্বাক্ষর যাচাই ব্যর্থ/i);
+    await expect(page.getByTestId("badge-signature-rejected")).toBeVisible();
+  });
+
+  test("applies agent self-update when Ed25519 signature is valid (T16.08)", async ({ page }) => {
+    const updateBtn = page.getByTestId("btn-update-agent-00000000-0000-0000-0000-0000000000aa");
+    await expect(updateBtn).toBeVisible();
+    await updateBtn.click();
+
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+
+    // Click Apply Signed Update without corruption
+    const applyBtn = page.getByTestId("btn-apply-agent-update");
+    await applyBtn.click();
+
+    // Verify success banner and verified status
+    const successAlert = page.getByTestId("agent-update-success-alert");
+    await expect(successAlert).toBeVisible();
+    await expect(page.getByTestId("badge-update-verified")).toBeVisible();
+  });
 });

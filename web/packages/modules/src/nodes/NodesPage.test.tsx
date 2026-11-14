@@ -76,6 +76,21 @@ vi.mock("@dhpanel/i18n", () => ({
         "nodes.revoke.desc": "Are you sure you want to revoke this node?",
         "nodes.revoke.confirmPrompt": "Type the node name to confirm revocation:",
         "nodes.revoke.success": "Node revoked successfully",
+        "nodes.update.actionBtn": "Update Agent",
+        "nodes.update.dialogTitle": "Signed Agent Self-Update",
+        "nodes.update.dialogDesc": "Cryptographically verify and apply signed release updates",
+        "nodes.update.currentNodeLabel": "Target Node",
+        "nodes.update.targetReleaseLabel": "Target Release",
+        "nodes.update.manifestTitle": "Signed Release Manifest",
+        "nodes.update.corruptSigLabel": "Fault Injection: Simulate Invalid Signature",
+        "nodes.update.corruptSigDesc": "Simulate corrupted signature",
+        "nodes.update.rejectedTitle": "Signature Verification Failed",
+        "nodes.update.rejectedError": "ERR_SIGNATURE_MISMATCH: Agent binary signature verification failed. Update rejected.",
+        "nodes.update.verifiedTitle": "Cryptographic Signature Verified",
+        "nodes.update.verifiedDesc": "Agent binary successfully verified and upgraded to v0.2.0.",
+        "nodes.update.applyBtn": "Apply Signed Update",
+        "nodes.update.verifying": "Verifying Signature...",
+        "nodes.update.successToast": "Agent self-update verified and applied successfully.",
         "common.loading": "Loading...",
         "common.reload": "Reload",
         "common.cancel": "Cancel",
@@ -178,6 +193,26 @@ describe("NodesPage", () => {
       }
       if (url.includes("/revoke")) {
         return { success: true, message: "Node revoked successfully" };
+      }
+      if (url.includes("/release-manifest")) {
+        return {
+          version: "0.2.0",
+          channel: "stable",
+          signing_key_id: "ed25519-release-v1",
+          signature: "ed25519:7a8b9c0d",
+          checksum_sha256: "b94d27b9934d",
+        };
+      }
+      if (url.includes("/update-agent") && opts?.method === "POST") {
+        const body = JSON.parse(opts.body || "{}");
+        if (body.corrupt_signature || body.manifest_signature?.includes("invalid")) {
+          throw new Error("ERR_SIGNATURE_MISMATCH: Agent binary signature verification failed. Update rejected.");
+        }
+        return {
+          success: true,
+          version: "0.2.0",
+          message: "Agent self-update verified and applied successfully",
+        };
       }
       return {};
     });
@@ -396,5 +431,65 @@ describe("NodesPage", () => {
       </ToastProvider>
     );
     expect(screen.getByText("Permission denied")).toBeInTheDocument();
+  });
+
+  it("rejects agent update when Ed25519 signature verification fails (DoD T16.08)", async () => {
+    render(
+      <ToastProvider>
+        <NodesPage />
+      </ToastProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("btn-update-agent-node_01")).toBeInTheDocument();
+    });
+
+    // Open Agent Update Dialog
+    fireEvent.click(screen.getByTestId("btn-update-agent-node_01"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Signed Agent Self-Update")).toBeInTheDocument();
+      expect(screen.getByTestId("toggle-corrupt-signature")).toBeInTheDocument();
+    });
+
+    // Toggle corrupt signature
+    fireEvent.click(screen.getByTestId("toggle-corrupt-signature"));
+
+    // Click Apply Signed Update
+    fireEvent.click(screen.getByTestId("btn-apply-agent-update"));
+
+    // Verify rejection alert (DoD T16.08)
+    await waitFor(() => {
+      expect(screen.getByTestId("agent-update-rejected-alert")).toBeInTheDocument();
+      expect(screen.getByTestId("badge-signature-rejected")).toHaveTextContent("REJECTED");
+      expect(screen.getByText(/ERR_SIGNATURE_MISMATCH/i)).toBeInTheDocument();
+    });
+  });
+
+  it("applies agent update when cryptographic signature is valid (DoD T16.08)", async () => {
+    render(
+      <ToastProvider>
+        <NodesPage />
+      </ToastProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("btn-update-agent-node_01")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId("btn-update-agent-node_01"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("btn-apply-agent-update")).toBeInTheDocument();
+    });
+
+    // Valid signature (untoggled corrupt signature)
+    fireEvent.click(screen.getByTestId("btn-apply-agent-update"));
+
+    // Verify success banner and verified status
+    await waitFor(() => {
+      expect(screen.getByTestId("agent-update-success-alert")).toBeInTheDocument();
+      expect(screen.getByTestId("badge-update-verified")).toHaveTextContent("VERIFIED & UPDATED");
+    });
   });
 });

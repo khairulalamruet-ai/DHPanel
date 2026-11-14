@@ -313,6 +313,23 @@
       "statusExpired": "Expired",
       "statusConsumed": "Consumed",
       "statusRevoked": "Revoked"
+    },
+    "update": {
+      "actionBtn": "Update Agent",
+      "dialogTitle": "Signed Agent Self-Update",
+      "dialogDesc": "Cryptographically verify and apply signed release updates across node agents.",
+      "currentNodeLabel": "Target Node",
+      "targetReleaseLabel": "Target Release",
+      "manifestTitle": "Signed Release Manifest",
+      "corruptSigLabel": "Fault Injection: Simulate Invalid Signature",
+      "corruptSigDesc": "Simulate corrupted or forged Ed25519 signature to verify DoD security rejection policy.",
+      "rejectedTitle": "Signature Verification Failed",
+      "rejectedError": "ERR_SIGNATURE_MISMATCH: Agent binary signature verification failed. Update rejected.",
+      "verifiedTitle": "Cryptographic Signature Verified",
+      "verifiedDesc": "Agent binary successfully verified and upgraded to v{{version}}.",
+      "applyBtn": "Apply Signed Update",
+      "verifying": "Verifying Signature...",
+      "successToast": "Agent self-update verified and applied successfully."
     }
   },
   "operations": {
