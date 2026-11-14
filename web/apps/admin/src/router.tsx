@@ -59,6 +59,7 @@ import {
   AdminResellersPage,
   MigrationPage,
   LicensePage,
+  LaAdminPage,
   filterNavItems,
   registeredFrontendModules,
 } from "@dhpanel/modules";
@@ -480,6 +481,13 @@ const licenseRoute = createRoute({
   path: "/license",
   component: LicensePage,
 });
+
+// 46. License Authority route (T17.06)
+const laRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/la",
+  component: LaAdminPage,
+});
 });
 
 // 18. Login route
@@ -549,19 +557,11 @@ const routeTree = rootRoute.addChildren([
   adminServerToolsRoute,
   clientWafRoute,
   adminWafRoute,
-  clientFirewallRoute,
-  adminFirewallRoute,
-  adminSecurityCenterRoute,
-  adminAppsRoute,
-  appsRoute,
-  adminMailRoute,
-  clientEmailRoute,
-  adminResellersRoute,
-  resellerRoute,
   adminMigrationRoute,
   clientMigrationRoute,
   adminLicenseRoute,
   licenseRoute,
+  laRoute,
   loginRoute,
 ]);
 

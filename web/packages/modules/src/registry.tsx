@@ -958,6 +958,25 @@ export const registeredFrontendModules: FrontendModule[] = [
       },
     ],
   },
+  {
+    manifest: {
+      name: "license-authority",
+      title: { en: "License Authority", bn: "লাইসেন্স অথরিটি" },
+      category: "core",
+      core: true,
+      permissions: ["admin.license.read", "admin.settings.read"],
+    },
+    adminNav: [
+      {
+        id: "license-authority",
+        labelKey: "la.nav",
+        icon: <KeyRound className="h-4 w-4" />,
+        href: "/la",
+        order: 85,
+        permission: "admin.settings.read",
+      },
+    ],
+  },
 ];
 
 export const registeredModules: ModuleManifest[] = registeredFrontendModules.map((m) => m.manifest);
