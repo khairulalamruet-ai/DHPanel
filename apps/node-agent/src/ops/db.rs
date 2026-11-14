@@ -224,6 +224,7 @@ pub async fn ensure_server_with(context: &TenantContext, public: bool) -> Result
                 "--local-infile=0".into(),
                 "--skip-symbolic-links".into(),
                 "--max-connections=300".into(),
+                "--max-allowed-packet=64M".into(),
             ];
             spec.env
                 .insert("MARIADB_ROOT_PASSWORD".into(), password.clone());
@@ -296,6 +297,14 @@ async fn root_conn(context: &TenantContext) -> Result<mysql_async::Conn, AgentEr
     mysql_async::Conn::new(root_opts(&password))
         .await
         .map_err(|e| sql_error(&e))
+}
+
+/// A connection as the server's root (for the import code).
+///
+/// # Errors
+/// As [`ensure_server`].
+pub async fn root_connection(context: &TenantContext) -> Result<mysql_async::Conn, AgentError> {
+    root_conn(context).await
 }
 
 /// What went wrong with a statement, said without quoting anything the server sent

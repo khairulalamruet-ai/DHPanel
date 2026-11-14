@@ -522,6 +522,36 @@ pub enum Operation {
     /// Measure the size of every database on the node's shared server (data and
     /// indexes). Answered with [`Output::DbSizes`].
     ReportDbSizes,
+    /// Fetch an SQL dump from the control plane and run it in one of the tenant's
+    /// databases, as a temporary account that has rights in that database only. The
+    /// file is checked (size and SHA-256) before anything runs, may be gzip
+    /// compressed, and is read as a stream; the run stops at the first statement the
+    /// server refuses. Answered with [`Output::SqlImported`]; how far it has come can
+    /// be asked with [`Operation::ReportImportProgress`] meanwhile.
+    ImportSql {
+        /// The tenant's system name.
+        username: String,
+        /// The database's whole name.
+        database: String,
+        /// This import's id.
+        import_id: Uuid,
+        /// Where the dump is fetched from (`https`, or `http` for loopback).
+        url: String,
+        /// The dump's size in bytes, as uploaded (compressed, if it is).
+        size_bytes: u64,
+        /// Its SHA-256, 64 hex digits.
+        sha256: String,
+        /// Whether it is gzip compressed.
+        gzip: bool,
+        /// The credential for the download; absent in the ledger, present on the wire.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        token: Option<DbPassword>,
+    },
+    /// How far an import has come. Answered with [`Output::ImportProgress`].
+    ReportImportProgress {
+        /// The import.
+        import_id: Uuid,
+    },
     /// Let a tenant's containers reach the shared database server as `db` on their
     /// own network (the server is started first when it does not run). Safe to
     /// repeat. Answered with [`Output::TenantDbAllowed`].
@@ -694,6 +724,8 @@ impl Operation {
         "allow_tenant_databases",
         "create_database",
         "drop_database",
+        "import_sql",
+        "report_import_progress",
         "report_db_sizes",
         "upsert_db_user",
         "grant_db",
@@ -731,6 +763,8 @@ impl Operation {
             Self::AllowTenantDatabases { .. } => "allow_tenant_databases",
             Self::CreateDatabase { .. } => "create_database",
             Self::DropDatabase { .. } => "drop_database",
+            Self::ImportSql { .. } => "import_sql",
+            Self::ReportImportProgress { .. } => "report_import_progress",
             Self::ReportDbSizes => "report_db_sizes",
             Self::UpsertDbUser { .. } => "upsert_db_user",
             Self::GrantDb { .. } => "grant_db",
@@ -911,6 +945,25 @@ pub enum Output {
     DatabaseDropped {
         /// Whether there was one to remove.
         existed: bool,
+    },
+    /// Answer to [`Operation::ImportSql`].
+    SqlImported {
+        /// How many statements ran.
+        statements: u64,
+    },
+    /// Answer to [`Operation::ReportImportProgress`].
+    ImportProgress {
+        /// `unknown` (this node has no such import), `downloading`, `checking`,
+        /// `importing`, `done` or `failed`.
+        stage: String,
+        /// Bytes of the uploaded file taken in so far (downloaded, then read).
+        bytes_done: u64,
+        /// The file's size.
+        bytes_total: u64,
+        /// Statements run so far.
+        statements: u64,
+        /// Why it failed (fixed words and the server's own message, clipped).
+        error: Option<String>,
     },
     /// Answer to [`Operation::ReportDbSizes`].
     DbSizes {
@@ -1797,6 +1850,17 @@ mod tests {
             Operation::SetErrorPages { pages: vec![] },
             Operation::EnsureDbServer,
             Operation::ReportDbSizes,
+            Operation::ImportSql {
+                username: "alice".into(),
+                database: "alice_shop".into(),
+                import_id: id(),
+                url: "https://panel.example.com/api/v1/public/imports/x/data".into(),
+                size_bytes: 10,
+                sha256: "0".repeat(64),
+                gzip: false,
+                token: None,
+            },
+            Operation::ReportImportProgress { import_id: id() },
             Operation::CreateDatabase {
                 name: "alice_shop".into(),
             },
@@ -1857,7 +1921,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            31,
+            33,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }

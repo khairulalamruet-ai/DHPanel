@@ -1,0 +1,551 @@
+//! Running an uploaded SQL dump in a tenant's database (T07.07).
+//!
+//! The control plane keeps the upload and gives the node a credential to fetch it.
+//! The node downloads it (and can pick a broken download up where it stopped),
+//! checks its size and SHA-256, and only then runs anything. The dump runs as a
+//! temporary database account made for that one import, with rights in that one
+//! database only: whatever the dump says (`USE mysql`, `GRANT`, `CREATE DATABASE`,
+//! `DROP` of someone else's database) is refused by the server, exactly as it would
+//! be for the tenant's own user. The account is removed at the end, whatever the
+//! outcome. The file is read as a stream, gzip decompressed on the way if it is
+//! compressed, cut into statements ([`super::sqlsplit`]) and run one by one; the
+//! first statement the server refuses stops it, and says which.
+
+use std::{
+    collections::BTreeMap,
+    io::{Read, Seek as _, SeekFrom, Write as _},
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex},
+    time::Duration,
+};
+
+use dhpanel_domain::TenantUsername;
+use dhpanel_node_protocol::{AgentError, ErrorCode, Operation, Output};
+use mysql_async::prelude::Queryable as _;
+use sha2::{Digest as _, Sha256};
+use uuid::Uuid;
+
+use super::{
+    db,
+    sqlsplit::{SplitError, Splitter},
+    tenant::TenantContext,
+};
+
+/// Largest statement run (the server's `max_allowed_packet` is set to match).
+const MAX_STATEMENT_BYTES: usize = 64 << 20;
+/// Largest dump taken, in bytes (the control plane's setting is lower).
+const MAX_DUMP_BYTES: u64 = 8 << 30;
+/// Longest a whole import may take.
+const MAX_DURATION: Duration = Duration::from_secs(6 * 3600);
+/// How many finished imports the node remembers.
+const REMEMBERED: usize = 200;
+
+/// Where an import stands.
+#[derive(Debug, Clone, Default)]
+struct Progress {
+    stage: &'static str,
+    done: u64,
+    total: u64,
+    statements: u64,
+    error: Option<String>,
+}
+
+static PROGRESS: Mutex<BTreeMap<Uuid, Progress>> = Mutex::new(BTreeMap::new());
+
+fn update(id: Uuid, f: impl FnOnce(&mut Progress)) {
+    if let Ok(mut all) = PROGRESS.lock() {
+        if all.len() > REMEMBERED && !all.contains_key(&id) {
+            // Forget the oldest finished one.
+            if let Some(old) = all
+                .iter()
+                .find(|(_, p)| matches!(p.stage, "done" | "failed"))
+                .map(|(k, _)| *k)
+            {
+                all.remove(&old);
+            }
+        }
+        f(all.entry(id).or_default());
+    }
+}
+
+/// Where downloads are kept: next to the other state the agent owns.
+fn imports_dir(context: &TenantContext) -> PathBuf {
+    context.vhosts_root.with_file_name("imports")
+}
+
+fn invalid(m: &str) -> AgentError {
+    AgentError::new(ErrorCode::InvalidArguments, m.to_owned())
+}
+
+fn failed(what: &str) -> AgentError {
+    AgentError::new(ErrorCode::Internal, what.to_owned())
+}
+
+/// Reads the bytes it is given and counts them.
+struct Counting<R> {
+    inner: R,
+    import_id: Uuid,
+    read: u64,
+}
+
+impl<R: Read> Read for Counting<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let n = self.inner.read(buf)?;
+        self.read += n as u64;
+        update(self.import_id, |p| p.done = self.read);
+        Ok(n)
+    }
+}
+
+/// `report_import_progress`.
+///
+/// # Errors
+/// A wrong operation.
+pub async fn report_import_progress(
+    _context: Arc<TenantContext>,
+    op: Operation,
+) -> Result<Output, AgentError> {
+    let Operation::ReportImportProgress { import_id } = op else {
+        return Err(super::wrong_operation());
+    };
+    let p = PROGRESS
+        .lock()
+        .ok()
+        .and_then(|all| all.get(&import_id).cloned());
+    Ok(match p {
+        Some(p) => Output::ImportProgress {
+            stage: p.stage.to_owned(),
+            bytes_done: p.done,
+            bytes_total: p.total,
+            statements: p.statements,
+            error: p.error,
+        },
+        None => Output::ImportProgress {
+            stage: "unknown".into(),
+            bytes_done: 0,
+            bytes_total: 0,
+            statements: 0,
+            error: None,
+        },
+    })
+}
+
+/// Downloads the dump into `path`, picking up a partial file, and returns when the
+/// whole `size` is there.
+fn download(
+    url: &str,
+    token: &str,
+    size: u64,
+    path: &Path,
+    import_id: Uuid,
+) -> Result<(), AgentError> {
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .http_status_as_error(false)
+        .timeout_connect(Some(Duration::from_secs(20)))
+        .timeout_recv_response(Some(Duration::from_secs(60)))
+        .max_redirects(0)
+        .build()
+        .into();
+    let have = std::fs::metadata(path).map_or(0, |m| m.len()).min(size);
+    let mut request = agent
+        .get(url)
+        .header("Authorization", &format!("Bearer {token}"));
+    if have > 0 {
+        request = request.header("Range", &format!("bytes={have}-"));
+    }
+    let mut response = request
+        .call()
+        .map_err(|_| failed("the dump could not be fetched from the control plane").retryable())?;
+    let status = response.status().as_u16();
+    let start = match (have, status) {
+        (0, 200) | (_, 200) => 0,
+        (h, 206) => h,
+        (_, 401 | 403 | 404 | 410) => {
+            return Err(failed("the control plane refused the download"));
+        }
+        _ => return Err(failed("the control plane did not give the dump").retryable()),
+    };
+    let mut out = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(start == 0)
+        .open(path)
+        .map_err(|e| failed(&format!("cannot keep the dump: {}", e.kind())).retryable())?;
+    out.seek(SeekFrom::Start(start))
+        .map_err(|e| failed(&format!("cannot keep the dump: {}", e.kind())))?;
+    let mut body = response.body_mut().as_reader();
+    let mut written = start;
+    let mut buf = vec![0u8; 256 * 1024];
+    loop {
+        let n = body
+            .read(&mut buf)
+            .map_err(|_| failed("the download broke off").retryable())?;
+        if n == 0 {
+            break;
+        }
+        written += n as u64;
+        if written > size {
+            return Err(failed("the control plane sent more than was announced"));
+        }
+        out.write_all(&buf[..n])
+            .map_err(|e| failed(&format!("cannot keep the dump: {}", e.kind())).retryable())?;
+        update(import_id, |p| p.done = written);
+    }
+    out.sync_all().ok();
+    if written != size {
+        return Err(failed("the download broke off").retryable());
+    }
+    Ok(())
+}
+
+fn sha256_of(path: &Path) -> std::io::Result<String> {
+    let mut file = std::fs::File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0u8; 1 << 20];
+    loop {
+        let n = file.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    Ok(hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect())
+}
+
+/// What the server said, clipped and on one line.
+fn server_words(err: &mysql_async::Error) -> String {
+    match err {
+        mysql_async::Error::Server(e) => {
+            let text: String = e
+                .message
+                .chars()
+                .filter(|c| !c.is_control())
+                .take(200)
+                .collect();
+            format!("error {}: {text}", e.code)
+        }
+        _ => "the connection to the database server failed".to_owned(),
+    }
+}
+
+/// A random password for the temporary account.
+fn random_password() -> std::io::Result<String> {
+    let mut bytes = [0u8; 24];
+    std::fs::File::open("/dev/urandom")?.read_exact(&mut bytes)?;
+    // Letters, digits and a symbol, so it passes the server's own policy if any.
+    Ok(format!(
+        "A-{}",
+        bytes.iter().map(|b| format!("{b:02x}")).collect::<String>()
+    ))
+}
+
+/// `import_sql`.
+///
+/// # Errors
+/// [`AgentError`]: bad arguments, or a dump that does not match what was announced
+/// (not retryable); the download breaking off or the server not reachable
+/// (retryable); the first statement the server refused (not retryable, with its
+/// words).
+pub async fn import_sql(context: Arc<TenantContext>, op: Operation) -> Result<Output, AgentError> {
+    let Operation::ImportSql {
+        username,
+        database,
+        import_id,
+        url,
+        size_bytes,
+        sha256,
+        gzip,
+        token,
+    } = op
+    else {
+        return Err(super::wrong_operation());
+    };
+    // Arguments first: nothing is touched for a bad request.
+    TenantUsername::parse(&username).map_err(|e| invalid(&e.to_string()))?;
+    dhpanel_domain::databases::check_identifier(&database).map_err(|e| invalid(&e.to_string()))?;
+    let local = url.starts_with("http://127.0.0.1")
+        || url.starts_with("http://localhost")
+        || url.starts_with("http://[::1]");
+    let plain_url = url.len() <= 400
+        && url.is_ascii()
+        && !url.chars().any(|c| c.is_control() || c == ' ')
+        && (url.starts_with("https://") || local);
+    if !plain_url {
+        return Err(invalid("the download address must be https"));
+    }
+    if size_bytes == 0 || size_bytes > MAX_DUMP_BYTES {
+        return Err(invalid("the dump's size is not acceptable"));
+    }
+    if sha256.len() != 64
+        || !sha256
+            .bytes()
+            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+    {
+        return Err(invalid(
+            "the dump's SHA-256 is not 64 lower-case hex digits",
+        ));
+    }
+    let token = token
+        .ok_or_else(|| invalid("no credential for the download"))?
+        .0;
+
+    update(import_id, |p| {
+        *p = Progress {
+            stage: "downloading",
+            total: size_bytes,
+            ..Progress::default()
+        };
+    });
+    let result = tokio::time::timeout(
+        MAX_DURATION,
+        run(
+            &context, &database, import_id, &url, &token, size_bytes, &sha256, gzip,
+        ),
+    )
+    .await
+    .unwrap_or_else(|_| Err(failed("the import took longer than six hours")));
+    match &result {
+        Ok(statements) => update(import_id, |p| {
+            p.stage = "done";
+            p.statements = *statements;
+        }),
+        Err(e) => update(import_id, |p| {
+            p.stage = "failed";
+            p.error = Some(e.message.clone());
+        }),
+    }
+    result.map(|statements| Output::SqlImported { statements })
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run(
+    context: &TenantContext,
+    database: &str,
+    import_id: Uuid,
+    url: &str,
+    token: &str,
+    size: u64,
+    sha256: &str,
+    gzip: bool,
+) -> Result<u64, AgentError> {
+    let dir = imports_dir(context);
+    std::fs::create_dir_all(&dir).map_err(|e| {
+        failed(&format!(
+            "cannot prepare the import directory: {}",
+            e.kind()
+        ))
+        .retryable()
+    })?;
+    let path = dir.join(format!("{}.dump", import_id.simple()));
+    let outcome = run_with_file(
+        context, database, import_id, url, token, size, sha256, gzip, &path,
+    )
+    .await;
+    // The file is only kept while a retry may need it.
+    let keep = matches!(&outcome, Err(e) if e.retryable);
+    if !keep {
+        let _ = std::fs::remove_file(&path);
+    }
+    outcome
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_with_file(
+    context: &TenantContext,
+    database: &str,
+    import_id: Uuid,
+    url: &str,
+    token: &str,
+    size: u64,
+    sha256: &str,
+    gzip: bool,
+    path: &Path,
+) -> Result<u64, AgentError> {
+    // 1. The download (blocking code, on its own thread).
+    {
+        let (url, token, path) = (url.to_owned(), token.to_owned(), path.to_owned());
+        tokio::task::spawn_blocking(move || download(&url, &token, size, &path, import_id))
+            .await
+            .map_err(|_| failed("the download was cancelled").retryable())??;
+    }
+    // 2. What arrived is what was announced.
+    update(import_id, |p| p.stage = "checking");
+    let found = {
+        let path = path.to_owned();
+        tokio::task::spawn_blocking(move || sha256_of(&path))
+            .await
+            .map_err(|_| failed("the check was cancelled"))?
+            .map_err(|e| failed(&format!("cannot read the dump: {}", e.kind())))?
+    };
+    if found != sha256 {
+        let _ = std::fs::remove_file(path);
+        return Err(failed(
+            "the dump does not match its SHA-256: nothing was run",
+        ));
+    }
+    // 3. The temporary account, with rights in this one database.
+    db::ensure_server(context).await?;
+    let password =
+        random_password().map_err(|e| failed(&format!("cannot make a password: {}", e.kind())))?;
+    let account = format!("dhimport_{}", &import_id.simple().to_string()[..12]);
+    let quoted_db = format!("`{database}`");
+    {
+        let mut admin = db::root_connection(context).await?;
+        let hash: Option<String> = admin
+            .exec_first("SELECT PASSWORD(?)", (&password,))
+            .await
+            .map_err(|e| failed(&server_words(&e)))?;
+        let hash = hash
+            .filter(|h| {
+                h.len() == 41 && h.starts_with('*') && h[1..].bytes().all(|b| b.is_ascii_hexdigit())
+            })
+            .ok_or_else(|| failed("the database server gave no password hash"))?;
+        admin
+            .query_drop(format!("DROP USER IF EXISTS '{account}'@'%'"))
+            .await
+            .map_err(|e| failed(&server_words(&e)))?;
+        admin
+            .query_drop(format!(
+                "CREATE USER '{account}'@'%' IDENTIFIED BY PASSWORD '{hash}' WITH MAX_USER_CONNECTIONS 2"
+            ))
+            .await
+            .map_err(|e| failed(&server_words(&e)))?;
+        let privileges = dhpanel_domain::databases::Access::All
+            .privileges()
+            .join(", ");
+        admin
+            .query_drop(format!(
+                "GRANT {privileges} ON {quoted_db}.* TO '{account}'@'%'"
+            ))
+            .await
+            .map_err(|e| failed(&server_words(&e)))?;
+        let _ = admin.disconnect().await;
+    }
+    // 4. Run it; whatever happens, the account goes.
+    update(import_id, |p| {
+        p.stage = "importing";
+        p.done = 0;
+    });
+    let ran = {
+        let (path, db_name, account2, password2) = (
+            path.to_owned(),
+            database.to_owned(),
+            account.clone(),
+            password.clone(),
+        );
+        let handle = tokio::runtime::Handle::current();
+        let port = db::port();
+        tokio::task::spawn_blocking(move || {
+            execute(
+                &handle, port, &path, &db_name, &account2, &password2, gzip, import_id,
+            )
+        })
+        .await
+        .unwrap_or_else(|_| Err(failed("the import was cancelled")))
+    };
+    if let Ok(mut admin) = db::root_connection(context).await {
+        let _ = admin
+            .query_drop(format!("DROP USER IF EXISTS '{account}'@'%'"))
+            .await;
+        let _ = admin.disconnect().await;
+    }
+    ran
+}
+
+#[allow(clippy::too_many_arguments)]
+fn execute(
+    handle: &tokio::runtime::Handle,
+    port: u16,
+    path: &Path,
+    database: &str,
+    account: &str,
+    password: &str,
+    gzip: bool,
+    import_id: Uuid,
+) -> Result<u64, AgentError> {
+    let file = std::fs::File::open(path)
+        .map_err(|e| failed(&format!("cannot read the dump: {}", e.kind())))?;
+    let counting = Counting {
+        inner: file,
+        import_id,
+        read: 0,
+    };
+    let mut reader: Box<dyn Read> = if gzip {
+        Box::new(flate2::read::MultiGzDecoder::new(counting))
+    } else {
+        Box::new(counting)
+    };
+    let opts: mysql_async::Opts = mysql_async::OptsBuilder::default()
+        .ip_or_hostname("127.0.0.1")
+        .tcp_port(port)
+        .user(Some(account))
+        .pass(Some(password))
+        .db_name(Some(database))
+        .into();
+    let mut conn = handle
+        .block_on(mysql_async::Conn::new(opts))
+        .map_err(|e| failed(&server_words(&e)).retryable())?;
+    let mut splitter = Splitter::new(MAX_STATEMENT_BYTES);
+    let mut buf = vec![0u8; 256 * 1024];
+    let count = std::cell::Cell::new(0u64);
+    let run_all =
+        |splitter: &mut Splitter, conn: &mut mysql_async::Conn| -> Result<(), AgentError> {
+            loop {
+                match splitter.next_statement() {
+                    Ok(Some(statement)) => {
+                        count.set(count.get() + 1);
+                        if let Err(e) = handle.block_on(conn.query_drop(statement)) {
+                            return Err(failed(&format!(
+                                "statement {}: {}",
+                                count.get(),
+                                server_words(&e)
+                            )));
+                        }
+                        update(import_id, |p| p.statements = count.get());
+                    }
+                    Ok(None) => return Ok(()),
+                    Err(e) => return Err(split_error(&e, count.get())),
+                }
+            }
+        };
+    loop {
+        let n = reader.read(&mut buf).map_err(|e| {
+            if gzip {
+                failed("the dump is not valid gzip data")
+            } else {
+                failed(&format!("cannot read the dump: {}", e.kind()))
+            }
+        })?;
+        if n == 0 {
+            break;
+        }
+        splitter.push(&buf[..n]);
+        run_all(&mut splitter, &mut conn)?;
+    }
+    splitter
+        .finish()
+        .map_err(|e| split_error(&e, count.get()))?;
+    run_all(&mut splitter, &mut conn)?;
+    let _ = handle.block_on(conn.disconnect());
+    Ok(count.get())
+}
+
+fn split_error(e: &SplitError, after: u64) -> AgentError {
+    failed(&format!("after statement {after}: {e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_temporary_password_is_long_and_mixed() {
+        let p = random_password().unwrap();
+        assert!(dhpanel_domain::databases::check_password(&p).is_ok(), "{p}");
+        assert_ne!(p, random_password().unwrap());
+    }
+}
