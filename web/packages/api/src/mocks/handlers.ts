@@ -9036,6 +9036,65 @@ export const handlers = [
     }),
   ];
 })(),
+...(() => {
+  // Global Search & Command Palette Handlers (T18.09)
+  const searchableEntities = [
+    {
+      id: "domain-apexstore",
+      title: "apexstore.com",
+      subtitle: "Tenant: apex_store (IP: 198.51.100.24)",
+      category: "domains" as const,
+      href: "/domains",
+      badge: "Domain",
+    },
+    {
+      id: "domain-mysite",
+      title: "mysite.org",
+      subtitle: "Tenant: user_john (IP: 198.51.100.24)",
+      category: "domains" as const,
+      href: "/domains",
+      badge: "Domain",
+    },
+    {
+      id: "user-apex-store",
+      title: "apex_store",
+      subtitle: "Pro Plan • apex@store.io",
+      category: "users" as const,
+      href: "/users",
+      badge: "Tenant",
+    },
+    {
+      id: "user-john",
+      title: "user_john",
+      subtitle: "Standard Plan • john@mysite.org",
+      category: "users" as const,
+      href: "/users",
+      badge: "Tenant",
+    },
+    {
+      id: "db-apex-prod",
+      title: "apex_store_prod",
+      subtitle: "MySQL 8.4 • 184 MB",
+      category: "actions" as const,
+      href: "/databases",
+      badge: "Database",
+    },
+  ];
+
+  return [
+    // GET /api/v1/search?q=... (TODO(api:T18.09))
+    http.get(/\/api\/v1\/search$/, ({ request }) => {
+      const url = new URL(request.url);
+      const q = (url.searchParams.get("q") || "").toLowerCase().trim();
+      if (!q) return HttpResponse.json([]);
+
+      const matched = searchableEntities.filter(
+        (e) => e.title.toLowerCase().includes(q) || e.subtitle.toLowerCase().includes(q)
+      );
+      return HttpResponse.json(matched);
+    }),
+  ];
+})(),
                                         ];
                                       })(),
                                     ];

@@ -9,13 +9,14 @@ import { ThemeProvider, ToastProvider } from "@dhpanel/ui";
 import { SessionProvider, useSession, LoginPage, AccountSecurityPage } from "@dhpanel/auth";
 import { queryClient, QueryClientProvider } from "@dhpanel/api";
 import { AppShell, NotFoundPage, RouteErrorFallback } from "@dhpanel/shell";
-import { ClientDashboardPage, ClientDomainsPage, DnsEditorPage, SslPage, PhpManagementPage, ServicesPage, ClientDatabasesPage, FileManagerPage, DiskUsagePage, FtpAccountsPage, ClientBackupsPage, CronJobsPage, LogViewerPage, ClientUsagePage, ClientProcessesPage, ClientWafPage, ClientFirewallPage, AppsPage, ClientEmailPage, ResellerPortalPage, MigrationPage, NotificationBell, NotificationPreferencesPage } from "@dhpanel/modules";
+import { ClientDashboardPage, ClientDomainsPage, DnsEditorPage, SslPage, PhpManagementPage, ServicesPage, ClientDatabasesPage, FileManagerPage, DiskUsagePage, FtpAccountsPage, ClientBackupsPage, CronJobsPage, LogViewerPage, ClientUsagePage, ClientProcessesPage, ClientWafPage, ClientFirewallPage, AppsPage, ClientEmailPage, ResellerPortalPage, MigrationPage, NotificationBell, NotificationPreferencesPage, CommandPalette, CommandPaletteTrigger } from "@dhpanel/modules";
 import { useTranslation } from "@dhpanel/i18n";
 import { LayoutDashboard, ShieldCheck, ShieldAlert, Globe, Lock, Database, Folder, Server, Archive, Clock, FileText, Activity, Terminal, Flame, Boxes, Mail, Briefcase, ArrowRightLeft } from "lucide-react";
 
 function AuthenticatedContent() {
   const { data: session, isLoading } = useSession();
   const { t } = useTranslation();
+  const [commandPaletteOpen, setCommandPaletteOpen] = React.useState(false);
 
   const navItems = [
     {
@@ -152,13 +153,25 @@ function AuthenticatedContent() {
   }
 
   return (
-    <AppShell
-      title={t("common.clientTitle")}
-      navItems={navItems}
-      headerActions={<NotificationBell settingsHref="/settings/notifications" />}
-    >
-      <Outlet />
-    </AppShell>
+    <>
+      <AppShell
+        title={t("common.clientTitle")}
+        navItems={navItems}
+        headerActions={
+          <div className="flex items-center gap-2">
+            <CommandPaletteTrigger onClick={() => setCommandPaletteOpen(true)} />
+            <NotificationBell settingsHref="/settings/notifications" />
+          </div>
+        }
+      >
+        <Outlet />
+      </AppShell>
+      <CommandPalette
+        open={commandPaletteOpen}
+        onOpenChange={setCommandPaletteOpen}
+        onNavigate={(href) => router.navigate({ to: href as any })}
+      />
+    </>
   );
 }
 

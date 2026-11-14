@@ -2856,5 +2856,16 @@
         }
       }
     }
+  },
+  "search": {
+    "inputPlaceholder": "Search users, domains, pages, settings (Ctrl+K)...",
+    "noResultsTitle": "No results found",
+    "noResultsDesc": "No matching pages, domains, or users found for '{{query}}'.",
+    "navigateHint": "to navigate",
+    "selectHint": "to select",
+    "closeHint": "to close",
+    "triggerLabel": "Search or jump to...",
+    "triggerTitle": "Global search & command palette (Ctrl+K)",
+    "triggerPlaceholder": "Search..."
   }
 }
