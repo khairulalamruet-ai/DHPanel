@@ -6,6 +6,7 @@ export * from "./dummy/DummyModulePage";
 export * from "./module-manager";
 export * from "./nodes/NodesPage";
 export * from "./nodes/AgentUpdateDialog";
+export * from "./nodes/AdminIpPoolsPage";
 export * from "./nodes/types";
 export * from "./operations/OperationsPage";
 export * from "./operations/useOperation";

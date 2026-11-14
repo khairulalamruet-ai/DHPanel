@@ -2511,6 +2511,115 @@ export const handlers = [
       },
     ];
 
+    interface MockNodeIp {
+      id: string;
+      node_id: string;
+      node_name: string;
+      ip_address: string;
+      subnet_mask: string;
+      interface_name: string;
+      type: "shared" | "dedicated";
+      status: "active" | "available" | "reserved";
+      is_primary: boolean;
+      assigned_tenant_id?: string | null;
+      assigned_tenant_username?: string | null;
+      assigned_domain?: string | null;
+      shared_tenants_count?: number;
+      created_at: string;
+      updated_at: string;
+    }
+
+    const subnetMaskTrim = (mask?: string) => (mask ? mask.trim() : "255.255.255.0");
+
+    const initialMockIps: MockNodeIp[] = [
+      {
+        id: "ip_01",
+        node_id: "00000000-0000-0000-0000-0000000000aa",
+        node_name: "node-master-01",
+        ip_address: "167.104.101.81",
+        subnet_mask: "255.255.255.0",
+        interface_name: "eth0",
+        type: "shared",
+        status: "active",
+        is_primary: true,
+        shared_tenants_count: 24,
+        created_at: new Date(Date.now() - 30 * 86400000).toISOString(),
+        updated_at: new Date(Date.now() - 30 * 86400000).toISOString(),
+      },
+      {
+        id: "ip_02",
+        node_id: "00000000-0000-0000-0000-0000000000aa",
+        node_name: "node-master-01",
+        ip_address: "167.104.101.82",
+        subnet_mask: "255.255.255.0",
+        interface_name: "eth0",
+        type: "shared",
+        status: "active",
+        is_primary: false,
+        shared_tenants_count: 10,
+        created_at: new Date(Date.now() - 20 * 86400000).toISOString(),
+        updated_at: new Date(Date.now() - 20 * 86400000).toISOString(),
+      },
+      {
+        id: "ip_03",
+        node_id: "00000000-0000-0000-0000-0000000000aa",
+        node_name: "node-master-01",
+        ip_address: "167.104.101.95",
+        subnet_mask: "255.255.255.0",
+        interface_name: "eth0:1",
+        type: "dedicated",
+        status: "active",
+        is_primary: false,
+        assigned_tenant_id: "usr_01",
+        assigned_tenant_username: "alex",
+        assigned_domain: "mail.alexblog.org",
+        created_at: new Date(Date.now() - 10 * 86400000).toISOString(),
+        updated_at: new Date(Date.now() - 2 * 86400000).toISOString(),
+      },
+      {
+        id: "ip_04",
+        node_id: "00000000-0000-0000-0000-0000000000aa",
+        node_name: "node-master-01",
+        ip_address: "167.104.101.96",
+        subnet_mask: "255.255.255.0",
+        interface_name: "eth0:2",
+        type: "dedicated",
+        status: "available",
+        is_primary: false,
+        created_at: new Date(Date.now() - 5 * 86400000).toISOString(),
+        updated_at: new Date(Date.now() - 5 * 86400000).toISOString(),
+      },
+      {
+        id: "ip_05",
+        node_id: "00000000-0000-0000-0000-0000000000bb",
+        node_name: "node-worker-02",
+        ip_address: "167.104.101.85",
+        subnet_mask: "255.255.255.0",
+        interface_name: "eth0",
+        type: "shared",
+        status: "active",
+        is_primary: true,
+        shared_tenants_count: 8,
+        created_at: new Date(Date.now() - 15 * 86400000).toISOString(),
+        updated_at: new Date(Date.now() - 15 * 86400000).toISOString(),
+      },
+      {
+        id: "ip_06",
+        node_id: "00000000-0000-0000-0000-0000000000bb",
+        node_name: "node-worker-02",
+        ip_address: "167.104.101.99",
+        subnet_mask: "255.255.255.0",
+        interface_name: "eth0:1",
+        type: "dedicated",
+        status: "available",
+        is_primary: false,
+        created_at: new Date(Date.now() - 8 * 86400000).toISOString(),
+        updated_at: new Date(Date.now() - 8 * 86400000).toISOString(),
+      },
+    ];
+
+    const mockIps = [...initialMockIps];
+
     return [
       // List Nodes (GET /api/v1/admin/nodes) TODO(api:T02.08)
       http.get(/\/api\/v1\/admin\/nodes$/, () => {
@@ -2690,6 +2799,159 @@ export const handlers = [
           exclude_draining: true,
         });
       }),
+      // Cluster IP Pools: List all cluster IP addresses & metrics (GET /api/v1/admin/cluster/ips)
+      // TODO(api:T16.05): Replace with real backend cluster IP pool endpoint
+      http.get(/\/api\/v1\/admin\/cluster\/ips$/, () => {
+        const total_ips = mockIps.length;
+        const shared_ips = mockIps.filter((i) => i.type === "shared").length;
+        const dedicated_total = mockIps.filter((i) => i.type === "dedicated").length;
+        const dedicated_assigned = mockIps.filter(
+          (i) => i.type === "dedicated" && i.assigned_tenant_id
+        ).length;
+        const dedicated_available = dedicated_total - dedicated_assigned;
+
+        return HttpResponse.json({
+          items: mockIps,
+          metrics: {
+            total_ips,
+            shared_ips,
+            dedicated_total,
+            dedicated_assigned,
+            dedicated_available,
+          },
+        });
+      }),
+
+      // Node IP Pool: List IP addresses for a node (GET /api/v1/admin/cluster/nodes/:nodeId/ips)
+      // TODO(api:T16.05): Replace with real backend node IP pool endpoint
+      http.get(/\/api\/v1\/admin\/cluster\/nodes\/([^/]+)\/ips$/, ({ params }) => {
+        const nodeId = (params.nodeId || params[0]) as string;
+        const filtered = mockIps.filter(
+          (i) => i.node_id === nodeId || i.node_name === nodeId
+        );
+        return HttpResponse.json({ items: filtered, total: filtered.length });
+      }),
+
+      // Node IP Pool: Add IP address to node (POST /api/v1/admin/cluster/nodes/:nodeId/ips)
+      // TODO(api:T16.05): Replace with real backend node IP pool endpoint
+      http.post(
+        /\/api\/v1\/admin\/cluster\/nodes\/([^/]+)\/ips$/,
+        async ({ params, request }) => {
+          const nodeId = (params.nodeId || params[0]) as string;
+          const body = (await request.json().catch(() => ({}))) as any;
+          const {
+            ip_address,
+            subnet_mask = "255.255.255.0",
+            interface_name = "eth0",
+            type = "dedicated",
+          } = body || {};
+
+          if (!ip_address) {
+            return HttpResponse.json({ message: "IP address is required" }, { status: 400 });
+          }
+
+          const targetNode = mockNodes.find(
+            (n) => n.id === nodeId || n.name === nodeId
+          );
+          const nodeName = targetNode ? targetNode.name : "node-master-01";
+
+          const newIp: MockNodeIp = {
+            id: `ip_${Date.now()}`,
+            node_id: targetNode ? targetNode.id : nodeId,
+            node_name: nodeName,
+            ip_address: ip_address.trim(),
+            subnet_mask: subnetMaskTrim(subnet_mask),
+            interface_name: interface_name.trim() || "eth0",
+            type: type === "shared" ? "shared" : "dedicated",
+            status: type === "shared" ? "active" : "available",
+            is_primary: false,
+            shared_tenants_count: type === "shared" ? 0 : undefined,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          };
+
+          mockIps.unshift(newIp);
+          return HttpResponse.json(newIp, { status: 201 });
+        }
+      ),
+
+      // Node IP Pool: Allocate dedicated IP to tenant (POST /api/v1/admin/cluster/nodes/:nodeId/ips/:ipId/assign)
+      // TODO(api:T16.05): Replace with real backend IP allocation endpoint
+      http.post(
+        /\/api\/v1\/admin\/cluster\/nodes\/([^/]+)\/ips\/([^/]+)\/assign$/,
+        async ({ params, request }) => {
+          const ipId = (params.ipId || params[1]) as string;
+          const body = (await request.json().catch(() => ({}))) as any;
+          const { tenant_id, tenant_username, domain } = body || {};
+
+          const index = mockIps.findIndex((i) => i.id === ipId);
+          if (index === -1) {
+            return HttpResponse.json({ message: "IP address not found" }, { status: 404 });
+          }
+
+          const current = mockIps[index];
+          const updated: MockNodeIp = {
+            ...current,
+            assigned_tenant_id: tenant_id,
+            assigned_tenant_username: tenant_username,
+            assigned_domain: domain || null,
+            status: "active",
+            updated_at: new Date().toISOString(),
+          };
+
+          mockIps[index] = updated;
+          return HttpResponse.json(updated);
+        }
+      ),
+
+      // Node IP Pool: Release dedicated IP from tenant (POST /api/v1/admin/cluster/nodes/:nodeId/ips/:ipId/release)
+      // TODO(api:T16.05): Replace with real backend IP release endpoint
+      http.post(
+        /\/api\/v1\/admin\/cluster\/nodes\/([^/]+)\/ips\/([^/]+)\/release$/,
+        ({ params }) => {
+          const ipId = (params.ipId || params[1]) as string;
+          const index = mockIps.findIndex((i) => i.id === ipId);
+          if (index === -1) {
+            return HttpResponse.json({ message: "IP address not found" }, { status: 404 });
+          }
+
+          const current = mockIps[index];
+          const updated: MockNodeIp = {
+            ...current,
+            assigned_tenant_id: null,
+            assigned_tenant_username: null,
+            assigned_domain: null,
+            status: "available",
+            updated_at: new Date().toISOString(),
+          };
+
+          mockIps[index] = updated;
+          return HttpResponse.json(updated);
+        }
+      ),
+
+      // Node IP Pool: Delete IP address (DELETE /api/v1/admin/cluster/nodes/:nodeId/ips/:ipId)
+      // TODO(api:T16.05): Replace with real backend node IP endpoint
+      http.delete(
+        /\/api\/v1\/admin\/cluster\/nodes\/([^/]+)\/ips\/([^/]+)$/,
+        ({ params }) => {
+          const ipId = (params.ipId || params[1]) as string;
+          const index = mockIps.findIndex((i) => i.id === ipId);
+          if (index === -1) {
+            return HttpResponse.json({ message: "IP address not found" }, { status: 404 });
+          }
+
+          if (mockIps[index].is_primary) {
+            return HttpResponse.json(
+              { message: "Cannot delete the node's primary IP address" },
+              { status: 400 }
+            );
+          }
+
+          mockIps.splice(index, 1);
+          return HttpResponse.json({ success: true });
+        }
+      ),
     ];
   })(),
   // Operations Ledger (T02.10, T02.11, T02.17) TODO(api:T02.17)
