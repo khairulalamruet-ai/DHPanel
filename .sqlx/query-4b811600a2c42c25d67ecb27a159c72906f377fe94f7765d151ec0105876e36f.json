@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE dns_zone_templates\n         SET name = $2, description = $3, records = $4, is_default = is_default OR $5\n         WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Jsonb",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4b811600a2c42c25d67ecb27a159c72906f377fe94f7765d151ec0105876e36f"
+}

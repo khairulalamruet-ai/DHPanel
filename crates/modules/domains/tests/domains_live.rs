@@ -1163,3 +1163,353 @@ async fn redirects_can_be_added_changed_and_removed_and_loops_are_caught(pool: P
         ["redirect.added", "redirect.changed", "redirect.deleted"]
     );
 }
+
+async fn zone_lines(pool: &PgPool, zone_name: &str) -> Vec<String> {
+    sqlx::query_scalar(
+        "SELECT r.name || ' ' || r.rtype || ' ' || r.content || coalesce(' p' || r.priority, '')
+         FROM dns_records r JOIN dns_zones z ON z.id = r.zone_id
+         WHERE z.name = $1 ORDER BY r.name, r.rtype, r.content",
+    )
+    .bind(zone_name)
+    .fetch_all(pool)
+    .await
+    .unwrap()
+}
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn a_new_domain_gets_a_zone_from_the_default_template(pool: PgPool) {
+    let e = env(&pool).await;
+    let (alice, _) = client(&pool, "alice", 10_000).await;
+    let a = e.sign_in(alice).await;
+    sqlx::query("UPDATE nodes SET public_ip = '192.0.2.10'")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // IPv4 only: the AAAA line is left out.
+    let (status, main) = e
+        .call(Some(&a), "POST", CLIENT, Some(domain("example.com")), true)
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{main}");
+    assert_eq!(
+        zone_lines(&pool, "example.com").await,
+        [
+            "@ A 192.0.2.10",
+            "@ MX example.com. p10",
+            "@ TXT v=spf1 a mx ~all",
+            "www CNAME example.com."
+        ]
+    );
+    let zone: (String, String) =
+        sqlx::query_as("SELECT status, provider FROM dns_zones WHERE name = 'example.com'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        zone,
+        ("pending".to_owned(), "powerdns".to_owned()),
+        "not pushed to the DNS server yet"
+    );
+
+    // A subdomain puts its address into the parent's zone, and takes it out when it goes.
+    let (_, blog) = e
+        .call(
+            Some(&a),
+            "POST",
+            CLIENT,
+            Some(
+                json!({"fqdn": "blog.example.com", "kind": "sub", "parent_domain_id": main["id"]}),
+            ),
+            true,
+        )
+        .await;
+    assert!(
+        zone_lines(&pool, "example.com")
+            .await
+            .contains(&"blog A 192.0.2.10".to_owned())
+    );
+    let zones: i64 = sqlx::query_scalar("SELECT count(*) FROM dns_zones")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(zones, 1, "a subdomain has no zone of its own");
+    let path = format!("{CLIENT}/{}", blog["id"].as_str().unwrap());
+    assert_eq!(
+        e.call(Some(&a), "DELETE", &path, None, true).await.0,
+        StatusCode::NO_CONTENT
+    );
+    assert!(
+        !zone_lines(&pool, "example.com")
+            .await
+            .iter()
+            .any(|l| l.starts_with("blog "))
+    );
+
+    // Addons and aliases have zones of their own; both address kinds appear when the node has IPv6.
+    sqlx::query("UPDATE nodes SET public_ip = '2001:db8::10'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    e.call(Some(&a), "POST", CLIENT, Some(domain("second.org")), true)
+        .await;
+    assert_eq!(
+        zone_lines(&pool, "second.org").await,
+        [
+            "@ AAAA 2001:db8::10",
+            "@ MX second.org. p10",
+            "@ TXT v=spf1 a mx ~all",
+            "www CNAME second.org."
+        ]
+    );
+    e.call(
+        Some(&a),
+        "POST",
+        CLIENT,
+        Some(json!({"fqdn": "alias.net", "kind": "alias", "parent_domain_id": main["id"]})),
+        true,
+    )
+    .await;
+    assert!(!zone_lines(&pool, "alias.net").await.is_empty());
+
+    // No address known for the server: the zone is made, without address records.
+    sqlx::query("UPDATE nodes SET public_ip = NULL")
+        .execute(&pool)
+        .await
+        .unwrap();
+    e.call(Some(&a), "POST", CLIENT, Some(domain("noaddr.com")), true)
+        .await;
+    let lines = zone_lines(&pool, "noaddr.com").await;
+    assert!(
+        lines
+            .iter()
+            .all(|l| !l.contains(" A ") && !l.contains(" AAAA ")),
+        "{lines:?}"
+    );
+    assert_eq!(lines.len(), 3);
+
+    // The zone goes with its domain.
+    let id = main["id"].as_str().unwrap();
+    for sub_id in sqlx::query_scalar::<_, Uuid>("SELECT id FROM domains WHERE kind <> 'primary'")
+        .fetch_all(&pool)
+        .await
+        .unwrap()
+    {
+        e.call(
+            Some(&a),
+            "DELETE",
+            &format!("{CLIENT}/{sub_id}"),
+            None,
+            true,
+        )
+        .await;
+    }
+    assert_eq!(
+        e.call(Some(&a), "DELETE", &format!("{CLIENT}/{id}"), None, true)
+            .await
+            .0,
+        StatusCode::NO_CONTENT
+    );
+    let left: i64 = sqlx::query_scalar("SELECT count(*) FROM dns_zones")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let records: i64 = sqlx::query_scalar("SELECT count(*) FROM dns_records")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!((left, records), (0, 0));
+}
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn administrators_edit_the_zone_templates_new_zones_start_from(pool: PgPool) {
+    let e = env(&pool).await;
+    let (alice, _) = client(&pool, "alice", 10_000).await;
+    let a = e.sign_in(alice).await;
+    let root = e
+        .sign_in(account(&pool, "rootuser", &["super_admin"]).await)
+        .await;
+    let plain = e
+        .sign_in(account(&pool, "plainadmin", &["admin"]).await)
+        .await;
+    const T: &str = "/api/v1/admin/dns/templates";
+    sqlx::query("UPDATE nodes SET public_ip = '192.0.2.10'")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let (status, b) = e.call(Some(&plain), "GET", T, None, false).await;
+    assert_eq!(
+        (status, code(&b)),
+        (StatusCode::FORBIDDEN, "permission_denied")
+    );
+    assert_eq!(
+        e.call(Some(&a), "GET", T, None, false).await.0,
+        StatusCode::FORBIDDEN
+    );
+    let (status, list) = e.call(Some(&root), "GET", T, None, false).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(list["items"][0]["name"], "default");
+    assert_eq!(
+        (
+            list["items"][0]["is_default"].clone(),
+            list["items"][0]["built_in"].clone()
+        ),
+        (json!(true), json!(true))
+    );
+    assert_eq!(list["items"][0]["records"].as_array().unwrap().len(), 5);
+    let default_id = list["items"][0]["id"].as_str().unwrap().to_owned();
+
+    // Bad templates say which record is wrong; nothing is saved.
+    for (records, want) in [
+        (
+            json!([{"name": "@", "type": "A", "content": "not-an-ip"}]),
+            "invalid_ipv4",
+        ),
+        (
+            json!([{"name": "@", "type": "A", "content": "{{oops}}"}]),
+            "unknown_variable",
+        ),
+        (
+            json!([{"name": "www", "type": "A", "content": "192.0.2.1"}, {"name": "www", "type": "CNAME", "content": "x.org."}]),
+            "cname_conflict",
+        ),
+        (
+            json!([{"name": "@", "type": "MX", "content": "m.example.com."}]),
+            "priority_required",
+        ),
+    ] {
+        let (status, body) = e
+            .call(
+                Some(&root),
+                "POST",
+                T,
+                Some(json!({"name": "bad", "records": records})),
+                true,
+            )
+            .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{records}");
+        assert_eq!(body["errors"][0]["code"], want, "{body}");
+    }
+    let (status, _) = e
+        .call(
+            Some(&root),
+            "POST",
+            T,
+            Some(json!({"name": "Bad Name", "records": []})),
+            true,
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    // A new template, made the default: the next zone starts from it.
+    let (status, created) = e
+        .call(
+            Some(&root),
+            "POST",
+            T,
+            Some(json!({
+                "name": "minimal",
+                "description": "Just the site",
+                "is_default": true,
+                "records": [
+                    {"name": "@", "type": "A", "content": "{{ipv4}}", "ttl": 300},
+                    {"name": "@", "type": "TXT", "content": "managed by {{domain}}"}
+                ]
+            })),
+            true,
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    assert_eq!(created["is_default"], true);
+    let (status, b) = e
+        .call(
+            Some(&root),
+            "POST",
+            T,
+            Some(json!({"name": "minimal", "records": []})),
+            true,
+        )
+        .await;
+    assert_eq!(
+        (status, code(&b)),
+        (StatusCode::CONFLICT, "template_name_taken")
+    );
+    e.call(Some(&a), "POST", CLIENT, Some(domain("example.com")), true)
+        .await;
+    assert_eq!(
+        zone_lines(&pool, "example.com").await,
+        ["@ A 192.0.2.10", "@ TXT managed by example.com"]
+    );
+    let ttl: i32 = sqlx::query_scalar("SELECT ttl FROM dns_records WHERE rtype = 'A'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(ttl, 300);
+    let (_, defaults) = e.call(Some(&root), "GET", T, None, false).await;
+    let flagged: Vec<&str> = defaults["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|t| t["is_default"] == true)
+        .map(|t| t["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(flagged, ["minimal"], "only one default");
+
+    // Changing a template does not touch zones that exist.
+    let minimal = format!("{T}/{}", created["id"].as_str().unwrap());
+    let (status, updated) = e
+        .call(Some(&root), "PUT", &minimal, Some(json!({"name": "minimal", "records": [{"name": "@", "type": "A", "content": "{{ipv4}}"}], "is_default": true})), true)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{updated}");
+    assert_eq!(zone_lines(&pool, "example.com").await.len(), 2);
+    // The built-in one keeps its name and cannot be deleted; the default cannot be deleted.
+    let built_in = format!("{T}/{default_id}");
+    let (status, b) = e
+        .call(
+            Some(&root),
+            "PUT",
+            &built_in,
+            Some(json!({"name": "renamed", "records": []})),
+            true,
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{b}");
+    let (status, b) = e.call(Some(&root), "DELETE", &built_in, None, true).await;
+    assert_eq!(
+        (status, code(&b)),
+        (StatusCode::CONFLICT, "template_built_in")
+    );
+    let (status, b) = e.call(Some(&root), "DELETE", &minimal, None, true).await;
+    assert_eq!(
+        (status, code(&b)),
+        (StatusCode::CONFLICT, "template_is_default")
+    );
+    // Back to the built-in default, then the other one can go.
+    let (status, _) = e
+        .call(Some(&root), "PUT", &built_in, Some(json!({"name": "default", "records": [{"name": "@", "type": "A", "content": "{{ipv4}}"}], "is_default": true})), true)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        e.call(Some(&root), "DELETE", &minimal, None, true).await.0,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        e.call(Some(&root), "DELETE", &minimal, None, true).await.0,
+        StatusCode::NOT_FOUND
+    );
+
+    let actions: Vec<String> = sqlx::query_scalar("SELECT DISTINCT action FROM audit_logs WHERE action LIKE 'admin.dns_template_%' ORDER BY action")
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        actions,
+        [
+            "admin.dns_template_created",
+            "admin.dns_template_deleted",
+            "admin.dns_template_updated"
+        ]
+    );
+}

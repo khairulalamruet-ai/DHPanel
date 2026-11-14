@@ -29,6 +29,7 @@
 //! The panel-wide settings of this module (`permit_subdomain_sharing`,
 //! `blocked_domains`) are read on every add, so a change takes effect at once.
 
+pub mod dns;
 pub mod redirects;
 
 use std::sync::Arc;
@@ -100,6 +101,7 @@ impl FromRef<DomainsState> for SessionStore {
 /// Routes for administrators, with full paths.
 pub fn admin_router() -> Router<DomainsState> {
     redirects::admin_router()
+        .merge(dns::admin_router())
         .route("/api/v1/admin/domains", get(admin_list).post(admin_add))
         .route(
             "/api/v1/admin/domains/{id}",
@@ -404,12 +406,14 @@ async fn add_domain(
     )
     .await
     .map_err(add_error)?;
+    let dns_note = dns::provision(&mut tx, hosting, &added, &fqdn).await?;
     dhpanel_audit::insert(
         &mut *tx,
         &entry("domain.added", who, hosting, added.id).metadata(serde_json::json!({
             "fqdn": added.fqdn,
             "kind": added.kind.as_str(),
             "docroot": added.docroot,
+            "dns": dns_note,
         })),
     )
     .await
@@ -466,6 +470,10 @@ async fn delete_domain(
                 "Remove the other domains first, or the main domain stays.",
             ));
         }
+    }
+    // A subdomain's address records live in its parent's zone; take them out.
+    if target.domain.kind == DomainKind::Sub {
+        dns::forget_subdomain(&mut tx, hosting, &target.domain.fqdn).await?;
     }
     if !domains::delete(&mut tx, id).await.map_err(internal)? {
         return Err(AppError::not_found("domain"));
@@ -1046,12 +1054,15 @@ pub async fn client_delete(
         admin_unsuspend, client_list, client_get, client_add, client_update, client_delete,
         redirects::admin_list, redirects::admin_add, redirects::admin_update,
         redirects::admin_delete, redirects::client_list, redirects::client_add,
-        redirects::client_update, redirects::client_delete
+        redirects::client_update, redirects::client_delete,
+        dns::list_templates, dns::get_template, dns::create_template, dns::update_template,
+        dns::delete_template
     ),
     components(schemas(
         DomainView, DomainList, AddDomain, AdminAddDomain, UpdateDomain,
         redirects::RedirectView, redirects::RedirectList, redirects::AddRedirect,
-        redirects::UpdateRedirect
+        redirects::UpdateRedirect, dns::TemplateLine, dns::TemplateView, dns::TemplateList,
+        dns::TemplateInput
     )),
     tags((name = "domains", description = "The names a hosting account serves"))
 )]

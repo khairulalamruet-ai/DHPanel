@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM dns_records WHERE zone_id = $1 AND name = $2 AND rtype IN ('A', 'AAAA')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7e67a446bb08f81f304bf7a2d99ee568fe2d7741aa92e2f62af6047c8c992b60"
+}

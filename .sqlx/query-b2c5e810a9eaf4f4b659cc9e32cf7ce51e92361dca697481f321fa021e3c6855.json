@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE dns_zone_templates SET is_default = false WHERE is_default AND id <> $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b2c5e810a9eaf4f4b659cc9e32cf7ce51e92361dca697481f321fa021e3c6855"
+}

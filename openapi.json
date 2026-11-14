@@ -859,6 +859,338 @@
         ]
       }
     },
+    "/api/v1/admin/dns/templates": {
+      "get": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "List the zone templates.",
+        "operationId": "listDnsTemplates",
+        "responses": {
+          "200": {
+            "description": "The templates",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateList"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied` (needs admin.domains.read)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "Create a zone template.",
+        "operationId": "createDnsTemplate",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TemplateInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied`, `reauth_required` or `csrf_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`template_name_taken`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid name or records (the message names the record)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/dns/templates/{id}": {
+      "get": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "One zone template.",
+        "operationId": "getDnsTemplate",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Template id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The template",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such template",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "Replace a zone template. Zones that already exist are not changed.",
+        "operationId": "updateDnsTemplate",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Template id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TemplateInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied`, `reauth_required` or `csrf_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such template",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`template_name_taken`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid name or records",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "Delete a zone template.",
+        "operationId": "deleteDnsTemplate",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Template id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "403": {
+            "description": "`permission_denied`, `reauth_required` or `csrf_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such template",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`template_built_in` or `template_is_default` (make another one the default first)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/domains": {
       "get": {
         "tags": [
@@ -8613,6 +8945,147 @@
             "format": "int64",
             "description": "Seconds until sensitive actions need re-authentication again.",
             "minimum": 0
+          }
+        }
+      },
+      "TemplateInput": {
+        "type": "object",
+        "description": "A template to write.",
+        "required": [
+          "name",
+          "records"
+        ],
+        "properties": {
+          "description": {
+            "type": "string",
+            "description": "What it is for."
+          },
+          "is_default": {
+            "type": "boolean",
+            "description": "Make it the template new zones start from."
+          },
+          "name": {
+            "type": "string",
+            "description": "Unique name: lower-case letters, digits and `_`, 2-32 characters.",
+            "example": "web_only"
+          },
+          "records": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TemplateLine"
+            },
+            "description": "The lines (at most 100)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "TemplateLine": {
+        "type": "object",
+        "description": "One line of a template.",
+        "required": [
+          "name",
+          "type",
+          "content"
+        ],
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "The data. May use `{{domain}}`, `{{ipv4}}` and `{{ipv6}}`; a line whose\naddress the server does not have is left out.",
+            "example": "{{domain}}."
+          },
+          "name": {
+            "type": "string",
+            "description": "Relative to the zone: `@` for the zone itself, `www`, `_dmarc`, ...",
+            "example": "www"
+          },
+          "priority": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "For `MX` and `SRV`.",
+            "minimum": 0
+          },
+          "ttl": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Seconds (60 to 604800; default 3600).",
+            "minimum": 0
+          },
+          "type": {
+            "type": "string",
+            "description": "`A`, `AAAA`, `CNAME`, `MX`, `TXT`, `SRV`, `CAA` or `NS`.",
+            "example": "CNAME"
+          }
+        },
+        "additionalProperties": false
+      },
+      "TemplateList": {
+        "type": "object",
+        "description": "The templates.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TemplateView"
+            },
+            "description": "The default first, then by name."
+          }
+        }
+      },
+      "TemplateView": {
+        "type": "object",
+        "description": "A zone template.",
+        "required": [
+          "id",
+          "name",
+          "description",
+          "records",
+          "is_default",
+          "built_in",
+          "updated_at"
+        ],
+        "properties": {
+          "built_in": {
+            "type": "boolean",
+            "description": "Made by the installation: it can be changed but not deleted."
+          },
+          "description": {
+            "type": "string",
+            "description": "Description."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Id."
+          },
+          "is_default": {
+            "type": "boolean",
+            "description": "New zones start from this one."
+          },
+          "name": {
+            "type": "string",
+            "description": "Unique name.",
+            "example": "default"
+          },
+          "records": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TemplateLine"
+            },
+            "description": "The lines."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Last change (RFC 3339, UTC)."
           }
         }
       },

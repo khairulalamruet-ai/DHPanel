@@ -1,0 +1,100 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, zone_id, name, rtype, content, ttl, priority\n         FROM dns_records WHERE zone_id = $1 ORDER BY name, rtype, content",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "dns_records",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "zone_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "dns_records",
+            "name": "zone_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "dns_records",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "rtype",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "dns_records",
+            "name": "rtype"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "content",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "dns_records",
+            "name": "content"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "ttl",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "dns_records",
+            "name": "ttl"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "priority",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "dns_records",
+            "name": "priority"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "452d6626bcc932b251640ffac6e5853c4f98cf2d2e6c066757201cc8d7dac047"
+}

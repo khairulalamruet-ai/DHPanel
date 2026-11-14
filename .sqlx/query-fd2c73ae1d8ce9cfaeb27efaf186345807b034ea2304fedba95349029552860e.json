@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO dns_records (zone_id, name, rtype, content, ttl, priority)\n             VALUES ($1, $2, $3, $4, $5, $6)\n             ON CONFLICT DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "fd2c73ae1d8ce9cfaeb27efaf186345807b034ea2304fedba95349029552860e"
+}
