@@ -1513,3 +1513,387 @@ async fn administrators_edit_the_zone_templates_new_zones_start_from(pool: PgPoo
         ]
     );
 }
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn dns_records_are_added_changed_and_removed_with_clear_errors(pool: PgPool) {
+    let e = env(&pool).await;
+    let (alice, _) = client(&pool, "alice", 10_000).await;
+    let (bobby, _) = client(&pool, "bobby", 10_001).await;
+    let (a, b) = (e.sign_in(alice).await, e.sign_in(bobby).await);
+    let root = e
+        .sign_in(account(&pool, "rootuser", &["super_admin"]).await)
+        .await;
+    sqlx::query("UPDATE nodes SET public_ip = '192.0.2.10'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (_, main) = e
+        .call(Some(&a), "POST", CLIENT, Some(domain("example.com")), true)
+        .await;
+    let (_, blog) = e
+        .call(
+            Some(&a),
+            "POST",
+            CLIENT,
+            Some(
+                json!({"fqdn": "blog.example.com", "kind": "sub", "parent_domain_id": main["id"]}),
+            ),
+            true,
+        )
+        .await;
+    let path = format!("{CLIENT}/{}/dns/records", main["id"].as_str().unwrap());
+
+    // The zone made from the template is there, and says it has not reached the server.
+    let (status, list) = e.call(Some(&a), "GET", &path, None, false).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(
+        (list["zone"]["name"].clone(), list["zone"]["status"].clone()),
+        (json!("example.com"), json!("pending"))
+    );
+    let names: Vec<String> = list["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| {
+            format!(
+                "{} {}",
+                r["name"].as_str().unwrap(),
+                r["type"].as_str().unwrap()
+            )
+        })
+        .collect();
+    assert!(
+        names.contains(&"www CNAME".to_owned()) && names.contains(&"@ MX".to_owned()),
+        "{names:?}"
+    );
+    let www = list["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["name"] == "www")
+        .unwrap();
+    assert_eq!(www["fqdn"], "www.example.com");
+
+    // Add one of every type.
+    sqlx::query("UPDATE dns_zones SET status = 'active'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let add = |body: Value| {
+        let (e, a, path) = (&e, &a, path.clone());
+        async move { e.call(Some(a), "POST", &path, Some(body), true).await }
+    };
+    for body in [
+        json!({"name": "api", "type": "A", "content": "192.0.2.20", "ttl": 300}),
+        json!({"name": "api", "type": "AAAA", "content": "2001:DB8::20"}),
+        json!({"name": "mail", "type": "A", "content": "192.0.2.30"}),
+        json!({"name": "@", "type": "MX", "content": "mail.example.com", "priority": 20}),
+        json!({"name": "_dmarc", "type": "TXT", "content": "v=DMARC1; p=none"}),
+        json!({"name": "_sip._tcp", "type": "SRV", "content": "10 5060 sip.example.com", "priority": 5}),
+        json!({"name": "@", "type": "CAA", "content": "0 issue letsencrypt.org"}),
+        json!({"name": "sub", "type": "NS", "content": "ns1.other.net"}),
+        json!({"name": "*.wild", "type": "A", "content": "192.0.2.40"}),
+    ] {
+        let (status, r) = add(body.clone()).await;
+        assert_eq!(status, StatusCode::CREATED, "{body}: {r}");
+    }
+    let (_, r) = add(json!({"name": "CDN", "type": "cname", "content": "Edge.Example.NET"})).await;
+    assert_eq!(
+        (r["name"].clone(), r["type"].clone(), r["content"].clone()),
+        (json!("cdn"), json!("CNAME"), json!("edge.example.net.")),
+        "normalised"
+    );
+    let (_, listed) = e.call(Some(&a), "GET", &path, None, false).await;
+    let aaaa = listed["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["type"] == "AAAA" && r["name"] == "api")
+        .unwrap();
+    assert_eq!(aaaa["content"], "2001:db8::20");
+    assert_eq!(
+        listed["zone"]["status"], "pending",
+        "a change marks the zone for the next push"
+    );
+
+    // Wrong records: 422, the field and what is wrong.
+    for (body, field, code_) in [
+        (
+            json!({"name": "x", "type": "A", "content": "256.0.0.1"}),
+            "content",
+            "invalid_ipv4",
+        ),
+        (
+            json!({"name": "x", "type": "AAAA", "content": "192.0.2.1"}),
+            "content",
+            "invalid_ipv6",
+        ),
+        (
+            json!({"name": "x", "type": "A", "content": "192.0.2.1", "ttl": 5}),
+            "ttl",
+            "ttl_out_of_range",
+        ),
+        (
+            json!({"name": "x", "type": "A", "content": "192.0.2.1", "ttl": 9_999_999}),
+            "ttl",
+            "ttl_out_of_range",
+        ),
+        (
+            json!({"name": "x", "type": "MX", "content": "mail.example.com"}),
+            "priority",
+            "priority_required",
+        ),
+        (
+            json!({"name": "x", "type": "A", "content": "192.0.2.1", "priority": 5}),
+            "priority",
+            "priority_not_allowed",
+        ),
+        (
+            json!({"name": "x", "type": "TXT", "content": "say \"hi\""}),
+            "content",
+            "invalid_txt",
+        ),
+        (
+            json!({"name": "x", "type": "SRV", "content": "5060 host", "priority": 1}),
+            "content",
+            "invalid_srv",
+        ),
+        (
+            json!({"name": "x", "type": "CAA", "content": "0 badtag x.org"}),
+            "content",
+            "invalid_caa",
+        ),
+        (
+            json!({"name": "bad name", "type": "A", "content": "192.0.2.1"}),
+            "name",
+            "invalid_record_name",
+        ),
+        (
+            json!({"name": "x.", "type": "A", "content": "192.0.2.1"}),
+            "name",
+            "invalid_record_name",
+        ),
+        (
+            json!({"name": "@", "type": "CNAME", "content": "x.org"}),
+            "name",
+            "cname_at_apex",
+        ),
+        (
+            json!({"name": "@", "type": "NS", "content": "ns.x.org"}),
+            "name",
+            "apex_ns_reserved",
+        ),
+        (
+            json!({"name": "x", "type": "SOA", "content": "x"}),
+            "type",
+            "unsupported_record_type",
+        ),
+        (
+            json!({"name": "x", "type": "CNAME", "content": "a b"}),
+            "content",
+            "invalid_record_target",
+        ),
+    ] {
+        let (status, body_) = add(body.clone()).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}: {body_}");
+        assert_eq!(
+            (
+                body_["errors"][0]["field"].clone(),
+                body_["errors"][0]["code"].clone()
+            ),
+            (json!(field), json!(code_)),
+            "{body}: {body_}"
+        );
+        assert!(!body_["errors"][0]["message"].as_str().unwrap().is_empty());
+    }
+    // Clashes with what is there: 409.
+    for (body, want) in [
+        (
+            json!({"name": "www", "type": "A", "content": "192.0.2.50"}),
+            "cname_conflict",
+        ),
+        (
+            json!({"name": "api", "type": "CNAME", "content": "x.org"}),
+            "cname_conflict",
+        ),
+        (
+            json!({"name": "cdn", "type": "CNAME", "content": "other.org"}),
+            "cname_conflict",
+        ),
+        (
+            json!({"name": "api", "type": "A", "content": "192.0.2.20"}),
+            "duplicate_record",
+        ),
+    ] {
+        let (status, body_) = add(body.clone()).await;
+        assert_eq!(
+            (status, code(&body_)),
+            (StatusCode::CONFLICT, want),
+            "{body}: {body_}"
+        );
+    }
+    assert_eq!(
+        add(json!({"name": "api", "type": "A", "content": "192.0.2.21"}))
+            .await
+            .0,
+        StatusCode::CREATED,
+        "two A records at one name are fine"
+    );
+
+    // Change: content, TTL; the same checks apply.
+    let id_of = |l: &Value, n: &str, t: &str, c: &str| {
+        l["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["name"] == n && r["type"] == t && r["content"] == c)
+            .unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    let (_, listed) = e.call(Some(&a), "GET", &path, None, false).await;
+    let mail = format!("{path}/{}", id_of(&listed, "mail", "A", "192.0.2.30"));
+    let (status, changed) = e
+        .call(
+            Some(&a),
+            "PATCH",
+            &mail,
+            Some(json!({"content": "192.0.2.31", "ttl": 120})),
+            true,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{changed}");
+    assert_eq!(
+        (
+            changed["content"].clone(),
+            changed["ttl"].clone(),
+            changed["name"].clone()
+        ),
+        (json!("192.0.2.31"), json!(120), json!("mail"))
+    );
+    let (status, body_) = e
+        .call(
+            Some(&a),
+            "PATCH",
+            &mail,
+            Some(json!({"content": "not-an-ip"})),
+            true,
+        )
+        .await;
+    assert_eq!(
+        (status, body_["errors"][0]["code"].clone()),
+        (StatusCode::UNPROCESSABLE_ENTITY, json!("invalid_ipv4"))
+    );
+    let (status, _) = e
+        .call(Some(&a), "PATCH", &mail, Some(json!({})), true)
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let api2 = format!("{path}/{}", id_of(&listed, "api", "A", "192.0.2.21"));
+    let (status, body_) = e
+        .call(
+            Some(&a),
+            "PATCH",
+            &api2,
+            Some(json!({"content": "192.0.2.20"})),
+            true,
+        )
+        .await;
+    assert_eq!(
+        (status, code(&body_)),
+        (StatusCode::CONFLICT, "duplicate_record")
+    );
+    let mx = format!("{path}/{}", id_of(&listed, "@", "MX", "mail.example.com."));
+    let (status, mxr) = e
+        .call(Some(&a), "PATCH", &mx, Some(json!({"priority": 5})), true)
+        .await;
+    assert_eq!(
+        (status, mxr["priority"].clone()),
+        (StatusCode::OK, json!(5))
+    );
+
+    // Remove.
+    assert_eq!(
+        e.call(Some(&a), "DELETE", &api2, None, true).await.0,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        e.call(Some(&a), "DELETE", &api2, None, true).await.0,
+        StatusCode::NOT_FOUND
+    );
+
+    // A subdomain's records are in its parent's zone; someone else's zone is not there.
+    let blog_path = format!("{CLIENT}/{}/dns/records", blog["id"].as_str().unwrap());
+    let (status, body_) = e.call(Some(&a), "GET", &blog_path, None, false).await;
+    assert_eq!((status, code(&body_)), (StatusCode::CONFLICT, "no_zone"));
+    assert_eq!(
+        e.call(Some(&b), "GET", &path, None, false).await.0,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        e.call(
+            Some(&b),
+            "POST",
+            &path,
+            Some(json!({"name": "x", "type": "A", "content": "192.0.2.1"})),
+            true
+        )
+        .await
+        .0,
+        StatusCode::NOT_FOUND
+    );
+
+    // Administrators see and change any zone.
+    let admin_path = format!("{ADMIN}/{}/dns/records", main["id"].as_str().unwrap());
+    let (status, theirs) = e.call(Some(&root), "GET", &admin_path, None, false).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(theirs["items"].as_array().unwrap().len() > 8);
+    let (status, _) = e
+        .call(
+            Some(&root),
+            "POST",
+            &admin_path,
+            Some(json!({"name": "byadmin", "type": "A", "content": "192.0.2.77"})),
+            true,
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    // DNS editing is a plan feature; looking is always allowed.
+    let set: Uuid = sqlx::query_scalar(
+        "INSERT INTO feature_sets (name, features) VALUES ('nodns', '{domains}') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE plans SET feature_set_id = $1 WHERE is_default")
+        .bind(set)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, body_) = add(json!({"name": "denied", "type": "A", "content": "192.0.2.1"})).await;
+    assert_eq!(
+        (status, code(&body_)),
+        (StatusCode::FORBIDDEN, "feature_disabled")
+    );
+    assert_eq!(
+        e.call(Some(&a), "GET", &path, None, false).await.0,
+        StatusCode::OK
+    );
+
+    let actions: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT action FROM audit_logs WHERE action LIKE 'dns.record_%' ORDER BY action",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        actions,
+        [
+            "dns.record_added",
+            "dns.record_changed",
+            "dns.record_deleted"
+        ]
+    );
+}

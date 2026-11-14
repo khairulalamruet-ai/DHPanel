@@ -1590,6 +1590,354 @@
         ]
       }
     },
+    "/api/v1/admin/domains/{id}/dns/records": {
+      "get": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "List the records of a domain's zone.",
+        "operationId": "adminListDnsRecords",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Domain id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The zone and its records",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordList"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such domain",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`no_zone`: a subdomain's records are in its parent's zone",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "Add a record to a domain's zone.",
+        "operationId": "adminAddDnsRecord",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Domain id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddRecord"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Added",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied`, `reauth_required`, `csrf_failed` or `feature_disabled`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such domain",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`no_zone`, `cname_conflict`, `duplicate_record` or `limit_reached`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The record is not valid: one error with the field and what is wrong",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/domains/{id}/dns/records/{record_id}": {
+      "delete": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "Remove a record.",
+        "operationId": "adminDeleteDnsRecord",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Domain id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "record_id",
+            "in": "path",
+            "description": "Record id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed"
+          },
+          "403": {
+            "description": "`permission_denied`, `reauth_required`, `csrf_failed` or `feature_disabled`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such domain or record",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`no_zone`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "Change a record's data, TTL or priority.",
+        "operationId": "adminUpdateDnsRecord",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Domain id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "record_id",
+            "in": "path",
+            "description": "Record id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateRecord"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied`, `reauth_required`, `csrf_failed` or `feature_disabled`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such domain or record",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`no_zone`, `cname_conflict` or `duplicate_record`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Nothing to change, or the record would not be valid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/domains/{id}/redirects": {
       "get": {
         "tags": [
@@ -5701,6 +6049,354 @@
         ]
       }
     },
+    "/api/v1/client/domains/{id}/dns/records": {
+      "get": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "List the records of one of your domains' zones.",
+        "operationId": "clientListDnsRecords",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Domain id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The zone and its records",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordList"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such domain (or it is not yours)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`no_zone`: a subdomain's records are in its parent's zone",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "Add a record to one of your domains' zones.",
+        "operationId": "clientAddDnsRecord",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Domain id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddRecord"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Added",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only`, `csrf_failed` or `feature_disabled`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such domain (or it is not yours)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`no_zone`, `cname_conflict`, `duplicate_record` or `limit_reached`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The record is not valid: one error with the field and what is wrong",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/domains/{id}/dns/records/{record_id}": {
+      "delete": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "Remove a record of one of your domains' zones.",
+        "operationId": "clientDeleteDnsRecord",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Domain id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "record_id",
+            "in": "path",
+            "description": "Record id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed"
+          },
+          "403": {
+            "description": "`client_only`, `csrf_failed` or `feature_disabled`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such domain or record (or it is not yours)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`no_zone`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "Change a record of one of your domains' zones.",
+        "operationId": "clientUpdateDnsRecord",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Domain id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "record_id",
+            "in": "path",
+            "description": "Record id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateRecord"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only`, `csrf_failed` or `feature_disabled`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such domain or record (or it is not yours)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`no_zone`, `cname_conflict` or `duplicate_record`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Nothing to change, or the record would not be valid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/client/domains/{id}/redirects": {
       "get": {
         "tags": [
@@ -6437,6 +7133,51 @@
             ],
             "format": "uuid",
             "description": "The domain a `sub` or `alias` belongs to."
+          }
+        },
+        "additionalProperties": false
+      },
+      "AddRecord": {
+        "type": "object",
+        "description": "A record to add.",
+        "required": [
+          "name",
+          "type",
+          "content"
+        ],
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "The data: an address for `A` and `AAAA`, a host name for `CNAME`, `MX`\n(the mail server) and `NS`, text for `TXT`, `weight port target` for `SRV`,\n`flags tag \"value\"` for `CAA`.",
+            "example": "192.0.2.10"
+          },
+          "name": {
+            "type": "string",
+            "description": "Relative to the zone; `@` for the zone itself.",
+            "example": "www"
+          },
+          "priority": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Required for `MX` and `SRV`, refused for the others.",
+            "minimum": 0
+          },
+          "ttl": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Seconds, 60 to 604800 (default 3600).",
+            "minimum": 0
+          },
+          "type": {
+            "type": "string",
+            "description": "`A`, `AAAA`, `CNAME`, `MX`, `TXT`, `SRV`, `CAA` or `NS`.",
+            "example": "A"
           }
         },
         "additionalProperties": false
@@ -8514,6 +9255,82 @@
           }
         }
       },
+      "RecordList": {
+        "type": "object",
+        "description": "A zone with its records.",
+        "required": [
+          "zone",
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RecordView"
+            },
+            "description": "The records, by name and type."
+          },
+          "zone": {
+            "$ref": "#/components/schemas/ZoneView",
+            "description": "The zone."
+          }
+        }
+      },
+      "RecordView": {
+        "type": "object",
+        "description": "A DNS record.",
+        "required": [
+          "id",
+          "name",
+          "fqdn",
+          "type",
+          "content",
+          "ttl"
+        ],
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "The data (for an `MX`, the mail server; the priority is separate).",
+            "example": "192.0.2.10"
+          },
+          "fqdn": {
+            "type": "string",
+            "description": "The full name, `www.example.com`.",
+            "example": "www.example.com"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Id."
+          },
+          "name": {
+            "type": "string",
+            "description": "Relative to the zone: `@`, `www`, `_dmarc`, ...",
+            "example": "www"
+          },
+          "priority": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "For `MX` and `SRV`.",
+            "minimum": 0
+          },
+          "ttl": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Seconds a resolver may keep the answer.",
+            "example": 3600,
+            "minimum": 0
+          },
+          "type": {
+            "type": "string",
+            "description": "`A`, `AAAA`, `CNAME`, `MX`, `TXT`, `SRV`, `CAA` or `NS`.",
+            "example": "A"
+          }
+        }
+      },
       "RedeemRequest": {
         "type": "object",
         "description": "The token from the administrator.",
@@ -9209,6 +10026,38 @@
         },
         "additionalProperties": false
       },
+      "UpdateRecord": {
+        "type": "object",
+        "description": "Changes to a record (its name and type stay: remove it and add another).",
+        "properties": {
+          "content": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "New data."
+          },
+          "priority": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "New priority (`MX` and `SRV`).",
+            "minimum": 0
+          },
+          "ttl": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "New TTL.",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
       "UpdateRedirect": {
         "type": "object",
         "description": "Changes to a redirect (the path it applies to cannot change: remove it and add another).",
@@ -9344,6 +10193,33 @@
             "type": "string",
             "description": "Login name.",
             "example": "alice"
+          }
+        }
+      },
+      "ZoneView": {
+        "type": "object",
+        "description": "How far the zone has got on the DNS server.",
+        "required": [
+          "name",
+          "status"
+        ],
+        "properties": {
+          "last_error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the last push was refused."
+          },
+          "name": {
+            "type": "string",
+            "description": "The zone's name.",
+            "example": "example.com"
+          },
+          "status": {
+            "type": "string",
+            "description": "`pending` (changes not on the server yet), `active` or `error`.",
+            "example": "active"
           }
         }
       }

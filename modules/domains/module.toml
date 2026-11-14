@@ -13,7 +13,7 @@ depends_on = ["auth", "rbac", "audit", "system", "plans", "users"]
 keys = ["admin.domains.read", "admin.domains.manage"]
 
 [features]
-keys = ["domains", "redirects"]
+keys = ["domains", "redirects", "dns"]
 
 # A plan without these keys gets the defaults: the limit counts main, addon and
 # alias names (`max_domains`) and subdomains (`max_subdomains`) separately.

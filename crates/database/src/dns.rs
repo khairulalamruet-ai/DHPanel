@@ -568,3 +568,153 @@ pub async fn finish_removal(pool: &PgPool, name: &str) -> Result<(), sqlx::Error
         .await?;
     Ok(())
 }
+
+/// Why changing a record failed.
+#[derive(Debug, thiserror::Error)]
+pub enum RecordWriteError {
+    /// The very same record exists in the zone.
+    #[error("this record exists already")]
+    Duplicate,
+    /// Any other database error.
+    #[error(transparent)]
+    Database(#[from] sqlx::Error),
+}
+
+/// How many records a zone has.
+///
+/// # Errors
+/// Database errors.
+pub async fn record_count(conn: &mut PgConnection, zone_id: Uuid) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar!(
+        r#"SELECT count(*) AS "n!" FROM dns_records WHERE zone_id = $1"#,
+        zone_id,
+    )
+    .fetch_one(conn)
+    .await
+}
+
+/// The records of a zone on a plain connection (inside a transaction).
+///
+/// # Errors
+/// Database errors.
+pub async fn records_in(
+    conn: &mut PgConnection,
+    zone_id: Uuid,
+) -> Result<Vec<StoredRecord>, sqlx::Error> {
+    let rows = sqlx::query!(
+        "SELECT id, zone_id, name, rtype, content, ttl, priority
+         FROM dns_records WHERE zone_id = $1 ORDER BY name, rtype, content",
+        zone_id,
+    )
+    .fetch_all(conn)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|r| {
+            Some(StoredRecord {
+                id: r.id,
+                zone_id: r.zone_id,
+                record: DnsRecord {
+                    name: r.name,
+                    rtype: DnsRecordType::parse(&r.rtype).ok()?,
+                    content: r.content,
+                    ttl: u32::try_from(r.ttl).ok()?,
+                    priority: r.priority.and_then(|p| u16::try_from(p).ok()),
+                },
+            })
+        })
+        .collect())
+}
+
+/// Adds one record and returns its id.
+///
+/// # Errors
+/// [`RecordWriteError`].
+pub async fn add_record(
+    conn: &mut PgConnection,
+    zone_id: Uuid,
+    r: &DnsRecord,
+) -> Result<Uuid, RecordWriteError> {
+    sqlx::query_scalar!(
+        "INSERT INTO dns_records (zone_id, name, rtype, content, ttl, priority)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id",
+        zone_id,
+        r.name,
+        r.rtype.as_str(),
+        r.content,
+        i32::try_from(r.ttl).unwrap_or(i32::MAX),
+        r.priority.map(i32::from),
+    )
+    .fetch_one(conn)
+    .await
+    .map_err(
+        |err| match err.as_database_error().and_then(|e| e.constraint()) {
+            Some("dns_records_unique") => RecordWriteError::Duplicate,
+            _ => RecordWriteError::Database(err),
+        },
+    )
+}
+
+/// Changes a record's content, TTL and priority. Returns whether it exists.
+///
+/// # Errors
+/// [`RecordWriteError`].
+pub async fn change_record(
+    conn: &mut PgConnection,
+    zone_id: Uuid,
+    id: Uuid,
+    r: &DnsRecord,
+) -> Result<bool, RecordWriteError> {
+    let done = sqlx::query!(
+        "UPDATE dns_records SET content = $3, ttl = $4, priority = $5
+         WHERE zone_id = $1 AND id = $2",
+        zone_id,
+        id,
+        r.content,
+        i32::try_from(r.ttl).unwrap_or(i32::MAX),
+        r.priority.map(i32::from),
+    )
+    .execute(conn)
+    .await
+    .map_err(
+        |err| match err.as_database_error().and_then(|e| e.constraint()) {
+            Some("dns_records_unique") => RecordWriteError::Duplicate,
+            _ => RecordWriteError::Database(err),
+        },
+    )?;
+    Ok(done.rows_affected() == 1)
+}
+
+/// Removes a record. Returns whether it existed.
+///
+/// # Errors
+/// Database errors.
+pub async fn delete_record(
+    conn: &mut PgConnection,
+    zone_id: Uuid,
+    id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    let done = sqlx::query!(
+        "DELETE FROM dns_records WHERE zone_id = $1 AND id = $2",
+        zone_id,
+        id,
+    )
+    .execute(conn)
+    .await?;
+    Ok(done.rows_affected() == 1)
+}
+
+/// Marks a zone as changed, so the next sync pushes it (and a zone the server
+/// refused is tried again at once).
+///
+/// # Errors
+/// Database errors.
+pub async fn mark_changed(conn: &mut PgConnection, zone_id: Uuid) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        "UPDATE dns_zones SET status = 'pending', last_error = NULL WHERE id = $1",
+        zone_id,
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
+}

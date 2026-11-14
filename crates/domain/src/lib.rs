@@ -10,6 +10,7 @@ pub mod redirects;
 pub mod tenant;
 
 pub use account::{AccountKind, Email, Username, ValidationError};
+pub use dns::check_conflicts as check_dns_conflicts;
 pub use dns::{Record as DnsRecord, RecordError as DnsRecordError, RecordType as DnsRecordType};
 pub use dns::{
     TemplateRecord as DnsTemplateRecord, Variables as DnsVariables,

@@ -30,6 +30,7 @@
 //! `blocked_domains`) are read on every add, so a change takes effect at once.
 
 pub mod dns;
+pub mod records;
 pub mod redirects;
 
 use std::sync::Arc;
@@ -101,6 +102,7 @@ impl FromRef<DomainsState> for SessionStore {
 /// Routes for administrators, with full paths.
 pub fn admin_router() -> Router<DomainsState> {
     redirects::admin_router()
+        .merge(records::admin_router())
         .merge(dns::admin_router())
         .route("/api/v1/admin/domains", get(admin_list).post(admin_add))
         .route(
@@ -117,6 +119,7 @@ pub fn admin_router() -> Router<DomainsState> {
 /// Routes for clients, with full paths.
 pub fn client_router() -> Router<DomainsState> {
     redirects::client_router()
+        .merge(records::client_router())
         .route("/api/v1/client/domains", get(client_list).post(client_add))
         .route(
             "/api/v1/client/domains/{id}",
@@ -1056,13 +1059,16 @@ pub async fn client_delete(
         redirects::admin_delete, redirects::client_list, redirects::client_add,
         redirects::client_update, redirects::client_delete,
         dns::list_templates, dns::get_template, dns::create_template, dns::update_template,
-        dns::delete_template
+        dns::delete_template, records::admin_list, records::admin_add, records::admin_update,
+        records::admin_delete, records::client_list, records::client_add, records::client_update,
+        records::client_delete
     ),
     components(schemas(
         DomainView, DomainList, AddDomain, AdminAddDomain, UpdateDomain,
         redirects::RedirectView, redirects::RedirectList, redirects::AddRedirect,
         redirects::UpdateRedirect, dns::TemplateLine, dns::TemplateView, dns::TemplateList,
-        dns::TemplateInput
+        dns::TemplateInput, records::RecordView, records::RecordList, records::ZoneView,
+        records::AddRecord, records::UpdateRecord
     )),
     tags((name = "domains", description = "The names a hosting account serves"))
 )]
