@@ -30,6 +30,7 @@ pub mod settings;
 pub mod skeleton;
 pub mod tenants;
 pub mod users;
+pub mod vhost_templates;
 
 use std::{future::Future, pin::Pin, time::Duration};
 

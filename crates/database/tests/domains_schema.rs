@@ -308,3 +308,42 @@ async fn docroots_status_and_redirects_are_checked(pool: PgPool) {
         .unwrap();
     assert_eq!(n, 0);
 }
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs PostgreSQL"]
+async fn the_default_vhost_template_is_the_one_in_the_code_and_there_is_only_one(pool: PgPool) {
+    let t = dhpanel_database::vhost_templates::default_for(&pool, "nginx")
+        .await
+        .unwrap()
+        .expect("seeded");
+    assert_eq!(t.body, dhpanel_domain::vhost::DEFAULT_NGINX_TEMPLATE);
+    dhpanel_domain::vhost::check_template(&t.body).unwrap();
+    // A second default for the same server is refused; a non-default is fine.
+    let second = sqlx::query(
+        "INSERT INTO vhost_templates (name, body, is_default) VALUES ('Other', 'x', true)",
+    )
+    .execute(&pool)
+    .await;
+    assert!(second.is_err());
+    sqlx::query("INSERT INTO vhost_templates (name, body) VALUES ('Other', 'x')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    // Names are plain and unique per server.
+    for bad in ["", " x", "a/b", "a\nb"] {
+        assert!(
+            sqlx::query("INSERT INTO vhost_templates (name, body) VALUES ($1, 'x')")
+                .bind(bad)
+                .execute(&pool)
+                .await
+                .is_err(),
+            "{bad:?}"
+        );
+    }
+    assert!(
+        sqlx::query("INSERT INTO vhost_templates (name, body) VALUES ('Other', 'y')")
+            .execute(&pool)
+            .await
+            .is_err()
+    );
+}

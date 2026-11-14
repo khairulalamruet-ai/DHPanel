@@ -8,6 +8,7 @@ pub mod dns;
 pub mod domains;
 pub mod redirects;
 pub mod tenant;
+pub mod vhost;
 
 pub use account::{AccountKind, Email, Username, ValidationError};
 pub use dns::check_conflicts as check_dns_conflicts;
