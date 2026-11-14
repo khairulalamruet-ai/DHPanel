@@ -28,7 +28,7 @@ use dhpanel_node_protocol::{AgentError, ErrorCode, Operation, Output};
 use dhpanel_priv_helper::protocol::{Action, ErrorCode as HelperCode, Request, Response};
 use dhpanel_tenant_stack::{
     Allowlist, PlanResources, Role, Tenant, conf_volume_name, files_volume_name, network_name,
-    plan_limits, render,
+    php_ini_volume_name, plan_limits, render,
 };
 use uuid::Uuid;
 
@@ -291,6 +291,19 @@ async fn converge_stack(
     })?;
     docker
         .create_bind_volume(&conf, &conf_dir, &context.vhosts_root)
+        .await
+        .map_err(|e| docker_error(&e))?;
+    // The directory the PHP containers read the account's php.ini options from.
+    let ini = php_ini_volume_name(username).map_err(|e| invalid(&e.to_string()))?;
+    let ini_dir = super::vhost::php_ini_dir(&context.vhosts_root, username).map_err(|e| {
+        AgentError::new(
+            ErrorCode::Internal,
+            format!("cannot prepare the PHP options directory: {}", e.kind()),
+        )
+        .retryable()
+    })?;
+    docker
+        .create_bind_volume(&ini, &ini_dir, &context.vhosts_root)
         .await
         .map_err(|e| docker_error(&e))?;
     let mut started = Vec::new();
@@ -556,6 +569,16 @@ async fn stack_names(
     Ok(names)
 }
 
+/// The PHP containers of a tenant: the main one and one per extra version.
+pub(super) async fn php_container_names(
+    docker: &DockerManager,
+    username: &TenantUsername,
+) -> Result<Vec<Name>, AgentError> {
+    let mut names = stack_names(docker, username).await?;
+    names.retain(|n| !n.as_str().ends_with("-web"));
+    Ok(names)
+}
+
 fn name_of(username: &TenantUsername, role: &str) -> Result<Name, AgentError> {
     Name::parse(&format!("dh-{}-{role}", username.as_str()))
         .map_err(|e| AgentError::new(ErrorCode::InvalidArguments, e.to_string()))
@@ -769,8 +792,15 @@ pub async fn delete_tenant(
     gone_is_fine(docker.remove_volume(&volume).await)?;
     let conf = conf_volume_name(&username).map_err(|e| invalid_arg(&e.to_string()))?;
     gone_is_fine(docker.remove_volume(&conf).await)?;
+    let ini = php_ini_volume_name(&username).map_err(|e| invalid_arg(&e.to_string()))?;
+    gone_is_fine(docker.remove_volume(&ini).await)?;
     // The configuration is made again from the panel's data: nothing to keep.
     let _ = std::fs::remove_dir_all(context.vhosts_root.join(username.as_str()));
+    let _ = std::fs::remove_dir_all(
+        context
+            .vhosts_root
+            .join(format!("{}.php", username.as_str())),
+    );
     gone_is_fine(docker.remove_network(&network).await)?;
     if purge_data {
         let socket = context.helper_socket.clone();

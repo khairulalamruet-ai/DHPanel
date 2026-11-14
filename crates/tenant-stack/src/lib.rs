@@ -286,7 +286,15 @@ struct ServiceTemplate {
     /// Where the web server configuration volume is mounted (read-only), if the
     /// service reads one.
     conf_at: Option<&'static str>,
+    /// Where the php.ini options volume is mounted (read-only), if the service
+    /// reads one.
+    ini_at: Option<&'static str>,
+    /// Environment the service always gets (no secrets: fixed paths).
+    env: &'static [(&'static str, &'static str)],
 }
+
+/// Where PHP containers read the account's options.
+const PHP_INI_DIR: &str = "/usr/local/etc/php/dhpanel.d";
 
 const MIB: u64 = 1024 * 1024;
 
@@ -307,6 +315,8 @@ const WEB_PHP: &[ServiceTemplate] = &[
         files_at: "/var/www/html",
         files_read_only: true,
         conf_at: Some("/etc/nginx/conf.d"),
+        ini_at: None,
+        env: &[],
     },
     ServiceTemplate {
         role: Role::Php,
@@ -318,6 +328,10 @@ const WEB_PHP: &[ServiceTemplate] = &[
         files_at: "/var/www/html",
         files_read_only: false,
         conf_at: None,
+        // The options the account chose are read from a directory of their own,
+        // next to the ones the image has (a leading `:` keeps the image's).
+        ini_at: Some(PHP_INI_DIR),
+        env: &[("PHP_INI_SCAN_DIR", ":/usr/local/etc/php/dhpanel.d")],
     },
 ];
 
@@ -377,6 +391,15 @@ pub fn php_upstream(tenant: &TenantUsername) -> Result<String, SpecError> {
         "{}:{PHP_PORT}",
         name(tenant, Role::Php.as_str())?.as_str()
     ))
+}
+
+/// Name of a tenant's php.ini options volume (a directory the node agent writes
+/// and the PHP containers only read).
+///
+/// # Errors
+/// [`SpecError`] (cannot happen for a valid tenant name).
+pub fn php_ini_volume_name(tenant: &TenantUsername) -> Result<Name, SpecError> {
+    name(tenant, "phpini")
 }
 
 /// Name of a tenant's web container.
@@ -498,6 +521,7 @@ pub fn render(tenant: &Tenant<'_>, allowlist: &Allowlist) -> Result<Stack, Stack
     let network = network_name(tenant.username)?;
     let files = files_volume_name(tenant.username)?;
     let conf = conf_volume_name(tenant.username)?;
+    let ini = php_ini_volume_name(tenant.username)?;
     let user = Some((tenant.uid.get(), tenant.uid.get()));
     let account_version = match tenant.php_version {
         Some(v) => v,
@@ -570,6 +594,18 @@ pub fn render(tenant: &Tenant<'_>, allowlist: &Allowlist) -> Result<Stack, Stack
                     read_only: true,
                 });
             }
+            if let Some(target) = template.ini_at {
+                spec.volumes.push(VolumeMount {
+                    volume: ini.clone(),
+                    target: target.to_owned(),
+                    read_only: true,
+                });
+            }
+            spec.env = template
+                .env
+                .iter()
+                .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+                .collect();
             spec.network = Network::Named(network.clone());
             spec.restart = Restart::UnlessStopped;
             spec.cap_add = Vec::<Capability>::new();
@@ -581,7 +617,7 @@ pub fn render(tenant: &Tenant<'_>, allowlist: &Allowlist) -> Result<Stack, Stack
     }
     Ok(Stack {
         network,
-        volumes: vec![files, conf],
+        volumes: vec![files, conf, ini],
         services,
     })
 }
@@ -732,7 +768,7 @@ mod tests {
             let prefix = format!("dh-{owner}-");
             // The tenant's own network and volume, named after the tenant.
             assert_eq!(stack.network.as_str(), format!("{prefix}net"));
-            assert_eq!(stack.volumes.len(), 2);
+            assert_eq!(stack.volumes.len(), 3);
             assert!(stack.volumes[0].as_str().starts_with(&prefix));
             assert_eq!(stack.services.len(), 2);
             let (mut memory, mut pids, mut cpu) = (0_u64, 0_u64, 0_u64);
@@ -753,9 +789,13 @@ mod tests {
                 assert!(spec.cap_add.is_empty(), "no capabilities");
                 assert!(spec.ports.is_empty(), "no published ports");
                 assert!(!spec.writable_root, "read-only root");
+                // No secrets in the environment: the one variable there is a fixed path.
                 assert!(
-                    spec.env.is_empty(),
-                    "no environment (and so no secrets) in the template"
+                    spec.env
+                        .iter()
+                        .all(|(k, v)| k == "PHP_INI_SCAN_DIR" && v.starts_with(":/usr/")),
+                    "{:?}",
+                    spec.env
                 );
                 // 4. Names, network and volumes are the tenant's own.
                 assert!(
@@ -824,8 +864,23 @@ mod tests {
             stack.services[1].volumes[0].read_only,
             "the web server only reads the site"
         );
-        // Its configuration comes from a volume of its own, read-only; PHP has none.
-        assert_eq!(stack.services[0].volumes.len(), 1);
+        // The web server's configuration comes from a volume of its own, read-only;
+        // PHP's options come from another, read-only too, and a variable says
+        // where to look for them.
+        assert_eq!(stack.services[0].volumes.len(), 2);
+        let ini = &stack.services[0].volumes[1];
+        assert_eq!(
+            (ini.volume.as_str(), ini.target.as_str(), ini.read_only),
+            ("dh-alice-phpini", "/usr/local/etc/php/dhpanel.d", true)
+        );
+        assert_eq!(
+            stack.services[0]
+                .env
+                .get("PHP_INI_SCAN_DIR")
+                .map(String::as_str),
+            Some(":/usr/local/etc/php/dhpanel.d")
+        );
+        assert!(stack.services[1].env.is_empty());
         let conf = &stack.services[1].volumes[1];
         assert_eq!(
             (conf.volume.as_str(), conf.target.as_str(), conf.read_only),

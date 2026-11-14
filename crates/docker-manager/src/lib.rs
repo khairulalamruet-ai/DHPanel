@@ -67,6 +67,21 @@ impl NginxCommand {
     }
 }
 
+/// The signals the manager sends to a container: only the ones it needs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Signal {
+    /// PHP-FPM: load the configuration again, finishing the requests in progress.
+    Usr2,
+}
+
+impl Signal {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Usr2 => "USR2",
+        }
+    }
+}
+
 /// How a command inside a container ended.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandResult {
@@ -296,6 +311,29 @@ impl DockerManager {
     /// [`DockerError::NotFound`], [`DockerError::NotManaged`].
     pub async fn inspect(&self, name: &Name) -> Result<ContainerInfo, DockerError> {
         self.require_managed_container(name).await
+    }
+
+    /// Sends a signal to the main process of a running container of ours.
+    ///
+    /// # Errors
+    /// [`DockerError::NotFound`], [`DockerError::NotManaged`], [`DockerError::Conflict`]
+    /// when it is not running, or an API error.
+    pub async fn signal(&self, name: &Name, signal: Signal) -> Result<(), DockerError> {
+        let info = self.require_managed_container(name).await?;
+        if !info.running {
+            return Err(DockerError::Conflict("the container is not running".into()));
+        }
+        self.docker
+            .kill_container(
+                name.as_str(),
+                Some(
+                    bollard::query_parameters::KillContainerOptionsBuilder::default()
+                        .signal(signal.name())
+                        .build(),
+                ),
+            )
+            .await
+            .map_err(map_error)
     }
 
     /// Runs one of the fixed nginx commands inside a running web container of

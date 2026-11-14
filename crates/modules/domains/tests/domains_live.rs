@@ -3697,3 +3697,245 @@ async fn an_account_and_its_domains_choose_php_versions_within_what_is_on_offer(
     .unwrap();
     assert!(actions >= 6, "{actions}");
 }
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn php_options_are_checked_against_the_list_and_the_plans_ceilings(pool: PgPool) {
+    let e = env(&pool).await;
+    let (alice, tenant) = client(&pool, "alice", 10_000).await;
+    let (bobby, btenant) = client(&pool, "bobby", 10_001).await;
+    let a = e.sign_in(alice).await;
+    let b = e.sign_in(bobby).await;
+    let root = e
+        .sign_in(account(&pool, "rootuser", &["super_admin"]).await)
+        .await;
+    const S: &str = "/api/v1/client/php/settings";
+    let put = |values: Value| {
+        let (e, a) = (&e, &a);
+        async move {
+            e.call(Some(a), "PUT", S, Some(json!({ "values": values })), true)
+                .await
+        }
+    };
+    let version = || {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_scalar::<_, i64>("SELECT routes_version FROM tenants WHERE id = $1")
+                .bind(tenant)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+        }
+    };
+
+    // Reading is open: the options, what was chosen (nothing yet), the ceilings.
+    let (status, view) = e.call(Some(&a), "GET", S, None, false).await;
+    assert_eq!(status, StatusCode::OK, "{view}");
+    assert_eq!(view["values"], json!({}));
+    assert_eq!(
+        view["plan_limits"],
+        json!({"memory_limit_mb": 256, "upload_max_mb": 64, "max_execution_time": 300})
+    );
+    let keys: Vec<&str> = view["options"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|o| o["key"].as_str().unwrap())
+        .collect();
+    assert!(keys.contains(&"memory_limit") && keys.contains(&"date.timezone"));
+    assert!(!keys.contains(&"disable_functions") && !keys.contains(&"open_basedir"));
+    let level = view["options"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|o| o["key"] == "error_reporting")
+        .unwrap();
+    assert_eq!(level["kind"], "choice");
+    assert_eq!(level["choices"][0], "E_ALL");
+
+    // Changing needs the feature.
+    sqlx::query(
+        "UPDATE feature_sets SET all_features = false, features = ARRAY['domains']::feature_key[]
+         WHERE id = (SELECT feature_set_id FROM plans WHERE is_default)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (status, body) = put(json!({"memory_limit": "64M"})).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::FORBIDDEN, "feature_disabled")
+    );
+    sqlx::query(
+        "UPDATE feature_sets SET features = ARRAY['domains', 'php_ini']::feature_key[]
+         WHERE id = (SELECT feature_set_id FROM plans WHERE is_default)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // Saved in a normal form; the account is made out of date so the node is told.
+    let before = version().await;
+    let (status, saved) = put(json!({
+        "memory_limit": "128m", "upload_max_filesize": "20M", "post_max_size": "24M",
+        "max_execution_time": 90, "display_errors": true, "date.timezone": "Asia/Dhaka"
+    }))
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(
+        saved["values"],
+        json!({
+            "memory_limit": "128M", "upload_max_filesize": "20M", "post_max_size": "24M",
+            "max_execution_time": "90", "display_errors": "On", "date.timezone": "Asia/Dhaka"
+        })
+    );
+    assert!(version().await > before);
+    // The same again changes nothing and is not audited twice.
+    let same = version().await;
+    put(json!({
+        "memory_limit": "128M", "upload_max_filesize": "20M", "post_max_size": "24M",
+        "max_execution_time": 90, "display_errors": true, "date.timezone": "Asia/Dhaka"
+    }))
+    .await;
+    assert_eq!(version().await, same);
+
+    // Refusals name the option; the choice stays as it was.
+    for (values, code_, mention) in [
+        (
+            json!({"disable_functions": ""}),
+            "unknown_option",
+            "disable_functions",
+        ),
+        (
+            json!({"memory_limit": "512M"}),
+            "above_plan_limit",
+            "memory_limit",
+        ),
+        (
+            json!({"upload_max_filesize": "100M"}),
+            "above_plan_limit",
+            "upload_max_filesize",
+        ),
+        (
+            json!({"max_execution_time": 301}),
+            "above_plan_limit",
+            "max_execution_time",
+        ),
+        (json!({"memory_limit": 64}), "invalid_value", "memory_limit"),
+        (
+            json!({"display_errors": "yes"}),
+            "invalid_value",
+            "display_errors",
+        ),
+        (
+            json!({"max_input_vars": 5}),
+            "invalid_value",
+            "max_input_vars",
+        ),
+        (
+            json!({"upload_max_filesize": "40M", "post_max_size": "20M"}),
+            "post_smaller_than_upload",
+            "post_max_size",
+        ),
+        (
+            json!({"date.timezone": "Asia/Dhaka\nauto_prepend_file=/x"}),
+            "invalid_value",
+            "date.timezone",
+        ),
+    ] {
+        let (status, body) = put(values.clone()).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{values}: {body}");
+        assert_eq!(body["errors"][0]["field"], "values");
+        assert_eq!(body["errors"][0]["code"], code_, "{values}");
+        assert!(
+            body["errors"][0]["message"]
+                .as_str()
+                .unwrap()
+                .contains(mention),
+            "{body}"
+        );
+    }
+    assert_eq!(
+        e.call(
+            Some(&a),
+            "PUT",
+            S,
+            Some(json!({"values": {}, "extra": 1})),
+            true
+        )
+        .await
+        .0,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    let (_, kept) = e.call(Some(&a), "GET", S, None, false).await;
+    assert_eq!(kept["values"], saved["values"]);
+
+    // A plan with bigger ceilings allows more; the choice is then within them.
+    let plan: Uuid = sqlx::query_scalar("SELECT plan_id FROM tenants WHERE id = $1")
+        .bind(tenant)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE plans SET limits = '{\"php_memory_limit_mb\": 1024, \"php_upload_max_mb\": -1}' WHERE id = $1")
+        .bind(plan)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, big) =
+        put(json!({"memory_limit": "1G", "upload_max_filesize": "500M", "post_max_size": "512M"}))
+            .await;
+    assert_eq!(status, StatusCode::OK, "{big}");
+    assert_eq!(big["plan_limits"]["memory_limit_mb"], 1024);
+    assert_eq!(big["plan_limits"]["upload_max_mb"], 1024);
+
+    // An empty object puts every option back to its default.
+    let (status, reset) = put(json!({})).await;
+    assert_eq!(
+        (status, reset["values"].clone()),
+        (StatusCode::OK, json!({}))
+    );
+    let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM php_settings WHERE tenant_id = $1")
+        .bind(tenant)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(rows, 0);
+
+    // Not another account's; the administrator can see and change an account's.
+    let (_, theirs) = e.call(Some(&b), "GET", S, None, false).await;
+    assert_eq!(theirs["values"], json!({}));
+    let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM php_settings WHERE tenant_id = $1")
+        .bind(btenant)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(rows, 0);
+    let (_, main) = e
+        .call(Some(&a), "POST", CLIENT, Some(domain("example.com")), true)
+        .await;
+    let admin = format!(
+        "/api/v1/admin/domains/{}/php/settings",
+        main["id"].as_str().unwrap()
+    );
+    let (status, v) = e
+        .call(
+            Some(&root),
+            "PUT",
+            &admin,
+            Some(json!({"values": {"max_input_vars": 3000}})),
+            true,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let (_, v) = e.call(Some(&root), "GET", &admin, None, false).await;
+    assert_eq!(v["values"], json!({"max_input_vars": "3000"}));
+    let logged: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM audit_logs WHERE action = 'php.settings_changed'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        logged, 4,
+        "saved, saved bigger, reset, and the administrator's"
+    );
+}

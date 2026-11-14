@@ -587,9 +587,10 @@ fn check_target(target: &str) -> Result<(), SpecError> {
         ));
     }
     let trimmed = target.trim_end_matches('/');
-    // The one place below `/etc` a volume may go: the web server's site
-    // configuration, which is the point of a web container.
-    if trimmed == "/etc/nginx/conf.d" {
+    // The two places below `/etc` and `/usr` a volume may go: the web server's site
+    // configuration and the PHP options directory, which is the point of a web
+    // and a PHP container.
+    if trimmed == "/etc/nginx/conf.d" || trimmed == "/usr/local/etc/php/dhpanel.d" {
         return Ok(());
     }
     let forbidden = trimmed.is_empty()
@@ -758,6 +759,8 @@ mod tests {
             "/etc/nginx/nginx.conf",
             "/etc/nginx/conf.d/x",
             "/usr/local",
+            "/usr/local/etc/php",
+            "/usr/local/etc/php/conf.d",
             "/a/../b",
             "/a//b",
             "/a b",
@@ -777,6 +780,13 @@ mod tests {
         s.volumes.push(VolumeMount {
             volume: Name::parse("dh-data").unwrap(),
             target: "/etc/nginx/conf.d".into(),
+            read_only: true,
+        });
+        assert!(s.validate().is_ok());
+        let mut s = spec();
+        s.volumes.push(VolumeMount {
+            volume: Name::parse("dh-data").unwrap(),
+            target: "/usr/local/etc/php/dhpanel.d".into(),
             read_only: true,
         });
         assert!(s.validate().is_ok());

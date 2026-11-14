@@ -98,3 +98,49 @@ pub async fn domain_version(pool: &PgPool, domain_id: Uuid) -> Result<Option<Str
             .flatten(),
     )
 }
+
+/// The options an account chose (a JSON object of option to text).
+///
+/// # Errors
+/// Database errors.
+pub async fn settings(
+    pool: &PgPool,
+    tenant_id: Uuid,
+) -> Result<serde_json::Map<String, serde_json::Value>, sqlx::Error> {
+    let row = sqlx::query_scalar!(
+        "SELECT options FROM php_settings WHERE tenant_id = $1",
+        tenant_id,
+    )
+    .fetch_optional(pool)
+    .await?;
+    Ok(match row {
+        Some(serde_json::Value::Object(map)) => map,
+        _ => serde_json::Map::new(),
+    })
+}
+
+/// Keeps the options an account chose; an empty object removes them.
+///
+/// # Errors
+/// Database errors.
+pub async fn set_settings(
+    conn: &mut PgConnection,
+    tenant_id: Uuid,
+    options: &serde_json::Value,
+) -> Result<(), sqlx::Error> {
+    if options.as_object().is_none_or(serde_json::Map::is_empty) {
+        sqlx::query!("DELETE FROM php_settings WHERE tenant_id = $1", tenant_id)
+            .execute(conn)
+            .await?;
+        return Ok(());
+    }
+    sqlx::query!(
+        "INSERT INTO php_settings (tenant_id, options) VALUES ($1, $2)
+         ON CONFLICT (tenant_id) DO UPDATE SET options = EXCLUDED.options",
+        tenant_id,
+        options,
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
+}

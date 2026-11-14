@@ -445,6 +445,38 @@ impl Dispatcher {
             keep.tenant_id = Some(tenant.id);
             self.enqueue_failed(&keep).await?;
         }
+        // The account's php.ini options, within what its plan allows now.
+        if matches!(tenant.status.as_str(), "active" | "suspended") {
+            let account = dhpanel_database::tenants::get(db, tenant.id)
+                .await
+                .map_err(|e| e.to_string())?
+                .ok_or("the account is gone")?;
+            let plan = dhpanel_database::plans::get(db, account.plan_id)
+                .await
+                .map_err(|e| e.to_string())?
+                .ok_or("the plan is gone")?;
+            let chosen = dhpanel_database::php::settings(db, tenant.id)
+                .await
+                .map_err(|e| e.to_string())?;
+            let ini = dhpanel_domain::php_ini::IniSettings::from_stored(&chosen)
+                .render(&dhpanel_domain::php_ini::Caps::from_limits(&plan.limits));
+            // Nothing chosen: the node is told to have no options file.
+            let ini = if chosen.is_empty() {
+                String::new()
+            } else {
+                ini
+            };
+            let mut php_ini = dhpanel_operations::Request::new(
+                tenant.node_id,
+                dhpanel_node_protocol::Operation::SetPhpIni {
+                    username: tenant.username.clone(),
+                    ini,
+                },
+                format!("phpini:{}:{}:{slot}", tenant.id.simple(), tenant.version),
+            );
+            php_ini.tenant_id = Some(tenant.id);
+            self.enqueue_failed(&php_ini).await?;
+        }
         let mut request = dhpanel_operations::Request::new(
             tenant.node_id,
             dhpanel_node_protocol::Operation::SetSiteRoutes {

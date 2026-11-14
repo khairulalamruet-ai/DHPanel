@@ -53,6 +53,21 @@ pub fn conf_dir(root: &Path, username: &TenantUsername) -> std::io::Result<PathB
     Ok(dir)
 }
 
+/// The directory a tenant's php.ini options are kept in (`<user>.php`, which no
+/// tenant name can be): created if it is not there, readable by the PHP containers.
+///
+/// # Errors
+/// The directory cannot be made.
+pub fn php_ini_dir(root: &Path, username: &TenantUsername) -> std::io::Result<PathBuf> {
+    let dir = root.join(format!("{}.php", username.as_str()));
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o755)
+        .create(&dir)?;
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755))?;
+    Ok(dir)
+}
+
 fn check_config(config: &str) -> Result<(), AgentError> {
     if config.trim().is_empty() {
         return Err(invalid("the configuration is empty"));
@@ -251,6 +266,44 @@ pub async fn detach_domain(
     )
     .await?;
     Ok(Output::DomainDetached { applied })
+}
+
+/// `set_php_ini`.
+///
+/// # Errors
+/// [`AgentError`]: a file that has an option outside the list or a value that does
+/// not fit (not retryable); the disk or Docker failing (retryable).
+pub async fn set_php_ini(context: Arc<TenantContext>, op: Operation) -> Result<Output, AgentError> {
+    let Operation::SetPhpIni { username, ini } = op else {
+        return Err(super::wrong_operation());
+    };
+    let username = TenantUsername::parse(&username).map_err(|e| invalid(e.to_string()))?;
+    if ini.len() > dhpanel_node_protocol::MAX_PHP_INI_BYTES {
+        return Err(invalid("the file is too large"));
+    }
+    dhpanel_domain::php_ini::check_text(&ini).map_err(|e| invalid(e.to_string()))?;
+    let _one_at_a_time = CHANGING.lock().await;
+    let dir = php_ini_dir(&context.vhosts_root, &username)
+        .map_err(|e| disk("prepare the directory", &e))?;
+    let path = dir.join("dhpanel.ini");
+    let content = (!ini.trim().is_empty()).then_some(ini.as_bytes());
+    put(&dir, &path, content).map_err(|e| disk("write the file", &e))?;
+    // The running PHP containers load it again, finishing the requests in progress.
+    let mut reloaded = 0;
+    let php = super::tenant::php_container_names(&context.docker, &username).await?;
+    for name in php {
+        match context
+            .docker
+            .signal(&name, dhpanel_docker_manager::Signal::Usr2)
+            .await
+        {
+            Ok(()) => reloaded += 1,
+            // Not running: it reads the file when it starts.
+            Err(DockerError::NotFound | DockerError::Conflict(_)) => {}
+            Err(e) => return Err(docker_error(&e)),
+        }
+    }
+    Ok(Output::PhpIniSet { reloaded })
 }
 
 /// `keep_domains`.

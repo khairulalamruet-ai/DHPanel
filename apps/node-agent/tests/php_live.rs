@@ -125,7 +125,7 @@ async fn the_main_php_changes_version_another_runs_beside_it_and_extras_are_remo
         &docker,
         &owner,
         1,
-        "echo '<?php echo PHP_VERSION;' > /data/index.php && chmod 755 /data && chmod 644 /data/index.php",
+        "echo '<?php echo PHP_VERSION;' > /data/index.php && echo '<?php echo ini_get(\"memory_limit\"), \" \", ini_get(\"max_execution_time\"), \" \", ini_get(\"date.timezone\");' > /data/ini.php && chmod 755 /data && chmod 644 /data/index.php /data/ini.php",
     )
     .await;
     assert_eq!(seeded, 0);
@@ -160,6 +160,48 @@ async fn the_main_php_changes_version_another_runs_beside_it_and_extras_are_remo
     .unwrap();
     assert!(serves(&docker, &owner, 2, "one.example.com", "8.4.").await);
 
+    // php.ini options reach the running container (and survive a change of version).
+    let seen = |what: &'static str| {
+        let (docker, owner) = (docker.clone(), owner.clone());
+        async move {
+            for attempt in 0..20 {
+                let script = format!(
+                    "wget -q -O - --header 'Host: one.example.com' http://dh-{owner}-web:8080/ini.php | grep -q '^{what}$'"
+                );
+                if run(&docker, &owner, 700 + attempt, &script).await == 0 {
+                    return true;
+                }
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+            false
+        }
+    };
+    assert!(seen("128M 30 UTC").await, "the image defaults");
+    let ini = |text: &str| Operation::SetPhpIni {
+        username: name.clone(),
+        ini: text.into(),
+    };
+    let set = dhpanel_node_agent::ops::vhost::set_php_ini(
+        context.clone(),
+        ini("memory_limit = 96M\nmax_execution_time = 45\ndate.timezone = Asia/Dhaka\n"),
+    )
+    .await
+    .unwrap();
+    assert!(matches!(set, Output::PhpIniSet { reloaded: 1 }), "{set:?}");
+    assert!(
+        seen("96M 45 Asia/Dhaka").await,
+        "the running container loaded it"
+    );
+    // A file with an option that is not on the list is refused and changes nothing.
+    let err = dhpanel_node_agent::ops::vhost::set_php_ini(
+        context.clone(),
+        ini("memory_limit = 32M\nauto_prepend_file = /etc/passwd\n"),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(err.code, ErrorCode::InvalidArguments);
+    assert!(seen("96M 45 Asia/Dhaka").await);
+
     // The main container moves to 8.3: its files stay, the site follows.
     let moved = set_php_versions(context.clone(), limits("8.3", &[]))
         .await
@@ -172,6 +214,10 @@ async fn the_main_php_changes_version_another_runs_beside_it_and_extras_are_remo
         }
     );
     assert!(serves(&docker, &owner, 3, "one.example.com", "8.3.").await);
+    assert!(
+        seen("96M 45 Asia/Dhaka").await,
+        "the options follow the account to the new version"
+    );
     // Saying it again changes nothing.
     assert_eq!(
         set_php_versions(context.clone(), limits("8.3", &[]))

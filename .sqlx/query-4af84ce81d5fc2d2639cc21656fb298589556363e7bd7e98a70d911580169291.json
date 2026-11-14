@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO php_settings (tenant_id, options) VALUES ($1, $2)\n         ON CONFLICT (tenant_id) DO UPDATE SET options = EXCLUDED.options",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4af84ce81d5fc2d2639cc21656fb298589556363e7bd7e98a70d911580169291"
+}

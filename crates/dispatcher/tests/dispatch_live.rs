@@ -1042,6 +1042,9 @@ async fn an_uploaded_certificate_reaches_the_node_with_its_key_and_the_ledger_ne
     registry.register("attach_domain", |_| async move {
         Ok(Output::DomainAttached { applied: true })
     });
+    registry.register("set_php_ini", |_| async move {
+        Ok(Output::PhpIniSet { reloaded: 0 })
+    });
     registry.register("keep_domains", |_| async move {
         Ok(Output::DomainsKept {
             removed: 0,
@@ -1245,6 +1248,37 @@ async fn a_tenants_web_server_files_are_sent_with_its_routes_and_what_is_gone_is
         keep["domains"],
         serde_json::json!(["shop.example.org", "vera.example.com"])
     );
+
+    // The account's php.ini options go with them: none chosen, none sent.
+    let ini: String = sqlx::query_scalar(
+        "SELECT payload ->> 'ini' FROM operations WHERE kind = 'set_php_ini' ORDER BY created_at DESC LIMIT 1",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(ini, "");
+    sqlx::query("INSERT INTO php_settings (tenant_id, options) VALUES ($1, $2)")
+        .bind(tenant)
+        .bind(serde_json::json!({"memory_limit": "512M", "max_execution_time": "60", "display_errors": "On"}))
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(d.request_route_syncs().await, 1);
+    let ini: String = sqlx::query_scalar(
+        "SELECT payload ->> 'ini' FROM operations WHERE kind = 'set_php_ini' ORDER BY created_at DESC LIMIT 1",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    // 512M is above what the default plan allows (256M): the node gets the ceiling.
+    assert!(ini.contains("memory_limit = 256M\n"), "{ini}");
+    assert!(ini.contains("max_execution_time = 60\n") && ini.contains("display_errors = On\n"));
+    sqlx::query("DELETE FROM php_settings WHERE tenant_id = $1")
+        .bind(tenant)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(d.request_route_syncs().await, 1);
 
     // A domain deleted: the next keep list no longer has it.
     sqlx::query("DELETE FROM domains WHERE fqdn = 'shop.example.org'")

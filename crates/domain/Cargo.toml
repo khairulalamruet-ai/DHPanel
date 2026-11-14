@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 thiserror = "2.0.21"
+serde_json = "1"
 uuid = "1"
 # Domain names (T05.01): IDN to punycode, and the public suffix list (which names
 # a person may register under: `com` and `co.uk` are suffixes, `example.com` is not).

@@ -2214,6 +2214,149 @@
         ]
       }
     },
+    "/api/v1/admin/domains/{id}/php/settings": {
+      "get": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "The php.ini options of the account a domain belongs to.",
+        "operationId": "adminGetPhpSettings",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Domain id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The options",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhpSettingsView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such domain",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "Replace the php.ini options of the account a domain belongs to.",
+        "operationId": "adminSetPhpSettings",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Domain id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetPhpSettings"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhpSettingsView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied`, `reauth_required`, `csrf_failed` or `feature_disabled`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such domain",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "As for the account's own change",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/domains/{id}/policy": {
       "get": {
         "tags": [
@@ -8871,6 +9014,107 @@
         ]
       }
     },
+    "/api/v1/client/php/settings": {
+      "get": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "The php.ini options you can set, what you chose and what your plan allows.",
+        "operationId": "clientGetPhpSettings",
+        "responses": {
+          "200": {
+            "description": "The options",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhpSettingsView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "Replace your php.ini options (an empty object puts every option back to its default).",
+        "operationId": "clientSetPhpSettings",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetPhpSettings"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhpSettingsView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only`, `csrf_failed` or `feature_disabled`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`unknown_option`, `invalid_value`, `out_of_range`, `above_plan_limit` or `post_smaller_than_upload` (the message names the option)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/public/auth/impersonate": {
       "post": {
         "tags": [
@@ -9903,6 +10147,34 @@
             "type": "string",
             "description": "Name shown on the sign-in page and in the browser tab.",
             "example": "DHPanel"
+          }
+        }
+      },
+      "CapsView": {
+        "type": "object",
+        "description": "The ceilings of the plan.",
+        "required": [
+          "memory_limit_mb",
+          "upload_max_mb",
+          "max_execution_time"
+        ],
+        "properties": {
+          "max_execution_time": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Most `max_execution_time` and `max_input_time`, in seconds."
+          },
+          "memory_limit_mb": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Most `memory_limit`, in megabytes.",
+            "minimum": 0
+          },
+          "upload_max_mb": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Most `upload_max_filesize` and `post_max_size`, in megabytes.",
+            "minimum": 0
           }
         }
       },
@@ -11317,6 +11589,38 @@
           }
         }
       },
+      "OptionView": {
+        "type": "object",
+        "description": "An option that may be set.",
+        "required": [
+          "key",
+          "kind",
+          "default",
+          "choices"
+        ],
+        "properties": {
+          "choices": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The texts a `choice` may take."
+          },
+          "default": {
+            "type": "string",
+            "description": "What PHP uses when it is not set."
+          },
+          "key": {
+            "type": "string",
+            "description": "The option, as in php.ini.",
+            "example": "memory_limit"
+          },
+          "kind": {
+            "type": "string",
+            "description": "`size` (like 64M), `int`, `flag` (true or false), `choice` or `timezone`."
+          }
+        }
+      },
       "PermissionList": {
         "type": "object",
         "description": "The permission catalogue.",
@@ -11359,6 +11663,31 @@
           "present": {
             "type": "boolean",
             "description": "Declared by the running build. A key that is not stays listed, because\nroles may still hold it, but grants nothing that exists."
+          }
+        }
+      },
+      "PhpSettingsView": {
+        "type": "object",
+        "description": "The options of an account.",
+        "required": [
+          "options",
+          "values",
+          "plan_limits"
+        ],
+        "properties": {
+          "options": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OptionView"
+            },
+            "description": "The options that can be set."
+          },
+          "plan_limits": {
+            "$ref": "#/components/schemas/CapsView",
+            "description": "What the plan allows at most."
+          },
+          "values": {
+            "description": "What the account chose (option to text; flags are `On` or `Off`)."
           }
         }
       },
@@ -12036,6 +12365,24 @@
           "enabled": {
             "type": "boolean",
             "description": "On or off."
+          }
+        },
+        "additionalProperties": false
+      },
+      "SetPhpSettings": {
+        "type": "object",
+        "description": "The options to keep.",
+        "required": [
+          "values"
+        ],
+        "properties": {
+          "values": {
+            "type": "object",
+            "description": "Option to value: sizes as text (`\"64M\"`), numbers as numbers, flags as\ntrue or false. Everything not given goes back to its default.",
+            "additionalProperties": {},
+            "propertyNames": {
+              "type": "string"
+            }
           }
         },
         "additionalProperties": false

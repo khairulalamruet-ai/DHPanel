@@ -13,13 +13,17 @@ depends_on = ["auth", "rbac", "audit", "system", "plans", "users"]
 keys = ["admin.domains.read", "admin.domains.manage"]
 
 [features]
-keys = ["domains", "redirects", "dns", "custom_ssl", "web_policy", "edit_vhost", "php_version"]
+keys = ["domains", "redirects", "dns", "custom_ssl", "web_policy", "edit_vhost", "php_version", "php_ini"]
 
 # A plan without these keys gets the defaults: the limit counts main, addon and
 # alias names (`max_domains`) and subdomains (`max_subdomains`) separately.
 [limits]
 max_domains    = { type = "int", default = 10, unlimited = -1 }
 max_subdomains = { type = "int", default = 20, unlimited = -1 }
+# The most an account may set in php.ini (the options themselves are the account's).
+php_memory_limit_mb    = { type = "int", default = 256, unlimited = -1 }
+php_upload_max_mb      = { type = "int", default = 64, unlimited = -1 }
+php_max_execution_time = { type = "int", default = 300, unlimited = -1 }
 
 [ui]
 admin_nav  = { group = "Web", order = 10, icon = "globe" }

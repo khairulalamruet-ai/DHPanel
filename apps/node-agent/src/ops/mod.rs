@@ -122,6 +122,10 @@ impl Registry {
                 let context = context.clone();
                 move |op| vhost::attach_domain(context.clone(), op)
             });
+            registry.register("set_php_ini", {
+                let context = context.clone();
+                move |op| vhost::set_php_ini(context.clone(), op)
+            });
             registry.register("detach_domain", {
                 let context = context.clone();
                 move |op| vhost::detach_domain(context.clone(), op)

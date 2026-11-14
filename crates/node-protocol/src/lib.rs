@@ -172,6 +172,9 @@ impl std::fmt::Debug for CustomCertificate {
     }
 }
 
+/// Longest php.ini file the control plane sends.
+pub const MAX_PHP_INI_BYTES: usize = 4096;
+
 /// Most PHP versions besides the account's own that one tenant may run.
 pub const MAX_EXTRA_PHP_VERSIONS: usize = 3;
 
@@ -386,6 +389,16 @@ pub enum Operation {
         /// More versions to run next to it (at most [`MAX_EXTRA_PHP_VERSIONS`]).
         extra_php: Vec<String>,
     },
+    /// Put the tenant's php.ini options (a file of `option = value` lines made by
+    /// the control plane) where its PHP containers read them and have the running
+    /// ones load it. The file is checked against the list of options that may be
+    /// set. Safe to repeat. Answered with [`Output::PhpIniSet`].
+    SetPhpIni {
+        /// The tenant's system name.
+        username: String,
+        /// The file (at most [`MAX_PHP_INI_BYTES`]; empty removes the options).
+        ini: String,
+    },
     /// Everything a new tenant needs on its node, in one operation: directories,
     /// network and volume ([`Operation::CreateTenant`]), the storage limits
     /// ([`Operation::SetStorageQuota`], skipped when the plan has none or the node
@@ -519,6 +532,7 @@ impl Operation {
         "provision_tenant_stack",
         "set_resource_limits",
         "set_php_versions",
+        "set_php_ini",
         "set_up_tenant",
         "set_site_routes",
         "report_certificates",
@@ -542,6 +556,7 @@ impl Operation {
             Self::ProvisionTenantStack { .. } => "provision_tenant_stack",
             Self::SetResourceLimits { .. } => "set_resource_limits",
             Self::SetPhpVersions { .. } => "set_php_versions",
+            Self::SetPhpIni { .. } => "set_php_ini",
             Self::SetUpTenant { .. } => "set_up_tenant",
             Self::SetSiteRoutes { .. } => "set_site_routes",
             Self::ReportCertificates => "report_certificates",
@@ -690,6 +705,12 @@ pub enum Output {
         containers: Vec<String>,
         /// How storage limits are enforced (`xfs`), or `None` when they are not.
         storage_quota: Option<String>,
+    },
+    /// Answer to [`Operation::SetPhpIni`].
+    PhpIniSet {
+        /// How many PHP containers loaded it (the file is kept either way; a
+        /// stopped container reads it when it starts).
+        reloaded: usize,
     },
     /// Answer to [`Operation::SetPhpVersions`].
     PhpVersionsSet {
@@ -1515,6 +1536,10 @@ mod tests {
                 php_version: "8.4".into(),
                 extra_php: vec!["8.3".into()],
             },
+            Operation::SetPhpIni {
+                username: "alice".into(),
+                ini: "memory_limit = 64M\n".into(),
+            },
             Operation::AttachDomain {
                 username: "alice".into(),
                 domain: "example.com".into(),
@@ -1541,7 +1566,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            17,
+            18,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }
