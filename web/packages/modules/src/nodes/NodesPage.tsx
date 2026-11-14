@@ -30,10 +30,14 @@ import {
   AlertTriangle,
   KeyRound,
   Trash2,
+  Cpu,
+  ArrowDownRight,
+  Sparkles,
 } from "lucide-react";
 import type { NodeItem, EnrollmentView, NodeStatus } from "./types";
 import { AddNodeDialog } from "./AddNodeDialog";
 import { NodeDetailDialog } from "./NodeDetailDialog";
+import { SchedulerConfigDialog } from "./SchedulerConfigDialog";
 
 export function NodesPage() {
   const { t } = useTranslation();
@@ -48,6 +52,8 @@ export function NodesPage() {
 
   // Dialog states
   const [isAddOpen, setIsAddOpen] = useState(false);
+  const [isSchedulerOpen, setIsSchedulerOpen] = useState(false);
+  const [drainingNodeId, setDrainingNodeId] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<NodeItem | null>(null);
   const [revokingNode, setRevokingNode] = useState<NodeItem | null>(null);
   const [cancellingEnrollmentId, setCancellingEnrollmentId] = useState<string | null>(null);
@@ -107,6 +113,35 @@ export function NodesPage() {
       });
     } finally {
       setRevokingNode(null);
+    }
+  };
+
+  const handleDrainToggle = async (node: NodeItem) => {
+    const action = node.status === "draining" ? "undrain" : "drain";
+    try {
+      setDrainingNodeId(node.id);
+      // TODO(api:T16.02): node drain/undrain toggle endpoint
+      await apiFetch<{ success: boolean; status: NodeStatus }>(
+        `/api/v1/admin/nodes/${node.id}/${action}`,
+        {
+          method: "POST",
+          headers: {
+            "X-CSRF-Token": getCsrfToken() || "",
+          },
+        }
+      );
+      toast({
+        title: action === "drain" ? t("nodes.scheduler.drainSuccess") : t("nodes.scheduler.undrainSuccess"),
+        variant: "default",
+      });
+      fetchNodes();
+    } catch {
+      toast({
+        title: t("common.error"),
+        variant: "destructive",
+      });
+    } finally {
+      setDrainingNodeId(null);
     }
   };
 
@@ -227,6 +262,18 @@ export function NodesPage() {
             {t("common.reload")}
           </Button>
           {hasPermission("admin.nodes.write") && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsSchedulerOpen(true)}
+              className="gap-1.5 text-xs"
+              data-testid="configure-scheduler-btn"
+            >
+              <Cpu className="h-4 w-4 text-primary" />
+              {t("nodes.scheduler.configure")}
+            </Button>
+          )}
+          {hasPermission("admin.nodes.write") && (
             <Button size="sm" onClick={() => setIsAddOpen(true)} className="gap-1.5 text-xs">
               <Plus className="h-4 w-4" />
               {t("nodes.addNode")}
@@ -331,6 +378,22 @@ export function NodesPage() {
                               <Button
                                 variant="outline"
                                 size="sm"
+                                onClick={() => handleDrainToggle(node)}
+                                disabled={drainingNodeId === node.id}
+                                className={`h-8 px-2 text-xs gap-1 ${
+                                  node.status === "draining"
+                                    ? "text-emerald-600 border-emerald-500/30 hover:bg-emerald-500/10"
+                                    : "text-amber-600 border-amber-500/30 hover:bg-amber-500/10"
+                                }`}
+                              >
+                                <ArrowDownRight className="h-3.5 w-3.5" />
+                                {node.status === "draining" ? t("nodes.scheduler.undrain") : t("nodes.scheduler.drain")}
+                              </Button>
+                            )}
+                            {hasPermission("admin.nodes.write") && node.status !== "revoked" && (
+                              <Button
+                                variant="outline"
+                                size="sm"
                                 onClick={() => setRevokingNode(node)}
                                 className="h-8 px-2 text-xs text-destructive hover:bg-destructive/10 border-destructive/30"
                               >
@@ -419,6 +482,14 @@ export function NodesPage() {
         node={selectedNode}
         open={!!selectedNode}
         onOpenChange={(open) => !open && setSelectedNode(null)}
+      />
+
+      {/* Placement Scheduler Dialog (T16.02) */}
+      <SchedulerConfigDialog
+        open={isSchedulerOpen}
+        onOpenChange={setIsSchedulerOpen}
+        nodes={nodes}
+        onPolicyUpdated={fetchNodes}
       />
 
       {/* Revoke Node Confirmation Dialog (AGENTS.md typed-confirmation) */}

@@ -26,6 +26,7 @@ import {
   Layers,
   Sparkles,
   Info,
+  AlertTriangle,
 } from "lucide-react";
 import {
   WizardStep,
@@ -36,6 +37,7 @@ import {
 } from "./types";
 import { HOSTING_PLANS, CLUSTER_NODES, RESERVED_USERNAMES } from "./constants";
 import { OperationProgress } from "./OperationProgress";
+import { selectPlacementNode } from "../nodes/placement";
 
 export function generateRandomPassword(): string {
   const chars = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#$%^&*";
@@ -130,6 +132,18 @@ export function UserCreateWizardPage() {
     return Object.keys(errs).length === 0;
   };
 
+  const validateStep3 = (): boolean => {
+    const errs: Record<string, string> = {};
+    if (formData.node_mode === "manual" && formData.node_id) {
+      const target = CLUSTER_NODES.find((n) => n.id === formData.node_id);
+      if (target?.status === "draining") {
+        errs.node = t("userWizard.step3.nodeDrainingError");
+      }
+    }
+    setErrors(errs);
+    return Object.keys(errs).length === 0;
+  };
+
   const validateStep4 = (): boolean => {
     const errs: Record<string, string> = {};
     const d = formData.primary_domain?.trim();
@@ -142,6 +156,7 @@ export function UserCreateWizardPage() {
 
   const handleNext = () => {
     if (step === 1 && !validateStep1()) return;
+    if (step === 3 && !validateStep3()) return;
     if (step === 4 && !validateStep4()) return;
 
     setErrors({});
@@ -163,12 +178,27 @@ export function UserCreateWizardPage() {
         prev.map((s, idx) => (idx === 0 ? { ...s, status: "running" } : s))
       );
 
+      const targetNodeId =
+        formData.node_mode === "auto" ? autoSelectedNode.id : (formData.node_id || autoSelectedNode.id);
+      const targetNode = CLUSTER_NODES.find((n) => n.id === targetNodeId);
+
+      if (targetNode?.status === "draining") {
+        toast({
+          title: t("common.error"),
+          description: t("userWizard.step3.nodeDrainingError"),
+          variant: "destructive",
+        });
+        setIsSubmitting(false);
+        setIsProvisioning(false);
+        return;
+      }
+
       const payload = {
         username: formData.username.trim().toLowerCase(),
         email: formData.email.trim(),
         password: formData.password,
         plan_id: formData.plan_id,
-        node_id: formData.node_mode === "auto" ? "node-sgp-01" : formData.node_id,
+        node_id: targetNodeId,
         primary_domain: formData.primary_domain?.trim() || undefined,
         create_vhost: formData.create_vhost,
       };
@@ -242,8 +272,10 @@ export function UserCreateWizardPage() {
     setOpSteps((prev) => prev.map((s) => ({ ...s, status: "pending" })));
   };
 
+  const placementResult = selectPlacementNode(CLUSTER_NODES, "least-loaded");
+  const autoSelectedNode = placementResult.selectedNode || CLUSTER_NODES[0];
   const selectedPlan = HOSTING_PLANS.find((p) => p.id === formData.plan_id) || HOSTING_PLANS[1];
-  const selectedNode = CLUSTER_NODES.find((n) => n.id === formData.node_id) || CLUSTER_NODES[0];
+  const selectedNode = CLUSTER_NODES.find((n) => n.id === formData.node_id) || autoSelectedNode;
 
   const stepsList = [
     { num: 1, label: t("userWizard.steps.account"), icon: User },
@@ -492,7 +524,10 @@ export function UserCreateWizardPage() {
               <div className="space-y-4">
                 {/* Auto Mode Option */}
                 <div
-                  onClick={() => setFormData((f) => ({ ...f, node_mode: "auto" }))}
+                  onClick={() => {
+                    setErrors({});
+                    setFormData((f) => ({ ...f, node_mode: "auto" }));
+                  }}
                   className={`p-4 rounded-xl border cursor-pointer transition-all ${
                     formData.node_mode === "auto"
                       ? "border-primary bg-primary/5 ring-2 ring-primary/20"
@@ -513,16 +548,25 @@ export function UserCreateWizardPage() {
                             Recommended
                           </Badge>
                         </div>
-                        <p className="text-xs text-muted-foreground">
-                          {t("userWizard.step3.autoDesc")}
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {t("userWizard.step3.autoDesc")} (Selected: <strong className="text-foreground font-mono">{autoSelectedNode.name}</strong> • {placementResult.reason})
                         </p>
+                        {placementResult.excludedNodes.length > 0 && (
+                          <p className="text-[11px] text-amber-500 flex items-center gap-1 mt-1 font-medium">
+                            <AlertTriangle className="h-3 w-3" />
+                            {t("userWizard.step3.excludedDrainingNotice", { count: placementResult.excludedNodes.length })}
+                          </p>
+                        )}
                       </div>
                     </div>
                     <input
                       type="radio"
                       name="node_mode"
                       checked={formData.node_mode === "auto"}
-                      onChange={() => setFormData((f) => ({ ...f, node_mode: "auto" }))}
+                      onChange={() => {
+                        setErrors({});
+                        setFormData((f) => ({ ...f, node_mode: "auto" }));
+                      }}
                       className="h-4 w-4 text-primary focus:ring-primary cursor-pointer"
                     />
                   </div>
@@ -533,39 +577,67 @@ export function UserCreateWizardPage() {
                   <p className="text-xs font-semibold uppercase text-muted-foreground">
                     {t("userWizard.step3.orSelectManual")}
                   </p>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
                     {CLUSTER_NODES.map((node) => {
                       const isSelected =
                         formData.node_mode === "manual" && formData.node_id === node.id;
+                      const isDraining = node.status === "draining";
+
                       return (
                         <div
                           key={node.id}
-                          onClick={() =>
-                            setFormData((f) => ({ ...f, node_mode: "manual", node_id: node.id }))
-                          }
-                          className={`p-3.5 rounded-xl border cursor-pointer transition-all ${
-                            isSelected
-                              ? "border-primary bg-primary/5 ring-2 ring-primary/20"
-                              : "border-border bg-card hover:bg-muted/40"
+                          data-testid={isDraining ? "node-item-draining" : `node-item-${node.id}`}
+                          onClick={() => {
+                            if (isDraining) {
+                              setErrors({ node: t("userWizard.step3.nodeDrainingError") });
+                              setFormData((f) => ({ ...f, node_mode: "manual", node_id: node.id }));
+                              return;
+                            }
+                            setErrors({});
+                            setFormData((f) => ({ ...f, node_mode: "manual", node_id: node.id }));
+                          }}
+                          className={`p-3.5 rounded-xl border transition-all ${
+                            isDraining
+                              ? "border-amber-500/30 bg-muted/40 opacity-70 cursor-not-allowed"
+                              : isSelected
+                              ? "border-primary bg-primary/5 ring-2 ring-primary/20 cursor-pointer"
+                              : "border-border bg-card hover:bg-muted/40 cursor-pointer"
                           }`}
                         >
                           <div className="flex items-center justify-between">
                             <span className="font-mono text-xs font-bold text-foreground">
                               {node.name}
                             </span>
-                            <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                            {isDraining ? (
+                              <Badge variant="outline" className="text-[10px] text-amber-500 border-amber-500 py-0">
+                                Draining
+                              </Badge>
+                            ) : (
+                              <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                            )}
                           </div>
                           <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
                             {node.region}
                           </p>
-                          <div className="mt-3 pt-2 border-t flex justify-between text-[11px] text-muted-foreground">
-                            <span>CPU: {node.cpu_usage_pct}%</span>
-                            <span>RAM: {node.memory_usage_pct}%</span>
-                          </div>
+                          {isDraining ? (
+                            <p className="mt-2 text-[10px] text-amber-500 font-medium">
+                              {t("userWizard.step3.nodeDrainingTooltip")}
+                            </p>
+                          ) : (
+                            <div className="mt-3 pt-2 border-t flex justify-between text-[11px] text-muted-foreground">
+                              <span>CPU: {node.cpu_usage_pct}%</span>
+                              <span>RAM: {node.memory_usage_pct}%</span>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
                   </div>
+                  {errors.node && (
+                    <p className="text-xs text-destructive font-medium mt-1.5" data-testid="node-selection-error">
+                      {errors.node}
+                    </p>
+                  )}
                 </div>
               </div>
             )}
@@ -642,7 +714,7 @@ export function UserCreateWizardPage() {
                     <div>
                       <span className="text-muted-foreground block text-[11px]">Target Node</span>
                       <span className="font-semibold text-foreground font-mono">
-                        {formData.node_mode === "auto" ? "Auto (node-sgp-01)" : selectedNode.name}
+                        {formData.node_mode === "auto" ? `Auto (${autoSelectedNode.name})` : selectedNode.name}
                       </span>
                     </div>
                   </div>

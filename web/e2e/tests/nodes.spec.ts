@@ -99,4 +99,44 @@ test.describe("Node Management UI (T02.16)", () => {
     // Verify modal closes
     await expect(page.getByText(/Revoke Node Certificate|নোড সার্টিফিকেট বাতিল করুন/i)).not.toBeVisible();
   });
+
+  test("configures placement scheduler and toggles drain mode (DoD T16.02)", async ({ page }) => {
+    // Open placement scheduler dialog
+    const schedulerBtn = page.getByTestId("configure-scheduler-btn");
+    await expect(schedulerBtn).toBeVisible();
+    await schedulerBtn.click();
+
+    // Verify dialog content and simulation card
+    await expect(page.getByText(/Placement Scheduler & Policies|প্লেসমেন্ট শিডিউলার ও নীতি/i)).toBeVisible();
+    await expect(page.getByTestId("placement-simulation-card")).toBeVisible();
+
+    // Verify drainage invariant is mentioned and draining nodes are disqualified
+    await expect(page.getByText(/Disqualified Draining \/ Offline Nodes|অযোগ্য ড্রেনিং \/ অফলাইন নোডসমূহ/i)).toBeVisible();
+
+    // Save policy
+    const saveBtn = page.getByTestId("save-scheduler-policy-btn");
+    await expect(saveBtn).toBeVisible();
+    await saveBtn.click();
+
+    // Modal closes
+    await expect(page.getByText(/Placement Scheduler & Policies|প্লেসমেন্ট শিডিউলার ও নীতি/i)).not.toBeVisible();
+
+    // Toggle drain on online node
+    const drainBtn = page.getByRole("button", { name: /^Drain$|^ড্রেন$/i }).first();
+    await expect(drainBtn).toBeVisible();
+    await drainBtn.click();
+
+    await expect(
+      page.getByText(/Node set to draining mode|নোডটি ড্রেনিং মোডে নেওয়া হয়েছে/i).first()
+    ).toBeVisible();
+
+    // Toggle undrain on draining node
+    const undrainBtn = page.getByRole("button", { name: /^Undrain$|^সচল করুন$/i }).first();
+    await expect(undrainBtn).toBeVisible();
+    await undrainBtn.click();
+
+    await expect(
+      page.getByText(/Node restored to active cluster service|নোডটি পুনরায় ক্লাস্টার সার্ভিসে সচল করা হয়েছে/i).first()
+    ).toBeVisible();
+  });
 });
