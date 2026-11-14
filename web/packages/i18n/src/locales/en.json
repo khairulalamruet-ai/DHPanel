@@ -1137,6 +1137,98 @@
       "updateFailed": "Failed to update record",
       "deleteFailed": "Failed to delete record",
       "nsVerifyFailed": "Nameserver verification failed"
+    },
+    "cluster": {
+      "nav": "DNS Cluster",
+      "title": "DNS Cluster Management",
+      "desc": "Manage high-availability PowerDNS cluster, configure replication, and ensure zero-downtime DNS resolution",
+      "addServerBtn": "Add DNS Server",
+      "testResolutionBtn": "Test Resolution & Failover",
+      "emptyServers": "No DNS cluster servers configured.",
+      "serversTableTitle": "Cluster Nameservers",
+      "serversTableDesc": "Authoritative nameservers operating in primary, secondary or replica mode with automatic replication",
+      "overview": {
+        "totalServers": "Total Nameservers",
+        "online": "online",
+        "roles": "Cluster Topology",
+        "syncedZones": "Synced Zones",
+        "zonesCount": "zones active",
+        "haHealth": "HA Availability",
+        "haActive": "Failover Redundant"
+      },
+      "table": {
+        "server": "Server & Hostname",
+        "role": "Role",
+        "network": "IP & API Endpoint",
+        "strategy": "Replication",
+        "status": "Health Status",
+        "zones": "Zones",
+        "actions": "Actions"
+      },
+      "role": {
+        "primary": "Primary",
+        "secondary": "Secondary",
+        "replica": "Replica"
+      },
+      "status": {
+        "online": "Online",
+        "offline": "Offline",
+        "syncing": "Syncing",
+        "error": "Error"
+      },
+      "strategy": {
+        "nativeDb": "Native DB Replication",
+        "axfr": "AXFR Zone Transfer",
+        "apiPush": "PowerDNS API Push"
+      },
+      "actions": {
+        "syncNow": "Sync Zones Now",
+        "takeOffline": "Take Offline (Maintenance)",
+        "bringOnline": "Bring Online"
+      },
+      "dialog": {
+        "createTitle": "Add Cluster DNS Server",
+        "createDesc": "Register a PowerDNS nameserver node to join the authoritative cluster pool",
+        "nameLabel": "Server Name",
+        "nameRequired": "Server name is required",
+        "hostnameLabel": "Hostname / FQDN",
+        "hostnameRequired": "Nameserver hostname is required",
+        "ipLabel": "IP Address",
+        "ipRequired": "IP address is required",
+        "portLabel": "DNS Port",
+        "roleLabel": "Cluster Role",
+        "syncStrategyLabel": "Replication Method",
+        "apiUrlLabel": "PowerDNS API URL",
+        "apiKeyLabel": "API Key (Optional)",
+        "saveBtn": "Add Server",
+        "deleteConfirm": "Are you sure you want to remove DNS server \"{{name}}\" from the cluster?"
+      },
+      "test": {
+        "title": "DNS Resolution & High-Availability Test",
+        "desc": "Simulate DNS queries across the cluster to verify that resolution succeeds even if a DNS server is offline (DoD T16.04)",
+        "domainLabel": "Domain to Resolve",
+        "domainRequired": "Please enter a domain name to test",
+        "typeLabel": "Record Type",
+        "simulateOutageLabel": "Simulate DNS Server Outage",
+        "simulateOutageDesc": "Select a nameserver to simulate as offline or unreachable to test cluster failover",
+        "allServersOnline": "None (All Servers Online)",
+        "runTestBtn": "Run Resolution Query",
+        "resolvedSuccess": "DNS Resolution Successful!",
+        "resolvedFailed": "DNS Resolution Failed",
+        "redundancyActive": "Failover Redundant (DoD Passed)",
+        "singleServerActive": "Standard Query Response",
+        "answeringServer": "Answering Nameserver",
+        "answeringIp": "Answering IP",
+        "responseTime": "Response Latency",
+        "answers": "Resolved Records"
+      },
+      "toast": {
+        "createSuccess": "DNS server \"{{name}}\" successfully added to the cluster.",
+        "statusUpdated": "Server \"{{name}}\" status changed to {{status}}.",
+        "syncSuccess": "Triggered manual zone synchronization for {{name}}.",
+        "deleteSuccess": "Server \"{{name}}\" removed from the cluster.",
+        "cannotDeleteLastPrimary": "Cannot delete the only primary DNS server in cluster."
+      }
     }
   },
   "ssl": {

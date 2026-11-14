@@ -60,6 +60,7 @@ import {
   UpdatePage,
   ApiTokensPage,
   SupportReportPage,
+  AdminDnsClusterPage,
   filterNavItems,
   registeredFrontendModules,
 } from "@dhpanel/modules";
@@ -257,6 +258,13 @@ const dnsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/dns",
   component: DnsEditorPage,
+});
+
+// DNS Cluster route (T16.04)
+const adminDnsClusterRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/dns-cluster",
+  component: AdminDnsClusterPage,
 });
 
 // 20. SSL / TLS Certificate route (T05.19)
@@ -601,6 +609,7 @@ const routeTree = rootRoute.addChildren([
   clientDomainsRoute,
   domainsRoute,
   dnsRoute,
+  adminDnsClusterRoute,
   sslRoute,
   vhostRoute,
   phpRoute,

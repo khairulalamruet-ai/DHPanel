@@ -1,5 +1,5 @@
 import React from "react";
-import { LayoutDashboard, ShieldCheck, ShieldAlert, Sparkles, Puzzle, Globe, Users, Settings, FileText, Boxes, Server, Activity, Layers, Lock, FileCode2, Cpu, Database, Folder, Archive, Clock, Terminal, Wrench, Flame, Mail, Briefcase, ArrowRightLeft, KeyRound, Palette, ArrowUpCircle, Key } from "lucide-react";
+import { LayoutDashboard, ShieldCheck, ShieldAlert, Sparkles, Puzzle, Globe, Users, Settings, FileText, Boxes, Server, Activity, Layers, Lock, FileCode2, Cpu, Database, Folder, Archive, Clock, Terminal, Wrench, Flame, Mail, Briefcase, ArrowRightLeft, KeyRound, Palette, ArrowUpCircle, Key, Network } from "lucide-react";
 
 export interface ModuleManifest {
   name: string;
@@ -297,6 +297,14 @@ export const registeredFrontendModules: FrontendModule[] = [
         order: 32,
         permission: "dns.read",
         feature: "dns",
+      },
+      {
+        id: "dns-cluster",
+        labelKey: "dns.cluster.nav",
+        icon: <Network className="h-4 w-4" />,
+        href: "/admin/dns-cluster",
+        order: 33,
+        permission: "dns.read",
       },
     ],
     clientNav: [
