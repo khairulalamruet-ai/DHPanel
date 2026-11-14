@@ -29,6 +29,10 @@ cp deploy/dev/.env.example deploy/dev/.env   # set strong passwords
 docker compose -f deploy/dev/compose.yml --env-file deploy/dev/.env up -d
 ```
 
+PowerDNS (the DNS server for hosted domains) starts with the same command. Its API
+is `http://127.0.0.1:8053` (key: `PDNS_API_KEY`), its DNS port `127.0.0.1:5300`.
+`deploy/dev/powerdns-check.sh` creates, reads and deletes a zone through the API.
+
 Then create `0600` files containing `postgres://dhpanel:<PG_PASSWORD>@127.0.0.1:5432/dhpanel_dev` and `redis://:<REDIS_PASSWORD>@127.0.0.1:6379/0`, and point `DHPANEL_DATABASE__URL_FILE` / `DHPANEL_REDIS__URL_FILE` at them. Mailpit's web UI is at `http://127.0.0.1:8025`.
 
 ## Tests

@@ -30,6 +30,29 @@ services:
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD}
 
+  # Authoritative DNS server for the zones of hosted domains (T05.07). The panel
+  # talks to it only through its HTTP API; zones live in its own SQLite file.
+  # 5.1.5 is the newest stable release (pdns-auth-52 is still an alpha).
+  # Pinned by digest, like the images a tenant may run. DNS on 127.0.0.1:5300.
+  powerdns:
+    image: powerdns/pdns-auth-51@sha256:77ff4efdbb9ec30e9309c8a1cbed6121a67fa3be25c848bbbfa756fc75bf9a27
+    environment:
+      PDNS_AUTH_API: "yes"
+      PDNS_AUTH_API_KEY: ${PDNS_API_KEY:?set PDNS_API_KEY in deploy/dev/.env}
+      PDNS_AUTH_WEBSERVER: "yes"
+      # Inside the container only; the published port below is bound to 127.0.0.1.
+      PDNS_AUTH_WEBSERVER_ADDRESS: 0.0.0.0
+      PDNS_AUTH_WEBSERVER_ALLOW_FROM: 0.0.0.0/0
+    ports:
+      - "127.0.0.1:8053:8081"
+      - "127.0.0.1:5300:53/udp"
+      - "127.0.0.1:5300:53/tcp"
+    volumes: [pdnsdata:/var/lib/powerdns]
+    healthcheck:
+      test: ["CMD-SHELL", "pdns_control uptime > /dev/null"]
+      interval: 5s
+      retries: 10
+
   # Catches outgoing mail in development (web UI on http://127.0.0.1:8025).
   mailpit:
     image: axllent/mailpit:latest
@@ -37,3 +60,4 @@ services:
 
 volumes:
   pgdata:
+  pdnsdata:
