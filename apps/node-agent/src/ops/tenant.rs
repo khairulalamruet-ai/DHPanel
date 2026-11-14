@@ -21,7 +21,7 @@ use std::{
 };
 
 use dhpanel_docker_manager::{
-    ContainerSpec, DockerError, DockerManager, Name, Network, VolumeMount,
+    ContainerSpec, DockerError, DockerManager, ImageRef, Name, Network, VolumeMount,
 };
 use dhpanel_domain::{TenantUsername, UidRange};
 use dhpanel_node_protocol::{AgentError, ErrorCode, Operation, Output};
@@ -312,7 +312,13 @@ async fn converge_stack(
         match docker.inspect(&spec.name).await {
             // A PHP container of another image is replaced (its files are in the
             // volume); the web container is left as it is.
-            Ok(info) if is_php && info.image != spec.image.as_str() => {
+            Ok(info)
+                if is_php
+                    && info.image != spec.image.as_str()
+                    && allowlist
+                        .fallback_for(&spec.image)
+                        .is_none_or(|official| info.image != official.as_str()) =>
+            {
                 docker
                     .stop(&spec.name, STOP_GRACE)
                     .await
@@ -321,7 +327,7 @@ async fn converge_stack(
                     .remove(&spec.name, true)
                     .await
                     .map_err(|e| docker_error(&e))?;
-                create_container(docker, spec).await?;
+                create_container(docker, spec, &allowlist).await?;
             }
             Ok(info) => {
                 // A change of the plan or of the number of PHP versions changes the share.
@@ -332,7 +338,7 @@ async fn converge_stack(
                         .map_err(|e| docker_error(&e))?;
                 }
             }
-            Err(DockerError::NotFound) => create_container(docker, spec).await?,
+            Err(DockerError::NotFound) => create_container(docker, spec, &allowlist).await?,
             Err(e) => return Err(docker_error(&e)),
         }
         docker
@@ -354,15 +360,52 @@ async fn converge_stack(
     Ok((started, removed))
 }
 
+/// Pulls the first of `candidates` that can be pulled and says which it was.
+///
+/// # Errors
+/// The last pull's error when none can.
+pub async fn pull_first(
+    docker: &DockerManager,
+    candidates: &[&ImageRef],
+) -> Result<usize, AgentError> {
+    let mut last = None;
+    for (i, image) in candidates.iter().enumerate() {
+        match docker.pull_image(image).await {
+            Ok(()) => return Ok(i),
+            Err(e) => last = Some(e),
+        }
+    }
+    Err(last.map_or_else(
+        || AgentError::new(ErrorCode::Internal, "no image to pull".to_owned()),
+        |e| docker_error(&e),
+    ))
+}
+
+/// Makes a container. An image of our own that cannot be pulled (the registry is
+/// down, or it has not been published) is replaced by the official one it lists as
+/// its fallback, so a site never waits for our registry.
 async fn create_container(
     docker: &DockerManager,
     spec: &dhpanel_docker_manager::ContainerSpec,
+    allowlist: &Allowlist,
 ) -> Result<(), AgentError> {
-    docker
-        .pull_image(&spec.image)
-        .await
-        .map_err(|e| docker_error(&e))?;
-    match docker.create_container(spec).await {
+    let mut spec = spec.clone();
+    if let Some(official) = allowlist.fallback_for(&spec.image) {
+        let chosen = pull_first(docker, &[&spec.image, official]).await?;
+        if chosen == 1 {
+            eprintln!(
+                "dhpanel-agent: {} could not be pulled; using the official image",
+                spec.image.as_str().split('@').next().unwrap_or("image")
+            );
+            spec.image = official.clone();
+        }
+    } else {
+        docker
+            .pull_image(&spec.image)
+            .await
+            .map_err(|e| docker_error(&e))?;
+    }
+    match docker.create_container(&spec).await {
         // Another attempt created it in the meantime.
         Ok(_) | Err(DockerError::Conflict(_)) => Ok(()),
         Err(e) => Err(docker_error(&e)),

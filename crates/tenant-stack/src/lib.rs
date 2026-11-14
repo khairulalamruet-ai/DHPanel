@@ -100,6 +100,9 @@ struct RawImage {
     /// The PHP version a `php` image runs (`8.4`).
     version: Option<String>,
     reference: String,
+    /// Our own image for the same version (`php` only), tried first; `reference`
+    /// is what is used when it cannot be pulled.
+    preferred: Option<String>,
     #[serde(default)]
     note: String,
 }
@@ -110,6 +113,8 @@ pub struct Allowlist {
     by_role: BTreeMap<Role, Vec<ImageRef>>,
     /// The PHP versions that may run, with their images, default first.
     php: Vec<(String, ImageRef)>,
+    /// For a PHP version with an image of our own: the official one to fall back to.
+    fallbacks: Vec<(ImageRef, ImageRef)>,
 }
 
 /// Whether `text` is a PHP version as the panel writes it: `8.4`.
@@ -133,6 +138,7 @@ impl Allowlist {
             .map_err(|e| StackError::Allowlist(e.to_string().replace('\n', " ")))?;
         let mut by_role: BTreeMap<Role, Vec<ImageRef>> = BTreeMap::new();
         let mut php: Vec<(String, ImageRef)> = Vec::new();
+        let mut fallbacks: Vec<(ImageRef, ImageRef)> = Vec::new();
         for image in raw.image {
             let reference = ImageRef::parse(&image.reference).map_err(|e| {
                 StackError::Allowlist(format!(
@@ -141,13 +147,18 @@ impl Allowlist {
                     image.note.chars().take(40).collect::<String>()
                 ))
             })?;
-            let list = by_role.entry(image.role).or_default();
-            if list.contains(&reference) {
-                return Err(StackError::Allowlist(format!(
-                    "{} lists the same image twice",
-                    image.role
-                )));
+            let preferred = image
+                .preferred
+                .as_deref()
+                .map(ImageRef::parse)
+                .transpose()
+                .map_err(|e| StackError::Allowlist(format!("preferred image: {e}")))?;
+            if preferred.is_some() && image.role != Role::Php {
+                return Err(StackError::Allowlist(
+                    "only php images have a preferred image".to_owned(),
+                ));
             }
+            let mut own_image: Option<ImageRef> = None;
             match (image.role, image.version) {
                 (Role::Php, Some(version)) if is_php_version(&version) => {
                     if php.iter().any(|(v, _)| *v == version) {
@@ -155,7 +166,15 @@ impl Allowlist {
                             "php {version} is listed twice"
                         )));
                     }
-                    php.push((version, reference.clone()));
+                    match preferred {
+                        // Ours first; the official one when ours cannot be pulled.
+                        Some(own) => {
+                            php.push((version, own.clone()));
+                            fallbacks.push((own.clone(), reference.clone()));
+                            own_image = Some(own);
+                        }
+                        None => php.push((version, reference.clone())),
+                    }
                 }
                 (Role::Php, _) => {
                     return Err(StackError::Allowlist(
@@ -170,6 +189,15 @@ impl Allowlist {
                 }
                 (_, None) => {}
             }
+            let list = by_role.entry(image.role).or_default();
+            if list.contains(&reference) || own_image.as_ref().is_some_and(|o| list.contains(o)) {
+                return Err(StackError::Allowlist(format!(
+                    "{} lists the same image twice",
+                    image.role
+                )));
+            }
+            // Our own image first, the official one after it: both may run.
+            list.extend(own_image);
             list.push(reference);
         }
         for role in [Role::Web, Role::Php] {
@@ -179,7 +207,11 @@ impl Allowlist {
                 )));
             }
         }
-        Ok(Self { by_role, php })
+        Ok(Self {
+            by_role,
+            php,
+            fallbacks,
+        })
     }
 
     /// The list shipped with this build.
@@ -228,6 +260,15 @@ impl Allowlist {
             .find(|(v, _)| v == version)
             .map(|(_, image)| image)
             .ok_or_else(|| StackError::UnknownPhpVersion(version.chars().take(10).collect()))
+    }
+
+    /// The official image to use when `image` (one of ours) cannot be pulled.
+    #[must_use]
+    pub fn fallback_for(&self, image: &ImageRef) -> Option<&ImageRef> {
+        self.fallbacks
+            .iter()
+            .find(|(own, _)| own == image)
+            .map(|(_, official)| official)
     }
 
     /// Whether `image` may run in `role`.
@@ -1035,6 +1076,46 @@ mod tests {
             );
         }
         assert!(php_extra_name(&username, "8.3; x").is_err());
+    }
+
+    #[test]
+    fn our_own_php_image_comes_first_and_the_official_one_is_its_fallback() {
+        let digest = "a".repeat(64);
+        let (own_d, official_d) = ("b".repeat(64), "c".repeat(64));
+        let web = format!("[[image]]\nrole = \"web\"\nreference = \"nginx@sha256:{digest}\"\n");
+        let php = format!(
+            "[[image]]\nrole = \"php\"\nversion = \"8.4\"\npreferred = \"ghcr.io/o/dhpanel-php@sha256:{own_d}\"\nreference = \"php@sha256:{official_d}\"\n"
+        );
+        let list = Allowlist::parse(&format!("{web}{php}")).unwrap();
+        let own = list.php_image("8.4").unwrap().clone();
+        let official = list.fallback_for(&own).unwrap().clone();
+        assert!(own.as_str().starts_with("ghcr.io/o/dhpanel-php@"));
+        assert!(official.as_str().starts_with("php@"));
+        assert_eq!(list.current(Role::Php).unwrap(), &own);
+        // Both may run (a container made from the fallback is not replaced).
+        assert!(list.allows(Role::Php, &own) && list.allows(Role::Php, &official));
+        assert_eq!(list.fallback_for(&official), None);
+        // A tag, a preferred image on the web role, or the same image twice is refused.
+        for (text, needle) in [
+            (
+                php.replace("ghcr.io/o/dhpanel-php@", "ghcr.io/o/dhpanel-php:"),
+                "preferred",
+            ),
+            (
+                format!(
+                    "[[image]]\nrole = \"web\"\npreferred = \"x@sha256:{own_d}\"\nreference = \"nginx@sha256:{digest}\"\n{php}"
+                ),
+                "only php",
+            ),
+        ] {
+            let text = if needle == "preferred" {
+                format!("{web}{text}")
+            } else {
+                text
+            };
+            let err = Allowlist::parse(&text).unwrap_err().to_string();
+            assert!(err.contains(needle), "{needle}: {err}");
+        }
     }
 
     #[test]

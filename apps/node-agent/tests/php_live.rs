@@ -350,3 +350,35 @@ async fn the_main_php_changes_version_another_runs_beside_it_and_extras_are_remo
     let _ = docker.remove_network(&network_name(&owner).unwrap()).await;
     let _ = std::fs::remove_dir_all(&root);
 }
+
+#[tokio::test]
+#[ignore = "needs rootless Docker (see the file header)"]
+async fn an_image_that_cannot_be_pulled_gives_way_to_the_next() {
+    let socket = docker_socket();
+    if !socket.exists() {
+        eprintln!("skipped: no Docker at {}", socket.display());
+        return;
+    }
+    let docker = DockerManager::connect(&socket).unwrap();
+    // A made-up registry name (it never resolves) first, a real image second.
+    let missing = ImageRef::parse(&format!(
+        "registry.invalid/dhpanel/none@sha256:{}",
+        "0".repeat(64)
+    ))
+    .unwrap();
+    let real = ImageRef::parse(BUSYBOX).unwrap();
+    let chosen = dhpanel_node_agent::ops::tenant::pull_first(&docker, &[&missing, &real])
+        .await
+        .unwrap();
+    assert_eq!(chosen, 1);
+    assert_eq!(
+        dhpanel_node_agent::ops::tenant::pull_first(&docker, &[&real, &missing])
+            .await
+            .unwrap(),
+        0
+    );
+    let err = dhpanel_node_agent::ops::tenant::pull_first(&docker, &[&missing])
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, ErrorCode::Internal);
+}
