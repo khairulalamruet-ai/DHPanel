@@ -23,6 +23,9 @@ tracing = "0.1.44"
 ureq = { version = "3", default-features = false, features = ["rustls", "json"] }
 uuid = "1"
 
+# Asks the public DNS which name servers a domain really has (T05.12).
+hickory-resolver = { version = "0.26.3", default-features = false, features = ["system-config", "tokio"] }
+
 [dev-dependencies]
 sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "postgres", "macros", "uuid", "json", "migrate"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
