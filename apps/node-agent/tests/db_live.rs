@@ -461,6 +461,88 @@ async fn the_database_server_is_reached_from_its_tenants_network_and_nowhere_els
             "the old password is dead"
         );
         assert!(sql(23, &net_a, second, "SELECT * FROM dbtest_shop.t").await);
+        // Remote access: two more networks stand in for two remote places. The user
+        // may come from one of them (same password, same access) and from no other.
+        {
+            use dhpanel_node_agent::ops::db::set_db_remote_hosts;
+            let (far1, far2) = (
+                Name::parse(&format!("dh-dbfar1-{}", std::process::id())).unwrap(),
+                Name::parse(&format!("dh-dbfar2-{}", std::process::id())).unwrap(),
+            );
+            for net in [&far1, &far2] {
+                docker.ensure_network(net, false).await.unwrap();
+                docker
+                    .connect_network(&Name::parse(CONTAINER).unwrap(), net, "db")
+                    .await
+                    .unwrap();
+            }
+            let range = docker.network_subnet(&far1).await.unwrap();
+            let remote = |cidrs: Vec<String>| Operation::SetDbRemoteHosts {
+                username: a.as_str().to_owned(),
+                name: "dbtest_web".into(),
+                cidrs,
+            };
+            assert!(
+                !sql(30, &far1, second, "SELECT 1").await,
+                "not before it is allowed"
+            );
+            let done = set_db_remote_hosts(context.clone(), remote(vec![range.clone()]))
+                .await
+                .unwrap();
+            assert_eq!(done, Output::DbRemoteHostsSet { hosts: 1 });
+            assert!(
+                sql(31, &far1, second, "SELECT * FROM dbtest_shop.t").await,
+                "from the added range, with its access"
+            );
+            assert!(
+                !sql(32, &far1, second, "INSERT INTO dbtest_shop.t VALUES (9)").await,
+                "read_only there too"
+            );
+            assert!(
+                !sql(33, &far2, second, "SELECT 1").await,
+                "from another range, no"
+            );
+            assert!(
+                !sql(34, &far1, first, "SELECT 1").await,
+                "and only with the password it has"
+            );
+            // Doing it again changes nothing; a grant given later reaches the added range too.
+            set_db_remote_hosts(context.clone(), remote(vec![range.clone()]))
+                .await
+                .unwrap();
+            g(grant("read_write", "dbtest_shop")).await.unwrap();
+            assert!(sql(35, &far1, second, "INSERT INTO dbtest_shop.t VALUES (9)").await);
+            // Nothing wider than a /8, nothing that is not an address.
+            for bad in [
+                "0.0.0.0/0",
+                "%",
+                "10.0.0.0/7",
+                "203.0.113.7",
+                "203.0.113.7/32'; --",
+            ] {
+                let err = set_db_remote_hosts(context.clone(), remote(vec![bad.into()]))
+                    .await
+                    .unwrap_err();
+                assert_eq!(err.code, ErrorCode::InvalidArguments, "{bad}");
+            }
+            assert!(
+                sql(36, &far1, second, "SELECT 1").await,
+                "a refused change leaves it as it was"
+            );
+            // Taking it away ends the access.
+            let done = set_db_remote_hosts(context.clone(), remote(vec![]))
+                .await
+                .unwrap();
+            assert_eq!(done, Output::DbRemoteHostsSet { hosts: 0 });
+            assert!(!sql(37, &far1, second, "SELECT 1").await);
+            assert!(
+                sql(38, &net_a, second, "SELECT 1").await,
+                "its own network is untouched"
+            );
+            for net in [&far1, &far2] {
+                let _ = docker.remove_network(net).await;
+            }
+        }
         // Gone.
         let dropped = drop_db_user(
             context.clone(),

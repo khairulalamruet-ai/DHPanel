@@ -135,6 +135,10 @@ impl Registry {
                 let context = context.clone();
                 move |op| db::revoke_db(context.clone(), op)
             });
+            registry.register("set_db_remote_hosts", {
+                let context = context.clone();
+                move |op| db::set_db_remote_hosts(context.clone(), op)
+            });
             registry.register("drop_db_user", {
                 let context = context.clone();
                 move |op| db::drop_db_user(context.clone(), op)

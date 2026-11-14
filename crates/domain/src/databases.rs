@@ -203,6 +203,31 @@ pub fn host_for_network(cidr: &str) -> Option<String> {
     ))
 }
 
+/// Most addresses a user may be allowed to connect from besides its own network.
+pub const MAX_REMOTE_HOSTS: usize = 20;
+
+/// The host part of a database user for connections from a remote address or
+/// range given as IPv4 CIDR (`203.0.113.7/32`, `198.51.100.0/24`), as the server
+/// writes it. Wider than a /8, or anything that is not the start of its range, is
+/// refused: a range is never "everywhere".
+#[must_use]
+pub fn host_for_remote(cidr: &str) -> Option<String> {
+    let (ip, bits) = cidr.split_once('/')?;
+    let bits: u32 = bits.parse().ok().filter(|b| (8..=32).contains(b))?;
+    if bits == 32 {
+        let parts: Vec<u8> = ip
+            .split('.')
+            .map(str::parse)
+            .collect::<Result<_, _>>()
+            .ok()?;
+        if parts.len() != 4 || ip.split('.').any(|p| p.len() > 1 && p.starts_with('0')) {
+            return None;
+        }
+        return Some(format!("{ip}/255.255.255.255"));
+    }
+    host_for_network(cidr)
+}
+
 /// What a user may do in a database.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Access {
@@ -402,6 +427,33 @@ mod tests {
             "172.18.0.0/16'; DROP",
         ] {
             assert_eq!(host_for_network(bad), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn remote_addresses_are_single_hosts_or_ranges_never_everywhere() {
+        assert_eq!(
+            host_for_remote("203.0.113.7/32").as_deref(),
+            Some("203.0.113.7/255.255.255.255")
+        );
+        assert_eq!(
+            host_for_remote("198.51.100.0/24").as_deref(),
+            Some("198.51.100.0/255.255.255.0")
+        );
+        for bad in [
+            "0.0.0.0/0",
+            "0.0.0.0/1",
+            "10.0.0.0/7",
+            "203.0.113.7",
+            "203.0.113.7/33",
+            "203.0.113.7/24",
+            "203.0.113.007/32",
+            "::1/128",
+            "%",
+            "203.0.113.7/32; --",
+            "",
+        ] {
+            assert_eq!(host_for_remote(bad), None, "{bad}");
         }
     }
 

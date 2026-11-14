@@ -551,6 +551,166 @@ pub async fn revoke_db(context: Arc<TenantContext>, op: Operation) -> Result<Out
     Ok(Output::DbRevoked)
 }
 
+/// The tenant's own network as the host part of a user.
+async fn tenant_host(
+    context: &TenantContext,
+    tenant: &TenantUsername,
+) -> Result<String, AgentError> {
+    let invalid = |m: &str| AgentError::new(ErrorCode::InvalidArguments, m.to_owned());
+    let network = network_name(tenant).map_err(|e| invalid(&e.to_string()))?;
+    let subnet = context
+        .docker
+        .network_subnet(&network)
+        .await
+        .map_err(|e| match e {
+            DockerError::NotFound => invalid("the tenant has no network on this node"),
+            other => docker_error(&other),
+        })?;
+    dhpanel_domain::databases::host_for_network(&subnet).ok_or_else(|| {
+        AgentError::new(
+            ErrorCode::Internal,
+            "the tenant's network range is not usable",
+        )
+    })
+}
+
+/// The databases a user has a grant in on one host, with the privileges, read from
+/// the server's own `SHOW GRANTS` and kept only where they are exactly what this
+/// agent writes: a database name that is a plain identifier and privileges from the
+/// fixed lists. Anything else in the output is ignored, never run.
+async fn grants_on(
+    conn: &mut mysql_async::Conn,
+    user: &str,
+    host: &str,
+) -> Result<Vec<(String, Vec<String>)>, AgentError> {
+    use mysql_async::prelude::Queryable as _;
+    let known: std::collections::BTreeSet<&str> = dhpanel_domain::databases::Access::All
+        .privileges()
+        .iter()
+        .copied()
+        .collect();
+    let lines: Vec<String> = conn
+        .query(format!(
+            "SHOW GRANTS FOR {}@{}",
+            user_literal(user)?,
+            host_literal(host)?
+        ))
+        .await
+        .map_err(|e| sql_error(&e))?;
+    let mut out = Vec::new();
+    for line in lines {
+        let Some(rest) = line.strip_prefix("GRANT ") else {
+            continue;
+        };
+        let Some((privs, after)) = rest.split_once(" ON `") else {
+            continue;
+        };
+        let Some((db, tail)) = after.split_once("`.* TO ") else {
+            continue;
+        };
+        let _ = tail;
+        let privileges: Vec<String> = privs.split(", ").map(str::to_owned).collect();
+        if dhpanel_domain::databases::check_identifier(db).is_ok()
+            && privileges.iter().all(|p| known.contains(p.as_str()))
+        {
+            out.push((db.to_owned(), privileges));
+        }
+    }
+    Ok(out)
+}
+
+/// `set_db_remote_hosts`.
+///
+/// # Errors
+/// [`AgentError`]: a bad address or too many, a user that does not exist (not
+/// retryable); the server not reachable (retryable).
+pub async fn set_db_remote_hosts(
+    context: Arc<TenantContext>,
+    op: Operation,
+) -> Result<Output, AgentError> {
+    use mysql_async::prelude::Queryable as _;
+    let Operation::SetDbRemoteHosts {
+        username,
+        name,
+        cidrs,
+    } = op
+    else {
+        return Err(super::wrong_operation());
+    };
+    let invalid = |m: &str| AgentError::new(ErrorCode::InvalidArguments, m.to_owned());
+    let user = user_literal(&name)?;
+    let tenant = TenantUsername::parse(&username).map_err(|e| invalid(&e.to_string()))?;
+    if cidrs.len() > dhpanel_node_protocol::MAX_DB_REMOTE_HOSTS {
+        return Err(invalid("too many remote addresses"));
+    }
+    let mut wanted: Vec<String> = Vec::new();
+    for cidr in &cidrs {
+        let host = dhpanel_domain::databases::host_for_remote(cidr)
+            .ok_or_else(|| invalid("a remote address is IPv4 a.b.c.d/n, no wider than /8"))?;
+        if !wanted.contains(&host) {
+            wanted.push(host);
+        }
+    }
+    let own = tenant_host(&context, &tenant).await?;
+    let mut conn = root_conn(&context).await?;
+    let existing = hosts_of(&mut conn, &name).await?;
+    if !existing.contains(&own) {
+        return Err(invalid("the database user does not exist for this tenant"));
+    }
+    // The password the user has (its hash) and the grants it has at home.
+    let hash: Option<String> = conn
+        .exec_first(
+            "SELECT Password FROM mysql.user WHERE User = ? AND Host = ?",
+            (&name, &own),
+        )
+        .await
+        .map_err(|e| sql_error(&e))?;
+    let hash = hash
+        .filter(|h| {
+            h.len() == 41 && h.starts_with('*') && h[1..].bytes().all(|b| b.is_ascii_hexdigit())
+        })
+        .ok_or_else(|| {
+            AgentError::new(
+                ErrorCode::Internal,
+                "the user's password hash is not readable",
+            )
+        })?;
+    let grants = grants_on(&mut conn, &name, &own).await?;
+    for host in &wanted {
+        let quoted = host_literal(host)?;
+        if !existing.contains(host) {
+            conn.query_drop(format!(
+                "CREATE USER {user}@{quoted} IDENTIFIED BY PASSWORD '{hash}' WITH MAX_USER_CONNECTIONS 20"
+            ))
+            .await
+            .map_err(|e| sql_error(&e))?;
+        }
+        // The same access as at home, as this agent's own statements.
+        for (db, privileges) in &grants {
+            let quoted_db = identifier(db)?;
+            conn.query_drop(format!(
+                "GRANT {} ON {quoted_db}.* TO {user}@{quoted}",
+                privileges.join(", ")
+            ))
+            .await
+            .map_err(|e| sql_error(&e))?;
+        }
+    }
+    // The ones that were allowed and no longer are.
+    for host in existing
+        .iter()
+        .filter(|h| **h != own && !wanted.contains(h))
+    {
+        conn.query_drop(format!("DROP USER {user}@{}", host_or_pattern(host)?))
+            .await
+            .map_err(|e| sql_error(&e))?;
+    }
+    let _ = conn.disconnect().await;
+    Ok(Output::DbRemoteHostsSet {
+        hosts: wanted.len(),
+    })
+}
+
 /// `drop_db_user`.
 ///
 /// # Errors

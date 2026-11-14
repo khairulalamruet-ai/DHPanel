@@ -202,6 +202,9 @@ impl std::fmt::Debug for DbPassword {
     }
 }
 
+/// Most remote addresses one database user may have.
+pub const MAX_DB_REMOTE_HOSTS: usize = 20;
+
 /// Longest php.ini file the control plane sends.
 pub const MAX_PHP_INI_BYTES: usize = 4096;
 
@@ -470,6 +473,19 @@ pub enum Operation {
         /// The user's whole name.
         user: String,
     },
+    /// Set the addresses a database user may connect from besides its tenant's own
+    /// network (IPv4 `a.b.c.d/n`, at most [`MAX_DB_REMOTE_HOSTS`], none wider than
+    /// a /8): the user gets the same password and the same grants for each, and
+    /// loses the ones not listed. An empty list ends remote access. Safe to
+    /// repeat. Answered with [`Output::DbRemoteHostsSet`].
+    SetDbRemoteHosts {
+        /// The tenant's system name.
+        username: String,
+        /// The user's whole name.
+        name: String,
+        /// The addresses or ranges.
+        cidrs: Vec<String>,
+    },
     /// Remove a database user (from every address it could connect from). Safe to
     /// repeat. Answered with [`Output::DbUserDropped`].
     DropDbUser {
@@ -651,6 +667,7 @@ impl Operation {
         "upsert_db_user",
         "grant_db",
         "revoke_db",
+        "set_db_remote_hosts",
         "drop_db_user",
         "set_up_tenant",
         "set_site_routes",
@@ -685,6 +702,7 @@ impl Operation {
             Self::UpsertDbUser { .. } => "upsert_db_user",
             Self::GrantDb { .. } => "grant_db",
             Self::RevokeDb { .. } => "revoke_db",
+            Self::SetDbRemoteHosts { .. } => "set_db_remote_hosts",
             Self::DropDbUser { .. } => "drop_db_user",
             Self::SetUpTenant { .. } => "set_up_tenant",
             Self::SetSiteRoutes { .. } => "set_site_routes",
@@ -871,6 +889,11 @@ pub enum Output {
     DbGranted,
     /// Answer to [`Operation::RevokeDb`].
     DbRevoked,
+    /// Answer to [`Operation::SetDbRemoteHosts`].
+    DbRemoteHostsSet {
+        /// How many remote addresses the user has now.
+        hosts: usize,
+    },
     /// Answer to [`Operation::DropDbUser`].
     DbUserDropped {
         /// Whether there was one to remove.
@@ -1747,6 +1770,11 @@ mod tests {
                 database: "alice_shop".into(),
                 user: "alice_web".into(),
             },
+            Operation::SetDbRemoteHosts {
+                username: "alice".into(),
+                name: "alice_web".into(),
+                cidrs: vec!["203.0.113.7/32".into()],
+            },
             Operation::DropDbUser {
                 name: "alice_web".into(),
             },
@@ -1779,7 +1807,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            28,
+            29,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }

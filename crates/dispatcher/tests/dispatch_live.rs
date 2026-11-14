@@ -1094,8 +1094,10 @@ async fn an_uploaded_certificate_reaches_the_node_with_its_key_and_the_ledger_ne
     .fetch_one(&pool)
     .await
     .unwrap();
-    // Everything so far is synced: the certificate alone makes the tenant pending again.
-    assert_eq!(d.request_route_syncs().await, 1);
+    // The first pass of the running dispatcher may have taken the new tenant already:
+    // either way, everything so far is synced after this. The certificate alone then
+    // makes the tenant pending again.
+    let _ = d.request_route_syncs().await;
     sqlx::query("UPDATE tenants SET routes_synced_version = routes_version WHERE id = $1")
         .bind(tenant)
         .execute(&pool)
