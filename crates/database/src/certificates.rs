@@ -152,3 +152,95 @@ pub async fn mark_notified(conn: &mut PgConnection, domain_id: Uuid) -> Result<(
     .await?;
     Ok(())
 }
+
+/// What an uploaded certificate is stored as. The key is already sealed.
+#[derive(Debug, Clone)]
+pub struct NewCustom<'a> {
+    /// The domain.
+    pub domain_id: Uuid,
+    /// Issuer of the first certificate.
+    pub issuer: &'a str,
+    /// Valid from (Unix seconds).
+    pub not_before: i64,
+    /// Valid until (Unix seconds).
+    pub not_after: i64,
+    /// The certificates, PEM.
+    pub chain_pem: &'a str,
+    /// The private key, sealed.
+    pub private_key_enc: &'a [u8],
+    /// Who uploaded it.
+    pub uploaded_by: Uuid,
+}
+
+/// Stores an uploaded certificate for a domain, replacing whatever it had.
+///
+/// # Errors
+/// Database errors.
+pub async fn set_custom(conn: &mut PgConnection, new: &NewCustom<'_>) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        "INSERT INTO certificates
+             (domain_id, kind, issuer, not_before, not_after, chain_pem, private_key_enc, uploaded_by)
+         VALUES ($1, 'custom', $2, to_timestamp($3::bigint), to_timestamp($4::bigint), $5, $6, $7)
+         ON CONFLICT (domain_id) DO UPDATE
+         SET kind = 'custom', issuer = EXCLUDED.issuer, not_before = EXCLUDED.not_before,
+             not_after = EXCLUDED.not_after, chain_pem = EXCLUDED.chain_pem,
+             private_key_enc = EXCLUDED.private_key_enc, uploaded_by = EXCLUDED.uploaded_by,
+             source_node_id = NULL, last_seen_at = now(), expiry_notified_at = NULL",
+        new.domain_id,
+        new.issuer,
+        new.not_before,
+        new.not_after,
+        new.chain_pem,
+        new.private_key_enc,
+        new.uploaded_by,
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
+/// Removes an uploaded certificate (the web server then gets its own again).
+/// Returns whether there was one.
+///
+/// # Errors
+/// Database errors.
+pub async fn remove_custom(conn: &mut PgConnection, domain_id: Uuid) -> Result<bool, sqlx::Error> {
+    let done = sqlx::query!(
+        "DELETE FROM certificates WHERE domain_id = $1 AND kind = 'custom'",
+        domain_id,
+    )
+    .execute(conn)
+    .await?;
+    Ok(done.rows_affected() == 1)
+}
+
+/// A domain's uploaded certificate with its sealed key, for sending to its node.
+#[derive(Debug, Clone)]
+pub struct CustomMaterial {
+    /// The certificates, PEM.
+    pub chain_pem: String,
+    /// The private key, sealed.
+    pub private_key_enc: Vec<u8>,
+}
+
+/// The uploaded certificate of a domain, if it has one.
+///
+/// # Errors
+/// Database errors.
+pub async fn custom_material(
+    pool: &PgPool,
+    domain_id: Uuid,
+) -> Result<Option<CustomMaterial>, sqlx::Error> {
+    let row = sqlx::query!(
+        "SELECT chain_pem, private_key_enc FROM certificates WHERE domain_id = $1 AND kind = 'custom'",
+        domain_id,
+    )
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.and_then(|r| {
+        Some(CustomMaterial {
+            chain_pem: r.chain_pem?,
+            private_key_enc: r.private_key_enc?,
+        })
+    }))
+}

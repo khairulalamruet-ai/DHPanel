@@ -92,6 +92,8 @@ pub struct DomainsState {
     pub resolver: Arc<dyn dhpanel_dns::resolver::NsResolver>,
     /// Limits how often one address may ask whether a name may get a certificate.
     pub ask_limiter: dhpanel_cache::ratelimit::RateLimiter,
+    /// Seals the private keys of uploaded certificates.
+    pub master_key: dhpanel_auth_core::secretbox::MasterKey,
 }
 
 impl FromRef<DomainsState> for PgPool {
@@ -1094,7 +1096,8 @@ pub async fn client_delete(
         records::admin_delete, records::client_list, records::client_add, records::client_update,
         records::client_delete, nameservers::admin_nameservers, nameservers::client_nameservers,
         nameservers::admin_check, nameservers::client_check, tls::ask, ssl::admin_ssl,
-        ssl::client_ssl
+        ssl::client_ssl, ssl::admin_upload, ssl::admin_remove, ssl::client_upload,
+        ssl::client_remove
     ),
     components(schemas(
         DomainView, DomainList, AddDomain, AdminAddDomain, UpdateDomain,
@@ -1102,7 +1105,7 @@ pub async fn client_delete(
         redirects::UpdateRedirect, dns::TemplateLine, dns::TemplateView, dns::TemplateList,
         dns::TemplateInput, records::RecordView, records::RecordList, records::ZoneView,
         records::AddRecord, records::UpdateRecord, nameservers::Nameservers,
-        nameservers::DelegationView, ssl::SslView
+        nameservers::DelegationView, ssl::SslView, ssl::UploadCertificate
     )),
     tags((name = "domains", description = "The names a hosting account serves"))
 )]

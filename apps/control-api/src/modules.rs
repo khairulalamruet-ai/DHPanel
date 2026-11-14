@@ -115,6 +115,7 @@ pub fn mount(
     // One cache for every rebuild of the system routes, so it survives a module switch.
     let branding: Arc<dhpanel_mod_system::bootstrap::BrandingCache> = Arc::default();
     let (db, sessions) = (states.auth.db.clone(), states.auth.sessions.clone());
+    let master_key = states.auth.master_key.clone();
     // One counter for the whole panel, so the limit holds across instances.
     let ask_limiter = dhpanel_cache::ratelimit::RateLimiter::new(
         states.auth.redis.clone(),
@@ -216,12 +217,13 @@ pub fn mount(
                         })
                     }
                     "domains" => {
-                        let (db, sessions, late_settings, resolver, ask_limiter) = (
+                        let (db, sessions, late_settings, resolver, ask_limiter, master_key) = (
                             db.clone(),
                             sessions.clone(),
                             late_settings.clone(),
                             resolver.clone(),
                             ask_limiter.clone(),
+                            master_key.clone(),
                         );
                         Box::new(move || match late_settings.get() {
                             Some(settings) => {
@@ -231,6 +233,7 @@ pub fn mount(
                                     settings: settings.clone(),
                                     resolver: resolver.clone(),
                                     ask_limiter: ask_limiter.clone(),
+                                    master_key: master_key.clone(),
                                 };
                                 ModuleRoutes {
                                     admin: Some(

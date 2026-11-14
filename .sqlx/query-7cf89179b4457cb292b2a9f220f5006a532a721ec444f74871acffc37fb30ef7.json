@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO certificates\n             (domain_id, kind, issuer, not_before, not_after, chain_pem, private_key_enc, uploaded_by)\n         VALUES ($1, 'custom', $2, to_timestamp($3::bigint), to_timestamp($4::bigint), $5, $6, $7)\n         ON CONFLICT (domain_id) DO UPDATE\n         SET kind = 'custom', issuer = EXCLUDED.issuer, not_before = EXCLUDED.not_before,\n             not_after = EXCLUDED.not_after, chain_pem = EXCLUDED.chain_pem,\n             private_key_enc = EXCLUDED.private_key_enc, uploaded_by = EXCLUDED.uploaded_by,\n             source_node_id = NULL, last_seen_at = now(), expiry_notified_at = NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Int8",
+        "Int8",
+        "Text",
+        "Bytea",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7cf89179b4457cb292b2a9f220f5006a532a721ec444f74871acffc37fb30ef7"
+}

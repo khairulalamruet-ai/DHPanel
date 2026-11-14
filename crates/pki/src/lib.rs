@@ -14,6 +14,8 @@
 //! are backdated by 5 minutes to tolerate clock skew. The CA private key is only
 //! ever written to a file created with mode 0600 and is never logged.
 
+pub mod custom;
+
 use std::{
     fs,
     io::{self, Write as _},

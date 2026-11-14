@@ -102,6 +102,7 @@ async fn env_limited(pool: &PgPool, ask_limit: u32) -> Env {
                     settings: settings.clone(),
                     resolver: Arc::new(resolver.clone()),
                     ask_limiter: ask_limiter.clone(),
+                    master_key: dhpanel_auth_core::secretbox::MasterKey::from_bytes(&[7u8; 32]),
                 };
                 ModuleRoutes {
                     admin: Some(admin_router().with_state(state.clone())),
@@ -2424,4 +2425,254 @@ async fn a_domains_certificate_is_shown_to_its_owner_and_domain_events_are_publi
     );
     assert_eq!(events[1].1["name"], "second.org");
     assert_eq!(events[2].1["domain_id"], extra["id"]);
+}
+
+/// A CA, then a leaf for `names` signed by it: `(chain pem, key pem)`.
+fn make_certificate(names: &[&str], from_days: i64, to_days: i64) -> (String, String) {
+    use rcgen::{BasicConstraints, CertificateParams, DnType, IsCa, Issuer, KeyPair};
+    let mut ca_params = CertificateParams::new(Vec::<String>::new()).unwrap();
+    ca_params
+        .distinguished_name
+        .push(DnType::CommonName, "Test CA");
+    ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+    let ca_key = KeyPair::generate().unwrap();
+    let ca_pem = ca_params.self_signed(&ca_key).unwrap().pem();
+    let issuer = Issuer::new(ca_params, ca_key);
+    let mut params =
+        CertificateParams::new(names.iter().map(|n| (*n).to_owned()).collect::<Vec<_>>()).unwrap();
+    let now = time::OffsetDateTime::now_utc();
+    params.not_before = now + time::Duration::days(from_days);
+    params.not_after = now + time::Duration::days(to_days);
+    let key = KeyPair::generate().unwrap();
+    let leaf = params.signed_by(&key, &issuer).unwrap().pem();
+    (format!("{leaf}{ca_pem}"), key.serialize_pem())
+}
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn an_uploaded_certificate_is_checked_kept_sealed_and_never_given_back(pool: PgPool) {
+    let e = env(&pool).await;
+    let (alice, _) = client(&pool, "alice", 10_000).await;
+    let (bobby, _) = client(&pool, "bobby", 10_001).await;
+    let (a, b) = (e.sign_in(alice).await, e.sign_in(bobby).await);
+    let root = e
+        .sign_in(account(&pool, "rootuser", &["super_admin"]).await)
+        .await;
+    let (_, main) = e
+        .call(Some(&a), "POST", CLIENT, Some(domain("example.com")), true)
+        .await;
+    let id = main["id"].as_str().unwrap().to_owned();
+    let path = format!("{CLIENT}/{id}/ssl/custom");
+    let put = |cert: &str, key: &str| {
+        let (e, a, path) = (&e, &a, path.clone());
+        let body = json!({"certificate": cert, "private_key": key});
+        async move { e.call(Some(a), "PUT", &path, Some(body), true).await }
+    };
+
+    // A good upload: shown as a custom certificate, with its issuer and days.
+    let (chain, key) = make_certificate(&["example.com", "www.example.com"], -1, 90);
+    let (status, shown) = put(&chain, &key).await;
+    assert_eq!(status, StatusCode::OK, "{shown}");
+    assert_eq!(
+        (
+            shown["state"].clone(),
+            shown["kind"].clone(),
+            shown["issuer"].clone()
+        ),
+        (json!("valid"), json!("custom"), json!("Test CA"))
+    );
+    assert!((89..=90).contains(&shown["days_left"].as_i64().unwrap()));
+    // The key is stored sealed: not readable from the table, and the answer never holds it.
+    let (stored, sealed): (String, Vec<u8>) =
+        sqlx::query_as("SELECT chain_pem, private_key_enc FROM certificates")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(stored.contains("BEGIN CERTIFICATE") && !stored.contains("PRIVATE"));
+    assert!(
+        !String::from_utf8_lossy(&sealed).contains("PRIVATE"),
+        "sealed"
+    );
+    assert!(!shown.to_string().contains("PRIVATE") && !shown.to_string().contains("BEGIN"));
+    let (_, got) = e
+        .call(Some(&a), "GET", &format!("{CLIENT}/{id}/ssl"), None, false)
+        .await;
+    assert!(!got.to_string().contains("PRIVATE"));
+    // It can be opened with the panel's key and the domain, and not with another domain.
+    let master = dhpanel_auth_core::secretbox::MasterKey::from_bytes(&[7u8; 32]);
+    let ctx = format!("certificate-key:{id}");
+    let opened = master.open(ctx.as_bytes(), &sealed).unwrap();
+    assert!(
+        String::from_utf8(opened)
+            .unwrap()
+            .contains("BEGIN PRIVATE KEY")
+    );
+    assert!(
+        master
+            .open(
+                format!("certificate-key:{}", Uuid::now_v7()).as_bytes(),
+                &sealed
+            )
+            .is_err()
+    );
+
+    // The roadmap's case: a key that is not the certificate's is a 422 naming the key.
+    let (_, other_key) = make_certificate(&["example.com"], -1, 90);
+    let (status, body) = put(&chain, &other_key).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(
+        (
+            body["errors"][0]["field"].clone(),
+            body["errors"][0]["code"].clone()
+        ),
+        (json!("private_key"), json!("key_mismatch"))
+    );
+    assert!(!body.to_string().contains("PRIVATE"));
+
+    // Other mistakes, each with its field and code.
+    let (elsewhere, elsewhere_key) = make_certificate(&["other.org"], -1, 90);
+    let (old, old_key) = make_certificate(&["example.com"], -90, -1);
+    let (future, future_key) = make_certificate(&["example.com"], 3, 90);
+    for (cert, k, field, want) in [
+        (
+            elsewhere.as_str(),
+            elsewhere_key.as_str(),
+            "certificate",
+            "name_mismatch",
+        ),
+        (
+            old.as_str(),
+            old_key.as_str(),
+            "certificate",
+            "certificate_expired",
+        ),
+        (
+            future.as_str(),
+            future_key.as_str(),
+            "certificate",
+            "certificate_not_yet_valid",
+        ),
+        ("hello", key.as_str(), "certificate", "invalid_certificate"),
+        (
+            chain.as_str(),
+            "not a key",
+            "private_key",
+            "invalid_private_key",
+        ),
+        (
+            chain.as_str(),
+            "-----BEGIN ENCRYPTED PRIVATE KEY-----\nAAAA\n-----END ENCRYPTED PRIVATE KEY-----\n",
+            "private_key",
+            "key_encrypted",
+        ),
+    ] {
+        let (status, body) = put(cert, k).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{want}: {body}");
+        assert_eq!(
+            (
+                body["errors"][0]["field"].clone(),
+                body["errors"][0]["code"].clone()
+            ),
+            (json!(field), json!(want)),
+            "{body}"
+        );
+    }
+    // Nothing changed by the refused ones.
+    let n: i64 = sqlx::query_scalar("SELECT count(*) FROM certificates WHERE kind = 'custom'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(n, 1);
+
+    // A node's report never replaces it; someone else cannot touch it.
+    assert_eq!(
+        e.call(
+            Some(&b),
+            "PUT",
+            &path,
+            Some(json!({"certificate": chain, "private_key": key})),
+            true
+        )
+        .await
+        .0,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        e.call(Some(&b), "DELETE", &path, None, true).await.0,
+        StatusCode::NOT_FOUND
+    );
+    let (status, seen) = e
+        .call(
+            Some(&root),
+            "GET",
+            &format!("{ADMIN}/{id}/ssl"),
+            None,
+            false,
+        )
+        .await;
+    assert_eq!(
+        (status, seen["kind"].clone()),
+        (StatusCode::OK, json!("custom"))
+    );
+
+    // Removing gives the domain back to the web server's own certificates.
+    assert_eq!(
+        e.call(Some(&a), "DELETE", &path, None, true).await.0,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        e.call(Some(&a), "DELETE", &path, None, true).await.0,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        e.call(Some(&a), "GET", &format!("{CLIENT}/{id}/ssl"), None, false)
+            .await
+            .1["state"],
+        "none"
+    );
+
+    // Administrators may upload for any domain; the plan must allow it for clients.
+    let (status, _) = e
+        .call(
+            Some(&root),
+            "PUT",
+            &format!("{ADMIN}/{id}/ssl/custom"),
+            Some(json!({"certificate": chain, "private_key": key})),
+            true,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let set: Uuid = sqlx::query_scalar(
+        "INSERT INTO feature_sets (name, features) VALUES ('nocustom', '{domains}') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE plans SET feature_set_id = $1 WHERE is_default")
+        .bind(set)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, body) = put(&chain, &key).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::FORBIDDEN, "feature_disabled")
+    );
+
+    let actions: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT action FROM audit_logs WHERE action LIKE 'ssl.%' ORDER BY action",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(actions, ["ssl.custom_removed", "ssl.custom_uploaded"]);
+    let logged: Vec<Value> =
+        sqlx::query_scalar("SELECT metadata FROM audit_logs WHERE action LIKE 'ssl.%'")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert!(
+        logged.iter().all(|m| !m.to_string().contains("PRIVATE")),
+        "the log never holds key material"
+    );
 }

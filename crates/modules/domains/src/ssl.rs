@@ -4,23 +4,41 @@
 //! |---|---|---|
 //! | GET | `/api/v1/admin/domains/{id}/ssl` | `admin.domains.read` |
 //! | GET | `/api/v1/client/domains/{id}/ssl` | the owner of the domain |
+//! | PUT, DELETE | `/api/v1/admin/domains/{id}/ssl/custom` | `admin.domains.manage`, sudo mode |
+//! | PUT, DELETE | `/api/v1/client/domains/{id}/ssl/custom` | the owner of the domain |
 //!
 //! The nodes report the certificates their web server holds; the control plane
 //! keeps the latest per domain: who issued it and when it is valid. A domain
 //! that has none yet (the first visit to it makes the web server fetch one) says
 //! `none`. A certificate that ends within 14 days is `expiring`, one that has
-//! ended `expired`. Nothing secret is stored or shown.
+//! ended `expired`. Nothing secret is shown.
+//!
+//! **Uploading a certificate** (needs the `custom_ssl` feature): the site's
+//! certificate and the ones that vouch for it, and its private key. Everything is
+//! checked before anything is kept ([`dhpanel_pki::custom`]): the certificate must
+//! cover the domain and be valid now, each must be signed by the next, the key must
+//! be an unprotected PKCS#8 key and the one of the certificate; a failure is a 422
+//! naming the field and what is wrong (`key_mismatch` for a key of another
+//! certificate). The key is sealed with the panel's master key before it is
+//! stored, with the domain as associated data, and is never returned. Removing the
+//! upload gives the domain back to the web server's own certificates.
 
 use axum::{
     Json, Router,
     extract::{Path, State},
+    http::StatusCode,
     routing::get,
 };
-use dhpanel_database::certificates;
-use dhpanel_http_kit::{AppError, ProblemDetails};
-use dhpanel_rbac::{Principal, Require, permissions::DomainsRead};
+use dhpanel_audit::{AuditEntry, Outcome};
+use dhpanel_database::{certificates, plans};
+use dhpanel_http_kit::{AppError, FieldError, ProblemDetails};
+use dhpanel_rbac::{
+    Principal, Require, RequireRecent,
+    permissions::{DomainsManage, DomainsRead},
+};
 use dhpanel_session::rfc3339;
-use serde::Serialize;
+use secrecy::ExposeSecret as _;
+use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
@@ -31,12 +49,22 @@ pub const EXPIRING_DAYS: i64 = 14;
 
 /// Routes for administrators.
 pub fn admin_router() -> Router<DomainsState> {
-    Router::new().route("/api/v1/admin/domains/{id}/ssl", get(admin_ssl))
+    Router::new()
+        .route("/api/v1/admin/domains/{id}/ssl", get(admin_ssl))
+        .route(
+            "/api/v1/admin/domains/{id}/ssl/custom",
+            axum::routing::put(admin_upload).delete(admin_remove),
+        )
 }
 
 /// Routes for clients.
 pub fn client_router() -> Router<DomainsState> {
-    Router::new().route("/api/v1/client/domains/{id}/ssl", get(client_ssl))
+    Router::new()
+        .route("/api/v1/client/domains/{id}/ssl", get(client_ssl))
+        .route(
+            "/api/v1/client/domains/{id}/ssl/custom",
+            axum::routing::put(client_upload).delete(client_remove),
+        )
 }
 
 /// A domain's certificate.
@@ -161,6 +189,231 @@ pub async fn client_ssl(
 ) -> Result<Json<SslView>, AppError> {
     let h = client_hosting(&state, &who).await?;
     view(&state, &h, id).await
+}
+
+/// A certificate to use for a domain.
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct UploadCertificate {
+    /// The site's certificate, then the certificates that vouch for it, as PEM
+    /// (`-----BEGIN CERTIFICATE-----` blocks). At most 5.
+    pub certificate: String,
+    /// Its private key, as an unprotected PKCS#8 PEM (`-----BEGIN PRIVATE KEY-----`).
+    #[schema(format = Password)]
+    pub private_key: String,
+}
+
+impl std::fmt::Debug for UploadCertificate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("UploadCertificate").finish_non_exhaustive()
+    }
+}
+
+/// What the key is sealed to: this domain's certificate and nothing else.
+fn key_context(domain_id: Uuid) -> Vec<u8> {
+    format!("certificate-key:{domain_id}").into_bytes()
+}
+
+async fn upload(
+    state: &DomainsState,
+    who: &Principal,
+    hosting: &Hosting,
+    domain_id: Uuid,
+    req: UploadCertificate,
+) -> Result<Json<SslView>, AppError> {
+    let domain = owned_domain(state, hosting.tenant.id, domain_id).await?;
+    if !plans::includes_feature(&state.db, hosting.plan.id, "custom_ssl")
+        .await
+        .map_err(internal)?
+    {
+        return Err(AppError::forbidden(
+            "feature_disabled",
+            "Uploading a certificate is not included in this plan.",
+        ));
+    }
+    let checked = dhpanel_pki::custom::check(
+        &req.certificate,
+        &req.private_key,
+        &domain.domain.fqdn,
+        now(),
+    )
+    .map_err(|e| AppError::validation(vec![FieldError::new(e.field(), e.code(), e.to_string())]))?;
+    let sealed = state
+        .master_key
+        .seal(
+            &key_context(domain_id),
+            checked.private_key_pem.expose_secret().as_bytes(),
+        )
+        .map_err(internal)?;
+    let mut tx = state.db.begin().await.map_err(internal)?;
+    certificates::set_custom(
+        &mut tx,
+        &certificates::NewCustom {
+            domain_id,
+            issuer: &checked.issuer,
+            not_before: checked.not_before,
+            not_after: checked.not_after,
+            chain_pem: &checked.certificate_pem,
+            private_key_enc: &sealed,
+            uploaded_by: who.account_id(),
+        },
+    )
+    .await
+    .map_err(internal)?;
+    dhpanel_audit::insert(
+        &mut *tx,
+        &AuditEntry::new("ssl.custom_uploaded", Outcome::Success)
+            .actor(who.account_id())
+            .tenant(hosting.tenant.id)
+            .target("domain", domain_id)
+            .metadata(serde_json::json!({
+                "fqdn": domain.domain.fqdn,
+                "issuer": checked.issuer,
+                "not_after": checked.not_after,
+            })),
+    )
+    .await
+    .map_err(internal)?;
+    tx.commit().await.map_err(internal)?;
+    view(state, hosting, domain_id).await
+}
+
+async fn remove(
+    state: &DomainsState,
+    who: &Principal,
+    hosting: &Hosting,
+    domain_id: Uuid,
+) -> Result<StatusCode, AppError> {
+    let domain = owned_domain(state, hosting.tenant.id, domain_id).await?;
+    let mut tx = state.db.begin().await.map_err(internal)?;
+    if !certificates::remove_custom(&mut tx, domain_id)
+        .await
+        .map_err(internal)?
+    {
+        return Err(AppError::not_found("uploaded certificate"));
+    }
+    dhpanel_audit::insert(
+        &mut *tx,
+        &AuditEntry::new("ssl.custom_removed", Outcome::Success)
+            .actor(who.account_id())
+            .tenant(hosting.tenant.id)
+            .target("domain", domain_id)
+            .metadata(serde_json::json!({ "fqdn": domain.domain.fqdn })),
+    )
+    .await
+    .map_err(internal)?;
+    tx.commit().await.map_err(internal)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Use an uploaded certificate for a domain.
+#[utoipa::path(
+    put,
+    path = "/api/v1/admin/domains/{id}/ssl/custom",
+    tag = "domains",
+    operation_id = "adminUploadCertificate",
+    security(("session" = [])),
+    params(
+        ("id" = Uuid, Path, description = "Domain id"),
+        ("X-CSRF-Token" = String, Header, description = "The session's csrf_token")
+    ),
+    request_body = UploadCertificate,
+    responses(
+        (status = 200, description = "Saved; the certificate as it will be shown", body = SslView),
+        (status = 403, description = "`permission_denied`, `reauth_required`, `csrf_failed` or `feature_disabled`", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 404, description = "No such domain", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 422, description = "The upload is not usable: the field and a code such as `key_mismatch`, `name_mismatch`, `certificate_expired`, `broken_chain`, `key_encrypted`", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+pub async fn admin_upload(
+    State(state): State<DomainsState>,
+    RequireRecent(who, _): RequireRecent<DomainsManage>,
+    Path(id): Path<Uuid>,
+    Json(req): Json<UploadCertificate>,
+) -> Result<Json<SslView>, AppError> {
+    let h = tenant_of_domain(&state, id).await?;
+    upload(&state, &who, &h, id, req).await
+}
+
+/// Go back to the web server's own certificate.
+#[utoipa::path(
+    delete,
+    path = "/api/v1/admin/domains/{id}/ssl/custom",
+    tag = "domains",
+    operation_id = "adminRemoveCertificate",
+    security(("session" = [])),
+    params(
+        ("id" = Uuid, Path, description = "Domain id"),
+        ("X-CSRF-Token" = String, Header, description = "The session's csrf_token")
+    ),
+    responses(
+        (status = 204, description = "Removed"),
+        (status = 403, description = "`permission_denied`, `reauth_required` or `csrf_failed`", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 404, description = "No such domain, or no uploaded certificate", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+pub async fn admin_remove(
+    State(state): State<DomainsState>,
+    RequireRecent(who, _): RequireRecent<DomainsManage>,
+    Path(id): Path<Uuid>,
+) -> Result<StatusCode, AppError> {
+    let h = tenant_of_domain(&state, id).await?;
+    remove(&state, &who, &h, id).await
+}
+
+/// Use an uploaded certificate for one of your domains.
+#[utoipa::path(
+    put,
+    path = "/api/v1/client/domains/{id}/ssl/custom",
+    tag = "domains",
+    operation_id = "clientUploadCertificate",
+    security(("session" = [])),
+    params(
+        ("id" = Uuid, Path, description = "Domain id"),
+        ("X-CSRF-Token" = String, Header, description = "The session's csrf_token")
+    ),
+    request_body = UploadCertificate,
+    responses(
+        (status = 200, description = "Saved; the certificate as it will be shown", body = SslView),
+        (status = 403, description = "`client_only`, `csrf_failed` or `feature_disabled`", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 404, description = "No such domain (or it is not yours)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 422, description = "The upload is not usable: the field and a code such as `key_mismatch`, `name_mismatch`, `certificate_expired`, `broken_chain`, `key_encrypted`", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+pub async fn client_upload(
+    State(state): State<DomainsState>,
+    who: Principal,
+    Path(id): Path<Uuid>,
+    Json(req): Json<UploadCertificate>,
+) -> Result<Json<SslView>, AppError> {
+    let h = client_hosting(&state, &who).await?;
+    upload(&state, &who, &h, id, req).await
+}
+
+/// Go back to the web server's own certificate for one of your domains.
+#[utoipa::path(
+    delete,
+    path = "/api/v1/client/domains/{id}/ssl/custom",
+    tag = "domains",
+    operation_id = "clientRemoveCertificate",
+    security(("session" = [])),
+    params(
+        ("id" = Uuid, Path, description = "Domain id"),
+        ("X-CSRF-Token" = String, Header, description = "The session's csrf_token")
+    ),
+    responses(
+        (status = 204, description = "Removed"),
+        (status = 403, description = "`client_only` or `csrf_failed`", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 404, description = "No such domain (or it is not yours), or no uploaded certificate", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+pub async fn client_remove(
+    State(state): State<DomainsState>,
+    who: Principal,
+    Path(id): Path<Uuid>,
+) -> Result<StatusCode, AppError> {
+    let h = client_hosting(&state, &who).await?;
+    remove(&state, &who, &h, id).await
 }
 
 #[cfg(test)]

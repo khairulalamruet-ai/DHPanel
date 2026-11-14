@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 dhpanel-audit.workspace = true
+dhpanel-auth-core.workspace = true
 dhpanel-cache.workspace = true
 dhpanel-database.workspace = true
 dhpanel-dns.workspace = true
@@ -19,17 +20,20 @@ dhpanel-domain.workspace = true
 dhpanel-events.workspace = true
 dhpanel-kernel.workspace = true
 dhpanel-http-kit.workspace = true
+dhpanel-pki.workspace = true
 dhpanel-rbac.workspace = true
 dhpanel-session.workspace = true
 dhpanel-settings.workspace = true
 axum = "0.8"
 serde = { version = "1", features = ["derive"] }
+secrecy = "0.10"
 serde_json = "1"
 utoipa = { version = "6", features = ["uuid"] }
 uuid = { version = "1", features = ["serde"] }
 
 [dev-dependencies]
-secrecy = "0.10"
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "ring", "x509-parser"] }
+time = "0.3"
 sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "postgres", "macros", "uuid", "json", "migrate"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 tower = { version = "0.5", features = ["util"] }

@@ -945,7 +945,7 @@ async fn reported_certificates_are_kept_and_an_ending_one_is_announced_once(pool
     assert!((4.0..6.0).contains(&days), "{days}");
 
     // A custom certificate is never replaced by a report.
-    sqlx::query("UPDATE certificates SET kind = 'custom', issuer = 'My CA' WHERE domain_id = (SELECT id FROM domains WHERE fqdn = 'custom.com')")
+    sqlx::query("UPDATE certificates SET kind = 'custom', issuer = 'My CA', chain_pem = 'x', private_key_enc = '\\x00'::bytea WHERE domain_id = (SELECT id FROM domains WHERE fqdn = 'custom.com')")
         .execute(&pool)
         .await
         .unwrap();

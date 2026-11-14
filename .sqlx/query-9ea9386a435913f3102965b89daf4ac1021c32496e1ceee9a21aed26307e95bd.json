@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM certificates WHERE domain_id = $1 AND kind = 'custom'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9ea9386a435913f3102965b89daf4ac1021c32496e1ceee9a21aed26307e95bd"
+}

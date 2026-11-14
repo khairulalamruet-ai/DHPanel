@@ -2437,6 +2437,151 @@
         ]
       }
     },
+    "/api/v1/admin/domains/{id}/ssl/custom": {
+      "put": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "Use an uploaded certificate for a domain.",
+        "operationId": "adminUploadCertificate",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Domain id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadCertificate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Saved; the certificate as it will be shown",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SslView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied`, `reauth_required`, `csrf_failed` or `feature_disabled`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such domain",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The upload is not usable: the field and a code such as `key_mismatch`, `name_mismatch`, `certificate_expired`, `broken_chain`, `key_encrypted`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "Go back to the web server's own certificate.",
+        "operationId": "adminRemoveCertificate",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Domain id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed"
+          },
+          "403": {
+            "description": "`permission_denied`, `reauth_required` or `csrf_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such domain, or no uploaded certificate",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/domains/{id}/suspend": {
       "post": {
         "tags": [
@@ -7077,6 +7222,151 @@
         ]
       }
     },
+    "/api/v1/client/domains/{id}/ssl/custom": {
+      "put": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "Use an uploaded certificate for one of your domains.",
+        "operationId": "clientUploadCertificate",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Domain id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadCertificate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Saved; the certificate as it will be shown",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SslView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only`, `csrf_failed` or `feature_disabled`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such domain (or it is not yours)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The upload is not usable: the field and a code such as `key_mismatch`, `name_mismatch`, `certificate_expired`, `broken_chain`, `key_encrypted`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "Go back to the web server's own certificate for one of your domains.",
+        "operationId": "clientRemoveCertificate",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Domain id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed"
+          },
+          "403": {
+            "description": "`client_only` or `csrf_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such domain (or it is not yours), or no uploaded certificate",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/public/auth/impersonate": {
       "post": {
         "tags": [
@@ -10645,6 +10935,26 @@
               "null"
             ],
             "description": "New interface language, `en` or `bn`."
+          }
+        },
+        "additionalProperties": false
+      },
+      "UploadCertificate": {
+        "type": "object",
+        "description": "A certificate to use for a domain.",
+        "required": [
+          "certificate",
+          "private_key"
+        ],
+        "properties": {
+          "certificate": {
+            "type": "string",
+            "description": "The site's certificate, then the certificates that vouch for it, as PEM\n(`-----BEGIN CERTIFICATE-----` blocks). At most 5."
+          },
+          "private_key": {
+            "type": "string",
+            "format": "password",
+            "description": "Its private key, as an unprotected PKCS#8 PEM (`-----BEGIN PRIVATE KEY-----`)."
           }
         },
         "additionalProperties": false
