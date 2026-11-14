@@ -187,7 +187,7 @@ fn clash(e: &DnsRecordError) -> AppError {
     AppError::conflict(e.code, e.message.clone())
 }
 
-async fn zone_of(
+pub(crate) async fn zone_of(
     state: &DomainsState,
     domain_id: Uuid,
     kind: DomainKind,

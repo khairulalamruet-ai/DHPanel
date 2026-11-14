@@ -20,6 +20,20 @@ use uuid::Uuid;
 
 use crate::{DnsError, DnsProvider, ZoneSpec};
 
+/// Where the zones' name servers come from, asked on every pass so a change of
+/// the administrator's settings is picked up.
+pub trait NameserverSource: Send + Sync + 'static {
+    /// The name servers, absolute (`ns1.example.net.`), in the order wanted.
+    fn nameservers(&self) -> crate::BoxFuture<'_, Vec<String>>;
+}
+
+/// A fixed list.
+impl NameserverSource for Vec<String> {
+    fn nameservers(&self) -> crate::BoxFuture<'_, Vec<String>> {
+        Box::pin(async move { self.clone() })
+    }
+}
+
 /// How many zones one pass handles.
 const BATCH: i64 = 100;
 
@@ -39,15 +53,20 @@ pub struct Stats {
 pub struct ZoneSync {
     db: PgPool,
     provider: Arc<dyn DnsProvider>,
-    nameservers: Vec<String>,
+    nameservers: Arc<dyn NameserverSource>,
     retry_errors_after: Duration,
 }
 
 impl ZoneSync {
-    /// A sync of `db` to `provider`; `nameservers` (absolute names) are given
-    /// to every zone the server creates.
+    /// A sync of `db` to `provider`; the zones get `nameservers` (absolute
+    /// names) as their apex name servers, new ones when created and existing
+    /// ones as soon as the list changes.
     #[must_use]
-    pub fn new(db: PgPool, provider: Arc<dyn DnsProvider>, nameservers: Vec<String>) -> Self {
+    pub fn new(
+        db: PgPool,
+        provider: Arc<dyn DnsProvider>,
+        nameservers: Arc<dyn NameserverSource>,
+    ) -> Self {
         Self {
             db,
             provider,
@@ -61,6 +80,12 @@ impl ZoneSync {
     /// # Errors
     /// The server's error (already recorded on the zone) or a database error.
     pub async fn sync_zone(&self, id: Uuid) -> Result<(), SyncError> {
+        let nameservers = self.nameservers.nameservers().await;
+        self.sync_zone_with(id, &nameservers).await
+    }
+
+    async fn sync_zone_with(&self, id: Uuid, nameservers: &[String]) -> Result<(), SyncError> {
+        let digest = nameservers.join(",");
         let Some(zone) = store::zone(&self.db, id).await? else {
             return Ok(());
         };
@@ -73,7 +98,7 @@ impl ZoneSync {
             self.provider
                 .ensure_zone(&ZoneSpec {
                     name: zone.name.clone(),
-                    nameservers: self.nameservers.clone(),
+                    nameservers: nameservers.to_vec(),
                 })
                 .await?;
             self.provider.replace_records(&zone.name, &records).await
@@ -81,7 +106,15 @@ impl ZoneSync {
         .await;
         match pushed {
             Ok(()) => {
-                store::mark_zone(&self.db, zone.id, &zone.version, "active", None).await?;
+                store::mark_zone(
+                    &self.db,
+                    zone.id,
+                    &zone.version,
+                    "active",
+                    None,
+                    Some(&digest),
+                )
+                .await?;
                 Ok(())
             }
             Err(error) => {
@@ -97,6 +130,7 @@ impl ZoneSync {
                     &zone.version,
                     status,
                     Some(&error.to_string()),
+                    None,
                 )
                 .await?;
                 Err(SyncError::Dns(error))
@@ -108,10 +142,11 @@ impl ZoneSync {
     pub async fn run_once(&self) -> Stats {
         let mut stats = Stats::default();
         let retry = i32::try_from(self.retry_errors_after.as_secs()).unwrap_or(i32::MAX);
-        match store::zones_to_sync(&self.db, retry, BATCH).await {
+        let nameservers = self.nameservers.nameservers().await;
+        match store::zones_to_sync(&self.db, retry, &nameservers.join(","), BATCH).await {
             Ok(zones) => {
                 for zone in zones {
-                    match self.sync_zone(zone.id).await {
+                    match self.sync_zone_with(zone.id, &nameservers).await {
                         Ok(()) => stats.synced += 1,
                         Err(error) => {
                             tracing::warn!(zone = %zone.name, %error, "zone not pushed to the DNS server");

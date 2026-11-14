@@ -107,6 +107,9 @@ pub fn mount(
     // The system module's routes need the mount itself (to switch modules), which
     // exists only after the registry does.
     let late_mount: Arc<std::sync::OnceLock<ModuleMount>> = Arc::default();
+    // Asks the public DNS about domains' name servers (set up on first use).
+    let resolver: Arc<dyn dhpanel_dns::resolver::NsResolver> =
+        Arc::new(dhpanel_dns::resolver::SystemResolver::new());
     // Likewise the settings schemas come from the modules once they exist.
     let late_settings: Arc<std::sync::OnceLock<Arc<SettingsRegistry>>> = Arc::default();
     // One cache for every rebuild of the system routes, so it survives a module switch.
@@ -206,14 +209,19 @@ pub fn mount(
                         })
                     }
                     "domains" => {
-                        let (db, sessions, late_settings) =
-                            (db.clone(), sessions.clone(), late_settings.clone());
+                        let (db, sessions, late_settings, resolver) = (
+                            db.clone(),
+                            sessions.clone(),
+                            late_settings.clone(),
+                            resolver.clone(),
+                        );
                         Box::new(move || match late_settings.get() {
                             Some(settings) => {
                                 let state = dhpanel_mod_domains::DomainsState {
                                     db: db.clone(),
                                     sessions: sessions.clone(),
                                     settings: settings.clone(),
+                                    resolver: resolver.clone(),
                                 };
                                 ModuleRoutes {
                                     admin: Some(

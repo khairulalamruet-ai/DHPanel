@@ -859,6 +859,42 @@
         ]
       }
     },
+    "/api/v1/admin/dns/nameservers": {
+      "get": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "The name servers a domain must point at.",
+        "operationId": "adminNameservers",
+        "responses": {
+          "200": {
+            "description": "The panel's name servers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Nameservers"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/dns/templates": {
       "get": {
         "tags": [
@@ -1574,6 +1610,93 @@
           },
           "422": {
             "description": "Invalid document root",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/domains/{id}/dns/check": {
+      "post": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "Ask the public DNS which name servers a domain uses and compare them with the panel's.",
+        "operationId": "adminCheckDelegation",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Domain id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "What was found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DelegationView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied` or `csrf_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such domain",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`no_zone`: a subdomain uses its parent's name servers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`dns_lookup_failed`: the public DNS could not be asked",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5650,6 +5773,42 @@
         ]
       }
     },
+    "/api/v1/client/dns/nameservers": {
+      "get": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "The name servers to give your registrar.",
+        "operationId": "clientNameservers",
+        "responses": {
+          "200": {
+            "description": "Tell the registrar these name servers; empty until the administrator sets them",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Nameservers"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/client/domains": {
       "get": {
         "tags": [
@@ -6033,6 +6192,93 @@
           },
           "422": {
             "description": "Invalid document root",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/domains/{id}/dns/check": {
+      "post": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "Check whether one of your domains points at the panel's name servers.",
+        "operationId": "clientCheckDelegation",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Domain id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "What was found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DelegationView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only` or `csrf_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such domain (or it is not yours)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`no_zone`: a subdomain uses its parent's name servers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`dns_lookup_failed`: the public DNS could not be asked",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7908,6 +8154,63 @@
           }
         }
       },
+      "DelegationView": {
+        "type": "object",
+        "description": "What a delegation check found.",
+        "required": [
+          "status",
+          "expected",
+          "found",
+          "missing",
+          "unexpected",
+          "checked_at",
+          "cached"
+        ],
+        "properties": {
+          "cached": {
+            "type": "boolean",
+            "description": "The answer of a check made a moment ago, not a new one."
+          },
+          "checked_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the DNS was asked (RFC 3339, UTC)."
+          },
+          "expected": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The panel's name servers."
+          },
+          "found": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "What the public DNS says the domain uses."
+          },
+          "missing": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Panel name servers the domain does not use yet."
+          },
+          "status": {
+            "type": "string",
+            "description": "`ok`, `partial`, `mismatch`, `not_delegated` or `not_configured`.",
+            "example": "ok"
+          },
+          "unexpected": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Name servers the domain uses that are not the panel's."
+          }
+        }
+      },
       "DomainList": {
         "type": "object",
         "description": "A page of domains.",
@@ -8742,6 +9045,26 @@
           "version": {
             "type": "string",
             "description": "Version of the build."
+          }
+        }
+      },
+      "Nameservers": {
+        "type": "object",
+        "description": "The panel's name servers.",
+        "required": [
+          "nameservers"
+        ],
+        "properties": {
+          "nameservers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Where a domain's name servers must point at the registrar, in order.",
+            "example": [
+              "ns1.example.net",
+              "ns2.example.net"
+            ]
           }
         }
       },

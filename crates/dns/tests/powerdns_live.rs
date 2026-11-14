@@ -120,3 +120,76 @@ async fn a_wrong_key_is_refused_and_a_dead_address_is_unavailable() {
     let error = dead.list_records("example.com").await.unwrap_err();
     assert!(error.is_retryable(), "{error:?}");
 }
+
+#[tokio::test]
+#[ignore = "needs a PowerDNS (see the file header)"]
+async fn changing_the_name_servers_updates_the_zone_the_server_already_has() {
+    let Some(dns) = server() else {
+        eprintln!("skipped: no PowerDNS configured");
+        return;
+    };
+    let zone = format!("dhpanel-ns-{}.test", std::process::id());
+    let spec = |ns: &[&str]| ZoneSpec {
+        name: zone.clone(),
+        nameservers: ns.iter().map(|n| (*n).to_owned()).collect(),
+    };
+    dns.ensure_zone(&spec(&["ns1.first.net."])).await.unwrap();
+    // The apex NS records are the server's own, so they are not in the record list;
+    // read them from the server's API directly.
+    let apex_ns = || async {
+        let url = std::env::var("DHPANEL_TEST_PDNS_URL").unwrap();
+        let key = std::env::var("DHPANEL_TEST_PDNS_KEY").unwrap();
+        let zone = zone.clone();
+        tokio::task::spawn_blocking(move || {
+            let mut r = ureq::get(&format!("{url}/api/v1/servers/localhost/zones/{zone}."))
+                .header("X-API-Key", &key)
+                .call()
+                .unwrap();
+            let body: serde_json::Value = r.body_mut().read_json().unwrap();
+            let mut ns: Vec<String> = body["rrsets"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|s| s["type"] == "NS")
+                .flat_map(|s| s["records"].as_array().unwrap().clone())
+                .map(|r| r["content"].as_str().unwrap().to_owned())
+                .collect();
+            ns.sort();
+            ns
+        })
+        .await
+        .unwrap()
+    };
+    assert_eq!(apex_ns().await, ["ns1.first.net."]);
+    // Same list: nothing changes. A new list: the zone gets it.
+    dns.ensure_zone(&spec(&["ns1.first.net."])).await.unwrap();
+    dns.ensure_zone(&spec(&["ns1.second.net.", "ns2.second.net."]))
+        .await
+        .unwrap();
+    assert_eq!(apex_ns().await, ["ns1.second.net.", "ns2.second.net."]);
+    // No names wanted: the zone's own are left alone.
+    dns.ensure_zone(&spec(&[])).await.unwrap();
+    assert_eq!(apex_ns().await, ["ns1.second.net.", "ns2.second.net."]);
+    dns.delete_zone(&zone).await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "needs the machine's DNS and the internet"]
+async fn the_system_resolver_finds_the_name_servers_of_a_real_domain() {
+    use dhpanel_dns::resolver::{NsResolver, SystemResolver};
+    let resolver = SystemResolver::new();
+    let found = resolver.lookup_ns("example.com").await.unwrap();
+    assert!(!found.is_empty(), "example.com has name servers");
+    assert!(
+        found
+            .iter()
+            .all(|n| n.ends_with('.') && n == &n.to_ascii_lowercase()),
+        "{found:?}"
+    );
+    // A name that does not exist has none; that is an answer, not a failure.
+    let none = resolver
+        .lookup_ns("surely-this-does-not-exist-dhpanel.invalid")
+        .await
+        .unwrap();
+    assert!(none.is_empty(), "{none:?}");
+}

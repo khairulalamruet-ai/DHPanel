@@ -69,8 +69,6 @@ pub struct DnsConfig {
     pub powerdns_api_key_file: Option<PathBuf>,
     /// PowerDNS's server id (almost always `localhost`).
     pub powerdns_server_id: String,
-    /// The name servers every new zone gets, absolute (`ns1.example.net.`).
-    pub nameservers: Vec<String>,
     /// Seconds between passes that push changed zones (5..=3600).
     pub sync_seconds: u32,
 }
@@ -270,7 +268,6 @@ impl Default for ControlConfig {
                 powerdns_api_key: None,
                 powerdns_api_key_file: None,
                 powerdns_server_id: "localhost".to_owned(),
-                nameservers: Vec::new(),
                 sync_seconds: 30,
             },
         }
@@ -379,21 +376,6 @@ impl ControlConfig {
             return Err(ConfigError::Invalid {
                 key: "dns.sync_seconds",
                 reason: format!("must be 5..=3600, got {}", self.dns.sync_seconds),
-            });
-        }
-        if self.dns.nameservers.len() > 8
-            || self.dns.nameservers.iter().any(|n| {
-                !(n.ends_with('.')
-                    && n.len() <= 254
-                    && n.len() > 3
-                    && n.bytes()
-                        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-')))
-            })
-        {
-            return Err(ConfigError::Invalid {
-                key: "dns.nameservers",
-                reason: "at most 8 names, each absolute with a final dot, like ns1.example.net."
-                    .to_owned(),
             });
         }
         if self.log.filter.trim().is_empty() {
@@ -846,21 +828,13 @@ mod tests {
             let cfg = load(jail).expect("defaults");
             assert_eq!(cfg.dns.powerdns_url, None);
             assert_eq!(cfg.dns.powerdns_server_id, "localhost");
-            assert_eq!((cfg.dns.sync_seconds, cfg.dns.nameservers.len()), (30, 0));
+            assert_eq!(cfg.dns.sync_seconds, 30);
             assert!(cfg.powerdns_api_key().is_err(), "no key until one is set");
 
             jail.set_env("DHPANEL_DNS__POWERDNS_URL", "http://127.0.0.1:8053");
             jail.set_env("DHPANEL_DNS__POWERDNS_API_KEY", "dns-key-material");
-            jail.set_env(
-                "DHPANEL_DNS__NAMESERVERS",
-                "[ns1.example.net., ns2.example.net.]",
-            );
             let cfg = load(jail).expect("set");
             assert!(cfg.powerdns_api_key().is_ok());
-            assert_eq!(
-                cfg.dns.nameservers,
-                ["ns1.example.net.", "ns2.example.net."]
-            );
             assert!(
                 !format!("{cfg:?}").contains("dns-key-material"),
                 "the key is never printed"
@@ -885,11 +859,6 @@ mod tests {
                 assert!(msg.contains("dns.sync_seconds"), "{bad}: {msg}");
             }
             jail.set_env("DHPANEL_DNS__SYNC_SECONDS", "30");
-            for bad in ["[ns1.example.net]", "[bad name.]", "[.]"] {
-                jail.set_env("DHPANEL_DNS__NAMESERVERS", bad);
-                let msg = load(jail).expect_err(bad).to_string();
-                assert!(msg.contains("dns.nameservers"), "{bad}: {msg}");
-            }
             Ok(())
         });
     }

@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT delegation, extract(epoch FROM delegation_checked_at)::bigint AS checked_at\n           FROM dns_zones WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "delegation",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "dns_zones",
+            "name": "delegation"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "checked_at",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true,
+      null
+    ]
+  },
+  "hash": "97078076f52357fa8440354ab73bc3143887957a9d7d1154b03bb8d5c465d188"
+}

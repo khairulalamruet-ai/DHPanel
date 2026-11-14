@@ -33,6 +33,70 @@
         "en": "Names nobody may host, one per line (commas and spaces also separate them). An entry closes that name and every name below it; it may be a whole ending such as gov.",
         "bn": "যে নামগুলো কেউ হোস্ট করতে পারবে না, প্রতি লাইনে একটি (কমা ও স্পেসও আলাদা করে)। একটি এন্ট্রি সেই নাম ও এর নিচের সব নাম বন্ধ করে; gov-এর মতো পুরো এন্ডিংও দেওয়া যায়।"
       }
+    },
+    "nameserver_1": {
+      "type": "string",
+      "title": "Name server 1",
+      "maxLength": 253,
+      "pattern": "^$|^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+\\.?$",
+      "default": "",
+      "x-scope": "global",
+      "x-title": {
+        "en": "Name server 1",
+        "bn": "নেম সার্ভার 1"
+      },
+      "x-description": {
+        "en": "A name server of this panel, such as ns1.example.net. Clients are told to point their domains here, and new zones are created with these. Leave empty if unused.",
+        "bn": "এই প্যানেলের একটি নেম সার্ভার, যেমন ns1.example.net। ক্লায়েন্টদের ডোমেইন এখানে নির্দেশ করতে বলা হয় এবং নতুন zone এগুলো দিয়ে তৈরি হয়। ব্যবহার না করলে ফাঁকা রাখুন।"
+      }
+    },
+    "nameserver_2": {
+      "type": "string",
+      "title": "Name server 2",
+      "maxLength": 253,
+      "pattern": "^$|^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+\\.?$",
+      "default": "",
+      "x-scope": "global",
+      "x-title": {
+        "en": "Name server 2",
+        "bn": "নেম সার্ভার 2"
+      },
+      "x-description": {
+        "en": "Another name server of this panel (optional).",
+        "bn": "প্যানেলের আরেকটি নেম সার্ভার (ঐচ্ছিক)।"
+      }
+    },
+    "nameserver_3": {
+      "type": "string",
+      "title": "Name server 3",
+      "maxLength": 253,
+      "pattern": "^$|^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+\\.?$",
+      "default": "",
+      "x-scope": "global",
+      "x-title": {
+        "en": "Name server 3",
+        "bn": "নেম সার্ভার 3"
+      },
+      "x-description": {
+        "en": "Another name server of this panel (optional).",
+        "bn": "প্যানেলের আরেকটি নেম সার্ভার (ঐচ্ছিক)।"
+      }
+    },
+    "nameserver_4": {
+      "type": "string",
+      "title": "Name server 4",
+      "maxLength": 253,
+      "pattern": "^$|^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+\\.?$",
+      "default": "",
+      "x-scope": "global",
+      "x-title": {
+        "en": "Name server 4",
+        "bn": "নেম সার্ভার 4"
+      },
+      "x-description": {
+        "en": "Another name server of this panel (optional).",
+        "bn": "প্যানেলের আরেকটি নেম সার্ভার (ঐচ্ছিক)।"
+      }
     }
   }
 }

@@ -347,7 +347,10 @@ async fn main() -> ExitCode {
                 let sync = dhpanel_dns::sync::ZoneSync::new(
                     db.clone(),
                     Arc::new(provider),
-                    config.dns.nameservers.clone(),
+                    Arc::new(SettingsNameservers {
+                        registry: settings.clone(),
+                        db: db.clone(),
+                    }),
                 );
                 Some(tokio::spawn(sync.run(
                     std::time::Duration::from_secs(u64::from(config.dns.sync_seconds)),
@@ -429,4 +432,22 @@ async fn shutdown_signal() {
         () = terminate => {},
     }
     tracing::info!("shutdown signal received");
+}
+
+/// The name servers the administrator set in the domains module's settings.
+struct SettingsNameservers {
+    registry: Arc<dhpanel_settings::SettingsRegistry>,
+    db: dhpanel_database::sqlx::PgPool,
+}
+
+impl dhpanel_dns::sync::NameserverSource for SettingsNameservers {
+    fn nameservers(&self) -> dhpanel_dns::BoxFuture<'_, Vec<String>> {
+        Box::pin(async move {
+            // A settings read that fails leaves the zones as they are: no name
+            // servers means "do not change the ones the server has".
+            dhpanel_mod_domains::nameservers::configured(&self.registry, &self.db)
+                .await
+                .unwrap_or_default()
+        })
+    }
 }

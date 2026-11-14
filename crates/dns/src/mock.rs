@@ -118,3 +118,41 @@ impl DnsProvider for MockProvider {
         })
     }
 }
+
+/// What a name will answer.
+type Answers = BTreeMap<String, Result<Vec<String>, DnsError>>;
+
+/// A resolver that answers from a table, for tests.
+#[derive(Debug, Clone, Default)]
+pub struct MockResolver {
+    answers: Arc<Mutex<Answers>>,
+}
+
+impl MockResolver {
+    /// A resolver that knows nothing (every name has no name servers).
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// What `name` (without the final dot) will answer.
+    pub fn answer(&self, name: &str, answer: Result<Vec<String>, DnsError>) {
+        self.answers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(name.to_owned(), answer);
+    }
+}
+
+impl crate::resolver::NsResolver for MockResolver {
+    fn lookup_ns<'a>(&'a self, name: &'a str) -> BoxFuture<'a, Result<Vec<String>, DnsError>> {
+        Box::pin(async move {
+            self.answers
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .get(name.trim_end_matches('.'))
+                .cloned()
+                .unwrap_or(Ok(Vec::new()))
+        })
+    }
+}

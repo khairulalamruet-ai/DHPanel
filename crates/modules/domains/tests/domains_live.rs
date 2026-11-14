@@ -11,6 +11,7 @@ use axum::{
 };
 use dhpanel_cache::RedisHandle;
 use dhpanel_database::{modules as db, rbac::assign_role};
+use dhpanel_dns::mock::MockResolver;
 use dhpanel_kernel::{Manifest, Module, ModuleMount, ModuleRoutes, Registry};
 use dhpanel_mod_domains::{DomainsState, SETTINGS_SCHEMA, admin_router, client_router};
 use dhpanel_session::{CSRF_HEADER, NewSession, SessionConfig, SessionStore, set_cookie};
@@ -53,6 +54,7 @@ struct Env {
     app: Router,
     sessions: SessionStore,
     settings: Arc<SettingsRegistry>,
+    resolver: MockResolver,
 }
 
 struct Browser {
@@ -71,15 +73,22 @@ async fn env(pool: &PgPool) -> Env {
         )])
         .unwrap(),
     );
+    let resolver = MockResolver::new();
     let domains = Arc::new(Fake {
         manifest: manifest("domains"),
         routes: Box::new({
-            let (pool, sessions, settings) = (pool.clone(), sessions.clone(), settings.clone());
+            let (pool, sessions, settings, resolver) = (
+                pool.clone(),
+                sessions.clone(),
+                settings.clone(),
+                resolver.clone(),
+            );
             move || {
                 let state = DomainsState {
                     db: pool.clone(),
                     sessions: sessions.clone(),
                     settings: settings.clone(),
+                    resolver: Arc::new(resolver.clone()),
                 };
                 ModuleRoutes {
                     admin: Some(admin_router().with_state(state.clone())),
@@ -115,6 +124,7 @@ async fn env(pool: &PgPool) -> Env {
         app: mount.service(),
         sessions,
         settings,
+        resolver,
     }
 }
 
@@ -1895,5 +1905,231 @@ async fn dns_records_are_added_changed_and_removed_with_clear_errors(pool: PgPoo
             "dns.record_changed",
             "dns.record_deleted"
         ]
+    );
+}
+
+async fn set_nameservers(e: &Env, pool: &PgPool, values: Value) {
+    let mut tx = pool.begin().await.unwrap();
+    dhpanel_settings::set(
+        &e.settings,
+        &mut tx,
+        "domains",
+        Scope::Global,
+        values.as_object().unwrap(),
+        None,
+    )
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+}
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn clients_are_told_the_name_servers_and_can_check_their_domains(pool: PgPool) {
+    let e = env(&pool).await;
+    let (alice, _) = client(&pool, "alice", 10_000).await;
+    let (bobby, _) = client(&pool, "bobby", 10_001).await;
+    let (a, b) = (e.sign_in(alice).await, e.sign_in(bobby).await);
+    let root = e
+        .sign_in(account(&pool, "rootuser", &["super_admin"]).await)
+        .await;
+    let (_, main) = e
+        .call(Some(&a), "POST", CLIENT, Some(domain("example.com")), true)
+        .await;
+    let (_, blog) = e
+        .call(
+            Some(&a),
+            "POST",
+            CLIENT,
+            Some(
+                json!({"fqdn": "blog.example.com", "kind": "sub", "parent_domain_id": main["id"]}),
+            ),
+            true,
+        )
+        .await;
+    let check = format!("{CLIENT}/{}/dns/check", main["id"].as_str().unwrap());
+
+    // Nothing set yet: the list is empty and a check says so without asking the DNS.
+    let (status, list) = e
+        .call(
+            Some(&a),
+            "GET",
+            "/api/v1/client/dns/nameservers",
+            None,
+            false,
+        )
+        .await;
+    assert_eq!(
+        (status, list["nameservers"].clone()),
+        (StatusCode::OK, json!([]))
+    );
+    let (status, got) = e.call(Some(&a), "POST", &check, None, true).await;
+    assert_eq!(status, StatusCode::OK, "{got}");
+    assert_eq!(got["status"], "not_configured");
+
+    // The administrator sets them (any case, with or without the dot, blanks and repeats ignored).
+    set_nameservers(&e, &pool, json!({"nameserver_1": "NS1.Panel.net.", "nameserver_2": "ns2.panel.net", "nameserver_3": "", "nameserver_4": "ns1.panel.net"})).await;
+    let (_, list) = e
+        .call(
+            Some(&a),
+            "GET",
+            "/api/v1/client/dns/nameservers",
+            None,
+            false,
+        )
+        .await;
+    assert_eq!(
+        list["nameservers"],
+        json!(["ns1.panel.net", "ns2.panel.net"])
+    );
+    let (_, list) = e
+        .call(
+            Some(&root),
+            "GET",
+            "/api/v1/admin/dns/nameservers",
+            None,
+            false,
+        )
+        .await;
+    assert_eq!(
+        list["nameservers"],
+        json!(["ns1.panel.net", "ns2.panel.net"])
+    );
+    // Only valid host names can be saved.
+    let mut tx = pool.begin().await.unwrap();
+    let bad = dhpanel_settings::set(
+        &e.settings,
+        &mut tx,
+        "domains",
+        Scope::Global,
+        json!({"nameserver_1": "not a name"}).as_object().unwrap(),
+        None,
+    )
+    .await;
+    assert!(bad.is_err());
+    drop(tx);
+
+    // A check asks the public DNS and compares; a repeat within seconds reuses the answer.
+    sqlx::query("DELETE FROM dns_zones WHERE name = 'example.com' AND false")
+        .execute(&pool)
+        .await
+        .unwrap();
+    for (found, want, missing) in [
+        (json!(["ns1.panel.net.", "ns2.panel.net."]), "ok", json!([])),
+        (
+            json!(["ns1.panel.net."]),
+            "partial",
+            json!(["ns2.panel.net"]),
+        ),
+        (
+            json!(["ns.other.org."]),
+            "mismatch",
+            json!(["ns1.panel.net", "ns2.panel.net"]),
+        ),
+        (
+            json!([]),
+            "not_delegated",
+            json!(["ns1.panel.net", "ns2.panel.net"]),
+        ),
+    ] {
+        e.resolver.answer(
+            "example.com",
+            Ok(found
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_str().unwrap().to_owned())
+                .collect()),
+        );
+        sqlx::query("UPDATE dns_zones SET delegation_checked_at = now() - interval '1 minute'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let (status, got) = e.call(Some(&a), "POST", &check, None, true).await;
+        assert_eq!(status, StatusCode::OK, "{got}");
+        assert_eq!(
+            (
+                got["status"].clone(),
+                got["missing"].clone(),
+                got["cached"].clone()
+            ),
+            (json!(want), missing, json!(false)),
+            "{got}"
+        );
+        assert_eq!(got["expected"], json!(["ns1.panel.net", "ns2.panel.net"]));
+    }
+    let (_, again) = e.call(Some(&a), "POST", &check, None, true).await;
+    assert_eq!(
+        (again["cached"].clone(), again["status"].clone()),
+        (json!(true), json!("not_delegated")),
+        "within 15 seconds the answer is reused"
+    );
+
+    // A resolver that cannot be asked is a 503, not a guess.
+    e.resolver.answer(
+        "example.com",
+        Err(dhpanel_dns::DnsError::Unavailable("timeout".into())),
+    );
+    sqlx::query("UPDATE dns_zones SET delegation_checked_at = now() - interval '1 minute'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, body_) = e.call(Some(&a), "POST", &check, None, true).await;
+    assert_eq!(
+        (status, code(&body_)),
+        (StatusCode::SERVICE_UNAVAILABLE, "dns_lookup_failed")
+    );
+
+    // A subdomain uses its parent's name servers; other accounts' domains are not there.
+    let (status, body_) = e
+        .call(
+            Some(&a),
+            "POST",
+            &format!("{CLIENT}/{}/dns/check", blog["id"].as_str().unwrap()),
+            None,
+            true,
+        )
+        .await;
+    assert_eq!((status, code(&body_)), (StatusCode::CONFLICT, "no_zone"));
+    assert_eq!(
+        e.call(Some(&b), "POST", &check, None, true).await.0,
+        StatusCode::NOT_FOUND
+    );
+    // Administrators may check any domain; plain admins may not.
+    let plain = e
+        .sign_in(account(&pool, "plainadmin", &["admin"]).await)
+        .await;
+    e.resolver.answer(
+        "example.com",
+        Ok(vec!["ns1.panel.net.".into(), "ns2.panel.net.".into()]),
+    );
+    sqlx::query("UPDATE dns_zones SET delegation_checked_at = now() - interval '1 minute'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, got) = e
+        .call(
+            Some(&root),
+            "POST",
+            &format!("{ADMIN}/{}/dns/check", main["id"].as_str().unwrap()),
+            None,
+            true,
+        )
+        .await;
+    assert_eq!(
+        (status, got["status"].clone()),
+        (StatusCode::OK, json!("ok"))
+    );
+    assert_eq!(
+        e.call(
+            Some(&plain),
+            "GET",
+            "/api/v1/admin/dns/nameservers",
+            None,
+            false
+        )
+        .await
+        .0,
+        StatusCode::FORBIDDEN
     );
 }

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, domain_id, name, status, last_error, updated_at::text AS \"version!\"\n           FROM dns_zones\n           WHERE status = 'pending'\n              OR (status = 'error' AND updated_at < now() - make_interval(secs => $1::int))\n           ORDER BY updated_at, id\n           LIMIT $2",
+  "query": "SELECT id, domain_id, name, status, last_error, updated_at::text AS \"version!\"\n           FROM dns_zones\n           WHERE status = 'pending'\n              OR (status = 'error' AND updated_at < now() - make_interval(secs => $1::int))\n              OR (status = 'active' AND ns_digest IS DISTINCT FROM $3)\n           ORDER BY updated_at, id\n           LIMIT $2",
   "describe": {
     "columns": [
       {
@@ -68,7 +68,8 @@
     "parameters": {
       "Left": [
         "Int4",
-        "Int8"
+        "Int8",
+        "Text"
       ]
     },
     "nullable": [
@@ -80,5 +81,5 @@
       null
     ]
   },
-  "hash": "8ee00c65454687dffdb9510ad654251b2eb808e55f7ab5e3a99e2965df89b177"
+  "hash": "ec1d1f71cd75e611f9e9257bfef4452d748dd2c5be04f4add8694756cdfca909"
 }

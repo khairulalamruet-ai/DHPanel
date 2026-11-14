@@ -466,13 +466,15 @@ pub async fn remove_host_records(
 }
 
 /// Zones whose copy on the DNS server is not up to date: new or changed ones
-/// (`pending`), and refused ones (`error`) once they have waited `retry_after_secs`.
+/// (`pending`), refused ones (`error`) once they have waited `retry_after_secs`,
+/// and active ones that were pushed with other name servers than `ns_digest`.
 ///
 /// # Errors
 /// Database errors.
 pub async fn zones_to_sync(
     pool: &PgPool,
     retry_after_secs: i32,
+    ns_digest: &str,
     limit: i64,
 ) -> Result<Vec<Zone>, sqlx::Error> {
     sqlx::query_as!(
@@ -481,10 +483,12 @@ pub async fn zones_to_sync(
            FROM dns_zones
            WHERE status = 'pending'
               OR (status = 'error' AND updated_at < now() - make_interval(secs => $1::int))
+              OR (status = 'active' AND ns_digest IS DISTINCT FROM $3)
            ORDER BY updated_at, id
            LIMIT $2"#,
         retry_after_secs,
         limit,
+        ns_digest,
     )
     .fetch_all(pool)
     .await
@@ -517,15 +521,17 @@ pub async fn mark_zone(
     version: &str,
     status: &str,
     last_error: Option<&str>,
+    ns_digest: Option<&str>,
 ) -> Result<bool, sqlx::Error> {
     let last_error = last_error.map(|e| e.chars().take(1000).collect::<String>());
     let done = sqlx::query!(
-        "UPDATE dns_zones SET status = $3, last_error = $4
+        "UPDATE dns_zones SET status = $3, last_error = $4, ns_digest = COALESCE($5, ns_digest)
          WHERE id = $1 AND updated_at::text = $2",
         id,
         version,
         status,
         last_error,
+        ns_digest,
     )
     .execute(pool)
     .await?;
@@ -715,6 +721,43 @@ pub async fn mark_changed(conn: &mut PgConnection, zone_id: Uuid) -> Result<(), 
         zone_id,
     )
     .execute(conn)
+    .await?;
+    Ok(())
+}
+
+/// The last delegation check of a zone: its result and when it was made.
+///
+/// # Errors
+/// Database errors.
+pub async fn delegation(
+    pool: &PgPool,
+    zone_id: Uuid,
+) -> Result<Option<(serde_json::Value, i64)>, sqlx::Error> {
+    let row = sqlx::query!(
+        r#"SELECT delegation, extract(epoch FROM delegation_checked_at)::bigint AS checked_at
+           FROM dns_zones WHERE id = $1"#,
+        zone_id,
+    )
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.and_then(|r| Some((r.delegation?, r.checked_at?))))
+}
+
+/// Keeps the result of a delegation check.
+///
+/// # Errors
+/// Database errors.
+pub async fn save_delegation(
+    pool: &PgPool,
+    zone_id: Uuid,
+    result: &serde_json::Value,
+) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        "UPDATE dns_zones SET delegation = $2, delegation_checked_at = now() WHERE id = $1",
+        zone_id,
+        result,
+    )
+    .execute(pool)
     .await?;
     Ok(())
 }

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE dns_zones SET delegation = $2, delegation_checked_at = now() WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "81c485e056f7d91bb9a43e29a9c6c19f8ce2bf72a9567d84ed9dfddab43d8ab0"
+}

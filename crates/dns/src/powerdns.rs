@@ -84,6 +84,62 @@ impl PowerDns {
         }
     }
 
+    /// Makes the apex name servers of an existing zone the wanted ones. With no
+    /// name servers wanted the zone's own are left alone.
+    async fn update_nameservers(&self, zone: &ZoneSpec, current: &Value) -> Result<(), DnsError> {
+        if zone.nameservers.is_empty() {
+            return Ok(());
+        }
+        let apex = format!("{}.", zone.name);
+        let mut have: Vec<String> = current
+            .get("rrsets")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter(|s| {
+                s.get("type").and_then(Value::as_str) == Some("NS")
+                    && s.get("name").and_then(Value::as_str) == Some(apex.as_str())
+            })
+            .flat_map(|s| {
+                s.get("records")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+            })
+            .filter_map(|r| r.get("content").and_then(Value::as_str))
+            .map(str::to_ascii_lowercase)
+            .collect();
+        let mut want: Vec<String> = zone
+            .nameservers
+            .iter()
+            .map(|n| n.to_ascii_lowercase())
+            .collect();
+        have.sort();
+        want.sort();
+        if have == want {
+            return Ok(());
+        }
+        let rrset = json!({
+            "name": apex,
+            "type": "NS",
+            "ttl": 3600,
+            "changetype": "REPLACE",
+            "records": zone.nameservers.iter().map(|n| json!({"content": n, "disabled": false})).collect::<Vec<_>>(),
+        });
+        let (status, body) = self
+            .call(
+                "PATCH",
+                zone_path(&zone.name),
+                Some(json!({ "rrsets": [rrset] })),
+            )
+            .await?;
+        if status == 204 {
+            Ok(())
+        } else {
+            Err(failure(status, &body))
+        }
+    }
+
     /// One call on the blocking pool: `(status, body)`.
     async fn call(
         &self,
@@ -315,7 +371,7 @@ impl DnsProvider for PowerDns {
         Box::pin(async move {
             let (status, body) = self.call("GET", zone_path(&zone.name), None).await?;
             match status {
-                200 => return Ok(()),
+                200 => return self.update_nameservers(zone, &body).await,
                 404 => {}
                 other => return Err(failure(other, &body)),
             }

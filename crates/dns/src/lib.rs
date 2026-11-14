@@ -13,6 +13,7 @@
 
 pub mod mock;
 pub mod powerdns;
+pub mod resolver;
 pub mod sync;
 
 use std::{future::Future, pin::Pin};

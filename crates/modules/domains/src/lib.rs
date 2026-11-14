@@ -30,6 +30,7 @@
 //! `blocked_domains`) are read on every add, so a change takes effect at once.
 
 pub mod dns;
+pub mod nameservers;
 pub mod records;
 pub mod redirects;
 
@@ -85,6 +86,8 @@ pub struct DomainsState {
     pub sessions: SessionStore,
     /// The checked settings schemas of all modules.
     pub settings: Arc<SettingsRegistry>,
+    /// Asks the public DNS which name servers a domain has.
+    pub resolver: Arc<dyn dhpanel_dns::resolver::NsResolver>,
 }
 
 impl FromRef<DomainsState> for PgPool {
@@ -103,6 +106,7 @@ impl FromRef<DomainsState> for SessionStore {
 pub fn admin_router() -> Router<DomainsState> {
     redirects::admin_router()
         .merge(records::admin_router())
+        .merge(nameservers::admin_router())
         .merge(dns::admin_router())
         .route("/api/v1/admin/domains", get(admin_list).post(admin_add))
         .route(
@@ -120,6 +124,7 @@ pub fn admin_router() -> Router<DomainsState> {
 pub fn client_router() -> Router<DomainsState> {
     redirects::client_router()
         .merge(records::client_router())
+        .merge(nameservers::client_router())
         .route("/api/v1/client/domains", get(client_list).post(client_add))
         .route(
             "/api/v1/client/domains/{id}",
@@ -1061,14 +1066,16 @@ pub async fn client_delete(
         dns::list_templates, dns::get_template, dns::create_template, dns::update_template,
         dns::delete_template, records::admin_list, records::admin_add, records::admin_update,
         records::admin_delete, records::client_list, records::client_add, records::client_update,
-        records::client_delete
+        records::client_delete, nameservers::admin_nameservers, nameservers::client_nameservers,
+        nameservers::admin_check, nameservers::client_check
     ),
     components(schemas(
         DomainView, DomainList, AddDomain, AdminAddDomain, UpdateDomain,
         redirects::RedirectView, redirects::RedirectList, redirects::AddRedirect,
         redirects::UpdateRedirect, dns::TemplateLine, dns::TemplateView, dns::TemplateList,
         dns::TemplateInput, records::RecordView, records::RecordList, records::ZoneView,
-        records::AddRecord, records::UpdateRecord
+        records::AddRecord, records::UpdateRecord, nameservers::Nameservers,
+        nameservers::DelegationView
     )),
     tags((name = "domains", description = "The names a hosting account serves"))
 )]

@@ -73,7 +73,7 @@ fn sync(pool: &PgPool, provider: &MockProvider) -> ZoneSync {
     ZoneSync::new(
         pool.clone(),
         Arc::new(provider.clone()),
-        vec!["ns1.example.net.".into()],
+        Arc::new(vec!["ns1.example.net.".to_owned()]),
     )
 }
 
@@ -198,7 +198,7 @@ async fn an_edit_made_during_a_push_is_not_lost(pool: PgPool) {
         .execute(&pool)
         .await
         .unwrap();
-    let written = store::mark_zone(&pool, z, &zone_before.version, "active", None)
+    let written = store::mark_zone(&pool, z, &zone_before.version, "active", None, None)
         .await
         .unwrap();
     assert!(!written, "a stale push does not mark the zone done");
@@ -290,4 +290,57 @@ async fn zones_deleted_in_the_panel_are_removed_from_the_server(pool: PgPool) {
     assert_eq!(s.run_once().await.removed, 1);
     assert!(server.with(|st| st.zones.is_empty()));
     let _: Vec<StoredLine> = Vec::new();
+}
+
+/// A name server list the test can change.
+struct Changing(std::sync::Mutex<Vec<String>>);
+
+impl dhpanel_dns::sync::NameserverSource for Changing {
+    fn nameservers(&self) -> dhpanel_dns::BoxFuture<'_, Vec<String>> {
+        Box::pin(async move { self.0.lock().unwrap().clone() })
+    }
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs PostgreSQL"]
+async fn changing_the_name_servers_pushes_the_zones_again(pool: PgPool) {
+    let server = MockProvider::new();
+    let (_, _, z) = zone(&pool, None, "example.com", &[rec("@", "A", "192.0.2.1")]).await;
+    let list = Arc::new(Changing(std::sync::Mutex::new(vec![
+        "ns1.a.net.".to_owned(),
+    ])));
+    let s = ZoneSync::new(pool.clone(), Arc::new(server.clone()), list.clone());
+    assert_eq!(s.run_once().await.synced, 1);
+    assert_eq!(status(&pool, z).await.0, "active");
+    assert_eq!(
+        s.run_once().await,
+        Default::default(),
+        "same name servers: nothing to do"
+    );
+    let calls = server.with(|st| st.calls.len());
+
+    // The administrator changes them: the active zone is pushed again, once.
+    *list.0.lock().unwrap() = vec!["ns1.b.net.".to_owned(), "ns2.b.net.".to_owned()];
+    assert_eq!(s.run_once().await.synced, 1);
+    assert!(server.with(|st| st.calls.len()) > calls);
+    assert_eq!(s.run_once().await, Default::default());
+    let digest: Option<String> =
+        sqlx::query_scalar("SELECT ns_digest FROM dns_zones WHERE id = $1")
+            .bind(z)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(digest.as_deref(), Some("ns1.b.net.,ns2.b.net."));
+
+    // A delegation check does not count as a change of the zone.
+    let before = store::zone(&pool, z).await.unwrap().unwrap().version;
+    store::save_delegation(&pool, z, &serde_json::json!({"status": "ok"}))
+        .await
+        .unwrap();
+    assert_eq!(
+        store::zone(&pool, z).await.unwrap().unwrap().version,
+        before
+    );
+    let (saved, _) = store::delegation(&pool, z).await.unwrap().unwrap();
+    assert_eq!(saved["status"], "ok");
 }
