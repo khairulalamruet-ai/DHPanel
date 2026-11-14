@@ -890,3 +890,276 @@ async fn blocked_names_are_refused_and_administrators_manage_any_domain(pool: Pg
     );
     let _ = tenant;
 }
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn redirects_can_be_added_changed_and_removed_and_loops_are_caught(pool: PgPool) {
+    let e = env(&pool).await;
+    let (alice, _) = client(&pool, "alice", 10_000).await;
+    let (bobby, _) = client(&pool, "bobby", 10_001).await;
+    let (a, b) = (e.sign_in(alice).await, e.sign_in(bobby).await);
+    let root = e
+        .sign_in(account(&pool, "rootuser", &["super_admin"]).await)
+        .await;
+    let (_, main) = e
+        .call(Some(&a), "POST", CLIENT, Some(domain("example.com")), true)
+        .await;
+    let (_, www) = e
+        .call(
+            Some(&a),
+            "POST",
+            CLIENT,
+            Some(json!({"fqdn": "www.example.com", "kind": "sub", "parent_domain_id": main["id"]})),
+            true,
+        )
+        .await;
+    let path = format!("{CLIENT}/{}/redirects", main["id"].as_str().unwrap());
+    let www_path = format!("{CLIENT}/{}/redirects", www["id"].as_str().unwrap());
+    let add = |p: String, source: &str, target: &str| {
+        let (e, a) = (&e, &a);
+        let body = json!({"source_path": source, "target": target});
+        async move { e.call(Some(a), "POST", &p, Some(body), true).await }
+    };
+
+    // Add, with the default code, and list.
+    let (status, r) = add(path.clone(), "/old", "/new").await;
+    assert_eq!(status, StatusCode::CREATED, "{r}");
+    assert_eq!(
+        (r["code"].clone(), r["source_path"].clone()),
+        (json!(301), json!("/old"))
+    );
+    let (status, r2) = e
+        .call(Some(&a), "POST", &path, Some(json!({"source_path": "/promo", "target": "https://example.org/sale?x=1", "code": 302})), true)
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{r2}");
+    let (_, list) = e.call(Some(&a), "GET", &path, None, false).await;
+    let sources: Vec<&str> = list["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["source_path"].as_str().unwrap())
+        .collect();
+    assert_eq!(sources, ["/old", "/promo"]);
+
+    // Bad input says what is wrong.
+    for (source, target, field) in [
+        ("old", "/new", "source_path"),
+        ("/a?x=1", "/new", "source_path"),
+        ("/z", "javascript:alert(1)", "target"),
+        ("/z", "//evil.example/x", "target"),
+        ("/z", "https://user:pw@example.org/", "target"),
+        ("/z", "", "target"),
+    ] {
+        let (status, body) = add(path.clone(), source, target).await;
+        assert_eq!(
+            status,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{source} {target}"
+        );
+        assert_eq!(
+            body["errors"][0]["field"], field,
+            "{source} {target}: {body}"
+        );
+    }
+    let (status, body) = e
+        .call(
+            Some(&a),
+            "POST",
+            &path,
+            Some(json!({"source_path": "/z", "target": "/y", "code": 303})),
+            true,
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["errors"][0]["code"], "invalid_redirect_code");
+    let (status, body) = add(path.clone(), "/old", "/other").await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "redirect_exists")
+    );
+
+    // Change the target and the code; the path stays.
+    let one = format!("{path}/{}", r["id"].as_str().unwrap());
+    let (status, changed) = e
+        .call(
+            Some(&a),
+            "PATCH",
+            &one,
+            Some(json!({"target": "https://example.net/", "code": 308})),
+            true,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{changed}");
+    assert_eq!(
+        (changed["target"].clone(), changed["code"].clone()),
+        (json!("https://example.net/"), json!(308))
+    );
+    let (status, _) = e.call(Some(&a), "PATCH", &one, Some(json!({})), true).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    // Loops: back to itself, around two paths, around two domains.
+    let (status, body) = add(path.clone(), "/self", "/self").await;
+    assert_eq!(
+        (status, body["errors"][0]["code"].clone()),
+        (StatusCode::UNPROCESSABLE_ENTITY, json!("redirect_loop")),
+        "{body}"
+    );
+    assert_eq!(add(path.clone(), "/a", "/b").await.0, StatusCode::CREATED);
+    let (status, body) = add(path.clone(), "/b", "/a").await;
+    assert_eq!(
+        (status, body["errors"][0]["code"].clone()),
+        (StatusCode::UNPROCESSABLE_ENTITY, json!("redirect_loop"))
+    );
+    let message = body["errors"][0]["message"].as_str().unwrap();
+    assert!(
+        message.contains("example.com/b -> example.com/a -> example.com/b"),
+        "{message}"
+    );
+    // The query string does not hide a loop, and a longer way round does not either.
+    assert_eq!(
+        add(path.clone(), "/c", "/d?x=1").await.0,
+        StatusCode::CREATED
+    );
+    assert_eq!(add(path.clone(), "/d", "/e").await.0, StatusCode::CREATED);
+    let (status, body) = add(path.clone(), "/e", "/c").await;
+    assert_eq!(
+        (status, body["errors"][0]["code"].clone()),
+        (StatusCode::UNPROCESSABLE_ENTITY, json!("redirect_loop"))
+    );
+    // Across names: example.com -> www.example.com -> example.com.
+    assert_eq!(
+        add(path.clone(), "/", "https://www.example.com/").await.0,
+        StatusCode::CREATED
+    );
+    let (status, body) = add(www_path.clone(), "/", "https://example.com/").await;
+    assert_eq!(
+        (status, body["errors"][0]["code"].clone()),
+        (StatusCode::UNPROCESSABLE_ENTITY, json!("redirect_loop")),
+        "{body}"
+    );
+    // Changing an existing redirect cannot close a circle either.
+    let (_, list) = e.call(Some(&a), "GET", &path, None, false).await;
+    let id_of = |p: &str| {
+        list["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["source_path"] == p)
+            .unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    let (status, body) = e
+        .call(
+            Some(&a),
+            "PATCH",
+            &format!("{path}/{}", id_of("/d")),
+            Some(json!({"target": "/c"})),
+            true,
+        )
+        .await;
+    assert_eq!(
+        (status, body["errors"][0]["code"].clone()),
+        (StatusCode::UNPROCESSABLE_ENTITY, json!("redirect_loop"))
+    );
+    // A redirect leaving the panel's domains is fine.
+    assert_eq!(
+        add(www_path.clone(), "/", "https://elsewhere.example.org/")
+            .await
+            .0,
+        StatusCode::CREATED
+    );
+
+    // A very long chain is refused rather than followed for ever.
+    let mut last = StatusCode::CREATED;
+    let mut body = Value::Null;
+    for i in (0..14).rev() {
+        let (status, b2) = add(path.clone(), &format!("/hop{i}"), &format!("/hop{}", i + 1)).await;
+        if status != StatusCode::CREATED {
+            (last, body) = (status, b2);
+            break;
+        }
+    }
+    assert_eq!(last, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        body["errors"][0]["code"], "redirect_chain_too_long",
+        "{body}"
+    );
+
+    // Removing.
+    assert_eq!(
+        e.call(Some(&a), "DELETE", &one, None, true).await.0,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        e.call(Some(&a), "DELETE", &one, None, true).await.0,
+        StatusCode::NOT_FOUND
+    );
+
+    // Somebody else's domain and redirects are not there; administrators see them all.
+    assert_eq!(
+        e.call(Some(&b), "GET", &path, None, false).await.0,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        e.call(
+            Some(&b),
+            "POST",
+            &path,
+            Some(json!({"source_path": "/x", "target": "/y"})),
+            true
+        )
+        .await
+        .0,
+        StatusCode::NOT_FOUND
+    );
+    let admin_path = format!("{ADMIN}/{}/redirects", main["id"].as_str().unwrap());
+    let (status, theirs) = e.call(Some(&root), "GET", &admin_path, None, false).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(theirs["items"].as_array().unwrap().len() >= 5);
+    let (status, _) = e
+        .call(
+            Some(&root),
+            "POST",
+            &admin_path,
+            Some(json!({"source_path": "/byadmin", "target": "/new"})),
+            true,
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    // Redirects are a plan feature; looking is always allowed.
+    let set: Uuid = sqlx::query_scalar(
+        "INSERT INTO feature_sets (name, features) VALUES ('plain', '{domains}') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE plans SET feature_set_id = $1 WHERE is_default")
+        .bind(set)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, body) = add(path.clone(), "/denied", "/x").await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::FORBIDDEN, "feature_disabled")
+    );
+    assert_eq!(
+        e.call(Some(&a), "GET", &path, None, false).await.0,
+        StatusCode::OK
+    );
+
+    // Audit.
+    let actions: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT action FROM audit_logs WHERE action LIKE 'redirect.%' ORDER BY action",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        actions,
+        ["redirect.added", "redirect.changed", "redirect.deleted"]
+    );
+}

@@ -5,8 +5,10 @@
 
 pub mod account;
 pub mod domains;
+pub mod redirects;
 pub mod tenant;
 
 pub use account::{AccountKind, Email, Username, ValidationError};
 pub use domains::{Blocklist, Docroot, DomainError, DomainKind, DomainStatus, Fqdn};
+pub use redirects::{Place, RedirectCode, RedirectError, SourcePath, Target};
 pub use tenant::{Tenant, TenantError, TenantStatus, TenantUsername, Uid, UidRange};
