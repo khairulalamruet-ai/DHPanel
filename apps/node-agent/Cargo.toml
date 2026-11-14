@@ -33,6 +33,9 @@ clap = { version = "4", features = ["derive", "env"] }
 # The agent makes its own key and certificate signing request.
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "ring", "x509-parser"] }
 # Checks what the control plane sends back before anything is stored.
+# Talks to the shared MariaDB server of the node (loopback only) to make databases and
+# users (T07.03). No TLS: the connection never leaves the host.
+mysql_async = { version = "0.37", default-features = false, features = ["minimal"] }
 x509-parser = { version = "0.18", features = ["verify"] }
 secrecy = "0.10"
 serde = { version = "1", features = ["derive"] }
