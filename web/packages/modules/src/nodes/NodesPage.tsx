@@ -30,10 +30,17 @@ import {
   AlertTriangle,
   KeyRound,
   Trash2,
+  SlidersHorizontal,
+  ArrowDownRight,
+  Layers,
+  Users,
+  Cpu,
 } from "lucide-react";
 import type { NodeItem, EnrollmentView, NodeStatus } from "./types";
 import { AddNodeDialog } from "./AddNodeDialog";
 import { NodeDetailDialog } from "./NodeDetailDialog";
+import { OversellConfigDialog } from "./OversellConfigDialog";
+import { computeNodeSaturation, getSaturationColor } from "./capacity";
 
 export function NodesPage() {
   const { t } = useTranslation();
@@ -51,6 +58,8 @@ export function NodesPage() {
   const [selectedNode, setSelectedNode] = useState<NodeItem | null>(null);
   const [revokingNode, setRevokingNode] = useState<NodeItem | null>(null);
   const [cancellingEnrollmentId, setCancellingEnrollmentId] = useState<string | null>(null);
+  const [configuringOversellNode, setConfiguringOversellNode] = useState<NodeItem | null>(null);
+  const [drainingNodeId, setDrainingNodeId] = useState<string | null>(null);
 
   // List nodes - TODO(api:T02.08): replace mocked nodes with backend endpoint when implemented
   const fetchNodes = async () => {
@@ -107,6 +116,35 @@ export function NodesPage() {
       });
     } finally {
       setRevokingNode(null);
+    }
+  };
+
+  const handleDrainToggle = async (node: NodeItem) => {
+    const action = node.status === "draining" ? "undrain" : "drain";
+    try {
+      setDrainingNodeId(node.id);
+      // TODO(api:T16.01): node drain / undrain endpoint
+      await apiFetch<{ success: boolean; status: NodeStatus }>(
+        `/api/v1/admin/nodes/${node.id}/${action}`,
+        {
+          method: "POST",
+          headers: {
+            "X-CSRF-Token": getCsrfToken() || "",
+          },
+        }
+      );
+      toast({
+        title: action === "drain" ? t("nodes.capacity.drainSuccess") : t("nodes.capacity.undrainSuccess"),
+        variant: "default",
+      });
+      fetchNodes();
+    } catch {
+      toast({
+        title: t("common.error"),
+        variant: "destructive",
+      });
+    } finally {
+      setDrainingNodeId(null);
     }
   };
 
@@ -213,6 +251,19 @@ export function NodesPage() {
     );
   }
 
+  const totalNodesCount = nodes.length;
+  const onlineNodesCount = nodes.filter((n) => n.status === "online").length;
+  const drainingNodesCount = nodes.filter((n) => n.status === "draining").length;
+  const offlineNodesCount = nodes.filter((n) => n.status === "offline").length;
+
+  const clusterTotalTenants = nodes.reduce((sum, n) => sum + (n.capacity?.tenants_count ?? 0), 0);
+  const clusterTotalMaxTenants = nodes.reduce((sum, n) => sum + (n.capacity?.max_tenants ?? 50), 0);
+
+  const clusterSaturations = nodes.map(computeNodeSaturation);
+  const avgClusterSaturation = clusterSaturations.length > 0
+    ? Math.round(clusterSaturations.reduce((a, b) => a + b, 0) / clusterSaturations.length)
+    : 0;
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -235,6 +286,80 @@ export function NodesPage() {
         </div>
       </div>
 
+      {/* Cluster Capacity Overview (T16.01) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" data-testid="cluster-capacity-overview">
+        {/* Nodes Health */}
+        <Card className="p-4 space-y-2">
+          <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <span className="font-semibold">{t("nodes.capacity.totalNodes")}</span>
+            <Server className="h-4 w-4 text-primary" />
+          </div>
+          <div className="text-2xl font-bold font-mono text-foreground">
+            {totalNodesCount}
+          </div>
+          <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+            <span className="text-emerald-500 font-medium">{onlineNodesCount} {t("nodes.status.online")}</span>
+            <span>•</span>
+            <span className="text-amber-500 font-medium">{drainingNodesCount} {t("nodes.status.draining")}</span>
+            {offlineNodesCount > 0 && (
+              <>
+                <span>•</span>
+                <span className="text-muted-foreground">{offlineNodesCount} {t("nodes.status.offline")}</span>
+              </>
+            )}
+          </div>
+        </Card>
+
+        {/* Cluster Fullness / Saturation */}
+        <Card className="p-4 space-y-2">
+          <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <span className="font-semibold">{t("nodes.capacity.clusterFullness")}</span>
+            <Layers className="h-4 w-4 text-primary" />
+          </div>
+          <div className="text-2xl font-bold font-mono text-foreground flex items-center gap-2">
+            <span>{avgClusterSaturation}%</span>
+            <Badge variant={getSaturationColor(avgClusterSaturation).badgeVariant} className="text-[10px] font-normal py-0">
+              {t("nodes.capacity.avgSaturation")}
+            </Badge>
+          </div>
+          <div className="w-full bg-muted rounded-full h-1.5 overflow-hidden">
+            <div
+              className={`h-1.5 rounded-full ${getSaturationColor(avgClusterSaturation).bar}`}
+              style={{ width: `${avgClusterSaturation}%` }}
+            />
+          </div>
+        </Card>
+
+        {/* Tenant Capacity */}
+        <Card className="p-4 space-y-2">
+          <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <span className="font-semibold">{t("nodes.capacity.tenants")}</span>
+            <Users className="h-4 w-4 text-primary" />
+          </div>
+          <div className="text-2xl font-bold font-mono text-foreground">
+            {clusterTotalTenants} <span className="text-sm font-normal text-muted-foreground">/ {clusterTotalMaxTenants}</span>
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            Across {nodes.length} cluster nodes
+          </p>
+        </Card>
+
+        {/* Placement Policy Status */}
+        <Card className="p-4 space-y-2">
+          <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <span className="font-semibold">Placement Scheduler</span>
+            <Cpu className="h-4 w-4 text-primary" />
+          </div>
+          <div className="text-sm font-semibold text-foreground flex items-center gap-1.5">
+            <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+            <span>Least-Loaded Active</span>
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            Oversell policies enabled
+          </p>
+        </Card>
+      </div>
+
       {/* Nodes Table Card */}
       <Card>
         <CardContent className="p-0">
@@ -244,6 +369,7 @@ export function NodesPage() {
                 <TableRow>
                   <TableHead>{t("nodes.table.node")}</TableHead>
                   <TableHead className="w-[120px]">{t("nodes.table.status")}</TableHead>
+                  <TableHead className="w-[150px]">{t("nodes.table.saturation")}</TableHead>
                   <TableHead className="w-[140px]">{t("nodes.table.cpu")}</TableHead>
                   <TableHead className="w-[150px]">{t("nodes.table.ram")}</TableHead>
                   <TableHead className="w-[150px]">{t("nodes.table.disk")}</TableHead>
@@ -255,19 +381,19 @@ export function NodesPage() {
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="text-center py-10 text-muted-foreground text-sm">
+                    <TableCell colSpan={9} className="text-center py-10 text-muted-foreground text-sm">
                       {t("common.loading")}
                     </TableCell>
                   </TableRow>
                 ) : error ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="text-center py-10 text-destructive text-sm">
+                    <TableCell colSpan={9} className="text-center py-10 text-destructive text-sm">
                       {error}
                     </TableCell>
                   </TableRow>
                 ) : nodes.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="text-center py-10 text-muted-foreground text-sm">
+                    <TableCell colSpan={9} className="text-center py-10 text-muted-foreground text-sm">
                       {t("nodes.empty")}
                     </TableCell>
                   </TableRow>
@@ -277,6 +403,8 @@ export function NodesPage() {
                     const ramTotalGb = (node.capabilities.ram_total_bytes / (1024 * 1024 * 1024)).toFixed(1);
                     const diskUsedGb = (node.capabilities.disk_used_bytes / (1024 * 1024 * 1024)).toFixed(1);
                     const diskTotalGb = (node.capabilities.disk_total_bytes / (1024 * 1024 * 1024)).toFixed(1);
+                    const saturationPct = computeNodeSaturation(node);
+                    const satColor = getSaturationColor(saturationPct);
 
                     return (
                       <TableRow key={node.id}>
@@ -292,6 +420,24 @@ export function NodesPage() {
                           </div>
                         </TableCell>
                         <TableCell>{renderStatusBadge(node.status)}</TableCell>
+                        <TableCell>
+                          <div className="space-y-1 w-[120px]" data-testid="node-saturation-container">
+                            <div className="flex items-center justify-between text-xs font-mono">
+                              <span className="font-semibold text-foreground" data-testid="node-saturation-value">
+                                {saturationPct}%
+                              </span>
+                              <Badge variant={satColor.badgeVariant} className="text-[10px] py-0 px-1.5 font-normal">
+                                {saturationPct >= 90 ? "Critical" : saturationPct >= 75 ? "Elevated" : "Normal"}
+                              </Badge>
+                            </div>
+                            <div className="w-full bg-muted rounded-full h-1.5 overflow-hidden" data-testid="node-saturation-bar">
+                              <div
+                                className={`h-1.5 rounded-full transition-all ${satColor.bar}`}
+                                style={{ width: `${saturationPct}%` }}
+                              />
+                            </div>
+                          </div>
+                        </TableCell>
                         <TableCell>
                           <div className="text-xs">
                             <span className="font-medium">{node.capabilities.cpu_usage_pct}%</span>
@@ -327,6 +473,34 @@ export function NodesPage() {
                               <Info className="h-3.5 w-3.5" />
                               {t("nodes.table.viewDetails")}
                             </Button>
+                            {hasPermission("admin.nodes.write") && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setConfiguringOversellNode(node)}
+                                className="h-8 px-2 text-xs gap-1"
+                                title={t("nodes.capacity.configureOversell")}
+                              >
+                                <SlidersHorizontal className="h-3.5 w-3.5 text-muted-foreground" />
+                                <span className="hidden xl:inline">{t("nodes.table.editCapacity")}</span>
+                              </Button>
+                            )}
+                            {hasPermission("admin.nodes.write") && node.status !== "revoked" && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleDrainToggle(node)}
+                                disabled={drainingNodeId === node.id}
+                                className={`h-8 px-2 text-xs gap-1 ${
+                                  node.status === "draining"
+                                    ? "text-emerald-600 border-emerald-500/30 hover:bg-emerald-500/10"
+                                    : "text-amber-600 border-amber-500/30 hover:bg-amber-500/10"
+                                }`}
+                              >
+                                <ArrowDownRight className="h-3.5 w-3.5" />
+                                {node.status === "draining" ? t("nodes.table.undrain") : t("nodes.table.drain")}
+                              </Button>
+                            )}
                             {hasPermission("admin.nodes.write") && node.status !== "revoked" && (
                               <Button
                                 variant="outline"
@@ -419,6 +593,14 @@ export function NodesPage() {
         node={selectedNode}
         open={!!selectedNode}
         onOpenChange={(open) => !open && setSelectedNode(null)}
+      />
+
+      {/* Oversell & Capacity Dialog (T16.01) */}
+      <OversellConfigDialog
+        node={configuringOversellNode}
+        open={!!configuringOversellNode}
+        onOpenChange={(open) => !open && setConfiguringOversellNode(null)}
+        onSaved={loadData}
       />
 
       {/* Revoke Node Confirmation Dialog (AGENTS.md typed-confirmation) */}
