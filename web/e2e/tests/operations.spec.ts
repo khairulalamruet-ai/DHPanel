@@ -63,4 +63,56 @@ test.describe("Operation Ledger UI (T02.17)", () => {
     // Verify success toast
     await expect(page.getByText(/Operation re-queued for execution successfully|অপারেশনটি সফলভাবে পুনরায় কিউতে যুক্ত করা হয়েছে/i)).toBeVisible();
   });
+
+  test("executes apply-to-all rolling orchestrator across 10 nodes (T16.06)", async ({ page }) => {
+    // Click Apply to All button
+    const openBtn = page.getByTestId("btn-open-apply-all");
+    await expect(openBtn).toBeVisible();
+    await openBtn.click();
+
+    // Verify dialog opens
+    await expect(page.getByText(/Rolling Cluster Orchestrator|রোলিং ক্লাস্টার অর্কেস্ট্রেটর/i)).toBeVisible();
+
+    // Select batch size of 2
+    const batchSelect = page.getByTestId("select-batch-size");
+    await expect(batchSelect).toBeVisible();
+    await batchSelect.selectOption("2");
+
+    // Click start rolling apply
+    const startBtn = page.getByTestId("btn-start-rolling-apply");
+    await expect(startBtn).toBeVisible();
+    await startBtn.click();
+
+    // Verify 10 nodes completed with succeeded status
+    await expect(page.getByTestId("rolling-status-title")).toBeVisible();
+    await expect(page.getByTestId("metric-total-nodes")).toHaveText("10");
+    await expect(page.getByTestId("metric-succeeded-nodes")).toHaveText("10");
+    await expect(page.getByTestId("rolling-result-badge")).toHaveText(/succeeded/i);
+
+    // Verify 10 node rows rendered
+    for (let i = 1; i <= 10; i++) {
+      const nodeId = i === 1 ? "node-master-01" : `node-worker-${String(i).padStart(2, "0")}`;
+      await expect(page.getByTestId(`node-progress-row-${nodeId}`)).toBeVisible();
+    }
+  });
+
+  test("trips circuit breaker and skips subsequent nodes on failure (T16.06)", async ({ page }) => {
+    const openBtn = page.getByTestId("btn-open-apply-all");
+    await expect(openBtn).toBeVisible();
+    await openBtn.click();
+
+    // Simulate failure on node-worker-04
+    const simFailSelect = page.getByTestId("select-simulate-fail");
+    await expect(simFailSelect).toBeVisible();
+    await simFailSelect.selectOption("node-04");
+
+    // Click start rolling apply
+    const startBtn = page.getByTestId("btn-start-rolling-apply");
+    await startBtn.click();
+
+    // Verify circuit breaker halted execution
+    await expect(page.getByTestId("rolling-status-title")).toHaveText(/Execution Halted by Circuit Breaker|সার্কিট ব্রেকার দ্বারা কার্যক্রম স্থগিত/i);
+    await expect(page.getByTestId("rolling-result-badge")).toHaveText(/halted/i);
+    await expect(page.getByTestId("metric-skipped-nodes")).not.toHaveText("0");
+  });
 });

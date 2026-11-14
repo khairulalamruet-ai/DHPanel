@@ -3021,6 +3021,158 @@ export const handlers = [
     });
   }),
 
+  // Apply-to-all Operation across cluster nodes (POST /api/v1/admin/cluster/apply-all) TODO(api:T16.06)
+  http.post(/\/api\/v1\/admin\/cluster\/apply-all$/, async ({ request }) => {
+    let body: any = {};
+    try {
+      body = await request.json();
+    } catch {
+      body = {};
+    }
+
+    const clusterNodes = [
+      { id: "node-master-01", name: "node-master-01 (Primary Controller)" },
+      { id: "node-worker-02", name: "node-worker-02 (US-East Worker)" },
+      { id: "node-worker-03", name: "node-worker-03 (US-East Worker)" },
+      { id: "node-worker-04", name: "node-worker-04 (US-West Worker)" },
+      { id: "node-worker-05", name: "node-worker-05 (EU-Central Worker)" },
+      { id: "node-worker-06", name: "node-worker-06 (EU-North Worker)" },
+      { id: "node-worker-07", name: "node-worker-07 (AP-South Worker)" },
+      { id: "node-worker-08", name: "node-worker-08 (AP-East Worker)" },
+      { id: "node-worker-09", name: "node-worker-09 (SA-East Worker)" },
+      { id: "node-worker-10", name: "node-worker-10 (AF-South Worker)" },
+    ];
+
+    const targetNodes = Array.isArray(body.target_node_ids) && body.target_node_ids.length > 0
+      ? clusterNodes.filter((n) => body.target_node_ids.includes(n.id))
+      : clusterNodes;
+
+    const opType = body.op_type || "SyncSettings";
+    const batchSize = Math.max(1, body.batch_size || 2);
+    const stopOnFailure = body.stop_on_failure !== false;
+    const simulateFailNodeId = body.simulate_fail_node_id || null;
+
+    const totalNodes = targetNodes.length;
+    const batchesCount = Math.ceil(totalNodes / batchSize);
+    const nodeResults: any[] = [];
+
+    let circuitBroken = false;
+    let succeededCount = 0;
+    let failedCount = 0;
+    let skippedCount = 0;
+
+    for (let i = 0; i < totalNodes; i++) {
+      const node = targetNodes[i];
+      const batchIndex = Math.floor(i / batchSize);
+
+      if (circuitBroken) {
+        nodeResults.push({
+          node_id: node.id,
+          node_name: node.name,
+          batch_index: batchIndex,
+          status: "skipped",
+          duration_ms: 0,
+          error: null,
+          output: "Skipped due to circuit breaker trip on earlier node failure",
+        });
+        skippedCount++;
+        continue;
+      }
+
+      const isFail = simulateFailNodeId && (
+        simulateFailNodeId === node.id ||
+        simulateFailNodeId === `node-${String(i + 1).padStart(2, "0")}` ||
+        node.id.includes(simulateFailNodeId)
+      );
+
+      if (isFail) {
+        nodeResults.push({
+          node_id: node.id,
+          node_name: node.name,
+          batch_index: batchIndex,
+          status: "failed",
+          duration_ms: 120 + i * 15,
+          error: `Node agent connection timeout: health check failed on ${node.id}`,
+          output: null,
+        });
+        failedCount++;
+
+        // Add to mockOperations ledger as failed
+        mockOperations.unshift({
+          id: `op_roll_${Date.now()}_${node.id}`,
+          idempotency_key: `idem_roll_${opType}_${node.id}_${Date.now()}`,
+          op_type: opType,
+          node_id: node.id,
+          node_name: node.name,
+          tenant_id: null,
+          status: "failed",
+          retries_count: 0,
+          payload: { batch: batchIndex + 1, rolling: true },
+          output: null,
+          error: {
+            code: "ERR_NODE_UNREACHABLE",
+            message: `Connection timeout on node ${node.id}`,
+          },
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+
+        if (stopOnFailure) {
+          circuitBroken = true;
+        }
+      } else {
+        nodeResults.push({
+          node_id: node.id,
+          node_name: node.name,
+          batch_index: batchIndex,
+          status: "succeeded",
+          duration_ms: 45 + i * 8,
+          error: null,
+          output: `${opType} executed successfully across node subsystems (exit code 0)`,
+        });
+        succeededCount++;
+
+        // Add to mockOperations ledger as succeeded
+        mockOperations.unshift({
+          id: `op_roll_${Date.now()}_${node.id}`,
+          idempotency_key: `idem_roll_${opType}_${node.id}_${Date.now()}`,
+          op_type: opType,
+          node_id: node.id,
+          node_name: node.name,
+          tenant_id: null,
+          status: "succeeded",
+          retries_count: 0,
+          payload: { batch: batchIndex + 1, rolling: true },
+          output: { success: true, exit_code: 0 },
+          error: null,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+      }
+    }
+
+    const overallStatus = circuitBroken ? "halted" : (failedCount > 0 ? "failed" : "succeeded");
+    const executionId = `roll_${Date.now()}`;
+
+    return HttpResponse.json({
+      id: executionId,
+      op_type: opType,
+      total_nodes: totalNodes,
+      completed_nodes: succeededCount + failedCount,
+      succeeded_nodes: succeededCount,
+      failed_nodes: failedCount,
+      skipped_nodes: skippedCount,
+      status: overallStatus,
+      batches_count: batchesCount,
+      node_results: nodeResults,
+      created_at: new Date().toISOString(),
+      completed_at: new Date().toISOString(),
+      message: circuitBroken
+        ? `Rolling execution halted after node failure in batch. Circuit breaker tripped.`
+        : `Rolling execution completed across all ${totalNodes} nodes successfully.`,
+    });
+  }),
+
   // Modules: List all modules (GET /api/v1/admin/modules)
   // TODO(api:T03.03): Replace with real backend endpoint
   http.get(/\/api\/v1\/admin\/modules$/, () => {
