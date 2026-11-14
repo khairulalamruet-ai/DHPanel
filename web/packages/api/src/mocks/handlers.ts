@@ -7185,7 +7185,6 @@ export const handlers = [
                                                 mockWafPolicies[domain].mode = body.mode || "block";
                                                 return HttpResponse.json({ success: true, policy: mockWafPolicies[domain] });
                                               }),
-
                                               ...(() => {
                                                 const mockClientIpRules: Array<{
                                                   id: string;
@@ -8720,6 +8719,54 @@ export const handlers = [
                                                       ...body,
                                                     };
                                                     return HttpResponse.json(mockBrandingState);
+                                                  }),
+                                                ];
+                                              })(),
+                                              // ==========================================
+                                              // T18.07: Onboarding & Tour Handlers
+                                              // ==========================================
+                                              ...(() => {
+                                                let adminDismissed = false;
+                                                let clientDismissed = false;
+                                                let completedSteps = ["add_node"];
+
+                                                return [
+                                                  // TODO(api:T18.07): Get admin quickstart onboarding status
+                                                  http.get("/api/v1/onboarding/admin", () => {
+                                                    return HttpResponse.json({
+                                                      dismissed: adminDismissed,
+                                                      completed_steps: completedSteps,
+                                                    });
+                                                  }),
+
+                                                  // TODO(api:T18.07): Dismiss admin quickstart checklist
+                                                  http.post("/api/v1/onboarding/admin/dismiss", () => {
+                                                    adminDismissed = true;
+                                                    return HttpResponse.json({ ok: true, dismissed: true });
+                                                  }),
+
+                                                  // TODO(api:T18.07): Toggle admin quickstart checklist step
+                                                  http.post("/api/v1/onboarding/admin/step/:id/toggle", ({ params }) => {
+                                                    const id = String(params.id);
+                                                    if (completedSteps.includes(id)) {
+                                                      completedSteps = completedSteps.filter((s) => s !== id);
+                                                    } else {
+                                                      completedSteps.push(id);
+                                                    }
+                                                    return HttpResponse.json({ ok: true, completed_steps: completedSteps });
+                                                  }),
+
+                                                  // TODO(api:T18.07): Get client welcome tour status
+                                                  http.get("/api/v1/onboarding/client", () => {
+                                                    return HttpResponse.json({
+                                                      dismissed: clientDismissed,
+                                                    });
+                                                  }),
+
+                                                  // TODO(api:T18.07): Dismiss client welcome tour
+                                                  http.post("/api/v1/onboarding/client/dismiss", () => {
+                                                    clientDismissed = true;
+                                                    return HttpResponse.json({ ok: true, dismissed: true });
                                                   }),
                                                 ];
                                               })(),

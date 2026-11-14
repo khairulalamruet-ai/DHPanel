@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
+import { AdminQuickstartChecklist } from "../onboarding";
 import { useTranslation } from "@dhpanel/i18n";
 import { useSession } from "@dhpanel/auth";
 import { apiFetch } from "@dhpanel/api";
@@ -190,6 +191,8 @@ export function DashboardPage() {
           </Button>
         </div>
       </div>
+
+      <AdminQuickstartChecklist />
 
       {/* Grid of Configured Active Widgets */}
       <div

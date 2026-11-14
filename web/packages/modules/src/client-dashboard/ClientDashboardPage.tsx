@@ -34,6 +34,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { ClientDashboardData } from "./types";
+import { ClientWelcomeTour } from "../onboarding";
 
 function formatBytes(mb: number): string {
   if (mb === -1) return "∞ Unlimited";
@@ -322,6 +323,9 @@ export function ClientDashboardPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Onboarding Tour for Clients */}
+      <ClientWelcomeTour />
 
       {/* 2. Resource Quotas Section */}
       <div className="space-y-3">

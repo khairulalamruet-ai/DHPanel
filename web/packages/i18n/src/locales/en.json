@@ -2798,5 +2798,63 @@
     "savedDesc": "New branding applied immediately without page reload.",
     "resetTitle": "Branding Reset",
     "resetDesc": "Restored default DHPanel branding."
+  },
+  "onboarding": {
+    "admin": {
+      "title": "Getting Started with DHPanel",
+      "stepsDone": "completed",
+      "description": "Complete these initial configuration steps to prepare your cluster for tenants and domains.",
+      "dismiss": "Dismiss Quickstart Checklist",
+      "steps": {
+        "addNode": {
+          "title": "Add First Managed Node",
+          "desc": "Enroll a Linux worker node using the secure one-line node-agent bootstrap token.",
+          "action": "Enroll Node"
+        },
+        "createPlan": {
+          "title": "Create Hosting Plan",
+          "desc": "Define resource quotas, disk limits, and feature sets for your client accounts.",
+          "action": "Manage Plans"
+        },
+        "configureDns": {
+          "title": "Configure Primary Nameservers",
+          "desc": "Set your cluster nameservers (ns1.example.com, ns2.example.com) for automated zone delegation.",
+          "action": "Configure DNS"
+        },
+        "setupSmtp": {
+          "title": "Configure SMTP & Notifications",
+          "desc": "Verify outgoing mail delivery for password resets, SSL warnings, and server health alerts.",
+          "action": "Setup SMTP"
+        }
+      }
+    },
+    "client": {
+      "tour": {
+        "title": "Welcome to Your DHPanel Account",
+        "subtitle": "Take a quick 1-minute walkthrough of the key features of your hosting account.",
+        "dismiss": "Dismiss Tour",
+        "finish": "Finish Tour",
+        "domains": {
+          "title": "1. Websites & Domain Management",
+          "desc": "Deploy new websites, map subdomains, customize PHP runtimes, and inspect document root paths.",
+          "action": "Manage Domains"
+        },
+        "files": {
+          "title": "2. Web File Manager & FTP Access",
+          "desc": "Upload archive packages, edit code in browser, extract archives, or configure secure FTP credentials.",
+          "action": "Open File Manager"
+        },
+        "databases": {
+          "title": "3. MariaDB Databases & phpMyAdmin",
+          "desc": "Create database schemas, grant user privileges, and access phpMyAdmin with single-sign-on.",
+          "action": "View Databases"
+        },
+        "security": {
+          "title": "4. SSL Certificates & WAF Protection",
+          "desc": "Issue free auto-renewing Let's Encrypt certificates, enforce HTTPS redirects, and monitor WAF blocks.",
+          "action": "Security & SSL"
+        }
+      }
+    }
   }
 }

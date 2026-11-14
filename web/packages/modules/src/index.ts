@@ -44,4 +44,5 @@ export * from "./license";
 export * from "./la";
 export * from "./notifications";
 export * from "./branding";
+export * from "./onboarding";
 export type { SslStatus } from "./domains";
