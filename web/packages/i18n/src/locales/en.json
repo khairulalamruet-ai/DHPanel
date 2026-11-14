@@ -364,7 +364,54 @@
       "retryOp": "Retry Operation"
     },
     "retrySuccess": "Operation re-queued for execution successfully",
-    "empty": "No operations found matching the filter criteria."
+    "empty": "No operations found matching the filter criteria.",
+    "applyAll": {
+      "openBtn": "Apply to All",
+      "dialogTitle": "Rolling Cluster Orchestrator",
+      "dialogDesc": "Execute operation progressively across all cluster nodes with batch concurrency and circuit breaker.",
+      "opTypeLabel": "Operation Type",
+      "targetScopeLabel": "Target Scope",
+      "allNodesScope": "All Active Cluster Nodes (10 nodes)",
+      "policySection": "Rolling Execution Policy",
+      "batchSizeLabel": "Batch Size (Concurrency)",
+      "batch1": "1 node / batch (Serial)",
+      "batch2": "2 nodes / batch (Recommended)",
+      "batch5": "5 nodes / batch (Fast)",
+      "delayLabel": "Inter-Batch Delay",
+      "stopOnFailureLabel": "Stop on Failure (Circuit Breaker)",
+      "stopOnFailureDesc": "Immediately abort remaining batches if any node fails execution.",
+      "simulateFailLabel": "Fault Injection (Circuit Breaker Test)",
+      "noSimulatedFail": "Normal Execution (All nodes healthy)",
+      "startBtn": "Start Rolling Apply",
+      "executing": "Executing Rolling Batches...",
+      "reconfigureBtn": "New Execution",
+      "completedTitle": "Rolling Apply Completed",
+      "haltedTitle": "Execution Halted by Circuit Breaker",
+      "totalNodes": "Total Nodes",
+      "succeededNodes": "Succeeded",
+      "failedNodes": "Failed",
+      "skippedNodes": "Skipped",
+      "op": {
+        "syncSettings": "Sync Cluster Settings",
+        "updateVhost": "Update VirtualHost Templates",
+        "restartWeb": "Graceful Restart Web Services",
+        "applySecurity": "Deploy Security Firewall Rules"
+      },
+      "status": {
+        "succeeded": "Succeeded",
+        "failed": "Failed",
+        "skipped": "Skipped",
+        "running": "Running",
+        "pending": "Pending"
+      },
+      "table": {
+        "batch": "Batch",
+        "node": "Node",
+        "status": "Status",
+        "latency": "Latency",
+        "output": "Output / Diagnostic"
+      }
+    }
   },
   "settings": {
     "nav": "Settings",

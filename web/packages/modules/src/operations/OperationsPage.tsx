@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 import type { OperationItem } from "./types";
 import { OperationDetailDialog } from "./OperationDetailDialog";
+import { ApplyToAllDialog } from "./ApplyToAllDialog";
 
 export function OperationsPage() {
   const { t } = useTranslation();
@@ -51,6 +52,7 @@ export function OperationsPage() {
   // Selected Item for Detail Dialog
   const [selectedOp, setSelectedOp] = useState<OperationItem | null>(null);
   const [retryingId, setRetryingId] = useState<string | null>(null);
+  const [isApplyAllOpen, setIsApplyAllOpen] = useState(false);
 
   const fetchOperations = async () => {
     try {
@@ -186,6 +188,17 @@ export function OperationsPage() {
           <p className="text-sm text-muted-foreground">{t("operations.desc")}</p>
         </div>
         <div className="flex items-center gap-2">
+          {hasPermission("admin.operations.write") && (
+            <Button
+              size="sm"
+              onClick={() => setIsApplyAllOpen(true)}
+              data-testid="btn-open-apply-all"
+              className="gap-1.5 text-xs"
+            >
+              <Layers className="h-3.5 w-3.5" />
+              {t("operations.applyAll.openBtn")}
+            </Button>
+          )}
           <Button variant="outline" size="sm" onClick={fetchOperations} className="gap-1.5 text-xs">
             <RotateCcw className="h-3.5 w-3.5" />
             {t("common.reload")}
@@ -365,6 +378,13 @@ export function OperationsPage() {
         onOpenChange={(open) => !open && setSelectedOp(null)}
         onRetry={handleRetry}
         isRetrying={!!retryingId && retryingId === selectedOp?.id}
+      />
+
+      {/* Apply to All Dialog (T16.06) */}
+      <ApplyToAllDialog
+        open={isApplyAllOpen}
+        onOpenChange={setIsApplyAllOpen}
+        onCompleted={fetchOperations}
       />
     </div>
   );

@@ -62,6 +62,47 @@ vi.mock("@dhpanel/i18n", () => ({
         "operations.modal.close": "Close",
         "operations.modal.retryOp": "Retry Operation",
         "operations.retrySuccess": "Operation re-queued for execution successfully",
+        "operations.applyAll.openBtn": "Apply to All",
+        "operations.applyAll.dialogTitle": "Rolling Cluster Orchestrator",
+        "operations.applyAll.dialogDesc": "Execute operation progressively across all cluster nodes",
+        "operations.applyAll.opTypeLabel": "Operation Type",
+        "operations.applyAll.targetScopeLabel": "Target Scope",
+        "operations.applyAll.allNodesScope": "All Active Cluster Nodes (10 nodes)",
+        "operations.applyAll.policySection": "Rolling Execution Policy",
+        "operations.applyAll.batchSizeLabel": "Batch Size (Concurrency)",
+        "operations.applyAll.batch1": "1 node / batch (Serial)",
+        "operations.applyAll.batch2": "2 nodes / batch (Recommended)",
+        "operations.applyAll.batch5": "5 nodes / batch (Fast)",
+        "operations.applyAll.delayLabel": "Inter-Batch Delay",
+        "operations.applyAll.stopOnFailureLabel": "Stop on Failure (Circuit Breaker)",
+        "operations.applyAll.stopOnFailureDesc": "Immediately abort remaining batches if any node fails execution.",
+        "operations.applyAll.simulateFailLabel": "Fault Injection (Circuit Breaker Test)",
+        "operations.applyAll.noSimulatedFail": "Normal Execution (All nodes healthy)",
+        "operations.applyAll.startBtn": "Start Rolling Apply",
+        "operations.applyAll.executing": "Executing Rolling Batches...",
+        "operations.applyAll.reconfigureBtn": "New Execution",
+        "operations.applyAll.completedTitle": "Rolling Apply Completed",
+        "operations.applyAll.haltedTitle": "Execution Halted by Circuit Breaker",
+        "operations.applyAll.totalNodes": "Total Nodes",
+        "operations.applyAll.succeededNodes": "Succeeded",
+        "operations.applyAll.failedNodes": "Failed",
+        "operations.applyAll.skippedNodes": "Skipped",
+        "operations.applyAll.op.syncSettings": "Sync Cluster Settings",
+        "operations.applyAll.op.updateVhost": "Update VirtualHost Templates",
+        "operations.applyAll.op.restartWeb": "Graceful Restart Web Services",
+        "operations.applyAll.op.applySecurity": "Deploy Security Firewall Rules",
+        "operations.applyAll.status.succeeded": "Succeeded",
+        "operations.applyAll.status.failed": "Failed",
+        "operations.applyAll.status.skipped": "Skipped",
+        "operations.applyAll.status.running": "Running",
+        "operations.applyAll.status.pending": "Pending",
+        "operations.applyAll.table.batch": "Batch",
+        "operations.applyAll.table.node": "Node",
+        "operations.applyAll.table.status": "Status",
+        "operations.applyAll.table.latency": "Latency",
+        "operations.applyAll.table.output": "Output / Diagnostic",
+        "common.cancel": "Cancel",
+        "common.close": "Close",
         "common.loading": "Loading...",
         "common.reload": "Reload",
         "common.error": "An error occurred",
@@ -127,6 +168,56 @@ describe("OperationsPage", () => {
             retries_count: 3,
             error: null,
           },
+        };
+      }
+      if (opts?.method === "POST" && url.includes("/cluster/apply-all")) {
+        const body = JSON.parse(opts.body || "{}");
+        const isSimulation = !!body.simulate_fail_node_id;
+        if (isSimulation) {
+          return {
+            id: "roll_sim_fail",
+            op_type: body.op_type || "SyncSettings",
+            total_nodes: 10,
+            completed_nodes: 4,
+            succeeded_nodes: 3,
+            failed_nodes: 1,
+            skipped_nodes: 6,
+            status: "halted",
+            batches_count: 5,
+            message: "Rolling execution halted after node failure in batch. Circuit breaker tripped.",
+            node_results: [
+              { node_id: "node-01", node_name: "node-master-01", batch_index: 0, status: "succeeded", duration_ms: 45 },
+              { node_id: "node-02", node_name: "node-worker-02", batch_index: 0, status: "succeeded", duration_ms: 50 },
+              { node_id: "node-03", node_name: "node-worker-03", batch_index: 1, status: "succeeded", duration_ms: 55 },
+              { node_id: "node-04", node_name: "node-worker-04", batch_index: 1, status: "failed", duration_ms: 120, error: "Connection timeout" },
+              { node_id: "node-05", node_name: "node-worker-05", batch_index: 2, status: "skipped", duration_ms: 0, output: "Skipped due to circuit breaker trip" },
+              { node_id: "node-06", node_name: "node-worker-06", batch_index: 2, status: "skipped", duration_ms: 0, output: "Skipped due to circuit breaker trip" },
+              { node_id: "node-07", node_name: "node-worker-07", batch_index: 3, status: "skipped", duration_ms: 0, output: "Skipped due to circuit breaker trip" },
+              { node_id: "node-08", node_name: "node-worker-08", batch_index: 3, status: "skipped", duration_ms: 0, output: "Skipped due to circuit breaker trip" },
+              { node_id: "node-09", node_name: "node-worker-09", batch_index: 4, status: "skipped", duration_ms: 0, output: "Skipped due to circuit breaker trip" },
+              { node_id: "node-10", node_name: "node-worker-10", batch_index: 4, status: "skipped", duration_ms: 0, output: "Skipped due to circuit breaker trip" },
+            ],
+          };
+        }
+        return {
+          id: "roll_success",
+          op_type: body.op_type || "SyncSettings",
+          total_nodes: 10,
+          completed_nodes: 10,
+          succeeded_nodes: 10,
+          failed_nodes: 0,
+          skipped_nodes: 0,
+          status: "succeeded",
+          batches_count: 5,
+          message: "Rolling execution completed across all 10 nodes successfully.",
+          node_results: Array.from({ length: 10 }).map((_, i) => ({
+            node_id: `node-${i + 1}`,
+            node_name: `node-worker-${String(i + 1).padStart(2, "0")}`,
+            batch_index: Math.floor(i / 2),
+            status: "succeeded",
+            duration_ms: 40 + i * 5,
+            output: "SyncSettings executed successfully",
+          })),
         };
       }
       if (url.includes("/api/v1/admin/operations")) {
@@ -204,5 +295,70 @@ describe("OperationsPage", () => {
       </ToastProvider>
     );
     expect(screen.getByText("Permission denied")).toBeInTheDocument();
+  });
+
+  it("opens Apply-to-All dialog and executes rolling apply across 10 nodes (DoD T16.06)", async () => {
+    render(
+      <ToastProvider>
+        <OperationsPage />
+      </ToastProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("btn-open-apply-all")).toBeInTheDocument();
+    });
+
+    // Open Apply to All Dialog
+    fireEvent.click(screen.getByTestId("btn-open-apply-all"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Rolling Cluster Orchestrator")).toBeInTheDocument();
+      expect(screen.getByTestId("btn-start-rolling-apply")).toBeInTheDocument();
+    });
+
+    // Start rolling execution
+    fireEvent.click(screen.getByTestId("btn-start-rolling-apply"));
+
+    // Verify 10 nodes executed successfully (DoD T16.06)
+    await waitFor(() => {
+      expect(screen.getByTestId("rolling-status-title")).toHaveTextContent("Rolling Apply Completed");
+      expect(screen.getByTestId("metric-total-nodes")).toHaveTextContent("10");
+      expect(screen.getByTestId("metric-succeeded-nodes")).toHaveTextContent("10");
+      expect(screen.getByTestId("rolling-result-badge")).toHaveTextContent("succeeded");
+    });
+  });
+
+  it("stops rolling apply and skips remaining nodes when a node fails with circuit breaker (DoD T16.06)", async () => {
+    render(
+      <ToastProvider>
+        <OperationsPage />
+      </ToastProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("btn-open-apply-all")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId("btn-open-apply-all"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("select-simulate-fail")).toBeInTheDocument();
+    });
+
+    // Select fault injection on node-04
+    fireEvent.change(screen.getByTestId("select-simulate-fail"), {
+      target: { value: "node-04" },
+    });
+
+    // Start execution
+    fireEvent.click(screen.getByTestId("btn-start-rolling-apply"));
+
+    // Verify circuit breaker tripped: execution halted, remaining nodes skipped
+    await waitFor(() => {
+      expect(screen.getByTestId("rolling-status-title")).toHaveTextContent("Execution Halted by Circuit Breaker");
+      expect(screen.getByTestId("metric-succeeded-nodes")).toHaveTextContent("3");
+      expect(screen.getByTestId("metric-skipped-nodes")).toHaveTextContent("6");
+      expect(screen.getByTestId("rolling-result-badge")).toHaveTextContent("halted");
+    });
   });
 });
