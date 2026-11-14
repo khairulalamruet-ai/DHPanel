@@ -8,6 +8,7 @@ members = [
     "apps/dhctl",
     "crates/kernel",
     "crates/safe-fs",
+    "crates/fileops",
     "crates/auth-core",
     "crates/cache",
     "crates/common",
@@ -58,6 +59,7 @@ dhpanel-common = { path = "crates/common" }
 dhpanel-config = { path = "crates/config" }
 dhpanel-domain = { path = "crates/domain" }
 dhpanel-safe-fs = { path = "crates/safe-fs" }
+dhpanel-fileops = { path = "crates/fileops" }
 dhpanel-database = { path = "crates/database" }
 dhpanel-http-kit = { path = "crates/http-kit" }
 dhpanel-observability = { path = "crates/observability" }

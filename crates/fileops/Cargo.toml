@@ -1,0 +1,17 @@
+[package]
+name = "dhpanel-fileops"
+description = "The file manager's operations on one tenant's files (T08.02-T08.06)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+dhpanel-node-protocol.workspace = true
+dhpanel-safe-fs.workspace = true
+rustix = { version = "1", default-features = false, features = ["std", "fs"] }
+serde_json = "1"

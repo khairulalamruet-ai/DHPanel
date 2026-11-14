@@ -1122,6 +1122,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "dhpanel-fileops"
+version = "0.1.0"
+dependencies = [
+ "dhpanel-node-protocol",
+ "dhpanel-safe-fs",
+ "rustix",
+ "serde_json",
+]
+
+[[package]]
 name = "dhpanel-http-kit"
 version = "0.1.0"
 dependencies = [

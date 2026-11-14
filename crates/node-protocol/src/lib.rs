@@ -18,6 +18,8 @@
 //! No operation here carries a secret; if one ever must, its type gets a
 //! redacting `Debug` and is left out of logs.
 
+pub mod files;
+
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
