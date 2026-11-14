@@ -42,4 +42,5 @@ export * from "./resellers";
 export * from "./migration";
 export * from "./license";
 export * from "./la";
+export * from "./notifications";
 export type { SslStatus } from "./domains";

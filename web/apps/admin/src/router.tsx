@@ -49,17 +49,11 @@ import {
   AdminServerToolsPage,
   ClientWafPage,
   AdminWafPage,
-  ClientFirewallPage,
-  AdminFirewallPage,
-  AdminSecurityCenterPage,
-  AppsPage,
-  ClientEmailPage,
-  AdminMailQueuePage,
-  ResellerPortalPage,
-  AdminResellersPage,
   MigrationPage,
   LicensePage,
   LaAdminPage,
+  NotificationBell,
+  NotificationPreferencesPage,
   filterNavItems,
   registeredFrontendModules,
 } from "@dhpanel/modules";
@@ -92,6 +86,7 @@ function AuthenticatedContent() {
     <AppShell
       title={t("common.adminTitle")}
       navItems={navItems}
+      headerActions={<NotificationBell settingsHref="/settings/notifications" />}
     >
       <Outlet />
     </AppShell>
@@ -488,6 +483,19 @@ const laRoute = createRoute({
   path: "/la",
   component: LaAdminPage,
 });
+
+// 47. Notification routes (T18.05)
+const adminNotificationsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/notifications",
+  component: NotificationPreferencesPage,
+});
+
+const settingsNotificationsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/settings/notifications",
+  component: NotificationPreferencesPage,
+});
 });
 
 // 18. Login route
@@ -562,6 +570,8 @@ const routeTree = rootRoute.addChildren([
   adminLicenseRoute,
   licenseRoute,
   laRoute,
+  adminNotificationsRoute,
+  settingsNotificationsRoute,
   loginRoute,
 ]);
 

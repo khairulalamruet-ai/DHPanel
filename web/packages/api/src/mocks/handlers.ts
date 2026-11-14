@@ -8820,6 +8820,141 @@ export const handlers = [
     http.get(/\/api\/v1\/admin\/dashboard\/summary$/, () => {
       return HttpResponse.json(mockDashboardSummary);
     }),
+  ];
+})(),
+...(() => {
+  // Notification Management Handlers (T18.03, T18.05)
+  let mockNotificationsList: Array<{
+    id: string;
+    title: string;
+    message: string;
+    severity: "info" | "warning" | "error" | "success";
+    category: "security" | "backup" | "ssl" | "system" | "billing";
+    read: boolean;
+    created_at: string;
+    action_url?: string;
+    action_label?: string;
+  }> = [
+    {
+      id: "notif-ssl-01",
+      title: "SSL Certificate Expiring Soon",
+      message: "Let's Encrypt certificate for apexstore.com will expire in 7 days.",
+      severity: "warning" as const,
+      category: "ssl" as const,
+      read: false,
+      created_at: new Date(Date.now() - 600000).toISOString(),
+      action_url: "/ssl",
+      action_label: "Renew Certificate",
+    },
+    {
+      id: "notif-backup-02",
+      title: "Nightly Cloud Backup Succeeded",
+      message: "420 MB archive transferred to AWS S3 (us-east-1).",
+      severity: "success" as const,
+      category: "backup" as const,
+      read: false,
+      created_at: new Date(Date.now() - 3600000).toISOString(),
+      action_url: "/backups",
+      action_label: "View Snapshot",
+    },
+    {
+      id: "notif-node-03",
+      title: "Worker Node lon-02 Connection Warning",
+      message: "Node lon-02 agent heartbeat delay detected (latency 420ms).",
+      severity: "error" as const,
+      category: "system" as const,
+      read: false,
+      created_at: new Date(Date.now() - 7200000).toISOString(),
+      action_url: "/nodes",
+      action_label: "Inspect Node",
+    },
+    {
+      id: "notif-waf-04",
+      title: "Coraza WAF Blocked SQL Injection",
+      message: "Rule 942100 triggered by 198.51.100.42 on /api/login.",
+      severity: "warning" as const,
+      category: "security" as const,
+      read: true,
+      created_at: new Date(Date.now() - 86400000).toISOString(),
+      action_url: "/waf",
+      action_label: "WAF Events",
+    },
+  ];
+
+  let mockNotifSettings = {
+    email_enabled: true,
+    email_recipients: ["admin@enterprise.io"],
+    webhook_enabled: false,
+    webhook_url: "",
+    in_app_enabled: true,
+    notify_on_ssl_expiry: true,
+    notify_on_backup_failure: true,
+    notify_on_node_offline: true,
+    notify_on_security_alert: true,
+    snooze_until: null as string | null,
+  };
+
+  return [
+    // GET /api/v1/notifications (TODO(api:T18.03), TODO(api:T18.05))
+    http.get(/\/api\/v1\/notifications$/, () => {
+      return HttpResponse.json(mockNotificationsList);
+    }),
+
+    // POST /api/v1/notifications/:id/read (TODO(api:T18.05))
+    http.post(/\/api\/v1\/notifications\/([^/]+)\/read$/, ({ params }) => {
+      const id = String(params[0]);
+      mockNotificationsList = mockNotificationsList.map((n) =>
+        n.id === id ? { ...n, read: true } : n
+      );
+      return HttpResponse.json({ success: true, id });
+    }),
+
+    // POST /api/v1/notifications/read-all (TODO(api:T18.05))
+    http.post(/\/api\/v1\/notifications\/read-all$/, () => {
+      mockNotificationsList = mockNotificationsList.map((n) => ({ ...n, read: true }));
+      return HttpResponse.json({ success: true });
+    }),
+
+    // DELETE /api/v1/notifications/:id (TODO(api:T18.05))
+    http.delete(/\/api\/v1\/notifications\/([^/]+)$/, ({ params }) => {
+      const id = String(params[0]);
+      mockNotificationsList = mockNotificationsList.filter((n) => n.id !== id);
+      return new HttpResponse(null, { status: 204 });
+    }),
+
+    // GET /api/v1/notifications/settings (TODO(api:T18.03), TODO(api:T18.05))
+    http.get(/\/api\/v1\/notifications\/settings$/, () => {
+      return HttpResponse.json(mockNotifSettings);
+    }),
+
+    // PUT /api/v1/notifications/settings (TODO(api:T18.03), TODO(api:T18.05))
+    http.put(/\/api\/v1\/notifications\/settings$/, async ({ request }) => {
+      const body = (await request.json().catch(() => ({}))) as any;
+      mockNotifSettings = { ...mockNotifSettings, ...body };
+      return HttpResponse.json(mockNotifSettings);
+    }),
+
+    // POST /api/v1/notifications/snooze (TODO(api:T18.03))
+    http.post(/\/api\/v1\/notifications\/snooze$/, async ({ request }) => {
+      const body = (await request.json().catch(() => ({}))) as any;
+      const hours = Number(body.duration_hours) || 0;
+      mockNotifSettings.snooze_until = hours > 0 ? new Date(Date.now() + hours * 3600000).toISOString() : null;
+      return HttpResponse.json({ snooze_until: mockNotifSettings.snooze_until });
+    }),
+
+    // POST /api/v1/notifications/test (TODO(api:T18.03))
+    http.post(/\/api\/v1\/notifications\/test$/, () => {
+      const sample = {
+        id: `notif-test-${Date.now()}`,
+        title: "Test Alert Notification",
+        message: "This is a verification test alert dispatched from Notification Settings.",
+        severity: "info" as const,
+        category: "system" as const,
+        read: false,
+        created_at: new Date().toISOString(),
+      };
+      mockNotificationsList.unshift(sample);
+      return HttpResponse.json({ success: true, item: sample });
     }),
   ];
 })(),

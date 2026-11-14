@@ -9,7 +9,7 @@ import { ThemeProvider, ToastProvider } from "@dhpanel/ui";
 import { SessionProvider, useSession, LoginPage, AccountSecurityPage } from "@dhpanel/auth";
 import { queryClient, QueryClientProvider } from "@dhpanel/api";
 import { AppShell, NotFoundPage, RouteErrorFallback } from "@dhpanel/shell";
-import { ClientDashboardPage, ClientDomainsPage, DnsEditorPage, SslPage, PhpManagementPage, ServicesPage, ClientDatabasesPage, FileManagerPage, DiskUsagePage, FtpAccountsPage, ClientBackupsPage, CronJobsPage, LogViewerPage, ClientUsagePage, ClientProcessesPage, ClientWafPage, ClientFirewallPage, AppsPage, ClientEmailPage, ResellerPortalPage, MigrationPage } from "@dhpanel/modules";
+import { ClientDashboardPage, ClientDomainsPage, DnsEditorPage, SslPage, PhpManagementPage, ServicesPage, ClientDatabasesPage, FileManagerPage, DiskUsagePage, FtpAccountsPage, ClientBackupsPage, CronJobsPage, LogViewerPage, ClientUsagePage, ClientProcessesPage, ClientWafPage, ClientFirewallPage, AppsPage, ClientEmailPage, ResellerPortalPage, MigrationPage, NotificationBell, NotificationPreferencesPage } from "@dhpanel/modules";
 import { useTranslation } from "@dhpanel/i18n";
 import { LayoutDashboard, ShieldCheck, ShieldAlert, Globe, Lock, Database, Folder, Server, Archive, Clock, FileText, Activity, Terminal, Flame, Boxes, Mail, Briefcase, ArrowRightLeft } from "lucide-react";
 
@@ -152,7 +152,11 @@ function AuthenticatedContent() {
   }
 
   return (
-    <AppShell title={t("common.clientTitle")} navItems={navItems}>
+    <AppShell
+      title={t("common.clientTitle")}
+      navItems={navItems}
+      headerActions={<NotificationBell settingsHref="/settings/notifications" />}
+    >
       <Outlet />
     </AppShell>
   );
@@ -310,6 +314,18 @@ const securityRoute = createRoute({
   component: AccountSecurityPage,
 });
 
+const notificationsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/notifications",
+  component: NotificationPreferencesPage,
+});
+
+const settingsNotificationsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/settings/notifications",
+  component: NotificationPreferencesPage,
+});
+
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/login",
@@ -324,7 +340,7 @@ const loginRoute = createRoute({
   },
 });
 
-const routeTree = rootRoute.addChildren([indexRoute, domainsRoute, dnsRoute, sslRoute, phpRoute, servicesRoute, databasesRoute, filesRoute, diskUsageRoute, ftpRoute, backupsRoute, cronRoute, logsRoute, usageRoute, processesRoute, wafRoute, firewallRoute, appsRoute, emailRoute, resellerRoute, migrationRoute, securityRoute, loginRoute]);
+const routeTree = rootRoute.addChildren([indexRoute, domainsRoute, dnsRoute, sslRoute, phpRoute, servicesRoute, databasesRoute, filesRoute, diskUsageRoute, ftpRoute, backupsRoute, cronRoute, logsRoute, usageRoute, processesRoute, wafRoute, firewallRoute, appsRoute, emailRoute, resellerRoute, migrationRoute, securityRoute, notificationsRoute, settingsNotificationsRoute, loginRoute]);
 
 export const router = createRouter({
   routeTree,
