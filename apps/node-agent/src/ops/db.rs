@@ -33,6 +33,10 @@ const NETWORK: &str = "dh-db-net";
 const VOLUME: &str = "dh-db-data";
 /// The loopback port it is published on unless `DHPANEL_AGENT_DB_PORT` says another.
 pub const DEFAULT_PORT: u16 = 3307;
+/// The public port unless `DHPANEL_AGENT_DB_PUBLIC_PORT` says another.
+pub const DEFAULT_PUBLIC_PORT: u16 = 13306;
+/// The label that says the container publishes its public port (and which).
+const PUBLIC_LABEL: &str = "dh-db-public";
 /// The name tenants reach it by on their own network.
 pub const ALIAS: &str = "db";
 /// Longest wait for it to accept connections.
@@ -48,6 +52,18 @@ pub fn port() -> u16 {
         .and_then(|p| p.parse().ok())
         .filter(|p| *p >= 1024)
         .unwrap_or(DEFAULT_PORT)
+}
+
+/// The port the server is published on for clients outside the node, when remote
+/// access is on (`DHPANEL_AGENT_DB_PUBLIC_PORT`; the privileged helper's
+/// `--db-port` must be the same).
+#[must_use]
+pub fn public_port() -> u16 {
+    std::env::var("DHPANEL_AGENT_DB_PUBLIC_PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .filter(|p| *p >= 1024)
+        .unwrap_or(DEFAULT_PUBLIC_PORT)
 }
 
 /// Where the root password is kept: next to the agent's other secrets.
@@ -147,10 +163,35 @@ async fn wait_ready(password: &str) -> Result<(), AgentError> {
 /// # Errors
 /// Docker or the disk failing (retryable), or the server not coming up.
 pub async fn ensure_server(context: &TenantContext) -> Result<bool, AgentError> {
+    ensure_server_with(context, false).await
+}
+
+/// [`ensure_server`], and with `public` the server also has to publish its public
+/// port: a container that does not is made again (its data is in the volume).
+///
+/// # Errors
+/// As [`ensure_server`].
+pub async fn ensure_server_with(context: &TenantContext, public: bool) -> Result<bool, AgentError> {
     let password = root_password(&secrets_dir(context))?;
     let docker = &context.docker;
     let container = name(CONTAINER)?;
-    let created = match docker.inspect(&container).await {
+    let wanted_label = public_port().to_string();
+    let mut existing = docker.inspect(&container).await;
+    if let Ok(info) = &existing
+        && public
+        && info.labels.get(PUBLIC_LABEL) != Some(&wanted_label)
+    {
+        docker
+            .stop(&container, Duration::from_secs(30))
+            .await
+            .map_err(|e| docker_error(&e))?;
+        docker
+            .remove(&container, true)
+            .await
+            .map_err(|e| docker_error(&e))?;
+        existing = Err(DockerError::NotFound);
+    }
+    let created = match existing {
         Ok(_) => false,
         Err(DockerError::NotFound) => {
             let allowlist = Allowlist::embedded().map_err(|e| {
@@ -215,13 +256,23 @@ pub async fn ensure_server(context: &TenantContext) -> Result<bool, AgentError> 
                 read_only: false,
             }];
             spec.network = Network::Named(network);
+            let bad = || AgentError::new(ErrorCode::Internal, "bad address");
             spec.ports = vec![PublishedPort {
                 container_port: 3306,
                 host_port: port(),
-                host_ip: "127.0.0.1"
-                    .parse()
-                    .map_err(|_| AgentError::new(ErrorCode::Internal, "bad loopback address"))?,
+                host_ip: "127.0.0.1".parse().map_err(|_| bad())?,
             }];
+            if public {
+                // Only ever after the packet filter has been set (see
+                // `set_db_remote_access`): the port is open to nobody until it is.
+                spec.ports.push(PublishedPort {
+                    container_port: 3306,
+                    host_port: public_port(),
+                    host_ip: "0.0.0.0".parse().map_err(|_| bad())?,
+                });
+                spec.labels
+                    .insert(PUBLIC_LABEL.to_owned(), wanted_label.clone());
+            }
             spec.restart = Restart::UnlessStopped;
             match docker.create_container(&spec).await {
                 Ok(_) | Err(DockerError::Conflict(_)) => {}
@@ -758,6 +809,56 @@ pub async fn set_db_remote_hosts(
     let _ = conn.disconnect().await;
     Ok(Output::DbRemoteHostsSet {
         hosts: wanted.len(),
+    })
+}
+
+/// `set_db_remote_access`.
+///
+/// # Errors
+/// [`AgentError`]: a bad address or too many (not retryable); the privileged
+/// helper or Docker not available (retryable). The public port is opened only after
+/// the packet filter was set; when the helper refuses, nothing is opened.
+pub async fn set_db_remote_access(
+    context: Arc<TenantContext>,
+    op: Operation,
+) -> Result<Output, AgentError> {
+    let Operation::SetDbRemoteAccess { cidrs } = op else {
+        return Err(super::wrong_operation());
+    };
+    let invalid = |m: &str| AgentError::new(ErrorCode::InvalidArguments, m.to_owned());
+    if cidrs.len() > dhpanel_node_protocol::MAX_DB_REMOTE_ACCESS {
+        return Err(invalid("too many address ranges"));
+    }
+    for cidr in &cidrs {
+        if dhpanel_domain::databases::host_for_remote(cidr).is_none() {
+            return Err(invalid(
+                "an address range is not IPv4 a.b.c.d/n (n from 8 to 32)",
+            ));
+        }
+    }
+    // 1. The packet filter: closed to everyone but these.
+    let socket = context.helper_socket.clone();
+    let sent = cidrs.clone();
+    tokio::task::spawn_blocking(move || {
+        super::tenant::ask_helper(
+            &socket,
+            dhpanel_priv_helper::protocol::Action::SetDbFirewall { cidrs: sent },
+        )
+    })
+    .await
+    .map_err(|_| {
+        AgentError::new(ErrorCode::Internal, "the helper call was cancelled").retryable()
+    })??;
+    // 2. Only then the port: open when there is anybody to let in.
+    let published = if cidrs.is_empty() {
+        false
+    } else {
+        ensure_server_with(&context, true).await?;
+        true
+    };
+    Ok(Output::DbRemoteAccessSet {
+        ranges: cidrs.len(),
+        published,
     })
 }
 

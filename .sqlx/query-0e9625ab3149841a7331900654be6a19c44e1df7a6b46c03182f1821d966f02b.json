@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT DISTINCT h.cidr AS \"cidr!\"\n           FROM db_remote_hosts h\n           JOIN db_users u ON u.id = h.user_id\n           JOIN tenants t ON t.id = u.tenant_id\n           WHERE t.node_id = $1 AND u.status <> 'deleting'\n           ORDER BY 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "cidr!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "db_remote_hosts",
+            "name": "cidr"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "0e9625ab3149841a7331900654be6a19c44e1df7a6b46c03182f1821d966f02b"
+}

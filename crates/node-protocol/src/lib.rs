@@ -215,6 +215,9 @@ pub struct DbSize {
 /// Most databases in one size report.
 pub const MAX_DB_SIZES_PER_REPORT: usize = 5000;
 
+/// Most address ranges allowed to reach one node's database server in all.
+pub const MAX_DB_REMOTE_ACCESS: usize = 2000;
+
 /// Most remote addresses one database user may have.
 pub const MAX_DB_REMOTE_HOSTS: usize = 20;
 
@@ -499,6 +502,17 @@ pub enum Operation {
         /// The addresses or ranges.
         cidrs: Vec<String>,
     },
+    /// Set which addresses may reach the node's database server from outside the
+    /// node: the union of every remote address of every user on the node (IPv4
+    /// `a.b.c.d/n`, none wider than a /8, at most [`MAX_DB_REMOTE_ACCESS`]). The
+    /// node's packet filter is set first (through the privileged helper), and only
+    /// then, when there is anything to allow, is the server's public port opened.
+    /// An empty list closes the port for everybody. Safe to repeat. Answered with
+    /// [`Output::DbRemoteAccessSet`].
+    SetDbRemoteAccess {
+        /// The allowed addresses and ranges.
+        cidrs: Vec<String>,
+    },
     /// Remove a database user (from every address it could connect from). Safe to
     /// repeat. Answered with [`Output::DbUserDropped`].
     DropDbUser {
@@ -685,6 +699,7 @@ impl Operation {
         "grant_db",
         "revoke_db",
         "set_db_remote_hosts",
+        "set_db_remote_access",
         "drop_db_user",
         "set_up_tenant",
         "set_site_routes",
@@ -721,6 +736,7 @@ impl Operation {
             Self::GrantDb { .. } => "grant_db",
             Self::RevokeDb { .. } => "revoke_db",
             Self::SetDbRemoteHosts { .. } => "set_db_remote_hosts",
+            Self::SetDbRemoteAccess { .. } => "set_db_remote_access",
             Self::DropDbUser { .. } => "drop_db_user",
             Self::SetUpTenant { .. } => "set_up_tenant",
             Self::SetSiteRoutes { .. } => "set_site_routes",
@@ -916,6 +932,13 @@ pub enum Output {
     DbRemoteHostsSet {
         /// How many remote addresses the user has now.
         hosts: usize,
+    },
+    /// Answer to [`Operation::SetDbRemoteAccess`].
+    DbRemoteAccessSet {
+        /// How many address ranges may reach the server now.
+        ranges: usize,
+        /// Whether the server's public port is open (to those ranges only).
+        published: bool,
     },
     /// Answer to [`Operation::DropDbUser`].
     DbUserDropped {
@@ -1799,6 +1822,9 @@ mod tests {
                 name: "alice_web".into(),
                 cidrs: vec!["203.0.113.7/32".into()],
             },
+            Operation::SetDbRemoteAccess {
+                cidrs: vec!["203.0.113.7/32".into()],
+            },
             Operation::DropDbUser {
                 name: "alice_web".into(),
             },
@@ -1831,7 +1857,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            30,
+            31,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }

@@ -18,6 +18,7 @@
 //!
 //! One request, one answer, then the connection is closed.
 
+pub mod firewall;
 pub mod protocol;
 pub mod quota;
 pub mod server;

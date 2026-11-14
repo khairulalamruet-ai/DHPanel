@@ -412,3 +412,25 @@ pub async fn node_has_databases(pool: &PgPool, node_id: Uuid) -> Result<bool, sq
     .fetch_one(pool)
     .await
 }
+
+/// Every remote address of every database user of the accounts on a node: what the
+/// node's packet filter has to let through to the server's public port.
+///
+/// # Errors
+/// Database errors.
+pub async fn remote_union(
+    conn: &mut PgConnection,
+    node_id: Uuid,
+) -> Result<Vec<String>, sqlx::Error> {
+    sqlx::query_scalar!(
+        r#"SELECT DISTINCT h.cidr AS "cidr!"
+           FROM db_remote_hosts h
+           JOIN db_users u ON u.id = h.user_id
+           JOIN tenants t ON t.id = u.tenant_id
+           WHERE t.node_id = $1 AND u.status <> 'deleting'
+           ORDER BY 1"#,
+        node_id,
+    )
+    .fetch_all(conn)
+    .await
+}

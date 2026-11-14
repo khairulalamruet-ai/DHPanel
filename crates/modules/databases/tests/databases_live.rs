@@ -600,6 +600,17 @@ async fn databases_users_and_grants_are_made_on_the_node_in_the_background(pool:
             .unwrap();
     assert_eq!(queued["username"], "alice");
     assert_eq!(queued["name"], "alice_web");
+    // The node is told which addresses its packet filter lets through: all of them.
+    let access: Value = sqlx::query_scalar(
+        "SELECT payload FROM operations WHERE kind = 'set_db_remote_access' ORDER BY created_at DESC LIMIT 1",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        access["cidrs"],
+        json!(["198.51.100.0/24", "203.0.113.7/32"])
+    );
 
     // Removing a grant, a user and a database.
     assert_eq!(

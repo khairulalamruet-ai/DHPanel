@@ -9,7 +9,7 @@ Before=dhpanel-agent.service
 [Service]
 Type=simple
 User=root
-ExecStart=/usr/local/bin/dhpanel-priv-helper --socket /run/dhpanel/priv-helper.sock --agent-user dhpanel-agent --tenants-root /srv/tenants
+ExecStart=/usr/local/bin/dhpanel-priv-helper --socket /run/dhpanel/priv-helper.sock --agent-user dhpanel-agent --tenants-root /srv/tenants --db-port 13306
 # The directory tenants live in is created by install.sh before the service is
 # started: the sandbox's mount namespace is built before any ExecStartPre runs,
 # so the path must already exist. It is the only place besides /run/dhpanel the
@@ -28,7 +28,10 @@ RestartSec=2
 NoNewPrivileges=yes
 # CAP_CHOWN: hand the socket file and tenant directories to their owners.
 # CAP_SYS_ADMIN: set project quota limits (quotactl); nothing else here needs it.
-CapabilityBoundingSet=CAP_CHOWN CAP_SYS_ADMIN
+# CAP_NET_ADMIN: write the one nftables table that guards the database's public
+# port (set_db_firewall, T07.05b); the table, the port and the shape of every rule
+# are fixed in the helper, and no request can name anything else.
+CapabilityBoundingSet=CAP_CHOWN CAP_SYS_ADMIN CAP_NET_ADMIN
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
@@ -37,7 +40,9 @@ PrivateTmp=yes
 # the helper from opening any device node.
 PrivateDevices=no
 DevicePolicy=closed
-PrivateNetwork=yes
+# The packet filter is the node's own, so the helper shares the network namespace
+# (and may open netlink sockets, nothing else but Unix sockets).
+PrivateNetwork=no
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectKernelLogs=yes
@@ -45,7 +50,7 @@ ProtectControlGroups=yes
 ProtectClock=yes
 ProtectHostname=yes
 ProtectProc=invisible
-RestrictAddressFamilies=AF_UNIX
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
 RestrictNamespaces=yes
 RestrictRealtime=yes
 RestrictSUIDSGID=yes

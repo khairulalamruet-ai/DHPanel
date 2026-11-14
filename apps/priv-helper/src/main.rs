@@ -15,7 +15,7 @@ use dhpanel_priv_helper::{
     tenant::TenantEnv,
 };
 
-const USAGE: &str = "usage: dhpanel-priv-helper [--socket PATH] [--tenants-root DIR] [--agent-user NAME | --agent-uid UID --agent-gid GID]";
+const USAGE: &str = "usage: dhpanel-priv-helper [--socket PATH] [--tenants-root DIR] [--db-port PORT] [--agent-user NAME | --agent-uid UID --agent-gid GID]";
 
 #[allow(clippy::print_stdout)]
 fn main() -> ExitCode {
@@ -23,6 +23,7 @@ fn main() -> ExitCode {
     let mut socket = PathBuf::from(DEFAULT_SOCKET);
     let mut user = String::from("dhpanel-agent");
     let mut tenants_root = PathBuf::from("/srv/tenants");
+    let mut db_port: u16 = 13306;
     let (mut uid, mut gid) = (None::<u32>, None::<u32>);
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -31,6 +32,10 @@ fn main() -> ExitCode {
             "--socket" => value().map(|v| socket = v.into()),
             "--agent-user" => value().map(|v| user = v),
             "--tenants-root" => value().map(|v| tenants_root = v.into()),
+            "--db-port" => value()
+                .and_then(|v| v.parse().ok())
+                .filter(|p: &u16| *p >= 1024)
+                .map(|p| db_port = p),
             "--agent-uid" => value().and_then(|v| v.parse().ok()).map(|v| uid = Some(v)),
             "--agent-gid" => value().and_then(|v| v.parse().ok()).map(|v| gid = Some(v)),
             "--version" => {
@@ -76,6 +81,7 @@ fn main() -> ExitCode {
             agent_gid,
             mountinfo: "/proc/self/mountinfo".into(),
         },
+        db_port,
     };
     let listener = match bind(&config) {
         Ok(listener) => listener,

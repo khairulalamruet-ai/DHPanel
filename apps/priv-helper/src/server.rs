@@ -49,6 +49,8 @@ pub struct Config {
     pub agent_gid: u32,
     /// Where tenant directories live and how their ids map to the host.
     pub tenants: TenantEnv,
+    /// The one port the firewall action may filter (the database's public port).
+    pub db_port: u16,
 }
 
 /// Creates the socket: owned by the agent, mode 0600. A stale socket file from
@@ -197,6 +199,7 @@ fn execute(action: &Action, config: &Config) -> Result<(), (ErrorCode, &'static 
             disk_bytes,
             inodes,
         } => tenant::set_storage_quota(&config.tenants, tenant_id, *uid, *disk_bytes, *inodes),
+        Action::SetDbFirewall { cidrs } => crate::firewall::set(config.db_port, cidrs),
         Action::RemoveTenant { tenant_id, uid } => tenant::remove(&config.tenants, tenant_id, *uid),
     }
 }
@@ -292,6 +295,7 @@ mod tests {
                 agent_uid: uid,
                 agent_gid: gid,
                 tenants: test_tenants(gid),
+                db_port: 13306,
             };
             let listener = bind(&bind_config).unwrap();
             let config = Config {
@@ -471,6 +475,7 @@ mod tests {
             agent_uid: uid,
             agent_gid: gid,
             tenants: test_tenants(gid),
+            db_port: 13306,
         };
         drop(bind(&config).unwrap()); // leaves the socket file behind
         assert!(path.exists());

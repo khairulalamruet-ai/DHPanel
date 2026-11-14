@@ -640,6 +640,31 @@ pub async fn list_users(
     }))
 }
 
+/// Tells the node which addresses may reach its database server from outside: the
+/// union of every user's remote addresses on the node, as the rows stand in this
+/// transaction. The node sets its packet filter first and opens the port after.
+async fn queue_remote_access(
+    tx: &mut dhpanel_database::sqlx::PgConnection,
+    h: &Hosting,
+    who: &Principal,
+) -> Result<(), AppError> {
+    let cidrs = store::remote_union(tx, h.tenant.node_id)
+        .await
+        .map_err(internal)?;
+    queue(
+        tx,
+        h,
+        &Operation::SetDbRemoteAccess { cidrs },
+        format!(
+            "dbaccess:{}:{}",
+            h.tenant.node_id.simple(),
+            Uuid::now_v7().simple()
+        ),
+        who,
+    )
+    .await
+}
+
 /// Seals a password for the dispatcher to deliver and queues the work.
 async fn queue_user(
     state: &DatabasesState,
@@ -849,6 +874,14 @@ pub async fn delete_user(
         &who,
     )
     .await?;
+    // What it was allowed from no longer counts for the node's packet filter.
+    if !store::remote_hosts(&state.db, gone.id)
+        .await
+        .map_err(internal)?
+        .is_empty()
+    {
+        queue_remote_access(&mut tx, &h, &who).await?;
+    }
     dhpanel_audit::insert(
         &mut *tx,
         &entry("db_user.deleted", &who, &h, "db_user", id)
@@ -1138,6 +1171,7 @@ pub async fn set_remote(
         &who,
     )
     .await?;
+    queue_remote_access(&mut tx, &h, &who).await?;
     dhpanel_audit::insert(
         &mut *tx,
         &entry("db_user.remote_hosts_set", &who, &h, "db_user", user.id)

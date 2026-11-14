@@ -45,6 +45,14 @@ pub enum Action {
         /// Most files and directories.
         inodes: Option<u64>,
     },
+    /// Sets which IPv4 addresses and ranges may reach the database server's public
+    /// port (see [`crate::firewall`]); everything else aimed at that port is dropped.
+    /// An empty list closes it for everybody. The port is the helper's own setting,
+    /// not part of the request.
+    SetDbFirewall {
+        /// `a.b.c.d/n`, n from 8 to 32, at most 2000.
+        cidrs: Vec<String>,
+    },
     /// Removes a tenant's two (empty) directories after its files were
     /// deleted. Never deletes any file: a non-empty directory is a failure.
     RemoveTenant {
@@ -63,6 +71,7 @@ impl Action {
             Self::Noop => "noop",
             Self::PrepareTenant { .. } => "prepare_tenant",
             Self::SetStorageQuota { .. } => "set_storage_quota",
+            Self::SetDbFirewall { .. } => "set_db_firewall",
             Self::RemoveTenant { .. } => "remove_tenant",
         }
     }
@@ -157,6 +166,7 @@ fn allowed_fields(action: &str) -> Option<&'static [&'static str]> {
         "noop" => Some(&["type"]),
         "prepare_tenant" => Some(&["type", "tenant_id", "uid", "skeleton"]),
         "set_storage_quota" => Some(&["type", "tenant_id", "uid", "disk_bytes", "inodes"]),
+        "set_db_firewall" => Some(&["type", "cidrs"]),
         "remove_tenant" => Some(&["type", "tenant_id", "uid"]),
         _ => None,
     }
