@@ -24,6 +24,7 @@ pub mod cache;
 pub mod capabilities;
 pub mod db;
 pub mod files;
+pub mod ftp;
 pub mod pma;
 pub mod sqlexport;
 pub mod sqlimport;
@@ -148,6 +149,14 @@ impl Registry {
             registry.register("export_sql", {
                 let context = context.clone();
                 move |op| sqlexport::export_sql(context.clone(), op)
+            });
+            registry.register("upsert_ftp_account", {
+                let context = context.clone();
+                move |op| ftp::upsert_ftp_account(context.clone(), op)
+            });
+            registry.register("drop_ftp_account", {
+                let context = context.clone();
+                move |op| ftp::drop_ftp_account(context.clone(), op)
             });
             registry.register("fetch_file", {
                 let context = context.clone();

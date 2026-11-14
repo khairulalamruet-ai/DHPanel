@@ -61,3 +61,8 @@ note      = "MariaDB 12.3.3 (long-term support): the node's shared database serv
 role      = "pma"
 reference = "phpmyadmin@sha256:e4b3eb5305cd42d21512bb55def2bab52625d56df927ad4ee1864a9354c84d40"
 note      = "phpMyAdmin 5.2.3 (Apache), the node's one database browser; clients reach it through single sign-on only"
+
+[[image]]
+role      = "sftp"
+reference = "drakkan/sftpgo@sha256:1edd28d80de2a008863fbfc58c8ff7db47b1b410bae48d4e6076192337809b11"
+note      = "SFTPGo 2.7.6, the node's SFTP and FTPS server (virtual users, one per account, confined to a folder of the tenant's files)"

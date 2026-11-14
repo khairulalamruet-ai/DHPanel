@@ -647,6 +647,41 @@ pub enum Operation {
         /// What to do.
         request: files::FileRequest,
     },
+    /// Makes (or changes) an SFTP/FTPS account of a tenant on the node's file transfer
+    /// server: a virtual user whose home is a folder of the tenant's files, working as
+    /// the tenant's own user id. The password is set when one is given (and is needed
+    /// for a new account). Safe to repeat. Answered with [`Output::FtpAccountSet`].
+    UpsertFtpAccount {
+        /// The tenant.
+        tenant_id: Uuid,
+        /// The tenant's numeric user id.
+        uid: u32,
+        /// The account's name (lower-case letters, digits, `_`, `-`, `.`; at most 64).
+        name: String,
+        /// Its home, relative to the tenant's files (`""` is all of them).
+        home: String,
+        /// The password; absent in the ledger, present on the wire.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        password: Option<DbPassword>,
+        /// May log in over SFTP.
+        sftp: bool,
+        /// May log in over FTP with TLS (FTPS).
+        ftps: bool,
+        /// May also log in over FTP without TLS.
+        ftp_plain: bool,
+        /// May read but not change anything.
+        read_only: bool,
+        /// Most disk the account may use, in MB.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        quota_mb: Option<u64>,
+        /// Whether it may log in at all.
+        enabled: bool,
+    },
+    /// Removes an SFTP/FTPS account. Answered with [`Output::FtpAccountDropped`].
+    DropFtpAccount {
+        /// The account's name.
+        name: String,
+    },
     /// How far an import has come. Answered with [`Output::ImportProgress`].
     ReportImportProgress {
         /// The import.
@@ -827,6 +862,8 @@ impl Operation {
         "import_sql",
         "export_sql",
         "file_op",
+        "upsert_ftp_account",
+        "drop_ftp_account",
         "fetch_file",
         "send_file",
         "set_phpmyadmin_host",
@@ -872,6 +909,8 @@ impl Operation {
             Self::ImportSql { .. } => "import_sql",
             Self::ExportSql { .. } => "export_sql",
             Self::FileOp { .. } => "file_op",
+            Self::UpsertFtpAccount { .. } => "upsert_ftp_account",
+            Self::DropFtpAccount { .. } => "drop_ftp_account",
             Self::FetchFile { .. } => "fetch_file",
             Self::SendFile { .. } => "send_file",
             Self::SetPhpMyAdminHost { .. } => "set_phpmyadmin_host",
@@ -1085,6 +1124,16 @@ pub enum Output {
     FileSent {
         /// Size of the file that was sent.
         size_bytes: u64,
+    },
+    /// Answer to [`Operation::UpsertFtpAccount`].
+    FtpAccountSet {
+        /// Whether the account was made now (otherwise it was changed).
+        created: bool,
+    },
+    /// Answer to [`Operation::DropFtpAccount`].
+    FtpAccountDropped {
+        /// Whether there was one to remove.
+        existed: bool,
     },
     /// Answer to [`Operation::FileOp`].
     File {
@@ -2030,6 +2079,22 @@ mod tests {
                 uid: 10_000,
                 request: files::FileRequest::TrashList,
             },
+            Operation::UpsertFtpAccount {
+                tenant_id: id(),
+                uid: 10_000,
+                name: "alice_site".into(),
+                home: "www".into(),
+                password: None,
+                sftp: true,
+                ftps: true,
+                ftp_plain: false,
+                read_only: false,
+                quota_mb: Some(100),
+                enabled: true,
+            },
+            Operation::DropFtpAccount {
+                name: "alice_site".into(),
+            },
             Operation::FetchFile {
                 tenant_id: id(),
                 uid: 10_000,
@@ -2110,7 +2175,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            39,
+            41,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }
