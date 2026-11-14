@@ -1,5 +1,5 @@
 import React from "react";
-import { LayoutDashboard, ShieldCheck, ShieldAlert, Sparkles, Puzzle, Globe, Users, Settings, FileText, Boxes, Server, Activity, Layers, Lock, FileCode2, Cpu, Database, Folder, Archive, Clock, Terminal, Wrench, Flame, Mail, Briefcase, ArrowRightLeft, KeyRound } from "lucide-react";
+import { LayoutDashboard, ShieldCheck, ShieldAlert, Sparkles, Puzzle, Globe, Users, Settings, FileText, Boxes, Server, Activity, Layers, Lock, FileCode2, Cpu, Database, Folder, Archive, Clock, Terminal, Wrench, Flame, Mail, Briefcase, ArrowRightLeft, KeyRound, Palette } from "lucide-react";
 
 export interface ModuleManifest {
   name: string;
@@ -974,6 +974,26 @@ export const registeredFrontendModules: FrontendModule[] = [
         href: "/la",
         order: 85,
         permission: "admin.settings.read",
+      },
+    ],
+  },
+  {
+    manifest: {
+      name: "branding",
+      title: { en: "Branding", bn: "ব্র্যান্ডিং" },
+      category: "core",
+      core: true,
+      permissions: ["admin.branding.manage", "admin.settings.manage", "*"],
+    },
+    adminNav: [
+      {
+        id: "branding",
+        labelKey: "branding.nav",
+        icon: <Palette className="h-4 w-4" />,
+        href: "/admin/branding",
+        order: 86,
+      },
+    ],
       },
     ],
   },

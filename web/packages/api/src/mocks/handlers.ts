@@ -8690,6 +8690,37 @@ export const handlers = [
                                                        })(),
                                                      ];
                                                    })(),
+                                              // ==========================================
+                                              // T18.06 — Branding & Live Theming Handlers (TODO(api:T18.06))
+                                              // ==========================================
+                                              ...(() => {
+                                                let mockBrandingState = {
+                                                  companyName: "DHPanel",
+                                                  logoUrl: "",
+                                                  faviconUrl: "",
+                                                  accentColor: "#3b82f6",
+                                                  loginTitle: "DHPanel",
+                                                  loginSubtitle: "Sign in to control your web hosting infrastructure",
+                                                  loginFooterText: "DHPanel Cloud Infrastructure & Management",
+                                                  nameservers: ["ns1.dhpanel.net", "ns2.dhpanel.net"],
+                                                  customCss: "",
+                                                };
+
+                                                return [
+                                                  // GET /api/v1/branding (TODO(api:T18.06))
+                                                  http.get(/\/api\/v1\/branding$/, () => {
+                                                    return HttpResponse.json(mockBrandingState);
+                                                  }),
+
+                                                  // PUT /api/v1/branding (TODO(api:T18.06))
+                                                  http.put(/\/api\/v1\/branding$/, async ({ request }) => {
+                                                    const body = (await request.json().catch(() => ({}))) as any;
+                                                    mockBrandingState = {
+                                                      ...mockBrandingState,
+                                                      ...body,
+                                                    };
+                                                    return HttpResponse.json(mockBrandingState);
+                                                  }),
                                                 ];
                                               })(),
                                             ];

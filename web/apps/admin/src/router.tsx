@@ -54,6 +54,7 @@ import {
   LaAdminPage,
   NotificationBell,
   NotificationPreferencesPage,
+  BrandingPage,
   filterNavItems,
   registeredFrontendModules,
 } from "@dhpanel/modules";
@@ -496,6 +497,19 @@ const settingsNotificationsRoute = createRoute({
   path: "/settings/notifications",
   component: NotificationPreferencesPage,
 });
+
+// 48. Branding routes (T18.06)
+const adminBrandingRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/branding",
+  component: BrandingPage,
+});
+
+const brandingRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/branding",
+  component: BrandingPage,
+});
 });
 
 // 18. Login route
@@ -565,13 +579,10 @@ const routeTree = rootRoute.addChildren([
   adminServerToolsRoute,
   clientWafRoute,
   adminWafRoute,
-  adminMigrationRoute,
-  clientMigrationRoute,
-  adminLicenseRoute,
-  licenseRoute,
-  laRoute,
   adminNotificationsRoute,
   settingsNotificationsRoute,
+  adminBrandingRoute,
+  brandingRoute,
   loginRoute,
 ]);
 

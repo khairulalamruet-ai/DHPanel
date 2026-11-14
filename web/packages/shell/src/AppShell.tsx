@@ -70,6 +70,9 @@ export function AppShell({ title, navItems, headerActions, children }: AppShellP
 
   return (
     <div className="min-h-screen bg-background text-foreground font-sans">
+      {session?.branding?.customCss && (
+        <style id="dhpanel-live-custom-css" dangerouslySetInnerHTML={{ __html: session.branding.customCss }} />
+      )}
       {/* Mobile Top Navigation */}
       <div className="flex items-center justify-between border-b px-4 py-3 md:hidden">
         <div className="flex items-center gap-2">
@@ -81,8 +84,12 @@ export function AppShell({ title, navItems, headerActions, children }: AppShellP
             {sidebarOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </button>
           <div className="flex items-center gap-2 font-bold text-lg text-primary">
-            <Server className="h-5 w-5 text-primary" />
-            <span>{title}</span>
+            {session?.branding?.logoUrl ? (
+              <img src={session.branding.logoUrl} alt="Logo" className="h-5 w-auto object-contain" />
+            ) : (
+              <Server className="h-5 w-5 text-primary" />
+            )}
+            <span data-testid="mobile-brand-title">{session?.branding?.companyName || title}</span>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -100,8 +107,14 @@ export function AppShell({ title, navItems, headerActions, children }: AppShellP
           }`}
         >
           <div className="hidden md:flex items-center gap-2 px-2 py-4 border-b">
-            <Server className="h-6 w-6 text-primary" />
-            <span className="text-xl font-bold tracking-tight text-primary">{title}</span>
+            {session?.branding?.logoUrl ? (
+              <img src={session.branding.logoUrl} alt="Logo" className="h-6 w-auto object-contain" />
+            ) : (
+              <Server className="h-6 w-6 text-primary" />
+            )}
+            <span className="text-xl font-bold tracking-tight text-primary" data-testid="app-brand-title">
+              {session?.branding?.companyName || title}
+            </span>
           </div>
 
           <div className="py-4">

@@ -16,6 +16,13 @@ export interface BootstrapData {
   branding?: {
     companyName?: string;
     logoUrl?: string;
+    faviconUrl?: string;
+    accentColor?: string;
+    loginTitle?: string;
+    loginSubtitle?: string;
+    loginFooterText?: string;
+    nameservers?: string[];
+    customCss?: string;
   };
   locale?: string;
   csrfToken?: string;
