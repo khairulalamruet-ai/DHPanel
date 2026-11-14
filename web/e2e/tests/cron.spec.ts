@@ -49,7 +49,7 @@ test.describe("Cron Jobs Management UI (T10.03)", () => {
     await expect(toggleBtn).toBeVisible();
     await toggleBtn.click();
     await expect(
-      page.getByText(/Cron job disabled|Cron job enabled|ক্রন জব সক্রিয়|নিষ্ক্রিয়/i)
+      page.getByText(/Cron job disabled|Cron job enabled|ক্রন জব সক্রিয়|নিষ্ক্রিয়/i).first()
     ).toBeVisible();
 
     // 3. Execute "Run Now"

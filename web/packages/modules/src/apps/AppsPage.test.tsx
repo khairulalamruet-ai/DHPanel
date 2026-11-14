@@ -1,0 +1,283 @@
+import React from "react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { CatalogGrid } from "./CatalogGrid";
+import { InstallWizardDialog } from "./InstallWizardDialog";
+import { InstalledAppsTable } from "./InstalledAppsTable";
+import { WordPressManagerDialog } from "./WordPressManagerDialog";
+import { AppsPage } from "./AppsPage";
+import { CatalogApp, InstalledApp, WordPressDetails } from "./types";
+
+// Mock @dhpanel/api
+const mockApiFetch = vi.fn();
+vi.mock("@dhpanel/api", () => ({
+  apiFetch: (...args: any[]) => mockApiFetch(...args),
+}));
+
+// Mock @dhpanel/i18n
+vi.mock("@dhpanel/i18n", () => ({
+  useTranslation: () => ({
+    t: (key: string, defaultVal?: string | Record<string, any>) => {
+      if (typeof defaultVal === "string") return defaultVal;
+      return key;
+    },
+    i18n: { language: "en" },
+  }),
+}));
+
+// Mock @dhpanel/ui toast
+const mockToast = vi.fn();
+vi.mock("@dhpanel/ui", async () => {
+  const actual = await vi.importActual<any>("@dhpanel/ui");
+  return {
+    ...actual,
+    useToast: () => ({ toast: mockToast }),
+  };
+});
+
+describe("Autoinstaller & Apps Management UI (T12.06 & T12.03)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const mockCatalog: CatalogApp[] = [
+    {
+      id: "wordpress",
+      name: "WordPress",
+      category: "cms",
+      version: "6.7.1",
+      description: "World's most popular blogging and CMS engine.",
+      icon: "wordpress",
+      requires_db: true,
+      requires_php: true,
+      min_php_version: "8.1",
+      documentation_url: "https://wordpress.org",
+    },
+    {
+      id: "laravel",
+      name: "Laravel Skeleton",
+      category: "framework",
+      version: "11.31.0",
+      description: "Modern PHP framework for web artisans.",
+      icon: "laravel",
+      requires_db: true,
+      requires_php: true,
+      min_php_version: "8.2",
+    },
+    {
+      id: "static",
+      name: "Static HTML5 Starter",
+      category: "static",
+      version: "1.0.0",
+      description: "Fast static website starter.",
+      icon: "static",
+      requires_db: false,
+      requires_php: false,
+    },
+  ];
+
+  const mockInstalled: InstalledApp[] = [
+    {
+      id: "app-wp-01",
+      catalog_app_id: "wordpress",
+      name: "WordPress",
+      domain: "client-site.com",
+      path: "/",
+      url: "https://client-site.com",
+      admin_url: "https://client-site.com/wp-admin",
+      version: "6.7.0",
+      latest_version: "6.7.1",
+      has_update: true,
+      status: "running",
+      db_name: "wp_clientsite",
+      db_user: "wp_user",
+      installed_at: "2026-11-10 12:00:00",
+      auto_update: true,
+    },
+  ];
+
+  const mockWpDetails: WordPressDetails = {
+    app_id: "app-wp-01",
+    core_version: "6.7.0",
+    latest_core_version: "6.7.1",
+    maintenance_mode: false,
+    xmlrpc_disabled: true,
+    debug_mode: false,
+    plugins: [
+      {
+        slug: "woocommerce",
+        name: "WooCommerce",
+        version: "8.5.1",
+        latest_version: "8.6.0",
+        has_update: true,
+        active: true,
+        author: "Automattic",
+      },
+      {
+        slug: "wordpress-seo",
+        name: "Yoast SEO",
+        version: "22.0",
+        latest_version: "22.0",
+        has_update: false,
+        active: true,
+        author: "Team Yoast",
+      },
+    ],
+    themes: [
+      {
+        slug: "twentytwentyfour",
+        name: "Twenty Twenty-Four",
+        version: "1.0",
+        active: true,
+      },
+    ],
+  };
+
+  it("CatalogGrid: renders catalog apps and handles search and selection", () => {
+    const handleSelect = vi.fn();
+    render(<CatalogGrid catalog={mockCatalog} onSelectApp={handleSelect} />);
+
+    expect(screen.getByTestId("catalog-grid")).toBeDefined();
+    expect(screen.getByTestId("catalog-card-wordpress")).toBeDefined();
+    expect(screen.getByTestId("catalog-card-laravel")).toBeDefined();
+    expect(screen.getByTestId("catalog-card-static")).toBeDefined();
+
+    // Select WordPress to install
+    const installBtn = screen.getByTestId("btn-install-wordpress");
+    fireEvent.click(installBtn);
+    expect(handleSelect).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "wordpress" })
+    );
+
+    // Search filter
+    const searchInput = screen.getByTestId("input-search-catalog");
+    fireEvent.change(searchInput, { target: { value: "Laravel" } });
+    expect(screen.queryByTestId("catalog-card-wordpress")).toBeNull();
+    expect(screen.getByTestId("catalog-card-laravel")).toBeDefined();
+  });
+
+  it("InstallWizardDialog: configures installation parameters and submits", async () => {
+    const handleInstall = vi.fn().mockResolvedValue(mockInstalled[0]);
+    const handleSuccess = vi.fn();
+    const handleClose = vi.fn();
+
+    render(
+      <InstallWizardDialog
+        open={true}
+        app={mockCatalog[0]}
+        domains={["client-site.com"]}
+        onClose={handleClose}
+        onInstall={handleInstall}
+        onSuccess={handleSuccess}
+      />
+    );
+
+    expect(screen.getByTestId("install-wizard-title")).toBeDefined();
+    expect(screen.getByTestId("select-app-domain")).toBeDefined();
+    expect(screen.getByTestId("input-site-name")).toBeDefined();
+
+    // Submit form
+    const submitBtn = screen.getByTestId("btn-submit-install");
+    fireEvent.click(submitBtn);
+
+    await waitFor(() => {
+      expect(handleInstall).toHaveBeenCalledWith(
+        expect.objectContaining({
+          catalog_app_id: "wordpress",
+          domain: "client-site.com",
+        })
+      );
+    });
+
+    // Check success screen
+    await waitFor(() => {
+      expect(screen.getByTestId("install-success-view")).toBeDefined();
+      expect(screen.getByTestId("link-installed-site")).toBeDefined();
+    });
+  });
+
+  it("InstalledAppsTable: renders list of tenant applications (DoD)", () => {
+    const handleOpenManage = vi.fn();
+    const handleUninstall = vi.fn();
+
+    render(
+      <InstalledAppsTable
+        apps={mockInstalled}
+        onOpenManage={handleOpenManage}
+        onUninstall={handleUninstall}
+      />
+    );
+
+    expect(screen.getByTestId("installed-apps-table")).toBeDefined();
+    expect(screen.getByTestId("installed-app-name-app-wp-01")).toHaveTextContent("WordPress");
+    expect(screen.getByTestId("link-visit-app-app-wp-01")).toBeDefined();
+
+    // Manage button
+    const manageBtn = screen.getByTestId("btn-manage-app-app-wp-01");
+    fireEvent.click(manageBtn);
+    expect(handleOpenManage).toHaveBeenCalledWith(mockInstalled[0]);
+  });
+
+  it("WordPressManagerDialog: meets T12.03 DoD by allowing plugin updates from UI", async () => {
+    const handleUpdatePlugin = vi.fn().mockResolvedValue(undefined);
+    const handleTogglePlugin = vi.fn();
+    const handleToggleMaint = vi.fn();
+    const handleClone = vi.fn();
+    const handleClose = vi.fn();
+
+    render(
+      <WordPressManagerDialog
+        open={true}
+        app={mockInstalled[0]}
+        details={mockWpDetails}
+        onClose={handleClose}
+        onUpdatePlugin={handleUpdatePlugin}
+        onTogglePlugin={handleTogglePlugin}
+        onToggleMaintenance={handleToggleMaint}
+        onCloneStaging={handleClone}
+      />
+    );
+
+    expect(screen.getByTestId("wp-manager-title")).toBeDefined();
+
+    // Switch to Plugins tab
+    const pluginsTab = screen.getByTestId("tab-wp-plugins");
+    fireEvent.click(pluginsTab);
+
+    expect(screen.getByTestId("wp-plugins-table")).toBeDefined();
+    expect(screen.getByTestId("plugin-row-woocommerce")).toBeDefined();
+    expect(screen.getByTestId("badge-update-woocommerce")).toBeDefined();
+
+    // Click Update button for WooCommerce (T12.03 DoD)
+    const updateBtn = screen.getByTestId("btn-update-plugin-woocommerce");
+    fireEvent.click(updateBtn);
+
+    await waitFor(() => {
+      expect(handleUpdatePlugin).toHaveBeenCalledWith("app-wp-01", "woocommerce");
+    });
+  });
+
+  it("AppsPage: fetches catalog and installed apps and enables tab switching", async () => {
+    mockApiFetch.mockImplementation(async (url: string) => {
+      if (url.includes("/catalog")) return mockCatalog;
+      if (url.includes("/installed")) return mockInstalled;
+      return [];
+    });
+
+    render(<AppsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("apps-page-title")).toBeDefined();
+    });
+
+    // Installed tab is default
+    expect(screen.getByTestId("installed-apps-table")).toBeDefined();
+
+    // Switch to catalog tab
+    const catalogTab = screen.getByTestId("tab-app-catalog");
+    fireEvent.click(catalogTab);
+
+    expect(screen.getByTestId("catalog-grid")).toBeDefined();
+    expect(screen.getByTestId("catalog-card-wordpress")).toBeDefined();
+  });
+});

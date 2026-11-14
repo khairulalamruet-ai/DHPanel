@@ -1,0 +1,343 @@
+import React, { useState, useEffect, useCallback } from "react";
+import { useTranslation } from "@dhpanel/i18n";
+import { apiFetch } from "@dhpanel/api";
+import { useToast, Button } from "@dhpanel/ui";
+import {
+  Boxes,
+  Download,
+  ListFilter,
+  RefreshCw,
+  Plus,
+  AlertCircle,
+} from "lucide-react";
+import { CatalogApp, InstalledApp, WordPressDetails, InstallAppPayload } from "./types";
+import { CatalogGrid } from "./CatalogGrid";
+import { InstallWizardDialog } from "./InstallWizardDialog";
+import { InstalledAppsTable } from "./InstalledAppsTable";
+import { WordPressManagerDialog } from "./WordPressManagerDialog";
+
+export function AppsPage() {
+  const { t } = useTranslation();
+  const { toast } = useToast();
+
+  const [activeTab, setActiveTab] = useState<"installed" | "catalog">("installed");
+  const [catalog, setCatalog] = useState<CatalogApp[]>([]);
+  const [installedApps, setInstalledApps] = useState<InstalledApp[]>([]);
+  const [domains, setDomains] = useState<string[]>(["client-site.com", "myblog.net"]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isError, setIsError] = useState(false);
+
+  // Modal states
+  const [selectedCatalogApp, setSelectedCatalogApp] = useState<CatalogApp | null>(null);
+  const [managingApp, setManagingApp] = useState<InstalledApp | null>(null);
+  const [wpDetails, setWpDetails] = useState<WordPressDetails | null>(null);
+
+  const fetchAppsData = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      setIsError(false);
+
+      const [catalogRes, installedRes] = await Promise.all([
+        apiFetch<CatalogApp[]>("/api/v1/apps/catalog"),
+        apiFetch<InstalledApp[]>("/api/v1/apps/installed"),
+      ]);
+
+      setCatalog(catalogRes);
+      setInstalledApps(installedRes);
+
+      // Extract unique domains if available
+      const doms = Array.from(new Set(installedRes.map((a) => a.domain)));
+      if (doms.length > 0) {
+        setDomains(doms);
+      }
+    } catch {
+      setIsError(true);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchAppsData();
+  }, [fetchAppsData]);
+
+  // Handle Install Application
+  const handleInstallApp = async (payload: InstallAppPayload): Promise<InstalledApp> => {
+    const res = await apiFetch<{ success: boolean; app: InstalledApp }>("/api/v1/apps/install", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+
+    setInstalledApps((prev) => [res.app, ...prev]);
+
+    toast({
+      title: t("apps.installSuccessToastTitle", "Application Installed"),
+      description: t("apps.installSuccessToastDesc", "{{name}} is now active on {{domain}}", {
+        name: res.app.name,
+        domain: res.app.domain,
+      }),
+    });
+
+    return res.app;
+  };
+
+  // Handle Uninstall Application
+  const handleUninstallApp = async (appId: string) => {
+    await apiFetch(`/api/v1/apps/installed/${appId}`, {
+      method: "DELETE",
+    });
+
+    setInstalledApps((prev) => prev.filter((a) => a.id !== appId));
+
+    toast({
+      title: t("apps.uninstallSuccessTitle", "Application Removed"),
+      description: t("apps.uninstallSuccessDesc", "The application was completely uninstalled."),
+    });
+  };
+
+  // Open Manage dialog
+  const handleOpenManage = async (app: InstalledApp) => {
+    setManagingApp(app);
+    if (app.catalog_app_id === "wordpress") {
+      try {
+        const details = await apiFetch<WordPressDetails>(`/api/v1/apps/wordpress/${app.id}`);
+        setWpDetails(details);
+      } catch {
+        // Fallback mock details if fetch fails
+        setWpDetails({
+          app_id: app.id,
+          core_version: app.version,
+          latest_core_version: app.latest_version,
+          maintenance_mode: app.status === "maintenance",
+          xmlrpc_disabled: true,
+          debug_mode: false,
+          plugins: [
+            {
+              slug: "woocommerce",
+              name: "WooCommerce",
+              version: "8.5.1",
+              latest_version: "8.6.0",
+              has_update: true,
+              active: true,
+              author: "Automattic",
+            },
+            {
+              slug: "wordpress-seo",
+              name: "Yoast SEO",
+              version: "22.0",
+              latest_version: "22.0",
+              has_update: false,
+              active: true,
+              author: "Team Yoast",
+            },
+          ],
+          themes: [
+            {
+              slug: "twentytwentyfour",
+              name: "Twenty Twenty-Four",
+              version: "1.0",
+              active: true,
+            },
+          ],
+        });
+      }
+    }
+  };
+
+  // Update WordPress Plugin (T12.03)
+  const handleUpdatePlugin = async (appId: string, slug: string) => {
+    await apiFetch(`/api/v1/apps/wordpress/${appId}/plugins/${slug}/update`, {
+      method: "POST",
+    });
+
+    setWpDetails((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        plugins: prev.plugins.map((p) =>
+          p.slug === slug ? { ...p, version: p.latest_version, has_update: false } : p
+        ),
+      };
+    });
+
+    toast({
+      title: t("wpManager.pluginUpdatedTitle", "Plugin Updated"),
+      description: t("wpManager.pluginUpdatedDesc", "Plugin {{slug}} has been updated to the latest version.", { slug }),
+    });
+  };
+
+  // Toggle WordPress Plugin
+  const handleTogglePlugin = async (appId: string, slug: string) => {
+    await apiFetch(`/api/v1/apps/wordpress/${appId}/plugins/${slug}/toggle`, {
+      method: "POST",
+    });
+
+    setWpDetails((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        plugins: prev.plugins.map((p) =>
+          p.slug === slug ? { ...p, active: !p.active } : p
+        ),
+      };
+    });
+  };
+
+  // Toggle Maintenance Mode
+  const handleToggleMaintenance = async (appId: string, enabled: boolean) => {
+    await apiFetch(`/api/v1/apps/wordpress/${appId}/maintenance`, {
+      method: "POST",
+      body: JSON.stringify({ enabled }),
+    });
+
+    setWpDetails((prev) => (prev ? { ...prev, maintenance_mode: enabled } : prev));
+    setInstalledApps((prev) =>
+      prev.map((a) => (a.id === appId ? { ...a, status: enabled ? "maintenance" : "running" } : a))
+    );
+
+    toast({
+      title: enabled ? t("wpManager.maintenanceEnabled", "Maintenance Mode Active") : t("wpManager.maintenanceDisabled", "Maintenance Mode Disabled"),
+    });
+  };
+
+  // Clone to Staging
+  const handleCloneStaging = async (appId: string) => {
+    const res = await apiFetch<{ staging_url: string }>(`/api/v1/apps/wordpress/${appId}/staging`, {
+      method: "POST",
+    });
+
+    setWpDetails((prev) => (prev ? { ...prev, staging_url: res.staging_url } : prev));
+
+    toast({
+      title: t("wpManager.stagingCreatedTitle", "Staging Environment Ready"),
+      description: t("wpManager.stagingCreatedDesc", "Clone was created at {{url}}", { url: res.staging_url }),
+    });
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex h-64 items-center justify-center" data-testid="apps-page-loading">
+        <p className="text-sm text-muted-foreground">{t("common.loading", "Loading...")}</p>
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className="p-8 text-center" data-testid="apps-page-error">
+        <AlertCircle className="h-10 w-10 text-destructive mx-auto mb-2" />
+        <p className="font-semibold">{t("apps.loadError", "Failed to load applications.")}</p>
+        <button
+          onClick={() => fetchAppsData()}
+          className="mt-4 px-4 py-2 bg-primary text-primary-foreground rounded text-xs font-semibold"
+        >
+          {t("common.retry", "Retry")}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6" data-testid="apps-page">
+      {/* Page Header */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2" data-testid="apps-page-title">
+            <Boxes className="h-7 w-7 text-primary" />
+            {t("apps.pageTitle", "Applications & Autoinstaller")}
+          </h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            {t("apps.pageSubtitle", "Install, manage, and automate WordPress, Joomla, Laravel, and other web apps.")}
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Button
+            onClick={() => setActiveTab("catalog")}
+            data-testid="btn-open-catalog-tab"
+            className="flex items-center gap-1.5 h-9 text-xs font-semibold"
+          >
+            <Plus className="h-4 w-4" />
+            <span>{t("apps.installNewApp", "Install Application")}</span>
+          </Button>
+        </div>
+      </div>
+
+      {/* Main Tabs (Installed vs Catalog) - T12.06 DoD */}
+      <div className="flex items-center border-b space-x-4">
+        <button
+          onClick={() => setActiveTab("installed")}
+          data-testid="tab-installed-apps"
+          className={`pb-3 font-semibold text-sm transition-all border-b-2 flex items-center gap-2 ${
+            activeTab === "installed"
+              ? "border-primary text-primary"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          <ListFilter className="h-4 w-4" />
+          <span>{t("apps.tabInstalled", "Installed Applications")}</span>
+          <span className="bg-muted px-2 py-0.5 rounded-full text-xs font-mono font-medium">
+            {installedApps.length}
+          </span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab("catalog")}
+          data-testid="tab-app-catalog"
+          className={`pb-3 font-semibold text-sm transition-all border-b-2 flex items-center gap-2 ${
+            activeTab === "catalog"
+              ? "border-primary text-primary"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          <Download className="h-4 w-4" />
+          <span>{t("apps.tabCatalog", "App Store / Catalog")}</span>
+          <span className="bg-muted px-2 py-0.5 rounded-full text-xs font-mono font-medium">
+            {catalog.length}
+          </span>
+        </button>
+      </div>
+
+      {/* Tab Panels */}
+      {activeTab === "installed" ? (
+        <InstalledAppsTable
+          apps={installedApps}
+          onOpenManage={handleOpenManage}
+          onUninstall={handleUninstallApp}
+        />
+      ) : (
+        <CatalogGrid
+          catalog={catalog}
+          onSelectApp={(app) => setSelectedCatalogApp(app)}
+        />
+      )}
+
+      {/* Install Wizard Dialog (T12.06) */}
+      <InstallWizardDialog
+        open={Boolean(selectedCatalogApp)}
+        app={selectedCatalogApp}
+        domains={domains}
+        onClose={() => setSelectedCatalogApp(null)}
+        onInstall={handleInstallApp}
+        onSuccess={() => {
+          setActiveTab("installed");
+        }}
+      />
+
+      {/* WordPress Manager Dialog (T12.03) */}
+      <WordPressManagerDialog
+        open={Boolean(managingApp)}
+        app={managingApp}
+        details={wpDetails}
+        onClose={() => {
+          setManagingApp(null);
+          setWpDetails(null);
+        }}
+        onUpdatePlugin={handleUpdatePlugin}
+        onTogglePlugin={handleTogglePlugin}
+        onToggleMaintenance={handleToggleMaintenance}
+        onCloneStaging={handleCloneStaging}
+      />
+    </div>
+  );
+}

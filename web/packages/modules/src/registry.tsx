@@ -1,5 +1,5 @@
 import React from "react";
-import { LayoutDashboard, ShieldCheck, ShieldAlert, Sparkles, Puzzle, Globe, Users, Settings, FileText, Boxes, Server, Activity, Layers, Lock, FileCode2, Cpu, Database, Folder, Archive, Clock, Terminal, Wrench } from "lucide-react";
+import { LayoutDashboard, ShieldCheck, ShieldAlert, Sparkles, Puzzle, Globe, Users, Settings, FileText, Boxes, Server, Activity, Layers, Lock, FileCode2, Cpu, Database, Folder, Archive, Clock, Terminal, Wrench, Flame, Mail, Briefcase, ArrowRightLeft } from "lucide-react";
 
 export interface ModuleManifest {
   name: string;
@@ -709,6 +709,176 @@ export const registeredFrontendModules: FrontendModule[] = [
         href: "/admin/waf",
         order: 63,
         permission: "admin.waf.manage",
+      },
+    ],
+  },
+  {
+    manifest: {
+      name: "firewall",
+      title: { en: "Firewall & IP Block", bn: "ফায়ারওয়াল ও আইপি ব্লক" },
+      category: "security",
+      core: true,
+      permissions: ["firewall.read", "firewall.manage", "admin.firewall.manage"],
+      features: ["firewall"],
+    },
+    clientNav: [
+      {
+        id: "firewall",
+        labelKey: "firewall.nav",
+        icon: <Flame className="h-4 w-4" />,
+        href: "/firewall",
+        order: 38,
+        permission: "firewall.read",
+        feature: "firewall",
+      },
+    ],
+    adminNav: [
+      {
+        id: "admin-firewall",
+        labelKey: "firewall.nav",
+        icon: <Flame className="h-4 w-4" />,
+        href: "/admin/firewall",
+        order: 65,
+        permission: "admin.firewall.manage",
+      },
+    ],
+  },
+  {
+    manifest: {
+      name: "security_center",
+      title: { en: "Security Center", bn: "নিরাপত্তা কেন্দ্র" },
+      category: "core",
+      core: true,
+      permissions: ["admin.security.read"],
+    },
+    adminNav: [
+      {
+        id: "admin-security-center",
+        labelKey: "securityCenter.nav",
+        icon: <ShieldAlert className="h-4 w-4" />,
+        href: "/admin/security",
+        order: 66,
+        permission: "admin.security.read",
+      },
+    ],
+  },
+  {
+    manifest: {
+      name: "apps",
+      title: { en: "Applications", bn: "অ্যাপ্লিকেশনসমূহ" },
+      category: "core",
+      core: true,
+      permissions: ["apps.read", "apps.install", "apps.manage"],
+      features: ["apps"],
+    },
+    clientNav: [
+      {
+        id: "apps",
+        labelKey: "apps.nav",
+        icon: <Boxes className="h-4 w-4" />,
+        href: "/apps",
+        order: 30,
+        permission: "apps.read",
+      },
+    ],
+    adminNav: [
+      {
+        id: "admin-apps",
+        labelKey: "apps.nav",
+        icon: <Boxes className="h-4 w-4" />,
+        href: "/admin/apps",
+        order: 55,
+        permission: "apps.read",
+      },
+    ],
+  },
+  {
+    manifest: {
+      name: "email",
+      title: { en: "Email", bn: "ইমেইল" },
+      category: "core",
+      core: true,
+      permissions: ["email.read", "email.manage", "admin.email.manage"],
+      features: ["email"],
+    },
+    clientNav: [
+      {
+        id: "email",
+        labelKey: "email.nav",
+        icon: <Mail className="h-4 w-4" />,
+        href: "/email",
+        order: 35,
+        permission: "email.read",
+      },
+    ],
+    adminNav: [
+      {
+        id: "admin-email",
+        labelKey: "email.adminNav",
+        icon: <Mail className="h-4 w-4" />,
+        href: "/admin/mail",
+        order: 56,
+        permission: "admin.email.manage",
+      },
+    ],
+  },
+  {
+    manifest: {
+      name: "resellers",
+      title: { en: "Resellers", bn: "রিসেলার" },
+      category: "core",
+      core: true,
+      permissions: ["resellers.read", "resellers.manage", "admin.resellers.manage"],
+      features: ["resellers"],
+    },
+    clientNav: [
+      {
+        id: "reseller-portal",
+        labelKey: "reseller.nav",
+        icon: <Briefcase className="h-4 w-4" />,
+        href: "/reseller",
+        order: 38,
+        permission: "resellers.read",
+      },
+    ],
+    adminNav: [
+      {
+        id: "admin-resellers",
+        labelKey: "reseller.adminNav",
+        icon: <Briefcase className="h-4 w-4" />,
+        href: "/admin/resellers",
+        order: 58,
+        permission: "admin.resellers.manage",
+      },
+    ],
+  },
+  {
+    manifest: {
+      name: "migration",
+      title: { en: "Migration & Transfers", bn: "মাইগ্রেশন ও ট্রান্সফার" },
+      category: "core",
+      core: true,
+      permissions: ["migration.read", "migration.execute", "admin.migration.manage"],
+      features: ["migration"],
+    },
+    adminNav: [
+      {
+        id: "admin-migration",
+        labelKey: "migration.adminNav",
+        icon: <ArrowRightLeft className="h-4 w-4" />,
+        href: "/admin/migration",
+        order: 60,
+        permission: "admin.migration.manage",
+      },
+    ],
+    clientNav: [
+      {
+        id: "client-migration",
+        labelKey: "migration.nav",
+        icon: <ArrowRightLeft className="h-4 w-4" />,
+        href: "/migration",
+        order: 42,
+        permission: "migration.read",
       },
     ],
   },

@@ -7060,7 +7060,6 @@ export const handlers = [
                                                 mockWafPolicies[domain].updated_at = new Date().toISOString();
                                                 return HttpResponse.json({ success: true, policy: mockWafPolicies[domain] });
                                               }),
-
                                               // GET /api/v1/admin/waf/events (TODO(api:T11.04))
                                               http.get(/\/api\/v1\/admin\/waf\/events$/, ({ request }) => {
                                                 const url = new URL(request.url);
@@ -7131,6 +7130,1513 @@ export const handlers = [
                                                 mockWafPolicies[domain].mode = body.mode || "block";
                                                 return HttpResponse.json({ success: true, policy: mockWafPolicies[domain] });
                                               }),
+
+                                              ...(() => {
+                                                const mockClientIpRules: Array<{
+                                                  id: string;
+                                                  domain: string;
+                                                  ip_cidr: string;
+                                                  action: "block" | "allow";
+                                                  notes?: string;
+                                                  created_at: string;
+                                                }> = [
+                                                  {
+                                                    id: "ip-rule-1",
+                                                    domain: "example.com",
+                                                    ip_cidr: "198.51.100.42",
+                                                    action: "block",
+                                                    notes: "Aggressive scraper / brute force",
+                                                    created_at: "2026-11-12 14:00:00",
+                                                  },
+                                                  {
+                                                    id: "ip-rule-2",
+                                                    domain: "example.com",
+                                                    ip_cidr: "203.0.113.0/24",
+                                                    action: "block",
+                                                    notes: "Suspicious hosting subnet",
+                                                    created_at: "2026-11-12 16:30:00",
+                                                  },
+                                                  {
+                                                    id: "ip-rule-3",
+                                                    domain: "example.com",
+                                                    ip_cidr: "192.0.2.10",
+                                                    action: "allow",
+                                                    notes: "Office static IP",
+                                                    created_at: "2026-11-10 10:00:00",
+                                                  },
+                                                ];
+
+                                                const mockAdminFirewallOverview: {
+                                                  node_id: string;
+                                                  status: "active" | "inactive";
+                                                  nftables_version: string;
+                                                  active_ports: Array<{ id: string; port: number; protocol: "tcp" | "udp"; service_name: string; is_system_protected: boolean; status: "open" | "closed" }>;
+                                                  active_bans: Array<{ id: string; ip: string; reason: string; source: "bruteforce_auto" | "admin_manual"; service: string; banned_at: string; expires_at: string | null }>;
+                                                  rate_limit_enabled: boolean;
+                                                  rate_limit_rps: number;
+                                                } = {
+                                                  node_id: "node-1",
+                                                  status: "active" as const,
+                                                  nftables_version: "nftables v1.0.9 (Kernel Packet Filter)",
+                                                  active_ports: [
+                                                    { id: "port-1", port: 22, protocol: "tcp" as const, service_name: "SSH Management", is_system_protected: true, status: "open" as const },
+                                                    { id: "port-2", port: 80, protocol: "tcp" as const, service_name: "HTTP Web Traffic", is_system_protected: true, status: "open" as const },
+                                                    { id: "port-3", port: 443, protocol: "tcp" as const, service_name: "HTTPS TLS Traffic", is_system_protected: true, status: "open" as const },
+                                                    { id: "port-4", port: 21, protocol: "tcp" as const, service_name: "FTP Control", is_system_protected: false, status: "open" as const },
+                                                    { id: "port-5", port: 8080, protocol: "tcp" as const, service_name: "Dev Webhook Port", is_system_protected: false, status: "open" as const },
+                                                  ],
+                                                  active_bans: [
+                                                    {
+                                                      id: "ban-1",
+                                                      ip: "198.51.100.22",
+                                                      reason: "Exceeded 10 failed panel login attempts",
+                                                      source: "bruteforce_auto" as const,
+                                                      service: "panel_login" as const,
+                                                      banned_at: "2026-11-13 10:15:00",
+                                                      expires_at: "2026-11-13 11:15:00",
+                                                    },
+                                                    {
+                                                      id: "ban-2",
+                                                      ip: "203.0.113.99",
+                                                      reason: "Repeated SFTP dictionary attacks",
+                                                      source: "bruteforce_auto" as const,
+                                                      service: "sftp" as const,
+                                                      banned_at: "2026-11-13 10:45:00",
+                                                      expires_at: "2026-11-13 11:45:00",
+                                                    },
+                                                  ],
+                                                  rate_limit_enabled: true,
+                                                  rate_limit_rps: 50,
+                                                };
+
+                                                return [
+                                                  // GET /api/v1/client/firewall/rules (TODO(api:T11.08))
+                                                  http.get(/\/api\/v1\/client\/firewall\/rules$/, ({ request }) => {
+                                                    const url = new URL(request.url);
+                                                    const domain = url.searchParams.get("domain") || "example.com";
+                                                    return HttpResponse.json(mockClientIpRules.filter((r) => r.domain === domain));
+                                                  }),
+
+                                                  // POST /api/v1/client/firewall/rules (TODO(api:T11.08))
+                                                  http.post(/\/api\/v1\/client\/firewall\/rules$/, async ({ request }) => {
+                                                    const body = (await request.json().catch(() => ({}))) as any;
+                                                    const newRule = {
+                                                      id: `ip-rule-${Date.now()}`,
+                                                      domain: body.domain || "example.com",
+                                                      ip_cidr: body.ip_cidr,
+                                                      action: body.action || "block",
+                                                      notes: body.notes || "",
+                                                      created_at: new Date().toISOString().slice(0, 19).replace("T", " "),
+                                                    };
+                                                    mockClientIpRules.unshift(newRule);
+                                                    return HttpResponse.json({ success: true, rule: newRule });
+                                                  }),
+
+                                                  // DELETE /api/v1/client/firewall/rules/:id (TODO(api:T11.08))
+                                                  http.delete(/\/api\/v1\/client\/firewall\/rules\/([^/]+)$/, ({ params }) => {
+                                                    const id = String(params[0] || params.id);
+                                                    const idx = mockClientIpRules.findIndex((r) => r.id === id);
+                                                    if (idx !== -1) {
+                                                      mockClientIpRules.splice(idx, 1);
+                                                    }
+                                                    return HttpResponse.json({ success: true, id });
+                                                  }),
+
+                                                  // GET /api/v1/admin/firewall/overview (TODO(api:T11.08))
+                                                  http.get(/\/api\/v1\/admin\/firewall\/overview$/, () => {
+                                                    return HttpResponse.json(mockAdminFirewallOverview);
+                                                  }),
+
+                                                  // POST /api/v1/admin/firewall/ports (TODO(api:T11.08))
+                                                  http.post(/\/api\/v1\/admin\/firewall\/ports$/, async ({ request }) => {
+                                                    const body = (await request.json().catch(() => ({}))) as any;
+                                                    const newPort = {
+                                                      id: `port-${Date.now()}`,
+                                                      port: Number(body.port),
+                                                      protocol: body.protocol || "tcp",
+                                                      service_name: body.service_name || "Custom Port",
+                                                      is_system_protected: false,
+                                                       status: "open" as const,
+                                                    };
+                                                    mockAdminFirewallOverview.active_ports.push(newPort);
+                                                    return HttpResponse.json({ success: true, port: newPort });
+                                                  }),
+
+                                                  // DELETE /api/v1/admin/firewall/ports/:id (TODO(api:T11.08))
+                                                  http.delete(/\/api\/v1\/admin\/firewall\/ports\/([^/]+)$/, ({ params }) => {
+                                                    const id = String(params[0] || params.id);
+                                                    const idx = mockAdminFirewallOverview.active_ports.findIndex((p) => p.id === id);
+                                                    if (idx !== -1) {
+                                                      mockAdminFirewallOverview.active_ports.splice(idx, 1);
+                                                    }
+                                                    return HttpResponse.json({ success: true, id });
+                                                  }),
+
+                                                  // POST /api/v1/admin/firewall/bans (TODO(api:T11.08))
+                                                  http.post(/\/api\/v1\/admin\/firewall\/bans$/, async ({ request }) => {
+                                                    const body = (await request.json().catch(() => ({}))) as any;
+                                                    const newBan = {
+                                                      id: `ban-${Date.now()}`,
+                                                      ip: body.ip,
+                                                      reason: body.reason || "Manual admin ban",
+                                                      source: "admin_manual" as const,
+                                                      service: "manual" as const,
+                                                      banned_at: new Date().toISOString().slice(0, 19).replace("T", " "),
+                                                      expires_at: body.duration_hours > 0 ? `${body.duration_hours} hours from now` : "Permanent",
+                                                    };
+                                                    mockAdminFirewallOverview.active_bans.unshift(newBan);
+                                                    return HttpResponse.json({ success: true, ban: newBan });
+                                                  }),
+
+                                                  // DELETE /api/v1/admin/firewall/bans/:id (TODO(api:T11.08))
+                                                  http.delete(/\/api\/v1\/admin\/firewall\/bans\/([^/]+)$/, ({ params }) => {
+                                                    const id = String(params[0] || params.id);
+                                                    const idx = mockAdminFirewallOverview.active_bans.findIndex((b) => b.id === id);
+                                                    if (idx !== -1) {
+                                                      mockAdminFirewallOverview.active_bans.splice(idx, 1);
+                                                    }
+                                                    return HttpResponse.json({ success: true, id });
+                                                  }),
+
+                                                  // POST /api/v1/admin/firewall/rate-limit (TODO(api:T11.08))
+                                                  http.post(/\/api\/v1\/admin\/firewall\/rate-limit$/, async ({ request }) => {
+                                                    const body = (await request.json().catch(() => ({}))) as any;
+                                                    mockAdminFirewallOverview.rate_limit_enabled = Boolean(body.enabled);
+                                                    mockAdminFirewallOverview.rate_limit_rps = Number(body.rate_limit_rps || 50);
+                                                    return HttpResponse.json({ success: true, enabled: mockAdminFirewallOverview.rate_limit_enabled, rate_limit_rps: mockAdminFirewallOverview.rate_limit_rps });
+                                                  }),
+
+                                                   ...(() => {
+                                                     const mockSecurityOverview = {
+                                                       stats: {
+                                                         score: 78,
+                                                         grade: "B" as const,
+                                                         critical_count: 2,
+                                                         warning_count: 4,
+                                                         info_count: 0,
+                                                         resolved_count: 4,
+                                                         login_failures_24h: 14,
+                                                         waf_blocks_24h: 8,
+                                                         malware_detected: 1,
+                                                         admins_without_2fa: 2,
+                                                         expiring_ssl_certs: 1,
+                                                         outdated_images: 3,
+                                                       },
+                                                       issues: [
+                                                         {
+                                                           id: "sec-issue-auth-failures",
+                                                           category: "auth" as const,
+                                                           severity: "critical" as const,
+                                                           title: "Brute-Force SSH/Panel Login Attempts Detected",
+                                                           title_bn: "ব্রুট-ফোর্স SSH ও প্যানেল লগইন চেষ্টা শনাক্ত হয়েছে",
+                                                           description: "14 consecutive failed login attempts detected from IP 203.0.113.88 targeting admin accounts.",
+                                                           description_bn: "IP 203.0.113.88 থেকে অ্যাডমিন অ্যাকাউন্টে ১৪ বার ধারাবাহিক ব্যর্থ লগইন চেষ্টা শনাক্ত হয়েছে।",
+                                                           timestamp: new Date(Date.now() - 15 * 60 * 1000).toISOString(),
+                                                           resource: "203.0.113.88 (fail2ban/panel-auth)",
+                                                           fix_action: {
+                                                             label_key: "securityCenter.fixBanIp",
+                                                             default_label: "Ban IP in Firewall",
+                                                             type: "modal_action" as const,
+                                                             action_id: "ban_ip",
+                                                           },
+                                                           status: "open" as "open" | "resolved",
+                                                         },
+                                                         {
+                                                           id: "sec-issue-malware-eicar",
+                                                           category: "malware" as const,
+                                                           severity: "critical" as const,
+                                                           title: "Suspicious Webshell / Malware Detected",
+                                                           title_bn: "সন্দেহভাজন ওয়েবশেল বা ম্যালওয়্যার শনাক্ত হয়েছে",
+                                                           description: "ClamAV scan flagged /var/www/site1/public/backdoor.php as PHP.Trojan.WebShell-1.",
+                                                           description_bn: "ClamAV স্ক্যানে /var/www/site1/public/backdoor.php ফাইলটি ম্যালওয়্যার হিসেবে ধরা পড়েছে।",
+                                                           timestamp: new Date(Date.now() - 45 * 60 * 1000).toISOString(),
+                                                           resource: "/var/www/site1/public/backdoor.php",
+                                                           fix_action: {
+                                                             label_key: "securityCenter.fixQuarantineFile",
+                                                             default_label: "Quarantine Malware File",
+                                                             type: "modal_action" as const,
+                                                             action_id: "quarantine_file",
+                                                           },
+                                                           status: "open" as "open" | "resolved",
+                                                         },
+                                                         {
+                                                           id: "sec-issue-waf-attacks",
+                                                           category: "waf" as const,
+                                                           severity: "warning" as const,
+                                                           title: "Coraza WAF Triggered on Domain client-store.com",
+                                                           title_bn: "ক্লায়েন্ট ডোমেইনে Coraza WAF ব্লকিং ট্রিগার হয়েছে",
+                                                           description: "Multiple SQL Injection (OWASP-942100) payloads detected on /api/search endpoint.",
+                                                           description_bn: "/api/search এন্ডপয়েন্টে একাধিক SQL ইনজেকশন পে-লোড শনাক্ত ও ব্লক করা হয়েছে।",
+                                                           timestamp: new Date(Date.now() - 2 * 3600 * 1000).toISOString(),
+                                                           resource: "client-store.com (WAF Core Ruleset)",
+                                                           fix_action: {
+                                                             label_key: "securityCenter.fixReviewWaf",
+                                                             default_label: "Review WAF Events",
+                                                             type: "link" as const,
+                                                             target_url: "/admin/waf",
+                                                           },
+                                                           status: "open" as "open" | "resolved",
+                                                         },
+                                                         {
+                                                           id: "sec-issue-admins-no-2fa",
+                                                           category: "auth" as const,
+                                                           severity: "warning" as const,
+                                                           title: "Admin Accounts Missing Two-Factor Authentication",
+                                                           title_bn: "অ্যাডমিন অ্যাকাউন্টে টু-ফ্যাক্টর অথেনটিকেশন (2FA) চালু নেই",
+                                                           description: "2 superadmin/operator accounts have not enrolled TOTP or WebAuthn hardware keys.",
+                                                           description_bn: "২ জন অ্যাডমিনের অ্যাকাউন্টে কোনো TOTP বা নিরাপত্তা চাবি কনফিগার করা নেই।",
+                                                           timestamp: new Date(Date.now() - 12 * 3600 * 1000).toISOString(),
+                                                           resource: "admin_user_2, ops_admin",
+                                                           fix_action: {
+                                                             label_key: "securityCenter.fixEnforce2fa",
+                                                             default_label: "Enforce 2FA on Admins",
+                                                             type: "modal_action" as const,
+                                                             action_id: "enforce_2fa",
+                                                           },
+                                                           status: "open" as "open" | "resolved",
+                                                         },
+                                                         {
+                                                           id: "sec-issue-ssl-expiring",
+                                                           category: "ssl" as const,
+                                                           severity: "warning" as const,
+                                                           title: "SSL/TLS Certificate Expiring Soon",
+                                                           title_bn: "SSL/TLS সনদের মেয়াদ দ্রুত শেষ হতে চলেছে",
+                                                           description: "Let's Encrypt certificate for billing.example.com will expire in 3 days.",
+                                                           description_bn: "billing.example.com ডোমেইনের SSL সার্টিফিকেটের মেয়াদ আগামী ৩ দিনের মধ্যে শেষ হবে।",
+                                                           timestamp: new Date(Date.now() - 18 * 3600 * 1000).toISOString(),
+                                                           resource: "billing.example.com",
+                                                           fix_action: {
+                                                             label_key: "securityCenter.fixRenewSsl",
+                                                             default_label: "Renew SSL Certificate",
+                                                             type: "link" as const,
+                                                             target_url: "/ssl",
+                                                           },
+                                                           status: "open" as "open" | "resolved",
+                                                         },
+                                                         {
+                                                           id: "sec-issue-outdated-image",
+                                                           category: "container" as const,
+                                                           severity: "warning" as const,
+                                                           title: "Outdated Base Docker Image with Known CVEs",
+                                                           title_bn: "পরিচিত নিরাপত্তা ত্রুটিসহ পুরনো ডকার ইমেজ শনাক্ত",
+                                                           description: "Container image php:8.2-fpm has 4 high-severity vulnerabilities in libxml2 and curl.",
+                                                           description_bn: "php:8.2-fpm ইমেজে libxml2 ও curl-এ ৪টি হাই-সিভিয়ারিটি CVE পাওয়া গেছে।",
+                                                           timestamp: new Date(Date.now() - 24 * 3600 * 1000).toISOString(),
+                                                           resource: "docker.io/library/php:8.2-fpm",
+                                                           fix_action: {
+                                                             label_key: "securityCenter.fixPullImage",
+                                                             default_label: "Update Container Image",
+                                                             type: "modal_action" as const,
+                                                             action_id: "update_image",
+                                                           },
+                                                           status: "open" as "open" | "resolved",
+                                                         },
+                                                       ],
+                                                     };
+
+                                                     return [
+                                                       // GET /api/v1/admin/security/overview (TODO(api:T11.11))
+                                                       http.get(/\/api\/v1\/admin\/security\/overview$/, () => {
+                                                         return HttpResponse.json(mockSecurityOverview);
+                                                       }),
+
+                                                       // POST /api/v1/admin/security/scan (TODO(api:T11.11))
+                                                       http.post(/\/api\/v1\/admin\/security\/scan$/, () => {
+                                                         return HttpResponse.json(mockSecurityOverview);
+                                                       }),
+
+                                                       // POST /api/v1/admin/security/issues/:id/fix (TODO(api:T11.11))
+                                                       http.post(/\/api\/v1\/admin\/security\/issues\/([^/]+)\/fix$/, ({ params }) => {
+                                                         const id = String(params[0] || params.id);
+                                                         const issue = mockSecurityOverview.issues.find((i) => i.id === id);
+                                                         if (issue) {
+                                                           issue.status = "resolved";
+                                                           mockSecurityOverview.stats.resolved_count += 1;
+                                                           if (issue.severity === "critical") {
+                                                             mockSecurityOverview.stats.critical_count = Math.max(0, mockSecurityOverview.stats.critical_count - 1);
+                                                           } else if (issue.severity === "warning") {
+                                                             mockSecurityOverview.stats.warning_count = Math.max(0, mockSecurityOverview.stats.warning_count - 1);
+                                                           }
+                                                           mockSecurityOverview.stats.score = Math.min(100, mockSecurityOverview.stats.score + 5);
+                                                         }
+                                                         return HttpResponse.json({ success: true, issue });
+                                                       }),
+                                                     ];
+                                                   })(),
+
+                                                   ...(() => {
+                                                     const mockCatalogApps = [
+                                                       {
+                                                         id: "wordpress",
+                                                         name: "WordPress",
+                                                         category: "cms" as const,
+                                                         version: "6.7.1",
+                                                         description: "World's most popular web publishing platform and CMS, powering over 40% of the web.",
+                                                         description_bn: "বিশ্বের সর্বাধিক জনপ্রিয় কন্টেন্ট ম্যানেজমেন্ট সিস্টেম ও ব্লগিং প্ল্যাটফর্ম।",
+                                                         icon: "wordpress",
+                                                         requires_db: true,
+                                                         requires_php: true,
+                                                         min_php_version: "8.1",
+                                                         documentation_url: "https://wordpress.org",
+                                                       },
+                                                       {
+                                                         id: "joomla",
+                                                         name: "Joomla",
+                                                         category: "cms" as const,
+                                                         version: "5.2.1",
+                                                         description: "Powerful open-source CMS for corporate websites, news portals, and intranets.",
+                                                         description_bn: "শক্তিশালী ওপেন-সোর্স সিএমএস যা জটিল কর্পোরেট ও নিউজ পোর্টালের জন্য আদর্শ।",
+                                                         icon: "joomla",
+                                                         requires_db: true,
+                                                         requires_php: true,
+                                                         min_php_version: "8.2",
+                                                         documentation_url: "https://joomla.org",
+                                                       },
+                                                       {
+                                                         id: "drupal",
+                                                         name: "Drupal",
+                                                         category: "cms" as const,
+                                                         version: "11.0.6",
+                                                         description: "Enterprise-grade digital experience and modular content management framework.",
+                                                         description_bn: "এন্টারপ্রাইজ গ্রেড ডিজিটাল এক্সপেরিয়েন্স ও মডুলার কনটেন্ট ম্যানেজমেন্ট প্ল্যাটফর্ম।",
+                                                         icon: "drupal",
+                                                         requires_db: true,
+                                                         requires_php: true,
+                                                         min_php_version: "8.3",
+                                                         documentation_url: "https://drupal.org",
+                                                       },
+                                                       {
+                                                         id: "laravel",
+                                                         name: "Laravel Skeleton",
+                                                         category: "framework" as const,
+                                                         version: "11.31.0",
+                                                         description: "The PHP framework for Web Artisans with expressive, elegant syntax and modern toolchain.",
+                                                         description_bn: "আধুনিক ওয়েব অ্যাপ তৈরির জন্য মার্জিত ও শক্তিশালী পিএইচপি ফ্রেমওয়ার্ক।",
+                                                         icon: "laravel",
+                                                         requires_db: true,
+                                                         requires_php: true,
+                                                         min_php_version: "8.2",
+                                                         documentation_url: "https://laravel.com",
+                                                       },
+                                                       {
+                                                         id: "static",
+                                                         name: "Static HTML5 Starter",
+                                                         category: "static" as const,
+                                                         version: "1.0.0",
+                                                         description: "Blazing fast responsive HTML5/CSS3 template optimized for high-performance static hosting.",
+                                                         description_bn: "হাই-পারফরম্যান্স স্ট্যাটিক সাইটের জন্য অপ্টিমাইজড এইচটিএমএল৫ ও সিএসএস৩ টেমপ্লেট।",
+                                                         icon: "static",
+                                                         requires_db: false,
+                                                         requires_php: false,
+                                                       },
+                                                     ];
+
+                                                     let mockInstalledApps: Array<{
+                                                       id: string;
+                                                       catalog_app_id: string;
+                                                       name: string;
+                                                       domain: string;
+                                                       path: string;
+                                                       url: string;
+                                                       admin_url?: string;
+                                                       version: string;
+                                                       latest_version: string;
+                                                       has_update: boolean;
+                                                       status: "running" | "maintenance" | "installing" | "error";
+                                                       db_name?: string;
+                                                       db_user?: string;
+                                                       installed_at: string;
+                                                       auto_update: boolean;
+                                                     }> = [
+                                                       {
+                                                         id: "app-wp-01",
+                                                         catalog_app_id: "wordpress",
+                                                         name: "WordPress",
+                                                         domain: "client-site.com",
+                                                         path: "/",
+                                                         url: "https://client-site.com",
+                                                         admin_url: "https://client-site.com/wp-admin",
+                                                         version: "6.7.0",
+                                                         latest_version: "6.7.1",
+                                                         has_update: true,
+                                                         status: "running" as const,
+                                                         db_name: "wp_clientsite",
+                                                         db_user: "wp_user",
+                                                         installed_at: "2026-11-10 12:00:00",
+                                                         auto_update: true,
+                                                       },
+                                                       {
+                                                         id: "app-laravel-02",
+                                                         catalog_app_id: "laravel",
+                                                         name: "Laravel Skeleton",
+                                                         domain: "myblog.net",
+                                                         path: "/",
+                                                         url: "https://myblog.net",
+                                                         version: "11.31.0",
+                                                         latest_version: "11.31.0",
+                                                         has_update: false,
+                                                         status: "running" as const,
+                                                         db_name: "lar_myblog",
+                                                         db_user: "lar_user",
+                                                         installed_at: "2026-11-12 09:30:00",
+                                                         auto_update: false,
+                                                       },
+                                                     ];
+
+                                                     const mockWordPressDetails: Record<string, any> = {
+                                                       "app-wp-01": {
+                                                         app_id: "app-wp-01",
+                                                         core_version: "6.7.0",
+                                                         latest_core_version: "6.7.1",
+                                                         maintenance_mode: false,
+                                                         xmlrpc_disabled: true,
+                                                         debug_mode: false,
+                                                         plugins: [
+                                                           {
+                                                             slug: "woocommerce",
+                                                             name: "WooCommerce",
+                                                             version: "8.5.1",
+                                                             latest_version: "8.6.0",
+                                                             has_update: true,
+                                                             active: true,
+                                                             author: "Automattic",
+                                                           },
+                                                           {
+                                                             slug: "wordpress-seo",
+                                                             name: "Yoast SEO",
+                                                             version: "22.0",
+                                                             latest_version: "22.0",
+                                                             has_update: false,
+                                                             active: true,
+                                                             author: "Team Yoast",
+                                                           },
+                                                           {
+                                                             slug: "wordfence",
+                                                             name: "Wordfence Security",
+                                                             version: "7.11.0",
+                                                             latest_version: "7.11.2",
+                                                             has_update: true,
+                                                             active: true,
+                                                             author: "Defiant",
+                                                           },
+                                                         ],
+                                                         themes: [
+                                                           {
+                                                             slug: "twentytwentyfour",
+                                                             name: "Twenty Twenty-Four",
+                                                             version: "1.0",
+                                                             active: true,
+                                                           },
+                                                           {
+                                                             slug: "astra",
+                                                             name: "Astra",
+                                                             version: "4.6.0",
+                                                             active: false,
+                                                           },
+                                                         ],
+                                                       },
+                                                     };
+
+                                                     return [
+                                                       // GET /api/v1/apps/catalog (TODO(api:T12.05))
+                                                       http.get(/\/api\/v1\/apps\/catalog$/, () => {
+                                                         return HttpResponse.json(mockCatalogApps);
+                                                       }),
+
+                                                       // GET /api/v1/apps/installed (TODO(api:T12.01))
+                                                       http.get(/\/api\/v1\/apps\/installed$/, () => {
+                                                         return HttpResponse.json(mockInstalledApps);
+                                                       }),
+
+                                                       // POST /api/v1/apps/install (TODO(api:T12.02))
+                                                       http.post(/\/api\/v1\/apps\/install$/, async ({ request }) => {
+                                                         const body = (await request.json().catch(() => ({}))) as any;
+                                                         const catalogApp = mockCatalogApps.find((c) => c.id === body.catalog_app_id) || mockCatalogApps[0];
+                                                         const proto = body.protocol || "https";
+                                                         const cleanPath = body.path === "/" ? "" : body.path;
+                                                         const fullUrl = `${proto}://${body.domain}${cleanPath}`;
+
+                                                         const newApp = {
+                                                           id: `app-${body.catalog_app_id}-${Date.now()}`,
+                                                           catalog_app_id: body.catalog_app_id,
+                                                           name: catalogApp.name,
+                                                           domain: body.domain,
+                                                           path: body.path || "/",
+                                                           url: fullUrl,
+                                                           admin_url: body.catalog_app_id === "wordpress" ? `${fullUrl}/wp-admin` : undefined,
+                                                           version: catalogApp.version,
+                                                           latest_version: catalogApp.version,
+                                                           has_update: false,
+                                                           status: "running" as const,
+                                                           db_name: catalogApp.requires_db ? `db_${body.catalog_app_id}` : undefined,
+                                                           db_user: catalogApp.requires_db ? `usr_${body.catalog_app_id}` : undefined,
+                                                           installed_at: new Date().toISOString().slice(0, 19).replace("T", " "),
+                                                           auto_update: Boolean(body.auto_update),
+                                                         };
+
+                                                         mockInstalledApps.unshift(newApp);
+
+                                                         if (body.catalog_app_id === "wordpress") {
+                                                           mockWordPressDetails[newApp.id] = {
+                                                             app_id: newApp.id,
+                                                             core_version: newApp.version,
+                                                             latest_core_version: newApp.latest_version,
+                                                             maintenance_mode: false,
+                                                             xmlrpc_disabled: true,
+                                                             debug_mode: false,
+                                                             plugins: [
+                                                               {
+                                                                 slug: "wordpress-seo",
+                                                                 name: "Yoast SEO",
+                                                                 version: "22.0",
+                                                                 latest_version: "22.0",
+                                                                 has_update: false,
+                                                                 active: true,
+                                                                 author: "Team Yoast",
+                                                               },
+                                                             ],
+                                                             themes: [
+                                                               {
+                                                                 slug: "twentytwentyfour",
+                                                                 name: "Twenty Twenty-Four",
+                                                                 version: "1.0",
+                                                                 active: true,
+                                                               },
+                                                             ],
+                                                           };
+                                                         }
+
+                                                         return HttpResponse.json({ success: true, app: newApp });
+                                                       }),
+
+                                                       // DELETE /api/v1/apps/installed/:id (TODO(api:T12.01))
+                                                       http.delete(/\/api\/v1\/apps\/installed\/([^/]+)$/, ({ params }) => {
+                                                         const id = String(params[0] || params.id);
+                                                         mockInstalledApps = mockInstalledApps.filter((a) => a.id !== id);
+                                                         delete mockWordPressDetails[id];
+                                                         return HttpResponse.json({ success: true, id });
+                                                       }),
+
+                                                       // GET /api/v1/apps/wordpress/:id (TODO(api:T12.03))
+                                                       http.get(/\/api\/v1\/apps\/wordpress\/([^/]+)$/, ({ params }) => {
+                                                         const id = String(params[0] || params.id);
+                                                         const details = mockWordPressDetails[id] || {
+                                                           app_id: id,
+                                                           core_version: "6.7.1",
+                                                           latest_core_version: "6.7.1",
+                                                           maintenance_mode: false,
+                                                           xmlrpc_disabled: true,
+                                                           debug_mode: false,
+                                                           plugins: [],
+                                                           themes: [],
+                                                         };
+                                                         return HttpResponse.json(details);
+                                                       }),
+
+                                                       // POST /api/v1/apps/wordpress/:id/plugins/:slug/update (TODO(api:T12.03))
+                                                       http.post(/\/api\/v1\/apps\/wordpress\/([^/]+)\/plugins\/([^/]+)\/update$/, ({ params }) => {
+                                                         const id = String(params[0]);
+                                                         const slug = String(params[1]);
+                                                         const details = mockWordPressDetails[id];
+                                                         if (details) {
+                                                           const plugin = details.plugins.find((p: any) => p.slug === slug);
+                                                           if (plugin) {
+                                                             plugin.version = plugin.latest_version;
+                                                             plugin.has_update = false;
+                                                           }
+                                                         }
+                                                         return HttpResponse.json({ success: true, slug });
+                                                       }),
+
+                                                       // POST /api/v1/apps/wordpress/:id/plugins/:slug/toggle (TODO(api:T12.03))
+                                                       http.post(/\/api\/v1\/apps\/wordpress\/([^/]+)\/plugins\/([^/]+)\/toggle$/, ({ params }) => {
+                                                         const id = String(params[0]);
+                                                         const slug = String(params[1]);
+                                                         const details = mockWordPressDetails[id];
+                                                         let active = true;
+                                                         if (details) {
+                                                           const plugin = details.plugins.find((p: any) => p.slug === slug);
+                                                           if (plugin) {
+                                                             plugin.active = !plugin.active;
+                                                             active = plugin.active;
+                                                           }
+                                                         }
+                                                         return HttpResponse.json({ success: true, slug, active });
+                                                       }),
+
+                                                       // POST /api/v1/apps/wordpress/:id/maintenance (TODO(api:T12.03))
+                                                       http.post(/\/api\/v1\/apps\/wordpress\/([^/]+)\/maintenance$/, async ({ params, request }) => {
+                                                         const id = String(params[0]);
+                                                         const body = (await request.json().catch(() => ({}))) as any;
+                                                         const details = mockWordPressDetails[id];
+                                                         if (details) {
+                                                           details.maintenance_mode = Boolean(body.enabled);
+                                                         }
+                                                         return HttpResponse.json({ success: true, enabled: body.enabled });
+                                                       }),
+
+                                                       // POST /api/v1/apps/wordpress/:id/staging (TODO(api:T12.03))
+                                                       http.post(/\/api\/v1\/apps\/wordpress\/([^/]+)\/staging$/, ({ params }) => {
+                                                         const id = String(params[0]);
+                                                         const stagingUrl = "https://staging.client-site.com";
+                                                         const details = mockWordPressDetails[id];
+                                                         if (details) {
+                                                           details.staging_url = stagingUrl;
+                                                         }
+                                                         return HttpResponse.json({ success: true, staging_url: stagingUrl });
+                                                       }),
+...(() => {
+                                                         // Email Handlers (T13.12, T13.05, T13.06, T13.10, T13.11)
+                                                         let mockMailboxes = [
+                                                           {
+                                                             id: "mb-1",
+                                                             email: "info@example.com",
+                                                             username: "info",
+                                                             domain: "example.com",
+                                                             quota_mb: 2048,
+                                                             used_bytes: 524288000,
+                                                             created_at: new Date(Date.now() - 30 * 86400000).toISOString(),
+                                                             webmail_url: "https://webmail.example.com",
+                                                           },
+                                                           {
+                                                             id: "mb-2",
+                                                             email: "support@example.com",
+                                                             username: "support",
+                                                             domain: "example.com",
+                                                             quota_mb: 5120,
+                                                             used_bytes: 4294967296,
+                                                             created_at: new Date(Date.now() - 60 * 86400000).toISOString(),
+                                                             webmail_url: "https://webmail.example.com",
+                                                           },
+                                                           {
+                                                             id: "mb-3",
+                                                             email: "admin@mysite.org",
+                                                             username: "admin",
+                                                             domain: "mysite.org",
+                                                             quota_mb: 1024,
+                                                             used_bytes: 104857600,
+                                                             created_at: new Date(Date.now() - 10 * 86400000).toISOString(),
+                                                             webmail_url: "https://webmail.mysite.org",
+                                                           },
+                                                         ];
+
+                                                         let mockForwarders = [
+                                                           {
+                                                             id: "fwd-1",
+                                                             source: "sales@example.com",
+                                                             destination: "sales-team@external-crm.com",
+                                                             domain: "example.com",
+                                                             created_at: new Date(Date.now() - 15 * 86400000).toISOString(),
+                                                           },
+                                                           {
+                                                             id: "fwd-2",
+                                                             source: "billing@example.com",
+                                                             destination: "accounting@finance-corp.com",
+                                                             domain: "example.com",
+                                                             created_at: new Date(Date.now() - 25 * 86400000).toISOString(),
+                                                           },
+                                                         ];
+
+                                                         let mockAutoresponders = [
+                                                           {
+                                                             id: "ar-1",
+                                                             email: "support@example.com",
+                                                             domain: "example.com",
+                                                             subject: "We received your ticket",
+                                                             body: "Thank you for contacting support. Our team will review your inquiry within 24 hours.",
+                                                             is_active: true,
+                                                           },
+                                                         ];
+
+                                                         let mockMailQueue = [
+                                                           {
+                                                             id: "4YZ8Q91024B",
+                                                             sender: "notifications@example.com",
+                                                             recipient: "user123@remote-domain.com",
+                                                             status: "deferred" as "queued" | "deferred" | "bounced",
+                                                             error_message: "Connection timed out (port 25)",
+                                                             queued_at: new Date(Date.now() - 1200000).toISOString(),
+                                                             retries: 3,
+                                                             size_bytes: 45020,
+                                                           },
+                                                           {
+                                                             id: "4YZ8T58291A",
+                                                             sender: "info@example.com",
+                                                             recipient: "client@gmail.com",
+                                                             status: "queued" as "queued" | "deferred" | "bounced",
+                                                             queued_at: new Date(Date.now() - 60000).toISOString(),
+                                                             retries: 0,
+                                                             size_bytes: 12850,
+                                                           },
+                                                         ];
+
+                                                         const mockDeliverability = [
+                                                           {
+                                                             domain: "example.com",
+                                                             spf_status: "pass" as const,
+                                                             dkim_status: "pass" as const,
+                                                             dmarc_status: "pass" as const,
+                                                             mx_status: "pass" as const,
+                                                             rbl_blacklisted: false,
+                                                             rbl_listings: [],
+                                                             recommendations: [
+                                                               "DKIM selector dhpanel is active with 2048-bit RSA key.",
+                                                               "DMARC policy is currently set to p=quarantine.",
+                                                             ],
+                                                           },
+                                                           {
+                                                             domain: "mysite.org",
+                                                             spf_status: "pass" as const,
+                                                             dkim_status: "fail" as const,
+                                                             dmarc_status: "missing" as const,
+                                                             mx_status: "pass" as const,
+                                                             rbl_blacklisted: false,
+                                                             rbl_listings: [],
+                                                             recommendations: [
+                                                               "Add a TXT record for _dmarc.mysite.org with v=DMARC1; p=none;.",
+                                                               "Sign outgoing mail with DKIM key to improve delivery.",
+                                                             ],
+                                                           },
+                                                         ];
+
+                                                         return [
+                                                           // GET /api/v1/email/mailboxes (TODO(api:T13.05))
+                                                           http.get(/\/api\/v1\/email\/mailboxes$/, ({ request }) => {
+                                                             const url = new URL(request.url);
+                                                             const domain = url.searchParams.get("domain");
+                                                             const filtered = domain
+                                                               ? mockMailboxes.filter((m) => m.domain === domain)
+                                                               : mockMailboxes;
+                                                             return HttpResponse.json(filtered);
+                                                           }),
+
+                                                           // POST /api/v1/email/mailboxes (TODO(api:T13.05))
+                                                           http.post(/\/api\/v1\/email\/mailboxes$/, async ({ request }) => {
+                                                             const body = (await request.json().catch(() => ({}))) as any;
+                                                             const newMailbox = {
+                                                               id: `mb-${Date.now()}`,
+                                                               email: `${body.username}@${body.domain}`,
+                                                               username: body.username,
+                                                               domain: body.domain,
+                                                               quota_mb: Number(body.quota_mb) || 1024,
+                                                               used_bytes: 0,
+                                                               created_at: new Date().toISOString(),
+                                                               webmail_url: `https://webmail.${body.domain}`,
+                                                             };
+                                                             mockMailboxes.push(newMailbox);
+                                                             return HttpResponse.json(newMailbox, { status: 201 });
+                                                           }),
+
+                                                           // DELETE /api/v1/email/mailboxes/:id (TODO(api:T13.05))
+                                                           http.delete(/\/api\/v1\/email\/mailboxes\/([^/]+)$/, ({ params }) => {
+                                                             const id = String(params[0]);
+                                                             mockMailboxes = mockMailboxes.filter((m) => m.id !== id);
+                                                             return new HttpResponse(null, { status: 204 });
+                                                           }),
+
+                                                           // POST /api/v1/email/mailboxes/:id/password (TODO(api:T13.05))
+                                                           http.post(/\/api\/v1\/email\/mailboxes\/([^/]+)\/password$/, () => {
+                                                             return HttpResponse.json({ success: true });
+                                                           }),
+
+                                                           // GET /api/v1/email/forwarders (TODO(api:T13.06))
+                                                           http.get(/\/api\/v1\/email\/forwarders$/, ({ request }) => {
+                                                             const url = new URL(request.url);
+                                                             const domain = url.searchParams.get("domain");
+                                                             const filtered = domain
+                                                               ? mockForwarders.filter((f) => f.domain === domain)
+                                                               : mockForwarders;
+                                                             return HttpResponse.json(filtered);
+                                                           }),
+
+                                                           // POST /api/v1/email/forwarders (TODO(api:T13.06))
+                                                           http.post(/\/api\/v1\/email\/forwarders$/, async ({ request }) => {
+                                                             const body = (await request.json().catch(() => ({}))) as any;
+                                                             const newFwd = {
+                                                               id: `fwd-${Date.now()}`,
+                                                               source: body.source,
+                                                               destination: body.destination,
+                                                               domain: body.domain,
+                                                               created_at: new Date().toISOString(),
+                                                             };
+                                                             mockForwarders.push(newFwd);
+                                                             return HttpResponse.json(newFwd, { status: 201 });
+                                                           }),
+
+                                                           // DELETE /api/v1/email/forwarders/:id (TODO(api:T13.06))
+                                                           http.delete(/\/api\/v1\/email\/forwarders\/([^/]+)$/, ({ params }) => {
+                                                             const id = String(params[0]);
+                                                             mockForwarders = mockForwarders.filter((f) => f.id !== id);
+                                                             return new HttpResponse(null, { status: 204 });
+                                                           }),
+
+                                                           // GET /api/v1/email/autoresponders (TODO(api:T13.06))
+                                                           http.get(/\/api\/v1\/email\/autoresponders$/, ({ request }) => {
+                                                             const url = new URL(request.url);
+                                                             const domain = url.searchParams.get("domain");
+                                                             const filtered = domain
+                                                               ? mockAutoresponders.filter((a) => a.domain === domain)
+                                                               : mockAutoresponders;
+                                                             return HttpResponse.json(filtered);
+                                                           }),
+
+                                                           // POST /api/v1/email/autoresponders (TODO(api:T13.06))
+                                                           http.post(/\/api\/v1\/email\/autoresponders$/, async ({ request }) => {
+                                                             const body = (await request.json().catch(() => ({}))) as any;
+                                                             const newAr = {
+                                                               id: `ar-${Date.now()}`,
+                                                               email: body.email,
+                                                               domain: body.domain,
+                                                               subject: body.subject,
+                                                               body: body.body,
+                                                               is_active: true,
+                                                               start_date: body.start_date,
+                                                               end_date: body.end_date,
+                                                             };
+                                                             mockAutoresponders.push(newAr);
+                                                             return HttpResponse.json(newAr, { status: 201 });
+                                                           }),
+
+                                                           // DELETE /api/v1/email/autoresponders/:id (TODO(api:T13.06))
+                                                           http.delete(/\/api\/v1\/email\/autoresponders\/([^/]+)$/, ({ params }) => {
+                                                             const id = String(params[0]);
+                                                             mockAutoresponders = mockAutoresponders.filter((a) => a.id !== id);
+                                                             return new HttpResponse(null, { status: 204 });
+                                                           }),
+
+                                                           // GET /api/v1/email/config (TODO(api:T13.12))
+                                                           http.get(/\/api\/v1\/email\/config$/, ({ request }) => {
+                                                             const url = new URL(request.url);
+                                                             const domain = url.searchParams.get("domain") || "example.com";
+                                                             return HttpResponse.json({
+                                                               incoming_server: `mail.${domain}`,
+                                                               incoming_imap_port: 993,
+                                                               incoming_pop3_port: 995,
+                                                               incoming_security: "SSL/TLS",
+                                                               outgoing_server: `mail.${domain}`,
+                                                               outgoing_smtp_port: 465,
+                                                               outgoing_submission_port: 587,
+                                                               outgoing_security: "SSL/TLS (or STARTTLS)",
+                                                               auth_required: true,
+                                                             });
+                                                           }),
+
+                                                           // GET /api/v1/admin/email/queue (TODO(api:T13.10))
+                                                           http.get(/\/api\/v1\/admin\/email\/queue$/, () => {
+                                                             return HttpResponse.json(mockMailQueue);
+                                                           }),
+
+                                                           // POST /api/v1/admin/email/queue/flush (TODO(api:T13.10))
+                                                           http.post(/\/api\/v1\/admin\/email\/queue\/flush$/, () => {
+                                                             mockMailQueue = [];
+                                                             return HttpResponse.json({ success: true, count: 2 });
+                                                           }),
+
+                                                           // DELETE /api/v1/admin/email/queue/:id (TODO(api:T13.10))
+                                                           http.delete(/\/api\/v1\/admin\/email\/queue\/([^/]+)$/, ({ params }) => {
+                                                             const id = String(params[0]);
+                                                             mockMailQueue = mockMailQueue.filter((q) => q.id !== id);
+                                                             return new HttpResponse(null, { status: 204 });
+                                                           }),
+
+                                                           // GET /api/v1/admin/email/deliverability (TODO(api:T13.11))
+                                                           http.get(/\/api\/v1\/admin\/email\/deliverability$/, () => {
+                                                             return HttpResponse.json(mockDeliverability);
+                                                           }),
+...(() => {
+                                                         // Reseller Handlers (T14.01, T14.02, T14.03, T14.04, T14.05, T14.07)
+                                                         let mockResellerPackages = [
+                                                           {
+                                                             id: "pkg-1",
+                                                             name: "Growth Agency Tier",
+                                                             max_accounts: 25,
+                                                             max_disk_gb: 150,
+                                                             max_bandwidth_gb: 1500,
+                                                             allow_overselling: true,
+                                                             allowed_plans: ["all"],
+                                                             created_at: new Date(Date.now() - 60 * 86400000).toISOString(),
+                                                           },
+                                                           {
+                                                             id: "pkg-2",
+                                                             name: "Enterprise Partner Tier",
+                                                             max_accounts: 100,
+                                                             max_disk_gb: 500,
+                                                             max_bandwidth_gb: 5000,
+                                                             allow_overselling: false,
+                                                             allowed_plans: ["all"],
+                                                             created_at: new Date(Date.now() - 90 * 86400000).toISOString(),
+                                                           },
+                                                         ];
+
+                                                         const mockResellerAccount = {
+                                                           id: "reseller-1",
+                                                           username: "apex_reseller",
+                                                           email: "partner@apexcloud.net",
+                                                           company_name: "Apex Cloud Solutions",
+                                                           package_id: "pkg-1",
+                                                           package_name: "Growth Agency Tier",
+                                                           status: "active" as "active" | "suspended",
+                                                           accounts_count: 8,
+                                                           disk_used_gb: 42,
+                                                           bandwidth_used_gb: 380,
+                                                           branding: {
+                                                             brand_name: "Apex Cloud Solutions",
+                                                             logo_url: "https://example.com/logo.png",
+                                                             primary_color: "#2563eb",
+                                                             support_email: "support@apexcloud.net",
+                                                             custom_login_message: "Welcome to your high performance cloud control panel.",
+                                                           },
+                                                           created_at: new Date(Date.now() - 45 * 86400000).toISOString(),
+                                                         };
+
+                                                         let mockAdminResellers = [
+                                                           mockResellerAccount,
+                                                           {
+                                                             id: "reseller-2",
+                                                             username: "pixel_craft",
+                                                             email: "admin@pixelcraft.agency",
+                                                             company_name: "PixelCraft Hosting",
+                                                             package_id: "pkg-2",
+                                                             package_name: "Enterprise Partner Tier",
+                                                             status: "active" as "active" | "suspended",
+                                                             accounts_count: 34,
+                                                             disk_used_gb: 180,
+                                                             bandwidth_used_gb: 1200,
+                                                             branding: {
+                                                               brand_name: "PixelCraft Hosting",
+                                                               logo_url: "https://example.com/pixel-logo.png",
+                                                               primary_color: "#7c3aed",
+                                                               support_email: "help@pixelcraft.agency",
+                                                               custom_login_message: "Powered by PixelCraft Studio Cloud.",
+                                                             },
+                                                             created_at: new Date(Date.now() - 80 * 86400000).toISOString(),
+                                                           },
+                                                         ];
+
+                                                         let mockResellerPlans = [
+                                                           {
+                                                             id: "rp-1",
+                                                             reseller_id: "reseller-1",
+                                                             name: "Client Starter",
+                                                             disk_mb: 5120,
+                                                             bandwidth_mb: 51200,
+                                                             domains_limit: 1,
+                                                             databases_limit: 2,
+                                                             mailboxes_limit: 5,
+                                                             created_at: new Date(Date.now() - 30 * 86400000).toISOString(),
+                                                           },
+                                                           {
+                                                             id: "rp-2",
+                                                             reseller_id: "reseller-1",
+                                                             name: "Business Pro",
+                                                             disk_mb: 15360,
+                                                             bandwidth_mb: 153600,
+                                                             domains_limit: 5,
+                                                             databases_limit: 10,
+                                                             mailboxes_limit: 20,
+                                                             created_at: new Date(Date.now() - 20 * 86400000).toISOString(),
+                                                           },
+                                                         ];
+
+                                                         let mockResellerUsers = [
+                                                           {
+                                                             id: "ru-1",
+                                                             reseller_id: "reseller-1",
+                                                             username: "novatech",
+                                                             email: "admin@novatech.io",
+                                                             domain: "novatech.io",
+                                                             plan_name: "Business Pro",
+                                                             disk_used_mb: 4200,
+                                                             status: "active" as "active" | "suspended",
+                                                             created_at: new Date(Date.now() - 15 * 86400000).toISOString(),
+                                                           },
+                                                           {
+                                                             id: "ru-2",
+                                                             reseller_id: "reseller-1",
+                                                             username: "sweetbakery",
+                                                             email: "contact@sweetbakery.com",
+                                                             domain: "sweetbakery.com",
+                                                             plan_name: "Client Starter",
+                                                             disk_used_mb: 1200,
+                                                             status: "active" as "active" | "suspended",
+                                                             created_at: new Date(Date.now() - 10 * 86400000).toISOString(),
+                                                           },
+                                                         ];
+
+                                                         return [
+                                                           // GET /api/v1/reseller/me (TODO(api:T14.01))
+                                                           http.get(/\/api\/v1\/reseller\/me$/, () => {
+                                                             return HttpResponse.json(mockResellerAccount);
+                                                           }),
+
+                                                           // GET /api/v1/reseller/me/package (TODO(api:T14.01))
+                                                           http.get(/\/api\/v1\/reseller\/me\/package$/, () => {
+                                                             const pkg = mockResellerPackages.find((p) => p.id === mockResellerAccount.package_id) || mockResellerPackages[0];
+                                                             return HttpResponse.json(pkg);
+                                                           }),
+
+                                                           // PUT /api/v1/reseller/me/branding (TODO(api:T14.05))
+                                                           http.put(/\/api\/v1\/reseller\/me\/branding$/, async ({ request }) => {
+                                                             const body = (await request.json().catch(() => ({}))) as any;
+                                                             mockResellerAccount.branding = {
+                                                               ...mockResellerAccount.branding,
+                                                               ...body,
+                                                             };
+                                                             return HttpResponse.json(mockResellerAccount.branding);
+                                                           }),
+
+                                                           // GET /api/v1/reseller/users (TODO(api:T14.03))
+                                                           http.get(/\/api\/v1\/reseller\/users$/, () => {
+                                                             return HttpResponse.json(mockResellerUsers);
+                                                           }),
+
+                                                           // POST /api/v1/reseller/users (TODO(api:T14.04))
+                                                           http.post(/\/api\/v1\/reseller\/users$/, async ({ request }) => {
+                                                             const body = (await request.json().catch(() => ({}))) as any;
+                                                             const newUser = {
+                                                               id: `ru-${Date.now()}`,
+                                                               reseller_id: mockResellerAccount.id,
+                                                               username: body.username,
+                                                               email: body.email,
+                                                               domain: body.domain,
+                                                               plan_name: body.plan_name || "Client Starter",
+                                                               disk_used_mb: 0,
+                                                               status: "active" as const,
+                                                               created_at: new Date().toISOString(),
+                                                             };
+                                                             mockResellerUsers.push(newUser);
+                                                             mockResellerAccount.accounts_count += 1;
+                                                             return HttpResponse.json(newUser, { status: 201 });
+                                                           }),
+
+                                                           // POST /api/v1/reseller/users/:id/status (TODO(api:T14.07))
+                                                           http.post(/\/api\/v1\/reseller\/users\/([^/]+)\/status$/, async ({ params, request }) => {
+                                                             const id = String(params[0]);
+                                                             const body = (await request.json().catch(() => ({}))) as any;
+                                                             const user = mockResellerUsers.find((u) => u.id === id);
+                                                             if (user) {
+                                                               user.status = body.status;
+                                                             }
+                                                             return HttpResponse.json({ success: true, status: body.status });
+                                                           }),
+
+                                                           // DELETE /api/v1/reseller/users/:id (TODO(api:T14.03))
+                                                           http.delete(/\/api\/v1\/reseller\/users\/([^/]+)$/, ({ params }) => {
+                                                             const id = String(params[0]);
+                                                             mockResellerUsers = mockResellerUsers.filter((u) => u.id !== id);
+                                                             mockResellerAccount.accounts_count = Math.max(0, mockResellerAccount.accounts_count - 1);
+                                                             return new HttpResponse(null, { status: 204 });
+                                                           }),
+
+                                                           // GET /api/v1/reseller/plans (TODO(api:T14.05))
+                                                           http.get(/\/api\/v1\/reseller\/plans$/, () => {
+                                                             return HttpResponse.json(mockResellerPlans);
+                                                           }),
+
+                                                           // POST /api/v1/reseller/plans (TODO(api:T14.05))
+                                                           http.post(/\/api\/v1\/reseller\/plans$/, async ({ request }) => {
+                                                             const body = (await request.json().catch(() => ({}))) as any;
+                                                             const newPlan = {
+                                                               id: `rp-${Date.now()}`,
+                                                               reseller_id: mockResellerAccount.id,
+                                                               name: body.name,
+                                                               disk_mb: Number(body.disk_mb) || 5120,
+                                                               bandwidth_mb: Number(body.bandwidth_mb) || 51200,
+                                                               domains_limit: Number(body.domains_limit) || 1,
+                                                               databases_limit: Number(body.databases_limit) || 1,
+                                                               mailboxes_limit: Number(body.mailboxes_limit) || 1,
+                                                               created_at: new Date().toISOString(),
+                                                             };
+                                                             mockResellerPlans.push(newPlan);
+                                                             return HttpResponse.json(newPlan, { status: 201 });
+                                                           }),
+
+                                                           // DELETE /api/v1/reseller/plans/:id (TODO(api:T14.05))
+                                                           http.delete(/\/api\/v1\/reseller\/plans\/([^/]+)$/, ({ params }) => {
+                                                             const id = String(params[0]);
+                                                             mockResellerPlans = mockResellerPlans.filter((p) => p.id !== id);
+                                                             return new HttpResponse(null, { status: 204 });
+                                                           }),
+
+                                                           // GET /api/v1/admin/resellers (TODO(api:T14.01))
+                                                           http.get(/\/api\/v1\/admin\/resellers$/, () => {
+                                                             return HttpResponse.json(mockAdminResellers);
+                                                           }),
+
+                                                           // POST /api/v1/admin/resellers (TODO(api:T14.01))
+                                                           http.post(/\/api\/v1\/admin\/resellers$/, async ({ request }) => {
+                                                             const body = (await request.json().catch(() => ({}))) as any;
+                                                             const pkg = mockResellerPackages.find((p) => p.id === body.package_id) || mockResellerPackages[0];
+                                                             const newReseller = {
+                                                               id: `reseller-${Date.now()}`,
+                                                               username: body.username,
+                                                               email: body.email,
+                                                               company_name: body.company_name,
+                                                               package_id: pkg.id,
+                                                               package_name: pkg.name,
+                                                               status: "active" as const,
+                                                               accounts_count: 0,
+                                                               disk_used_gb: 0,
+                                                               bandwidth_used_gb: 0,
+                                                               branding: {
+                                                                 brand_name: body.company_name,
+                                                                 logo_url: "https://example.com/logo.png",
+                                                                 primary_color: "#2563eb",
+                                                                 support_email: body.email,
+                                                                 custom_login_message: "Welcome to your control panel",
+                                                               },
+                                                               created_at: new Date().toISOString(),
+                                                             };
+                                                             mockAdminResellers.push(newReseller);
+                                                             return HttpResponse.json(newReseller, { status: 201 });
+                                                           }),
+
+                                                           // POST /api/v1/admin/resellers/:id/status (TODO(api:T14.07))
+                                                           http.post(/\/api\/v1\/admin\/resellers\/([^/]+)\/status$/, async ({ params, request }) => {
+                                                             const id = String(params[0]);
+                                                             const body = (await request.json().catch(() => ({}))) as any;
+                                                             const reseller = mockAdminResellers.find((r) => r.id === id);
+                                                             if (reseller) {
+                                                               reseller.status = body.status;
+                                                             }
+                                                             return HttpResponse.json({ success: true, status: body.status });
+                                                           }),
+
+                                                           // DELETE /api/v1/admin/resellers/:id (TODO(api:T14.01))
+                                                           http.delete(/\/api\/v1\/admin\/resellers\/([^/]+)$/, ({ params }) => {
+                                                             const id = String(params[0]);
+                                                             mockAdminResellers = mockAdminResellers.filter((r) => r.id !== id);
+                                                             return new HttpResponse(null, { status: 204 });
+                                                           }),
+
+                                                           // GET /api/v1/admin/reseller-packages (TODO(api:T14.02))
+                                                           http.get(/\/api\/v1\/admin\/reseller-packages$/, () => {
+                                                             return HttpResponse.json(mockResellerPackages);
+                                                           }),
+
+                                                           // POST /api/v1/admin/reseller-packages (TODO(api:T14.02))
+                                                           http.post(/\/api\/v1\/admin\/reseller-packages$/, async ({ request }) => {
+                                                             const body = (await request.json().catch(() => ({}))) as any;
+                                                             const newPkg = {
+                                                               id: `pkg-${Date.now()}`,
+                                                               name: body.name,
+                                                               max_accounts: Number(body.max_accounts) || 25,
+                                                               max_disk_gb: Number(body.max_disk_gb) || 100,
+                                                               max_bandwidth_gb: Number(body.max_bandwidth_gb) || 1000,
+                                                               allow_overselling: Boolean(body.allow_overselling),
+                                                               allowed_plans: ["all"],
+                                                               created_at: new Date().toISOString(),
+                                                             };
+                                                             mockResellerPackages.push(newPkg);
+                                                             return HttpResponse.json(newPkg, { status: 201 });
+                                                           }),
+
+                                                           // DELETE /api/v1/admin/reseller-packages/:id (TODO(api:T14.02))
+                                                           http.delete(/\/api\/v1\/admin\/reseller-packages\/([^/]+)$/, ({ params }) => {
+                                                             const id = String(params[0]);
+                                                             mockResellerPackages = mockResellerPackages.filter((p) => p.id !== id);
+                                                             return new HttpResponse(null, { status: 204 });
+                                                           }),
+...(() => {
+                                                         // Migration & Transfer Handlers (T15.04, T15.05, T15.06)
+                                                         let mockTransferJobs: Array<{
+                                                           id: string;
+                                                           source_type: "cpanel" | "cyberpanel" | "openpanel" | "dhpanel_archive";
+                                                           source_host?: string;
+                                                           tenant_username: string;
+                                                           target_domain: string;
+                                                           status: "pending" | "running" | "completed" | "failed" | "cancelled";
+                                                           progress_percent: number;
+                                                           current_step: string;
+                                                           size_bytes?: number;
+                                                           created_at: string;
+                                                           updated_at: string;
+                                                           steps: Array<{
+                                                             id: string;
+                                                             name: string;
+                                                             status: "pending" | "running" | "completed" | "failed";
+                                                             started_at?: string;
+                                                             completed_at?: string;
+                                                             details?: string;
+                                                           }>;
+                                                           logs: string[];
+                                                         }> = [
+                                                           {
+                                                             id: "TRF-90241A",
+                                                             source_type: "cpanel" as const,
+                                                             source_host: "cpanel.legacy-host.com",
+                                                             tenant_username: "apex_store",
+                                                             target_domain: "apexstore.com",
+                                                             status: "running" as const,
+                                                             progress_percent: 65,
+                                                             current_step: "Restoring MySQL Databases",
+                                                             size_bytes: 858993459,
+                                                             created_at: new Date(Date.now() - 360000).toISOString(),
+                                                             updated_at: new Date().toISOString(),
+                                                             steps: [
+                                                               {
+                                                                 id: "step-1",
+                                                                 name: "Connecting to Remote Server via SSH",
+                                                                 status: "completed" as const,
+                                                                 started_at: new Date(Date.now() - 360000).toISOString(),
+                                                                 completed_at: new Date(Date.now() - 350000).toISOString(),
+                                                                 details: "Authenticated successfully as root via port 22",
+                                                               },
+                                                               {
+                                                                 id: "step-2",
+                                                                 name: "Generating & Fetching cpmove Backup Archive",
+                                                                 status: "completed" as const,
+                                                                 started_at: new Date(Date.now() - 350000).toISOString(),
+                                                                 completed_at: new Date(Date.now() - 210000).toISOString(),
+                                                                 details: "Transferred 819 MB archive (cpmove-apex_store.tar.gz)",
+                                                               },
+                                                               {
+                                                                 id: "step-3",
+                                                                 name: "Extracting Archive & Parsing Metadata",
+                                                                 status: "completed" as const,
+                                                                 started_at: new Date(Date.now() - 210000).toISOString(),
+                                                                 completed_at: new Date(Date.now() - 170000).toISOString(),
+                                                                 details: "Parsed 3 domains, 2 MySQL DBs, 5 mailboxes, and 12 cron entries",
+                                                               },
+                                                               {
+                                                                 id: "step-4",
+                                                                 name: "Restoring MySQL Databases & Users",
+                                                                 status: "running" as const,
+                                                                 started_at: new Date(Date.now() - 170000).toISOString(),
+                                                                 details: "Importing apex_store_prod (184 MB) table structure & data",
+                                                               },
+                                                               {
+                                                                 id: "step-5",
+                                                                 name: "Restoring Web Root & Vhost Configuration",
+                                                                 status: "pending" as const,
+                                                               },
+                                                               {
+                                                                 id: "step-6",
+                                                                 name: "Configuring DNS & SSL Certificates",
+                                                                 status: "pending" as const,
+                                                               },
+                                                               {
+                                                                 id: "step-7",
+                                                                 name: "Verifying Tenant Services & Health Check",
+                                                                 status: "pending" as const,
+                                                               },
+                                                             ],
+                                                             logs: [
+                                                               "Connecting to remote host cpanel.legacy-host.com on port 22...",
+                                                               "SSH handshake complete. Key accepted.",
+                                                               "Checking source cPanel version: 110.0.12 (Linux x86_64)",
+                                                               "Triggering /scripts/pkgacct apex_store --skiphomedir=0...",
+                                                               "pkgacct completed in 42s. Archive size: 819,200 KB.",
+                                                               "Starting streaming rsync transfer to /var/dhpanel/transfers/cpmove-apex_store.tar.gz...",
+                                                               "Transfer completed: 858,993,459 bytes received (speed 38.4 MB/s).",
+                                                               "Validating SHA256 checksum... OK.",
+                                                               "Extracting archive metadata from cp/apex_store yaml manifest...",
+                                                               "Discovered primary domain: apexstore.com (document_root: public_html)",
+                                                               "Provisioning DHPanel tenant apex_store with linux user and cgroup limits...",
+                                                               "RESTORED user apex_store (UID 1042, GID 1042)",
+                                                               "Extracting MySQL dumps: apex_store_prod.sql.gz, apex_store_cache.sql.gz...",
+                                                               "Creating MySQL user apex_store_u with grant on apex_store_prod.*...",
+                                                               "Importing database apex_store_prod (table count: 48)...",
+                                                             ],
+                                                           },
+                                                           {
+                                                             id: "TRF-88192C",
+                                                             source_type: "cyberpanel" as const,
+                                                             source_host: "198.51.100.24",
+                                                             tenant_username: "agency_portal",
+                                                             target_domain: "agencyportal.io",
+                                                             status: "completed" as const,
+                                                             progress_percent: 100,
+                                                             current_step: "Migration Completed Successfully",
+                                                             size_bytes: 429496729,
+                                                             created_at: new Date(Date.now() - 7200000).toISOString(),
+                                                             updated_at: new Date(Date.now() - 6900000).toISOString(),
+                                                             steps: [
+                                                               {
+                                                                 id: "step-1",
+                                                                 name: "Connecting to Remote Server via SSH",
+                                                                 status: "completed" as const,
+                                                                 started_at: new Date(Date.now() - 7200000).toISOString(),
+                                                                 completed_at: new Date(Date.now() - 7190000).toISOString(),
+                                                               },
+                                                               {
+                                                                 id: "step-2",
+                                                                 name: "Generating & Fetching CyberPanel Backup",
+                                                                 status: "completed" as const,
+                                                                 started_at: new Date(Date.now() - 7190000).toISOString(),
+                                                                 completed_at: new Date(Date.now() - 7080000).toISOString(),
+                                                               },
+                                                               {
+                                                                 id: "step-3",
+                                                                 name: "Extracting Archive & Parsing Metadata",
+                                                                 status: "completed" as const,
+                                                                 started_at: new Date(Date.now() - 7080000).toISOString(),
+                                                                 completed_at: new Date(Date.now() - 7040000).toISOString(),
+                                                               },
+                                                               {
+                                                                 id: "step-4",
+                                                                 name: "Restoring MySQL Databases & Users",
+                                                                 status: "completed" as const,
+                                                                 started_at: new Date(Date.now() - 7040000).toISOString(),
+                                                                 completed_at: new Date(Date.now() - 6980000).toISOString(),
+                                                               },
+                                                               {
+                                                                 id: "step-5",
+                                                                 name: "Restoring Web Root & Vhost Configuration",
+                                                                 status: "completed" as const,
+                                                                 started_at: new Date(Date.now() - 6980000).toISOString(),
+                                                                 completed_at: new Date(Date.now() - 6930000).toISOString(),
+                                                               },
+                                                               {
+                                                                 id: "step-6",
+                                                                 name: "Configuring DNS & SSL Certificates",
+                                                                 status: "completed" as const,
+                                                                 started_at: new Date(Date.now() - 6930000).toISOString(),
+                                                                 completed_at: new Date(Date.now() - 6910000).toISOString(),
+                                                               },
+                                                               {
+                                                                 id: "step-7",
+                                                                 name: "Verifying Tenant Services & Health Check",
+                                                                 status: "completed" as const,
+                                                                 started_at: new Date(Date.now() - 6910000).toISOString(),
+                                                                 completed_at: new Date(Date.now() - 6900000).toISOString(),
+                                                                 details: "All HTTP/HTTPS endpoints healthy with status 200 OK",
+                                                               },
+                                                             ],
+                                                             logs: [
+                                                               "Connecting to remote CyberPanel instance 198.51.100.24:22...",
+                                                               "Transfer initiated for agency_portal...",
+                                                               "Fetching backup archive: 429,496,729 bytes transferred.",
+                                                               "Archive extracted and verified.",
+                                                               "RESTORED database agency_portal_main (size: 42 MB).",
+                                                               "RESTORED public_html web files (file count: 3,420).",
+                                                               "Generated Caddy virtual host configuration for agencyportal.io.",
+                                                               "ACME TLS certificate provisioned.",
+                                                               "SUCCESS: Migration completed in 5m 0s. All services live.",
+                                                             ],
+                                                           },
+                                                         ];
+
+                                                         return [
+                                                           // GET /api/v1/migration/transfers (TODO(api:T15.06))
+                                                           http.get(/\/api\/v1\/migration\/transfers$/, () => {
+                                                             return HttpResponse.json(mockTransferJobs);
+                                                           }),
+
+                                                           // GET /api/v1/migration/transfers/:id (TODO(api:T15.06))
+                                                           http.get(/\/api\/v1\/migration\/transfers\/([^/]+)$/, ({ params }) => {
+                                                             const id = String(params[0]);
+                                                             const job = mockTransferJobs.find((j) => j.id === id);
+                                                             if (!job) return new HttpResponse(null, { status: 404 });
+                                                             return HttpResponse.json(job);
+                                                           }),
+
+                                                           // POST /api/v1/migration/transfers (TODO(api:T15.04), TODO(api:T15.05))
+                                                           http.post(/\/api\/v1\/migration\/transfers$/, async ({ request }) => {
+                                                             const body = (await request.json().catch(() => ({}))) as any;
+                                                             const newJob = {
+                                                               id: `TRF-${Math.floor(10000 + Math.random() * 90000)}X`,
+                                                               source_type: body.source_type || "cpanel",
+                                                               source_host: body.remote_host || "127.0.0.1",
+                                                               tenant_username: body.tenant_username,
+                                                               target_domain: body.target_domain,
+                                                               status: "running" as const,
+                                                               progress_percent: 15,
+                                                               current_step: "Connecting to Remote Server via SSH",
+                                                               size_bytes: 104857600,
+                                                               created_at: new Date().toISOString(),
+                                                               updated_at: new Date().toISOString(),
+                                                               steps: [
+                                                                 {
+                                                                   id: "step-1",
+                                                                   name: "Connecting to Remote Server via SSH",
+                                                                   status: "running" as const,
+                                                                   started_at: new Date().toISOString(),
+                                                                   details: `Connecting to ${body.remote_host || "source"}...`,
+                                                                 },
+                                                                 {
+                                                                   id: "step-2",
+                                                                   name: "Generating & Fetching Archive",
+                                                                   status: "pending" as const,
+                                                                 },
+                                                                 {
+                                                                   id: "step-3",
+                                                                   name: "Extracting Archive & Parsing Metadata",
+                                                                   status: "pending" as const,
+                                                                 },
+                                                                 {
+                                                                   id: "step-4",
+                                                                   name: "Restoring MySQL Databases & Users",
+                                                                   status: "pending" as const,
+                                                                 },
+                                                                 {
+                                                                   id: "step-5",
+                                                                   name: "Restoring Web Root & Vhost Configuration",
+                                                                   status: "pending" as const,
+                                                                 },
+                                                                 {
+                                                                   id: "step-6",
+                                                                   name: "Configuring DNS & SSL Certificates",
+                                                                   status: "pending" as const,
+                                                                 },
+                                                                 {
+                                                                   id: "step-7",
+                                                                   name: "Verifying Tenant Services",
+                                                                   status: "pending" as const,
+                                                                 },
+                                                               ],
+                                                               logs: [
+                                                                 `Initiating migration transfer from ${body.source_type} at ${body.remote_host || "local"}...`,
+                                                                 `Connecting via SSH to ${body.remote_user || "root"}@${body.remote_host}:${body.remote_ssh_port || 22}...`,
+                                                                 "SSH connection established. Handshake verified.",
+                                                                 `Target tenant account: ${body.tenant_username} (@${body.target_domain}).`,
+                                                               ],
+                                                             };
+                                                             mockTransferJobs.unshift(newJob);
+                                                             return HttpResponse.json(newJob, { status: 201 });
+                                                           }),
+
+                                                           // POST /api/v1/migration/transfers/:id/retry (TODO(api:T15.06))
+                                                           http.post(/\/api\/v1\/migration\/transfers\/([^/]+)\/retry$/, ({ params }) => {
+                                                             const id = String(params[0]);
+                                                             const job = mockTransferJobs.find((j) => j.id === id);
+                                                             if (job) {
+                                                               job.status = "running";
+                                                               job.progress_percent = 20;
+                                                               job.current_step = "Connecting to Remote Server via SSH";
+                                                               job.logs.push("Retrying migration transfer from step 1...");
+                                                             }
+                                                             return HttpResponse.json({ success: true });
+                                                           }),
+
+                                                           // POST /api/v1/migration/transfers/:id/cancel (TODO(api:T15.06))
+                                                           http.post(/\/api\/v1\/migration\/transfers\/([^/]+)\/cancel$/, ({ params }) => {
+                                                             const id = String(params[0]);
+                                                             const job = mockTransferJobs.find((j) => j.id === id);
+                                                             if (job) {
+                                                               job.status = "cancelled";
+                                                               job.current_step = "Transfer Aborted by User";
+                                                               job.logs.push("WARNING: Transfer cancelled by operator.");
+                                                             }
+                                                             return HttpResponse.json({ success: true });
+                                                           }),
+
+                                                           // DELETE /api/v1/migration/transfers/:id (TODO(api:T15.06))
+                                                           http.delete(/\/api\/v1\/migration\/transfers\/([^/]+)$/, ({ params }) => {
+                                                             const id = String(params[0]);
+                                                             mockTransferJobs = mockTransferJobs.filter((j) => j.id !== id);
+                                                             return new HttpResponse(null, { status: 204 });
+                                                           }),
+                                                         ];
+                                                       })(),
+                                                         ];
+                                                       })(),
+                                                         ];
+                                                       })(),
+                                                     ];
+                                                   })(),
+                                                ];
+                                              })(),
                                             ];
                                           })(),
                                         ];
