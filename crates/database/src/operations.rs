@@ -463,10 +463,15 @@ pub async fn list_recent(
     Ok(rows.into_iter().map(Into::into).collect())
 }
 
+/// How long an operation of a long-running kind (`import_sql`) may stay
+/// unanswered: 6.5 hours, a little over the node's own limit.
+pub const LONG_RUNNING_SECS: i32 = 6 * 3600 + 1800;
+
 /// Handles operations that were sent but never answered within `timeout_secs`
 /// (the node vanished, restarted, or lost the frame): they become `retryable`
 /// after `retry_in_secs` while attempts and time remain, otherwise `failed`.
-/// Returns the ids and the status each ended in.
+/// Returns the ids and the status each ended in. An SQL import (`import_sql`)
+/// runs for hours and gets [`LONG_RUNNING_SECS`] instead of `timeout_secs`.
 ///
 /// # Errors
 /// Database errors.
@@ -488,10 +493,12 @@ pub async fn time_out_dispatched(
                         AND now() + make_interval(secs => $2::int) < expires_at
                    THEN NULL ELSE now() END
            WHERE status = 'dispatched'
-             AND dispatched_at < now() - make_interval(secs => $1::int)
+             AND dispatched_at < now() - make_interval(
+                     secs => CASE WHEN kind = 'import_sql' THEN $3::int ELSE $1::int END)
            RETURNING id, status AS "status!""#,
         timeout_secs,
         retry_in_secs,
+        LONG_RUNNING_SECS,
     )
     .fetch_all(pool)
     .await?;

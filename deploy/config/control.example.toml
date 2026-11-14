@@ -83,3 +83,9 @@ enrollment_token_minutes = 15
 # --out <pki.ca_dir>`). Set both or neither. Open this port to your nodes only.
 # stream_listen = "0.0.0.0:8444"
 # stream_url = "https://panel.example.com:8444"
+
+[imports]
+# Uploaded SQL dumps wait here until the node has fetched them, then they are
+# removed. Needs room for a few of the biggest dumps (setting `max_import_mb` of
+# the databases module, 1024 MB by default). Imports need `agent.public_url`.
+# spool_dir = "/var/lib/dhpanel/spool/imports"

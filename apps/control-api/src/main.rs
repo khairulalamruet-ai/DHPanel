@@ -284,7 +284,15 @@ async fn main() -> ExitCode {
     });
     // Module routes: core modules at once, the others as soon as the modules
     // table can be read, and again whenever an administrator switches one.
-    let (mount, settings) = match modules::mount(modules::States { auth, admin, nodes }, base) {
+    let (mount, settings) = match modules::mount(
+        modules::States {
+            auth,
+            admin,
+            nodes,
+            spool_dir: config.imports.spool_dir.clone(),
+        },
+        base,
+    ) {
         Ok(mounted) => mounted,
         Err(messages) => {
             for message in messages {
@@ -298,6 +306,20 @@ async fn main() -> ExitCode {
         modules = %settings.modules().map(|m| m.module.as_str()).collect::<Vec<_>>().join(", "),
         "settings schemas valid"
     );
+    // Uploaded dumps nobody needs any more are removed; forgotten uploads are cancelled.
+    tokio::spawn({
+        let (db, spool_dir) = (db.clone(), config.imports.spool_dir.clone());
+        async move {
+            let mut every = tokio::time::interval(std::time::Duration::from_secs(120));
+            every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                every.tick().await;
+                if let Err(error) = dhpanel_mod_databases::imports::sweep(&db, &spool_dir).await {
+                    tracing::warn!(%error, "could not sweep the import spool");
+                }
+            }
+        }
+    });
     tokio::spawn(modules::follow_enabled(
         db.clone(),
         mount.clone(),

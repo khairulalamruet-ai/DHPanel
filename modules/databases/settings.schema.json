@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Databases",
-  "description": "How databases and their users are named.",
+  "description": "How databases and their users are named, and how much an SQL import may take.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -17,6 +17,22 @@
       "x-description": {
         "en": "Every database and database user name starts with the account's system name and an underscore (alice_shop). Off: names are as typed, still unique across the panel.",
         "bn": "প্রতিটি ডাটাবেস ও ডাটাবেস ইউজারের নাম অ্যাকাউন্টের system name ও একটি আন্ডারস্কোর দিয়ে শুরু হয় (alice_shop)। বন্ধ থাকলে নাম যেমন লেখা হয় তেমনই থাকে, তবে প্যানেলজুড়ে অনন্য।"
+      }
+    },
+    "max_import_mb": {
+      "type": "integer",
+      "title": "Biggest SQL import (MB)",
+      "default": 1024,
+      "minimum": 1,
+      "maximum": 10240,
+      "x-scope": "global",
+      "x-title": {
+        "en": "Biggest SQL import (MB)",
+        "bn": "সর্বোচ্চ SQL import (MB)"
+      },
+      "x-description": {
+        "en": "The biggest dump file (as uploaded, compressed or not) a client may import. Uploads wait in the control plane's spool folder (imports.spool_dir) until the node has run them, so keep room for a few at a time.",
+        "bn": "একজন ক্লায়েন্ট সর্বোচ্চ যত বড় dump ফাইল (আপলোড করা অবস্থায়, compressed হোক বা না হোক) import করতে পারবে। নোড চালানো শেষ না হওয়া পর্যন্ত আপলোড কন্ট্রোল প্লেনের spool ফোল্ডারে (imports.spool_dir) থাকে, তাই একসাথে কয়েকটির জায়গা রাখুন।"
       }
     }
   }

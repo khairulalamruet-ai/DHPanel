@@ -7674,6 +7674,103 @@
         ]
       }
     },
+    "/api/v1/client/databases/{id}/imports": {
+      "post": {
+        "tags": [
+          "databases"
+        ],
+        "summary": "Start an import: say what the file is, then upload it in chunks.",
+        "operationId": "clientStartImport",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Database id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartImport"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Upload the chunks next",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only`, `csrf_failed` or `feature_disabled`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such database",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`import_active`, `database_not_ready`, `imports_unavailable` or `tenant_not_running`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`invalid_checksum`, `empty_file` or `file_too_big`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/client/db-users": {
       "get": {
         "tags": [
@@ -10066,6 +10163,337 @@
           },
           "422": {
             "description": "`forbidden_directive` (naming it), `reserved_header`, `custom_too_large`, `custom_characters`, `template_syntax`, `template_braces` or `alias_has_no_file`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/imports": {
+      "get": {
+        "tags": [
+          "databases"
+        ],
+        "summary": "The imports of the account.",
+        "operationId": "clientListImports",
+        "responses": {
+          "200": {
+            "description": "The imports",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportList"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/imports/{id}": {
+      "get": {
+        "tags": [
+          "databases"
+        ],
+        "summary": "One import: where the upload stands, or how far the node has come.",
+        "operationId": "clientGetImport",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Import id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The import",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such import (or it is not yours)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "databases"
+        ],
+        "summary": "Stops an import that the node has not started yet (an upload, or a queued one).",
+        "operationId": "clientCancelImport",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Import id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Cancelled; the uploaded data is removed"
+          },
+          "404": {
+            "description": "No such import",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`import_running` (the node is at it) or `already_ended`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/imports/{id}/chunks/{n}": {
+      "put": {
+        "tags": [
+          "databases"
+        ],
+        "summary": "Send the next chunk of the file (the body is the raw bytes).",
+        "operationId": "clientPutImportChunk",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Import id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "n",
+            "in": "path",
+            "description": "Chunk number, from 0; must be the one the import expects",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Kept; `next_chunk` is the one to send now",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such import",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`not_uploading` or `wrong_chunk` (ask for the import to see which one is expected)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The chunk is bigger than `max_chunk_bytes`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`empty_chunk` or `too_much_data`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/imports/{id}/complete": {
+      "post": {
+        "tags": [
+          "databases"
+        ],
+        "summary": "The file is whole: it is checked and the node is asked to run it.",
+        "operationId": "clientCompleteImport",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Import id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Queued; follow `status`, `stage` and `bytes_done`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such import",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`not_uploading`, `incomplete` or `tenant_not_running`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`checksum_mismatch`: the import has ended; start again",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -12498,6 +12926,128 @@
           }
         }
       },
+      "ImportList": {
+        "type": "object",
+        "description": "The imports of an account.",
+        "required": [
+          "items",
+          "max_size_mb"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ImportView"
+            },
+            "description": "Newest first (the last 50)."
+          },
+          "max_size_mb": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The biggest file that is accepted, in MB."
+          }
+        }
+      },
+      "ImportView": {
+        "type": "object",
+        "description": "An import.",
+        "required": [
+          "id",
+          "database_id",
+          "database",
+          "status",
+          "gzip",
+          "size_bytes",
+          "received_bytes",
+          "next_chunk",
+          "max_chunk_bytes",
+          "bytes_done",
+          "statements",
+          "created_at"
+        ],
+        "properties": {
+          "bytes_done": {
+            "type": "integer",
+            "format": "int64",
+            "description": "While `running`: bytes of the file the node has taken in so far."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it was started (RFC 3339, UTC)."
+          },
+          "database": {
+            "type": "string",
+            "description": "The database's name.",
+            "example": "alice_shop"
+          },
+          "database_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The database it fills."
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it failed."
+          },
+          "finished_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When it ended (RFC 3339, UTC)."
+          },
+          "gzip": {
+            "type": "boolean",
+            "description": "Whether the file is gzip-compressed."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Id."
+          },
+          "max_chunk_bytes": {
+            "type": "integer",
+            "description": "The largest chunk that is accepted, in bytes.",
+            "minimum": 0
+          },
+          "next_chunk": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The chunk to send next (while `uploading`)."
+          },
+          "received_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Bytes the panel has received."
+          },
+          "size_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Size of the file in bytes."
+          },
+          "stage": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "While `running`: `downloading`, `checking` or `importing`."
+          },
+          "statements": {
+            "type": "integer",
+            "format": "int64",
+            "description": "While `running`: statements run so far."
+          },
+          "status": {
+            "type": "string",
+            "description": "`uploading`, `queued`, `running`, `done`, `failed` or `cancelled`."
+          }
+        }
+      },
       "LimitList": {
         "type": "object",
         "description": "Every limit of the installed modules.",
@@ -14255,6 +14805,31 @@
             "example": "valid"
           }
         }
+      },
+      "StartImport": {
+        "type": "object",
+        "description": "A dump to import.",
+        "required": [
+          "size_bytes",
+          "sha256"
+        ],
+        "properties": {
+          "gzip": {
+            "type": "boolean",
+            "description": "Whether the file is gzip-compressed (`.sql.gz`)."
+          },
+          "sha256": {
+            "type": "string",
+            "description": "The file's SHA-256, 64 hex digits."
+          },
+          "size_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Size of the file in bytes (as uploaded: compressed, if it is).",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
       },
       "StatusInput": {
         "type": "string",

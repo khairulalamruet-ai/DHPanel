@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE db_imports SET received_bytes = $3, next_chunk = next_chunk + 1, updated_at = now()\n         WHERE id = $1 AND status = 'uploading' AND next_chunk = $2 AND $3 <= size_bytes",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "526fbb2fb10f34638dae3fd41098bafd997b51d181f5c355449be2d033149367"
+}

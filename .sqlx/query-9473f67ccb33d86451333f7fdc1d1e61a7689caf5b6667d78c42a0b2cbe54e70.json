@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE db_imports SET status = 'failed', finished_at = now(), updated_at = now(),\n                               error = 'the node lost the import (it restarted); upload the file again',\n                               sealed_token = NULL, token_hash = NULL\n         WHERE id = $1 AND status = 'running' AND updated_at < now() - interval '60 seconds'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9473f67ccb33d86451333f7fdc1d1e61a7689caf5b6667d78c42a0b2cbe54e70"
+}

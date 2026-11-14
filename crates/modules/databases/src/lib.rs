@@ -9,6 +9,7 @@
 //! | PUT | `/api/v1/client/db-users/{id}/password` | the owner |
 //! | DELETE | `/api/v1/client/db-users/{id}` | the owner |
 //! | GET, PUT | `/api/v1/client/db-users/{id}/remote-hosts` | the owner; the `db_remote` feature to change |
+//! | POST, GET, PUT | `.../databases/{id}/imports`, `/api/v1/client/imports...` | SQL imports, see [`imports`] |
 //!
 //! Names start with the account's system name and an underscore (the setting
 //! `require_prefix`). The plan limits how many databases (`max_databases`) and
@@ -18,7 +19,9 @@
 //! changed (a given password is checked; without one a strong one is made); it
 //! is kept sealed only until the node has it and never in the ledger or the log.
 
-use std::sync::Arc;
+pub mod imports;
+
+use std::{path::PathBuf, sync::Arc};
 
 use axum::{
     Json, Router,
@@ -66,6 +69,11 @@ pub struct DatabasesState {
     pub settings: Arc<SettingsRegistry>,
     /// Seals the passwords of database users until the node has them.
     pub master_key: MasterKey,
+    /// Where uploaded SQL dumps wait for the node (`imports.spool_dir`).
+    pub spool_dir: PathBuf,
+    /// Where nodes reach this panel (`agent.public_url`); without it nothing can
+    /// be imported.
+    pub agent_url: Option<String>,
 }
 
 impl FromRef<DatabasesState> for PgPool {
@@ -102,6 +110,12 @@ pub fn client_router() -> Router<DatabasesState> {
             "/api/v1/client/db-users/{id}/remote-hosts",
             get(get_remote).put(set_remote),
         )
+        .merge(imports::client_router())
+}
+
+/// Routes without a session (the node fetching an SQL dump with its token).
+pub fn public_router() -> Router<DatabasesState> {
+    imports::public_router()
 }
 
 /// Routes for administrators (the overview arrives with T07.11).
@@ -1188,11 +1202,14 @@ pub async fn set_remote(
 #[openapi(
     paths(
         list_databases, create_database, delete_database, list_users, create_user,
-        change_password, delete_user, set_grant, remove_grant, get_remote, set_remote
+        change_password, delete_user, set_grant, remove_grant, get_remote, set_remote,
+        imports::start_import, imports::list_imports, imports::get_import,
+        imports::put_chunk, imports::complete_import, imports::cancel_import
     ),
     components(schemas(
         GrantView, DatabaseView, DatabaseList, UserGrantView, DbUserView, DbUserList,
-        DbUserCreated, AddDatabase, AddDbUser, NewPassword, SetAccess, RemoteHosts
+        DbUserCreated, AddDatabase, AddDbUser, NewPassword, SetAccess, RemoteHosts,
+        imports::ImportView, imports::ImportList, imports::StartImport
     )),
     tags((name = "databases", description = "Databases, their users and grants"))
 )]

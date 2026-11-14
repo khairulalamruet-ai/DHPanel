@@ -13,7 +13,7 @@ use dhpanel_auth_core::secretbox::MasterKey;
 use dhpanel_cache::RedisHandle;
 use dhpanel_database::modules as db;
 use dhpanel_kernel::{Manifest, Module, ModuleMount, ModuleRoutes, Registry};
-use dhpanel_mod_databases::{DatabasesState, SETTINGS_SCHEMA, client_router};
+use dhpanel_mod_databases::{DatabasesState, SETTINGS_SCHEMA, client_router, public_router};
 use dhpanel_session::{CSRF_HEADER, NewSession, SessionConfig, SessionStore, set_cookie};
 use dhpanel_settings::{Scope, SettingsRegistry};
 use secrecy::SecretString;
@@ -43,6 +43,7 @@ struct Env {
     app: Router,
     sessions: SessionStore,
     settings: Arc<SettingsRegistry>,
+    spool: std::path::PathBuf,
 }
 
 struct Browser {
@@ -61,6 +62,7 @@ async fn env(pool: &PgPool) -> Env {
         )])
         .unwrap(),
     );
+    let spool = std::env::temp_dir().join(format!("dh-spool-{}", Uuid::new_v4()));
     let manifest = Manifest::parse(
         "databases",
         "[module]\nname = \"databases\"\nversion = \"1.0.0\"\ntitle = { en = \"Databases\" }\ncategory = \"core\"\ncore = true\n",
@@ -69,16 +71,24 @@ async fn env(pool: &PgPool) -> Env {
     let module = Arc::new(Fake {
         manifest,
         routes: Box::new({
-            let (pool, sessions, settings) = (pool.clone(), sessions.clone(), settings.clone());
+            let (pool, sessions, settings, spool) = (
+                pool.clone(),
+                sessions.clone(),
+                settings.clone(),
+                spool.clone(),
+            );
             move || {
                 let state = DatabasesState {
                     db: pool.clone(),
                     sessions: sessions.clone(),
                     settings: settings.clone(),
                     master_key: MasterKey::from_bytes(&KEY),
+                    spool_dir: spool.clone(),
+                    agent_url: Some("https://panel.example.com:8443".to_owned()),
                 };
                 ModuleRoutes {
-                    client: Some(client_router().with_state(state)),
+                    client: Some(client_router().with_state(state.clone())),
+                    public: Some(public_router().with_state(state)),
                     ..ModuleRoutes::none()
                 }
             }
@@ -110,6 +120,7 @@ async fn env(pool: &PgPool) -> Env {
         app: mount.service(),
         sessions,
         settings,
+        spool,
     }
 }
 
@@ -158,6 +169,39 @@ impl Env {
             status,
             serde_json::from_slice(&bytes).unwrap_or(Value::Null),
         )
+    }
+}
+
+impl Env {
+    /// A request with a raw body (a chunk) or none; the whole answer.
+    async fn raw(
+        &self,
+        who: Option<&Browser>,
+        method: &str,
+        path: &str,
+        headers: &[(&str, &str)],
+        body: Vec<u8>,
+    ) -> (StatusCode, axum::http::HeaderMap, Vec<u8>) {
+        let mut req = Request::builder().method(method).uri(path);
+        if let Some(who) = who {
+            req = req
+                .header(header::COOKIE, &who.cookie)
+                .header(CSRF_HEADER, &who.csrf);
+        }
+        for (k, v) in headers {
+            req = req.header(*k, *v);
+        }
+        let res = self
+            .app
+            .clone()
+            .oneshot(req.body(Body::from(body)).unwrap())
+            .await
+            .unwrap();
+        let (status, headers) = (res.status(), res.headers().clone());
+        let bytes = axum::body::to_bytes(res.into_body(), 1 << 24)
+            .await
+            .unwrap();
+        (status, headers, bytes.to_vec())
     }
 }
 
@@ -762,4 +806,473 @@ async fn the_account_prefix_can_be_switched_off_and_names_stay_unique(pool: PgPo
         )
         .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+fn sha256_hex(data: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(data)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+async fn ready_database(pool: &PgPool, tenant: Uuid, name: &str) -> Uuid {
+    sqlx::query_scalar(
+        "INSERT INTO databases (tenant_id, name, status) VALUES ($1, $2, 'ready') RETURNING id",
+    )
+    .bind(tenant)
+    .bind(name)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn a_dump_is_uploaded_in_chunks_checked_and_handed_to_the_node_once(pool: PgPool) {
+    let e = env(&pool).await;
+    let (alice, tenant) = client(&pool, "alice", 10_000).await;
+    let (bobby, _) = client(&pool, "bobby", 10_001).await;
+    let (a, b) = (e.sign_in(alice).await, e.sign_in(bobby).await);
+    let database = ready_database(&pool, tenant, "alice_shop").await;
+    let starter = format!("/api/v1/client/databases/{database}/imports");
+    let dump: Vec<u8> = (0..5000u32)
+        .flat_map(|i| format!("INSERT INTO t VALUES ({i});\n").into_bytes())
+        .collect();
+    let sha = sha256_hex(&dump);
+
+    // What cannot be started.
+    for (body, why) in [
+        (
+            json!({"size_bytes": 10, "sha256": "abc"}),
+            "invalid_checksum",
+        ),
+        (json!({"size_bytes": 0, "sha256": sha}), "empty_file"),
+        (
+            json!({"size_bytes": 2u64 << 30, "sha256": sha}),
+            "file_too_big",
+        ),
+    ] {
+        let (status, got) = e.call(&a, "POST", &starter, Some(body)).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{got}");
+        assert!(got.to_string().contains(why), "{why}: {got}");
+    }
+    let (status, _) = e
+        .call(
+            &b,
+            "POST",
+            &starter,
+            Some(json!({"size_bytes": 10, "sha256": sha})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "someone else's database");
+
+    let (status, import) = e
+        .call(
+            &a,
+            "POST",
+            &starter,
+            Some(json!({"size_bytes": dump.len(), "sha256": sha.to_uppercase()})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{import}");
+    let id = import["id"].as_str().unwrap().to_owned();
+    assert_eq!(
+        (import["status"].clone(), import["next_chunk"].clone()),
+        (json!("uploading"), json!(0))
+    );
+    let (status, again) = e
+        .call(
+            &a,
+            "POST",
+            &starter,
+            Some(json!({"size_bytes": 10, "sha256": sha})),
+        )
+        .await;
+    assert_eq!(
+        (status, code(&again)),
+        (StatusCode::CONFLICT, "import_active")
+    );
+    let one = format!("/api/v1/client/imports/{id}");
+    let (status, _) = e.call(&b, "GET", &one, None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _, _) = e
+        .raw(
+            Some(&b),
+            "PUT",
+            &format!("{one}/chunks/0"),
+            &[],
+            dump[..10].to_vec(),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // Chunks go in order.
+    let chunk = |n: i32| format!("{one}/chunks/{n}");
+    let (status, _, body) = e
+        .raw(Some(&a), "PUT", &chunk(1), &[], dump[..10].to_vec())
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "{}",
+        String::from_utf8_lossy(&body)
+    );
+    let (status, _, body) = e.raw(Some(&a), "PUT", &chunk(0), &[], Vec::new()).await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{}",
+        String::from_utf8_lossy(&body)
+    );
+    let (status, _, body) = e
+        .raw(Some(&a), "PUT", &chunk(0), &[], dump[..1000].to_vec())
+        .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let now: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(
+        (now["received_bytes"].clone(), now["next_chunk"].clone()),
+        (json!(1000), json!(1))
+    );
+    let (status, _, _) = e
+        .raw(Some(&a), "PUT", &chunk(0), &[], dump[..1000].to_vec())
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "a chunk is taken once");
+    let (status, got) = e.call(&a, "POST", &format!("{one}/complete"), None).await;
+    assert_eq!((status, code(&got)), (StatusCode::CONFLICT, "incomplete"));
+    let mut too_much = dump[1000..].to_vec();
+    too_much.push(b'x');
+    let (status, _, _) = e.raw(Some(&a), "PUT", &chunk(1), &[], too_much).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (status, _, _) = e
+        .raw(
+            Some(&a),
+            "PUT",
+            &chunk(1),
+            &[],
+            vec![0u8; 8 * 1024 * 1024 + 1],
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::PAYLOAD_TOO_LARGE,
+        "chunks are at most 8 MiB"
+    );
+    let (status, _, _) = e
+        .raw(Some(&a), "PUT", &chunk(1), &[], dump[1000..].to_vec())
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Whole and right: queued for the node, with a token that is only kept sealed.
+    let (status, done) = e.call(&a, "POST", &format!("{one}/complete"), None).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{done}");
+    assert_eq!(done["status"], "queued");
+    let (op_id, payload): (Uuid, Value) =
+        sqlx::query_as("SELECT id, payload FROM operations WHERE kind = 'import_sql'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(payload["database"], "alice_shop");
+    assert_eq!(payload["username"], "alice");
+    assert_eq!(
+        payload["url"],
+        format!("https://panel.example.com:8443/api/v1/public/imports/{id}/data")
+    );
+    assert!(
+        payload.get("token").is_none_or(Value::is_null),
+        "no token in the ledger: {payload}"
+    );
+    let (hash, sealed): (Vec<u8>, Vec<u8>) =
+        sqlx::query_as("SELECT token_hash, sealed_token FROM db_imports WHERE id = $1")
+            .bind(id.parse::<Uuid>().unwrap())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let token = MasterKey::from_bytes(&KEY)
+        .open(
+            &dhpanel_database::imports::token_context(id.parse().unwrap()),
+            &sealed,
+        )
+        .unwrap();
+    {
+        use sha2::{Digest, Sha256};
+        assert_eq!(Sha256::digest(&token).to_vec(), hash);
+    }
+    let token = String::from_utf8(token).unwrap();
+
+    // The node's download: only with the token, and ranges work.
+    let data = format!("/api/v1/public/imports/{id}/data");
+    let (status, _, _) = e.raw(None, "GET", &data, &[], Vec::new()).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, _, _) = e
+        .raw(
+            None,
+            "GET",
+            &data,
+            &[("authorization", "Bearer nope")],
+            Vec::new(),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let bearer = format!("Bearer {token}");
+    let (status, headers, body) = e
+        .raw(
+            None,
+            "GET",
+            &data,
+            &[("authorization", &bearer), ("accept-encoding", "gzip")],
+            Vec::new(),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        body, dump,
+        "the file as it was uploaded (never compressed on the way)"
+    );
+    assert!(
+        headers
+            .get("content-encoding")
+            .is_none_or(|v| v == "identity")
+    );
+    let (status, headers, body) = e
+        .raw(
+            None,
+            "GET",
+            &data,
+            &[("authorization", &bearer), ("range", "bytes=4000-")],
+            Vec::new(),
+        )
+        .await;
+    assert_eq!(status, StatusCode::PARTIAL_CONTENT);
+    assert_eq!(body, dump[4000..]);
+    assert!(headers.get("content-range").is_some());
+
+    // The node starts: running, and it reports how far it has come.
+    sqlx::query("UPDATE operations SET status = 'dispatched', attempts = 1 WHERE id = $1")
+        .bind(op_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (_, now) = e.call(&a, "GET", &one, None).await;
+    assert_eq!(now["status"], "running", "{now}");
+    dhpanel_database::imports::record_progress(&pool, id.parse().unwrap(), "importing", 2500, 120)
+        .await
+        .unwrap();
+    let (_, now) = e.call(&a, "GET", &one, None).await;
+    assert_eq!(
+        (
+            now["stage"].clone(),
+            now["bytes_done"].clone(),
+            now["statements"].clone()
+        ),
+        (json!("importing"), json!(2500), json!(120))
+    );
+    let (status, got) = e.call(&a, "DELETE", &one, None).await;
+    assert_eq!(
+        (status, code(&got)),
+        (StatusCode::CONFLICT, "import_running")
+    );
+    // A node that does not know the import (it restarted) loses it, after a minute.
+    dhpanel_database::imports::lost(&pool, id.parse().unwrap())
+        .await
+        .unwrap();
+    let (_, now) = e.call(&a, "GET", &one, None).await;
+    assert_eq!(
+        now["status"], "running",
+        "not lost yet: it was heard of a moment ago"
+    );
+    assert!(
+        dhpanel_database::operations::succeed(
+            &pool,
+            op_id,
+            &json!({"type": "sql_imported", "statements": 5000})
+        )
+        .await
+        .unwrap()
+    );
+    let (_, now) = e.call(&a, "GET", &one, None).await;
+    assert_eq!(now["status"], "done", "{now}");
+    let left: Option<Vec<u8>> =
+        sqlx::query_scalar("SELECT sealed_token FROM db_imports WHERE id = $1")
+            .bind(id.parse::<Uuid>().unwrap())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(left.is_none(), "the token goes when the import has ended");
+    let (status, _, _) = e
+        .raw(
+            None,
+            "GET",
+            &data,
+            &[("authorization", &bearer)],
+            Vec::new(),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "no download after the end"
+    );
+    assert!(
+        e.spool
+            .join(format!("{}.dump", id.replace('-', "")))
+            .exists()
+    );
+    assert_eq!(
+        dhpanel_mod_databases::imports::sweep(&pool, &e.spool)
+            .await
+            .unwrap(),
+        1
+    );
+    assert!(
+        !e.spool
+            .join(format!("{}.dump", id.replace('-', "")))
+            .exists(),
+        "the spool file is removed"
+    );
+    let (status, got) = e.call(&a, "DELETE", &one, None).await;
+    assert_eq!(
+        (status, code(&got)),
+        (StatusCode::CONFLICT, "already_ended")
+    );
+
+    // A file that is not what it was said to be ends the import at once.
+    let (_, import) = e
+        .call(
+            &a,
+            "POST",
+            &starter,
+            Some(json!({"size_bytes": 4, "sha256": sha})),
+        )
+        .await;
+    let bad = import["id"].as_str().unwrap().to_owned();
+    let (status, _, _) = e
+        .raw(
+            Some(&a),
+            "PUT",
+            &format!("/api/v1/client/imports/{bad}/chunks/0"),
+            &[],
+            b"oops".to_vec(),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, got) = e
+        .call(
+            &a,
+            "POST",
+            &format!("/api/v1/client/imports/{bad}/complete"),
+            None,
+        )
+        .await;
+    assert_eq!(
+        (status, got.to_string().contains("checksum_mismatch")),
+        (StatusCode::UNPROCESSABLE_ENTITY, true),
+        "{got}"
+    );
+    let (_, now) = e
+        .call(&a, "GET", &format!("/api/v1/client/imports/{bad}"), None)
+        .await;
+    assert_eq!(now["status"], "failed");
+
+    // An upload can be given up; so can one that waits for the node.
+    let (_, import) = e
+        .call(
+            &a,
+            "POST",
+            &starter,
+            Some(json!({"size_bytes": 4, "sha256": sha256_hex(b"data")})),
+        )
+        .await;
+    let giveup = import["id"].as_str().unwrap().to_owned();
+    let (status, _, _) = e
+        .raw(
+            Some(&a),
+            "PUT",
+            &format!("/api/v1/client/imports/{giveup}/chunks/0"),
+            &[],
+            b"data".to_vec(),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = e
+        .call(
+            &a,
+            "DELETE",
+            &format!("/api/v1/client/imports/{giveup}"),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (_, now) = e
+        .call(&a, "GET", &format!("/api/v1/client/imports/{giveup}"), None)
+        .await;
+    assert_eq!(now["status"], "cancelled");
+    assert!(
+        !e.spool
+            .join(format!("{}.dump", giveup.replace('-', "")))
+            .exists()
+    );
+
+    // The node's refusal is told to the client.
+    let (_, import) = e
+        .call(
+            &a,
+            "POST",
+            &starter,
+            Some(json!({"size_bytes": 4, "sha256": sha256_hex(b"data")})),
+        )
+        .await;
+    let failing = import["id"].as_str().unwrap().to_owned();
+    let (status, _, _) = e
+        .raw(
+            Some(&a),
+            "PUT",
+            &format!("/api/v1/client/imports/{failing}/chunks/0"),
+            &[],
+            b"data".to_vec(),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = e
+        .call(
+            &a,
+            "POST",
+            &format!("/api/v1/client/imports/{failing}/complete"),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    let op_id: Uuid = sqlx::query_scalar(
+        "SELECT id FROM operations WHERE kind = 'import_sql' AND status = 'pending'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE operations SET status = 'dispatched', attempts = 1 WHERE id = $1")
+        .bind(op_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    dhpanel_database::operations::fail(
+        &pool,
+        op_id,
+        &json!({"code": "invalid_argument", "message": "statement 3: error 1064: syntax", "retryable": false}),
+        None,
+    )
+    .await
+    .unwrap();
+    let (_, now) = e
+        .call(
+            &a,
+            "GET",
+            &format!("/api/v1/client/imports/{failing}"),
+            None,
+        )
+        .await;
+    assert_eq!(now["status"], "failed", "{now}");
+    assert_eq!(now["error"], "statement 3: error 1064: syntax");
+    let (_, list) = e.call(&a, "GET", "/api/v1/client/imports", None).await;
+    assert_eq!(list["items"].as_array().unwrap().len(), 4);
+    assert_eq!(list["max_size_mb"], 1024);
+    let _ = std::fs::remove_dir_all(&e.spool);
 }

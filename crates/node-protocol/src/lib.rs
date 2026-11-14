@@ -1186,6 +1186,9 @@ pub enum AgentMessage {
 /// [`encode_operation`] and read with [`parse_operation_frame`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+// A frame is built, sent and dropped one at a time; boxing the operation would only
+// add a pointer to follow.
+#[allow(clippy::large_enum_variant)]
 pub enum ControlMessage {
     /// Accepts the session.
     Welcome(Welcome),

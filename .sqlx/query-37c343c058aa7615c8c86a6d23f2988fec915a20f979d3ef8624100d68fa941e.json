@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE db_imports SET stage = left($2, 20), bytes_done = $3, statements = $4, updated_at = now()\n         WHERE id = $1 AND status = 'running'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "37c343c058aa7615c8c86a6d23f2988fec915a20f979d3ef8624100d68fa941e"
+}

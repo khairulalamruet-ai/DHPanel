@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT sealed_token FROM db_imports WHERE id = $1 AND status IN ('queued', 'running')",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "sealed_token",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "db_imports",
+            "name": "sealed_token"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "1441101280e9ddf6b37bdde42d93fae8f762f2122766e8c0163bce27837600fe"
+}

@@ -25,8 +25,12 @@ pub type MetricsHandle = Arc<dyn Fn() -> String + Send + Sync>;
 /// Whole-request timeout. Long-running work goes through the operations queue
 /// (202 + operation_id), never a long HTTP request.
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
-/// Default maximum request body. Upload endpoints will set their own limits.
+/// Default maximum request body. An upload endpoint raises it for its own route
+/// (`DefaultBodyLimit`), up to [`UPLOAD_LIMIT_BYTES`].
 pub const BODY_LIMIT_BYTES: usize = 2 * 1024 * 1024;
+/// The most any request body may be, whatever a route asks for (a chunk of an
+/// SQL dump is at most 8 MiB).
+pub const UPLOAD_LIMIT_BYTES: usize = 9 * 1024 * 1024;
 
 /// State shared by all handlers.
 #[derive(Clone)]
@@ -82,11 +86,12 @@ pub fn base_router(state: AppState) -> Router {
 ///
 /// Layer order, outermost first:
 /// correlation ID -> client address -> panic catcher -> metrics -> timeout -> body limit
-/// -> compression -> routes.
+/// (2 MiB for what handlers read, 9 MiB at most for any body) -> compression -> routes.
 pub fn router(routes: Router, trusted_proxies: Arc<[IpAddr]>) -> Router {
     routes
         .layer(CompressionLayer::new())
-        .layer(RequestBodyLimitLayer::new(BODY_LIMIT_BYTES))
+        .layer(axum::extract::DefaultBodyLimit::max(BODY_LIMIT_BYTES))
+        .layer(RequestBodyLimitLayer::new(UPLOAD_LIMIT_BYTES))
         .layer(TimeoutLayer::with_status_code(
             StatusCode::REQUEST_TIMEOUT,
             REQUEST_TIMEOUT,
@@ -288,12 +293,47 @@ mod tests {
 
     #[tokio::test]
     async fn oversized_body_is_rejected() {
-        let app = Router::new()
-            .route(
-                "/echo",
-                axum::routing::post(|body: String| async move { body }),
-            )
-            .layer(RequestBodyLimitLayer::new(BODY_LIMIT_BYTES));
+        let app = router(
+            Router::new()
+                .route(
+                    "/echo",
+                    axum::routing::post(|body: String| async move { body }),
+                )
+                .route(
+                    "/upload",
+                    axum::routing::post(
+                        |body: axum::body::Bytes| async move { body.len().to_string() },
+                    )
+                    .layer(axum::extract::DefaultBodyLimit::max(8 * 1024 * 1024)),
+                ),
+            Arc::from(Vec::new()),
+        );
+        // A route that asks for more gets it (8 MiB), but not past the absolute cap.
+        let post = |uri: &str, n: usize| {
+            Request::builder()
+                .method("POST")
+                .uri(uri.to_owned())
+                .body(Body::from("x".repeat(n)))
+                .unwrap()
+        };
+        let res = app
+            .clone()
+            .oneshot(post("/upload", 8 * 1024 * 1024))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let res = app
+            .clone()
+            .oneshot(post("/upload", UPLOAD_LIMIT_BYTES + 1))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        let res = app
+            .clone()
+            .oneshot(post("/echo", BODY_LIMIT_BYTES + 1))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
         let big = "x".repeat(BODY_LIMIT_BYTES + 1);
         let res = app
             .oneshot(

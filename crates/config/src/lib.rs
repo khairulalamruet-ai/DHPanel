@@ -53,6 +53,27 @@ pub struct ControlConfig {
     pub pki: PkiConfig,
     /// The DNS server that hosts the zones of hosted domains.
     pub dns: DnsConfig,
+    /// Where uploaded SQL dumps wait for the node to fetch them.
+    #[serde(default)]
+    pub imports: ImportsConfig,
+}
+
+/// SQL import settings.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct ImportsConfig {
+    /// Folder for uploaded dumps (owned by the control plane's user; needs room
+    /// for the biggest `max_import_mb` several times over). A dump is removed
+    /// as soon as its import has ended.
+    pub spool_dir: PathBuf,
+}
+
+impl Default for ImportsConfig {
+    fn default() -> Self {
+        Self {
+            spool_dir: PathBuf::from("/var/lib/dhpanel/spool/imports"),
+        }
+    }
 }
 
 /// DNS server settings.
@@ -270,6 +291,7 @@ impl Default for ControlConfig {
                 powerdns_server_id: "localhost".to_owned(),
                 sync_seconds: 30,
             },
+            imports: ImportsConfig::default(),
         }
     }
 }

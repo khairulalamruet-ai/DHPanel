@@ -181,7 +181,7 @@ impl Dispatcher {
                 _ = tick.tick() => { self.tick().await; }
                 _ = capabilities.tick() => { self.request_capabilities().await; }
                 _ = purges.tick() => { self.request_purges().await; }
-                _ = routes.tick() => { self.expire_previews().await; self.request_route_syncs().await; self.request_error_pages().await; }
+                _ = routes.tick() => { self.expire_previews().await; self.request_route_syncs().await; self.request_error_pages().await; self.request_import_progress().await; }
                 _ = certificates.tick() => { self.request_certificates().await; self.request_db_sizes().await; }
                 _ = expiry.tick() => { self.announce_expiring().await; }
                 Some(report) = results.recv() => self.handle_result(report).await,
@@ -607,6 +607,69 @@ impl Dispatcher {
         asked
     }
 
+    /// Asks the nodes that run an SQL import how far they have come (the key has a
+    /// ten-second slot, so each import is asked about once per slot). Returns how
+    /// many were asked.
+    pub async fn request_import_progress(&self) -> usize {
+        let running = match dhpanel_database::imports::running(self.ops.db()).await {
+            Ok(r) => r,
+            Err(err) => {
+                tracing::warn!(error = %err, "could not look for running imports");
+                return 0;
+            }
+        };
+        let slot = u64::try_from(unix_now()).unwrap_or(0) / 10;
+        let connected = self.gateway.connected_nodes();
+        let mut asked = 0;
+        for (import_id, node) in running {
+            if !connected.contains(&node) {
+                continue;
+            }
+            let request = dhpanel_operations::Request::new(
+                node,
+                dhpanel_node_protocol::Operation::ReportImportProgress { import_id },
+                format!("importprog:{}:{slot}", import_id.simple()),
+            );
+            match self.ops.enqueue(&request).await {
+                Ok(dhpanel_operations::Enqueued::Created(_)) => asked += 1,
+                Ok(dhpanel_operations::Enqueued::Existing(_)) => {}
+                Err(error) => {
+                    tracing::warn!(%node, %error, "could not queue an import progress request")
+                }
+            }
+        }
+        asked
+    }
+
+    async fn store_import_progress(&self, import_id: Uuid, report: &dhpanel_node_protocol::Output) {
+        let dhpanel_node_protocol::Output::ImportProgress {
+            stage,
+            bytes_done,
+            statements,
+            ..
+        } = report
+        else {
+            return;
+        };
+        let result = if stage == "unknown" {
+            // The node has no such import: it restarted, so the run is lost. (A
+            // young import may only not have been noticed by the node yet.)
+            dhpanel_database::imports::lost(self.ops.db(), import_id).await
+        } else {
+            dhpanel_database::imports::record_progress(
+                self.ops.db(),
+                import_id,
+                stage,
+                i64::try_from(*bytes_done).unwrap_or(i64::MAX),
+                i64::try_from(*statements).unwrap_or(i64::MAX),
+            )
+            .await
+        };
+        if let Err(err) = result {
+            tracing::warn!(%import_id, error = %err, "could not keep the progress of an import");
+        }
+    }
+
     async fn store_db_sizes(&self, node_id: Uuid, items: &[dhpanel_node_protocol::DbSize]) {
         let sizes: Vec<(String, i64)> = items
             .iter()
@@ -821,6 +884,15 @@ impl Dispatcher {
                 }
                 if let Some(dhpanel_node_protocol::Output::DbSizes { items }) = &output {
                     self.store_db_sizes(node_id, items).await;
+                }
+                if let Some(report @ dhpanel_node_protocol::Output::ImportProgress { .. }) = &output
+                    && let Some(import_id) = row
+                        .payload
+                        .get("import_id")
+                        .and_then(serde_json::Value::as_str)
+                        .and_then(|s| s.parse::<Uuid>().ok())
+                {
+                    self.store_import_progress(import_id, report).await;
                 }
                 let output = output
                     .and_then(|o| serde_json::to_value(o).ok())

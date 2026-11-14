@@ -1582,3 +1582,130 @@ async fn database_sizes_are_asked_for_only_where_there_are_databases_and_kept(po
     agent_stop.send(true).unwrap();
     agent.await.unwrap();
 }
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs PostgreSQL"]
+async fn running_imports_are_asked_how_far_they_are_and_the_answer_is_kept(pool: PgPool) {
+    let p = plane(&pool).await;
+    let d = Dispatcher::new(p.ops.clone(), p.gateway.clone(), None, dispatch_settings());
+    let mut registry = Registry::new();
+    registry.register("report_import_progress", |_| async move {
+        Ok(Output::ImportProgress {
+            stage: "importing".into(),
+            bytes_done: 4_000,
+            bytes_total: 10_000,
+            statements: 77,
+            error: None,
+        })
+    });
+    let node = make_node_with(&p, &pool, "imports", registry).await;
+    let (agent_stop, agent) = node.start_agent(p.addr);
+    wait_connected(&p, node.id).await;
+    let results = p.gateway.take_results().expect("results taken once");
+    tokio::spawn(d.clone().run(results, p.stop.subscribe()));
+
+    assert_eq!(
+        d.request_import_progress().await,
+        0,
+        "no import, nobody asked"
+    );
+    let account: Uuid = sqlx::query_scalar(
+        "INSERT INTO accounts (kind, username, email, password_hash)
+         VALUES ('client', 'eve', 'eve@example.com',
+                 '$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHQ$aGFzaGhhc2hoYXNoaGFzaA') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let plan: Uuid = sqlx::query_scalar("SELECT id FROM plans WHERE is_default")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let tenant: Uuid = sqlx::query_scalar(
+        "INSERT INTO tenants (owner_account_id, node_id, plan_id, username, uid, status)
+         VALUES ($1, $2, $3, 'eve', 10005, 'active') RETURNING id",
+    )
+    .bind(account)
+    .bind(node.id)
+    .bind(plan)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let database: Uuid = sqlx::query_scalar(
+        "INSERT INTO databases (tenant_id, name, status) VALUES ($1, 'eve_shop', 'ready') RETURNING id",
+    )
+    .bind(tenant)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let import: Uuid = sqlx::query_scalar(
+        "INSERT INTO db_imports (tenant_id, database_id, gzip, size_bytes, sha256, status)
+         VALUES ($1, $2, false, 10000, repeat('a', 64), 'queued') RETURNING id",
+    )
+    .bind(tenant)
+    .bind(database)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        d.request_import_progress().await,
+        0,
+        "only running imports are asked about"
+    );
+    sqlx::query("UPDATE db_imports SET status = 'running' WHERE id = $1")
+        .bind(import)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(d.request_import_progress().await, 1);
+    assert_eq!(d.request_import_progress().await, 0, "once per time slot");
+    let mut statements = 0_i64;
+    for _ in 0..100 {
+        statements = sqlx::query_scalar("SELECT statements FROM db_imports WHERE id = $1")
+            .bind(import)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        if statements > 0 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert_eq!(statements, 77);
+    let (stage, done): (String, i64) =
+        sqlx::query_as("SELECT stage, bytes_done FROM db_imports WHERE id = $1")
+            .bind(import)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!((stage.as_str(), done), ("importing", 4_000));
+
+    // A node that has lost the import (it restarted) ends it, but not at once.
+    dhpanel_database::imports::lost(&pool, import)
+        .await
+        .unwrap();
+    let status: String = sqlx::query_scalar("SELECT status FROM db_imports WHERE id = $1")
+        .bind(import)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(status, "running");
+    sqlx::query("UPDATE db_imports SET updated_at = now() - interval '2 minutes' WHERE id = $1")
+        .bind(import)
+        .execute(&pool)
+        .await
+        .unwrap();
+    dhpanel_database::imports::lost(&pool, import)
+        .await
+        .unwrap();
+    let (status, error): (String, Option<String>) =
+        sqlx::query_as("SELECT status, error FROM db_imports WHERE id = $1")
+            .bind(import)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(status, "failed");
+    assert!(error.unwrap().contains("restarted"));
+    agent_stop.send(true).unwrap();
+    agent.await.unwrap();
+}

@@ -1,0 +1,199 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT i.id, i.tenant_id, i.database_id, d.name AS database, i.gzip, i.size_bytes,\n                  i.sha256, i.status, i.received_bytes, i.next_chunk, i.stage,\n                  i.bytes_done, i.statements, i.error,\n                  extract(epoch FROM i.created_at)::bigint AS \"created_at!\",\n                  extract(epoch FROM i.finished_at)::bigint AS finished_at\n           FROM db_imports i JOIN databases d ON d.id = i.database_id\n           WHERE i.tenant_id = $1 ORDER BY i.created_at DESC LIMIT $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "db_imports",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "db_imports",
+            "name": "tenant_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "database_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "db_imports",
+            "name": "database_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "database",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "databases",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "gzip",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "db_imports",
+            "name": "gzip"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "size_bytes",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "db_imports",
+            "name": "size_bytes"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "sha256",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "db_imports",
+            "name": "sha256"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "db_imports",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "received_bytes",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "db_imports",
+            "name": "received_bytes"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "next_chunk",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "db_imports",
+            "name": "next_chunk"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "stage",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "db_imports",
+            "name": "stage"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "bytes_done",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "db_imports",
+            "name": "bytes_done"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "statements",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "db_imports",
+            "name": "statements"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "error",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "db_imports",
+            "name": "error"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "created_at!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 15,
+        "name": "finished_at",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      null,
+      null
+    ]
+  },
+  "hash": "55a9e6156f22dbfb03acf5a7cb845725c5cad38d933e398751c28045d5a3edc5"
+}

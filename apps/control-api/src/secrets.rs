@@ -50,6 +50,43 @@ pub fn operation_secrets(
                         password,
                     });
                 }
+                // The download credential of an SQL import: sealed by the API, opened
+                // for this one message. Once the import has ended there is none, and
+                // the node's download (which would be refused anyway) is not tried.
+                Operation::ImportSql {
+                    username,
+                    database,
+                    import_id,
+                    url,
+                    size_bytes,
+                    sha256,
+                    gzip,
+                    token: None,
+                } => {
+                    let sealed = dhpanel_database::imports::sealed_token_of(&db, import_id)
+                        .await
+                        .map_err(|_| "could not read an import token".to_owned())?
+                        .ok_or_else(|| "this import has ended".to_owned())?;
+                    let bytes = master_key
+                        .open(
+                            &dhpanel_database::imports::token_context(import_id),
+                            &sealed,
+                        )
+                        .map_err(|_| "an import token does not open".to_owned())?;
+                    return Ok(Operation::ImportSql {
+                        username,
+                        database,
+                        import_id,
+                        url,
+                        size_bytes,
+                        sha256,
+                        gzip,
+                        token: Some(dhpanel_node_protocol::DbPassword(
+                            String::from_utf8(bytes)
+                                .map_err(|_| "an import token is not text".to_owned())?,
+                        )),
+                    });
+                }
                 other => return Ok(other),
             };
             let mut filled = Vec::with_capacity(items.len());

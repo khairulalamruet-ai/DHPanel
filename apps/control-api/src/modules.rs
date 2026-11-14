@@ -94,6 +94,8 @@ pub struct States {
     pub admin: dhpanel_mod_admin::AdminState,
     /// Nodes and operations.
     pub nodes: dhpanel_mod_nodes::NodesState,
+    /// Where uploaded SQL dumps wait for the node.
+    pub spool_dir: std::path::PathBuf,
 }
 
 /// Builds the registry of this binary with every module's routes attached,
@@ -133,7 +135,13 @@ pub fn mount(
         dhpanel_mod_domains::services::RESTARTS_PER_MINUTE,
         std::time::Duration::from_secs(60),
     );
-    let States { auth, admin, nodes } = states;
+    let States {
+        auth,
+        admin,
+        nodes,
+        spool_dir,
+    } = states;
+    let agent_url: Option<String> = nodes.public_url.as_deref().map(str::to_owned);
     let modules = manifests
         .into_iter()
         .map(|manifest| {
@@ -280,6 +288,7 @@ pub fn mount(
                         late_settings.clone(),
                         master_key.clone(),
                     );
+                    let (spool_dir, agent_url) = (spool_dir.clone(), agent_url.clone());
                     Box::new(move || match late_settings.get() {
                         Some(settings) => {
                             let state = dhpanel_mod_databases::DatabasesState {
@@ -287,15 +296,20 @@ pub fn mount(
                                 sessions: sessions.clone(),
                                 settings: settings.clone(),
                                 master_key: master_key.clone(),
+                                spool_dir: spool_dir.clone(),
+                                agent_url: agent_url.clone(),
                             };
                             ModuleRoutes {
                                 admin: Some(
                                     dhpanel_mod_databases::admin_router().with_state(state.clone()),
                                 ),
                                 client: Some(
-                                    dhpanel_mod_databases::client_router().with_state(state),
+                                    dhpanel_mod_databases::client_router()
+                                        .with_state(state.clone()),
                                 ),
-                                ..ModuleRoutes::none()
+                                public: Some(
+                                    dhpanel_mod_databases::public_router().with_state(state),
+                                ),
                             }
                         }
                         None => ModuleRoutes::none(),

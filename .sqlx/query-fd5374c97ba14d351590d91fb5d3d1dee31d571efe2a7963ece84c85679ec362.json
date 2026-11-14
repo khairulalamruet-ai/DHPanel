@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE db_imports SET status = 'cancelled', error = 'the upload was left unfinished',\n                               finished_at = now(), updated_at = now()\n         WHERE status = 'uploading' AND updated_at < now() - make_interval(hours => $1::int)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "fd5374c97ba14d351590d91fb5d3d1dee31d571efe2a7963ece84c85679ec362"
+}
