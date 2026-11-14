@@ -81,4 +81,14 @@ test.describe("Users Management UI (T04.15)", () => {
 
     await expect(dialog).not.toBeVisible();
   });
+
+  test("displays node offline badge for tenants hosted on offline nodes (T16.07)", async ({ page }) => {
+    // In mockUsers, users on node-nyc-01 (e.g. gamma) are on offline nodes
+    await expect(page.locator("table").getByText("gamma", { exact: true })).toBeVisible();
+
+    // Verify tenant-node-offline-badge is visible
+    const offlineBadge = page.getByTestId("tenant-node-offline-badge").first();
+    await expect(offlineBadge).toBeVisible();
+    await expect(offlineBadge).toContainText(/Node Offline|নোড অফলাইন/i);
+  });
 });

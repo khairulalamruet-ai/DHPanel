@@ -195,4 +195,17 @@ describe("UsersPage (T04.15)", () => {
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     });
   });
+
+  it("displays 'node offline' warning badge for tenants on offline nodes (DoD T16.07)", async () => {
+    renderWithProviders(<UsersPage />);
+
+    // In mockUsers, users on node-nyc-01 (such as gamma) are on an offline node
+    await waitFor(() => {
+      expect(screen.getByText("gamma")).toBeInTheDocument();
+    });
+
+    const offlineBadges = screen.getAllByTestId("tenant-node-offline-badge");
+    expect(offlineBadges.length).toBeGreaterThan(0);
+    expect(offlineBadges[0]).toHaveTextContent(/Node Offline|নোড অফলাইন/i);
+  });
 });

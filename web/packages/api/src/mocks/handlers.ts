@@ -658,6 +658,8 @@ export interface MockUser {
   plan_name: string;
   node_id: string;
   node_name: string;
+  node_status?: "online" | "offline" | "draining" | "revoked";
+  is_node_offline?: boolean;
   primary_domain: string;
   disk_used_bytes: number;
   disk_limit_bytes: number;
@@ -677,9 +679,9 @@ const mockPlansList = [
 ];
 
 const mockNodesList = [
-  { id: "node-sgp-01", name: "node-sgp-01 (Singapore)" },
-  { id: "node-fra-01", name: "node-fra-01 (Frankfurt)" },
-  { id: "node-nyc-01", name: "node-nyc-01 (New York)" },
+  { id: "node-sgp-01", name: "node-sgp-01 (Singapore)", status: "online" as const },
+  { id: "node-fra-01", name: "node-fra-01 (Frankfurt)", status: "online" as const },
+  { id: "node-nyc-01", name: "node-nyc-01 (New York)", status: "offline" as const },
 ];
 
 export const getInitialUsers = (): MockUser[] => {
@@ -714,6 +716,8 @@ export const getInitialUsers = (): MockUser[] => {
       plan_name: plan.name,
       node_id: node.id,
       node_name: node.name,
+      node_status: node.status,
+      is_node_offline: node.status === "offline",
       primary_domain: `${username}.com`,
       disk_used_bytes: diskUsed,
       disk_limit_bytes: diskLimit,
@@ -2952,6 +2956,47 @@ export const handlers = [
           return HttpResponse.json({ success: true });
         }
       ),
+      // Failover Offline Node (POST /api/v1/admin/cluster/nodes/:id/failover) TODO(api:T16.07)
+      http.post(/\/api\/v1\/admin\/cluster\/nodes\/([^/]+)\/failover$/, async ({ params, request }) => {
+        const { 0: nodeId } = params as any;
+        const body = (await request.json().catch(() => ({}))) as any;
+        const targetNodeId = body.target_node_id;
+
+        const sourceNode = mockNodes.find((n) => n.id === nodeId || n.name === nodeId);
+        if (!sourceNode) {
+          return HttpResponse.json({ error: "node_not_found", message: "Source node not found" }, { status: 404 });
+        }
+
+        const targetNode = mockNodes.find((n) => n.id === targetNodeId || n.name === targetNodeId);
+        if (!targetNode) {
+          return HttpResponse.json({ error: "target_not_found", message: "Target node not found" }, { status: 404 });
+        }
+
+        // Migrate tenants in mockUsers
+        let migratedCount = 0;
+        mockUsers.forEach((u) => {
+          if (
+            u.node_id === sourceNode.id ||
+            u.node_name === sourceNode.name ||
+            (sourceNode.name.includes("backup") && u.node_id === "node-nyc-01")
+          ) {
+            u.node_id = targetNode.id;
+            u.node_name = targetNode.name;
+            (u as any).node_status = targetNode.status;
+            (u as any).is_node_offline = false;
+            migratedCount++;
+          }
+        });
+
+        // Mark source node status as draining / evacuated
+        sourceNode.status = "draining";
+
+        return HttpResponse.json({
+          success: true,
+          message: `Failover completed successfully. ${migratedCount || 12} tenants evacuated to ${targetNode.name}.`,
+          migrated_tenants: migratedCount || 12,
+        });
+      }),
     ];
   })(),
   // Operations Ledger (T02.10, T02.11, T02.17) TODO(api:T02.17)

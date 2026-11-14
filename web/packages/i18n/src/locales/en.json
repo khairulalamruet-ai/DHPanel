@@ -470,6 +470,17 @@
         "deleteSuccess": "IP address \"{{ip}}\" removed from node.",
         "cannotDeletePrimary": "Cannot delete the primary IP address of a node."
       }
+    },
+    "health": {
+      "alertTitle": "Node Offline Alert (Heartbeat missed > 60s)",
+      "alertDesc": "Node {{nodes}} is unreachable. Failover may be initiated to restore tenant availability.",
+      "triggerFailover": "Trigger Failover",
+      "failoverModalTitle": "Emergency Node Failover",
+      "failoverModalDesc": "Evacuate and failover hosted tenants from offline node to a healthy cluster node.",
+      "sourceNode": "Offline Source Node",
+      "targetNode": "Target Destination Node",
+      "executeFailover": "Execute Failover",
+      "failoverSuccess": "Failover initiated successfully. Tenants evacuated to standby node."
     }
   },
   "operations": {
@@ -727,6 +738,7 @@
     "desc": "Manage client tenant accounts, assigned hosting plans, nodes, and quotas",
     "refresh": "Refresh",
     "createUser": "New User",
+    "nodeOffline": "Node Offline",
     "stats": {
       "total": "Total Users",
       "active": "Active",

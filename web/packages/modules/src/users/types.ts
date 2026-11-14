@@ -9,6 +9,8 @@ export interface UserItem {
   plan_name: string;
   node_id: string;
   node_name: string;
+  node_status?: "online" | "offline" | "draining" | "revoked";
+  is_node_offline?: boolean;
   primary_domain?: string;
   disk_used_bytes: number;
   disk_limit_bytes: number; // -1 for unlimited

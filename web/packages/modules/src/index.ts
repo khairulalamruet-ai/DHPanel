@@ -7,6 +7,7 @@ export * from "./module-manager";
 export * from "./nodes/NodesPage";
 export * from "./nodes/AgentUpdateDialog";
 export * from "./nodes/AdminIpPoolsPage";
+export * from "./nodes/NodeFailoverDialog";
 export * from "./nodes/types";
 export * from "./operations/OperationsPage";
 export * from "./operations/ApplyToAllDialog";
