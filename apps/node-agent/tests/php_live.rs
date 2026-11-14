@@ -202,6 +202,39 @@ async fn the_main_php_changes_version_another_runs_beside_it_and_extras_are_remo
     assert_eq!(err.code, ErrorCode::InvalidArguments);
     assert!(seen("96M 45 Asia/Dhaka").await);
 
+    // Restarting the web server or PHP keeps the site up afterwards.
+    for service in ["web", "php"] {
+        let done = dhpanel_node_agent::ops::tenant::restart_service(
+            context.clone(),
+            Operation::RestartService {
+                username: name.clone(),
+                service: service.into(),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            done,
+            Output::ServiceRestarted {
+                containers: vec![format!("dh-{name}-{service}")]
+            }
+        );
+        assert!(
+            serves(&docker, &owner, 9, "one.example.com", "8.4.").await,
+            "{service}"
+        );
+    }
+    let err = dhpanel_node_agent::ops::tenant::restart_service(
+        context.clone(),
+        Operation::RestartService {
+            username: name.clone(),
+            service: "mail".into(),
+        },
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(err.code, ErrorCode::InvalidArguments);
+
     // The main container moves to 8.3: its files stay, the site follows.
     let moved = set_php_versions(context.clone(), limits("8.3", &[]))
         .await

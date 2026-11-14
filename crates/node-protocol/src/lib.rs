@@ -389,6 +389,15 @@ pub enum Operation {
         /// More versions to run next to it (at most [`MAX_EXTRA_PHP_VERSIONS`]).
         extra_php: Vec<String>,
     },
+    /// Restart one of the tenant's own services: its web server (`web`) or all its
+    /// PHP containers (`php`): stopped with a short grace period, started, and
+    /// waited for. The files stay. Answered with [`Output::ServiceRestarted`].
+    RestartService {
+        /// The tenant's system name.
+        username: String,
+        /// `web` or `php`.
+        service: String,
+    },
     /// Put the tenant's php.ini options (a file of `option = value` lines made by
     /// the control plane) where its PHP containers read them and have the running
     /// ones load it. The file is checked against the list of options that may be
@@ -533,6 +542,7 @@ impl Operation {
         "set_resource_limits",
         "set_php_versions",
         "set_php_ini",
+        "restart_service",
         "set_up_tenant",
         "set_site_routes",
         "report_certificates",
@@ -557,6 +567,7 @@ impl Operation {
             Self::SetResourceLimits { .. } => "set_resource_limits",
             Self::SetPhpVersions { .. } => "set_php_versions",
             Self::SetPhpIni { .. } => "set_php_ini",
+            Self::RestartService { .. } => "restart_service",
             Self::SetUpTenant { .. } => "set_up_tenant",
             Self::SetSiteRoutes { .. } => "set_site_routes",
             Self::ReportCertificates => "report_certificates",
@@ -705,6 +716,11 @@ pub enum Output {
         containers: Vec<String>,
         /// How storage limits are enforced (`xfs`), or `None` when they are not.
         storage_quota: Option<String>,
+    },
+    /// Answer to [`Operation::RestartService`].
+    ServiceRestarted {
+        /// The containers that were restarted.
+        containers: Vec<String>,
     },
     /// Answer to [`Operation::SetPhpIni`].
     PhpIniSet {
@@ -1540,6 +1556,10 @@ mod tests {
                 username: "alice".into(),
                 ini: "memory_limit = 64M\n".into(),
             },
+            Operation::RestartService {
+                username: "alice".into(),
+                service: "web".into(),
+            },
             Operation::AttachDomain {
                 username: "alice".into(),
                 domain: "example.com".into(),
@@ -1566,7 +1586,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            18,
+            19,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }

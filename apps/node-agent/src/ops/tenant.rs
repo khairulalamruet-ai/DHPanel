@@ -413,6 +413,45 @@ pub async fn provision_tenant_stack(
     })
 }
 
+/// `restart_service`.
+///
+/// # Errors
+/// [`AgentError`]: an unknown service or no stack here (not retryable); Docker
+/// unavailable (retryable); a container that stops again right after starting.
+pub async fn restart_service(
+    context: Arc<TenantContext>,
+    op: Operation,
+) -> Result<Output, AgentError> {
+    let Operation::RestartService { username, service } = op else {
+        return Err(super::wrong_operation());
+    };
+    let username = parse_username(&username)?;
+    let names = match service.as_str() {
+        "web" => vec![name_of(&username, "web")?],
+        "php" => php_container_names(&context.docker, &username).await?,
+        _ => return Err(invalid_arg("the service is `web` or `php`")),
+    };
+    require_provisioned(&context.docker, &names).await?;
+    let mut restarted = Vec::new();
+    for name in &names {
+        context
+            .docker
+            .stop(name, Duration::from_secs(10))
+            .await
+            .map_err(|e| docker_error(&e))?;
+        context
+            .docker
+            .start(name)
+            .await
+            .map_err(|e| docker_error(&e))?;
+        wait_healthy(&context.docker, name).await?;
+        restarted.push(name.as_str().to_owned());
+    }
+    Ok(Output::ServiceRestarted {
+        containers: restarted,
+    })
+}
+
 /// `set_php_versions`.
 ///
 /// # Errors

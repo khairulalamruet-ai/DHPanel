@@ -123,6 +123,12 @@ pub fn mount(
         dhpanel_mod_domains::tls::ASK_LIMIT_PER_MINUTE,
         std::time::Duration::from_secs(60),
     );
+    let restart_limiter = dhpanel_cache::ratelimit::RateLimiter::new(
+        states.auth.redis.clone(),
+        "service-restart",
+        dhpanel_mod_domains::services::RESTARTS_PER_MINUTE,
+        std::time::Duration::from_secs(60),
+    );
     let States { auth, admin, nodes } = states;
     let modules = manifests
         .into_iter()
@@ -217,12 +223,21 @@ pub fn mount(
                         })
                     }
                     "domains" => {
-                        let (db, sessions, late_settings, resolver, ask_limiter, master_key) = (
+                        let (
+                            db,
+                            sessions,
+                            late_settings,
+                            resolver,
+                            ask_limiter,
+                            restart_limiter,
+                            master_key,
+                        ) = (
                             db.clone(),
                             sessions.clone(),
                             late_settings.clone(),
                             resolver.clone(),
                             ask_limiter.clone(),
+                            restart_limiter.clone(),
                             master_key.clone(),
                         );
                         Box::new(move || match late_settings.get() {
@@ -233,6 +248,7 @@ pub fn mount(
                                     settings: settings.clone(),
                                     resolver: resolver.clone(),
                                     ask_limiter: ask_limiter.clone(),
+                                    restart_limiter: restart_limiter.clone(),
                                     master_key: master_key.clone(),
                                 };
                                 ModuleRoutes {

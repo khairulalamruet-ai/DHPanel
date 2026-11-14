@@ -36,6 +36,7 @@ pub mod php_settings;
 pub mod policy;
 pub mod records;
 pub mod redirects;
+pub mod services;
 pub mod ssl;
 pub mod tls;
 pub mod vhost;
@@ -97,6 +98,8 @@ pub struct DomainsState {
     pub resolver: Arc<dyn dhpanel_dns::resolver::NsResolver>,
     /// Limits how often one address may ask whether a name may get a certificate.
     pub ask_limiter: dhpanel_cache::ratelimit::RateLimiter,
+    /// Limits how often an account may restart its services.
+    pub restart_limiter: dhpanel_cache::ratelimit::RateLimiter,
     /// Seals the private keys of uploaded certificates.
     pub master_key: dhpanel_auth_core::secretbox::MasterKey,
 }
@@ -140,6 +143,7 @@ pub fn admin_router() -> Router<DomainsState> {
 /// Routes for clients, with full paths.
 pub fn client_router() -> Router<DomainsState> {
     php::client_router()
+        .merge(services::client_router())
         .merge(php_settings::client_router())
         .merge(policy::client_router())
         .merge(vhost::client_router())
@@ -1149,7 +1153,7 @@ pub async fn client_delete(
         admin_list, admin_get, admin_add, admin_update, admin_delete, admin_suspend,
         admin_unsuspend, client_list, client_get, client_add, client_update, client_delete,
         php::admin_get, php::admin_set, php::client_get, php::client_set_account,
-        php::client_set_domain, php_settings::admin_get, php_settings::admin_set,
+        services::restart, php::client_set_domain, php_settings::admin_get, php_settings::admin_set,
         php_settings::client_get, php_settings::client_set,
         policy::admin_get, policy::admin_set, policy::client_get, policy::client_set,
         vhost::admin_get, vhost::admin_set, vhost::client_get, vhost::client_set,
@@ -1169,7 +1173,7 @@ pub async fn client_delete(
     ),
     components(schemas(
         DomainView, DomainList, AddDomain, AdminAddDomain, UpdateDomain,
-        php::PhpView, php::DomainPhp, php::SetVersion, php_settings::PhpSettingsView,
+        services::Restarted, php::PhpView, php::DomainPhp, php::SetVersion, php_settings::PhpSettingsView,
         php_settings::OptionView, php_settings::CapsView, php_settings::SetPhpSettings, policy::PolicyView, policy::HeaderView, vhost::VhostView, vhost::SetVhost, vhost_templates::TemplateSummary,
         vhost_templates::TemplateView, vhost_templates::TemplateList, vhost_templates::TemplateInput,
         vhost_templates::VersionView, vhost_templates::VersionList, vhost_templates::PreviewInput,

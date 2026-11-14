@@ -9115,6 +9115,92 @@
         ]
       }
     },
+    "/api/v1/client/services/{service}/restart": {
+      "post": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "Restart your web server or your PHP.",
+        "operationId": "clientRestartService",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "description": "`web` or `php`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Restarted"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only` or `csrf_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`tenant_not_running`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`unknown_service`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Three restarts a minute, with Retry-After",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/public/auth/impersonate": {
       "post": {
         "tags": [
@@ -12241,6 +12327,20 @@
           }
         },
         "additionalProperties": false
+      },
+      "Restarted": {
+        "type": "object",
+        "description": "A restart that was queued.",
+        "required": [
+          "operation_id"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The operation that does it."
+          }
+        }
       },
       "RevokedCount": {
         "type": "object",

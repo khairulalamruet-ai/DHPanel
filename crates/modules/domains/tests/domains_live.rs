@@ -85,15 +85,22 @@ async fn env_limited(pool: &PgPool, ask_limit: u32) -> Env {
         ask_limit,
         std::time::Duration::from_secs(60),
     );
+    let restart_limiter = dhpanel_cache::ratelimit::RateLimiter::new(
+        redis.clone(),
+        format!("test-restart-{}", Uuid::now_v7().simple()),
+        dhpanel_mod_domains::services::RESTARTS_PER_MINUTE,
+        std::time::Duration::from_secs(60),
+    );
     let domains = Arc::new(Fake {
         manifest: manifest("domains"),
         routes: Box::new({
-            let (pool, sessions, settings, resolver, ask_limiter) = (
+            let (pool, sessions, settings, resolver, ask_limiter, restart_limiter) = (
                 pool.clone(),
                 sessions.clone(),
                 settings.clone(),
                 resolver.clone(),
                 ask_limiter.clone(),
+                restart_limiter.clone(),
             );
             move || {
                 let state = DomainsState {
@@ -102,6 +109,7 @@ async fn env_limited(pool: &PgPool, ask_limit: u32) -> Env {
                     settings: settings.clone(),
                     resolver: Arc::new(resolver.clone()),
                     ask_limiter: ask_limiter.clone(),
+                    restart_limiter: restart_limiter.clone(),
                     master_key: dhpanel_auth_core::secretbox::MasterKey::from_bytes(&[7u8; 32]),
                 };
                 ModuleRoutes {
@@ -3937,5 +3945,75 @@ async fn php_options_are_checked_against_the_list_and_the_plans_ceilings(pool: P
     assert_eq!(
         logged, 4,
         "saved, saved bigger, reset, and the administrator's"
+    );
+}
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn an_account_may_restart_its_services_three_times_a_minute(pool: PgPool) {
+    let e = env(&pool).await;
+    let (alice, tenant) = client(&pool, "alice", 10_000).await;
+    let (bobby, _) = client(&pool, "bobby", 10_001).await;
+    let (a, b) = (e.sign_in(alice).await, e.sign_in(bobby).await);
+    const R: &str = "/api/v1/client/services";
+    let (status, body) = e
+        .call(Some(&a), "POST", &format!("{R}/mail/restart"), None, true)
+        .await;
+    assert_eq!(
+        (status, body["errors"][0]["code"].clone()),
+        (StatusCode::UNPROCESSABLE_ENTITY, json!("unknown_service"))
+    );
+    for service in ["web", "php", "web"] {
+        let (status, body) = e
+            .call(
+                Some(&a),
+                "POST",
+                &format!("{R}/{service}/restart"),
+                None,
+                true,
+            )
+            .await;
+        assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+        assert!(body["operation_id"].is_string());
+    }
+    let (status, body) = e
+        .call(Some(&a), "POST", &format!("{R}/web/restart"), None, true)
+        .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::TOO_MANY_REQUESTS, "too_many_restarts")
+    );
+    // The limit is per account.
+    assert_eq!(
+        e.call(Some(&b), "POST", &format!("{R}/php/restart"), None, true)
+            .await
+            .0,
+        StatusCode::ACCEPTED
+    );
+    let ops: Vec<(String, String)> = sqlx::query_as(
+        "SELECT payload ->> 'service', payload ->> 'username' FROM operations
+         WHERE kind = 'restart_service' AND tenant_id = $1 ORDER BY created_at",
+    )
+    .bind(tenant)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        ops,
+        [("web", "alice"), ("php", "alice"), ("web", "alice")]
+            .map(|(s, u)| (s.to_owned(), u.to_owned()))
+    );
+    // Only a running account.
+    sqlx::query("UPDATE tenants SET status = 'suspended' WHERE id = $1")
+        .bind(tenant)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, body) = e
+        .call(Some(&a), "POST", &format!("{R}/web/restart"), None, true)
+        .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "tenant_not_running")
     );
 }
