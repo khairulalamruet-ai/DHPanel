@@ -2911,5 +2911,30 @@
       "desc": "Audit trail of all package upgrades, schema migrations, and emergency rollback events.",
       "empty": "No update history recorded yet."
     }
+  },
+  "apiTokens": {
+    "nav": "API Tokens",
+    "pageTitle": "API Tokens & Public Developer API",
+    "pageSubtitle": "Generate scoped Bearer tokens for billing integration (WHMCS), CLI clients, and public REST endpoints.",
+    "tableTitle": "Active API Access Tokens",
+    "tableDesc": "Manage Bearer credentials authorized to invoke DHPanel REST endpoints.",
+    "noTokens": "No API tokens created yet. Generate one above to get started.",
+    "generateButton": "Generate New Token",
+    "createTitle": "Generate New API Token",
+    "createDesc": "Scoped Bearer tokens authenticate third-party billing software (WHMCS), CLI scripts, and custom integrations.",
+    "nameLabel": "Token Name / Description",
+    "expirationLabel": "Expiration Period",
+    "scopesLabel": "Authorized API Scopes",
+    "noScopeError": "Scope Required",
+    "noScopeErrorDesc": "Select at least one API scope for this token.",
+    "createdSuccess": "API Token Generated",
+    "createdSuccessDesc": "Copy the secret key now before closing this dialog.",
+    "saveSecretNotice": "Copy your API Secret Key now",
+    "saveSecretWarning": "For your security, this key is encrypted with Argon2id and will never be displayed again.",
+    "secretKeyLabel": "Secret Token",
+    "revokedTitle": "Token Revoked",
+    "revokedDesc": "API token was permanently deleted and revoked.",
+    "docsTitle": "Public OpenAPI Documentation & Scope Tester",
+    "docsDesc": "Interactive endpoint validation verifying token authorization and scope enforcement."
   }
 }
