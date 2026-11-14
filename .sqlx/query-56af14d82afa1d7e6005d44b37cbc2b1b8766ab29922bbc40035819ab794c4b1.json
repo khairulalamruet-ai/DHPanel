@@ -1,0 +1,126 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, name, kind, settings, (sealed_credentials IS NOT NULL) AS \"has_credentials!\",\n                  enabled, is_default,\n                  extract(epoch FROM last_tested_at)::bigint AS last_tested_at,\n                  last_test_ok, last_test_error\n           FROM backup_destinations WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "backup_destinations",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "backup_destinations",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "kind",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "backup_destinations",
+            "name": "kind"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "settings",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "backup_destinations",
+            "name": "settings"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "has_credentials!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "enabled",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "backup_destinations",
+            "name": "enabled"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "is_default",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "backup_destinations",
+            "name": "is_default"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "last_tested_at",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 8,
+        "name": "last_test_ok",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "backup_destinations",
+            "name": "last_test_ok"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "last_test_error",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "backup_destinations",
+            "name": "last_test_error"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      null,
+      false,
+      false,
+      null,
+      true,
+      true
+    ]
+  },
+  "hash": "56af14d82afa1d7e6005d44b37cbc2b1b8766ab29922bbc40035819ab794c4b1"
+}

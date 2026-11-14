@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE backup_destinations SET is_default = false WHERE is_default",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "25d87c1e65b24e54ac804a407636d8b3f5c74b4966ecc9a4079ea0da55006c8a"
+}

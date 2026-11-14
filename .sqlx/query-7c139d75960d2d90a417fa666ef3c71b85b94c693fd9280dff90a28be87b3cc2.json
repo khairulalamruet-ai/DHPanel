@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT sealed_credentials FROM backup_destinations WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "sealed_credentials",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "backup_destinations",
+            "name": "sealed_credentials"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "7c139d75960d2d90a417fa666ef3c71b85b94c693fd9280dff90a28be87b3cc2"
+}

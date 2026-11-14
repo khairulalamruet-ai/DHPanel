@@ -121,6 +121,14 @@ pub mod permissions {
         pub DatabasesManage = "admin.databases.manage"
     );
     crate::permission!(
+        /// See the backups of every account, where they go and when they are made.
+        pub BackupsRead = "admin.backups.read"
+    );
+    crate::permission!(
+        /// Change where backups go and when they are made, and make or remove any backup.
+        pub BackupsManage = "admin.backups.manage"
+    );
+    crate::permission!(
         /// See the panel's settings.
         pub SettingsRead = "admin.settings.read"
     );

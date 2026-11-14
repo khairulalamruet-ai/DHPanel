@@ -813,6 +813,299 @@
         ]
       }
     },
+    "/api/v1/admin/backup-destinations": {
+      "get": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "The destinations.",
+        "operationId": "adminListBackupDestinations",
+        "responses": {
+          "200": {
+            "description": "The destinations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DestinationList"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied` (needs admin.backups.read)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Add a destination.",
+        "operationId": "adminAddBackupDestination",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddDestination"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Made (the first one is the default)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DestinationView"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`name_taken`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A setting or the credentials are not acceptable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/backup-destinations/{id}": {
+      "put": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Change a destination.",
+        "operationId": "adminChangeBackupDestination",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Destination id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangeDestination"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Changed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DestinationView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such destination",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`name_taken` or `is_default` (the default cannot be switched off)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Remove a destination nothing uses.",
+        "operationId": "adminRemoveBackupDestination",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Destination id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed"
+          },
+          "404": {
+            "description": "No such destination",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`in_use` (backups or schedules use it) or `is_default`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/backup-destinations/{id}/default": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Make a destination the default.",
+        "operationId": "adminDefaultBackupDestination",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Destination id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Now the default",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DestinationView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such (enabled) destination",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/bootstrap": {
       "get": {
         "tags": [
@@ -13559,6 +13852,34 @@
         },
         "additionalProperties": false
       },
+      "AddDestination": {
+        "type": "object",
+        "description": "A destination to make.",
+        "required": [
+          "name",
+          "kind",
+          "settings"
+        ],
+        "properties": {
+          "credentials": {
+            "description": "The secret part: `s3`: `access_key`, `secret_key`; `sftp`: `password` or `private_key`.\nSealed at once and never shown again."
+          },
+          "kind": {
+            "type": "string",
+            "description": "`local`, `s3` or `sftp`.",
+            "example": "s3"
+          },
+          "name": {
+            "type": "string",
+            "description": "Its name.",
+            "example": "Offsite S3"
+          },
+          "settings": {
+            "description": "What is not secret: `local`: `path`; `s3`: `endpoint`, `bucket`, `region`, `prefix`,\n`path_style`; `sftp`: `host`, `port`, `user`, `path`, `host_key_sha256`."
+          }
+        },
+        "additionalProperties": false
+      },
       "AddDomain": {
         "type": "object",
         "description": "A domain to add.",
@@ -14319,6 +14640,33 @@
           }
         }
       },
+      "ChangeDestination": {
+        "type": "object",
+        "description": "What to change; what is left out stays.",
+        "properties": {
+          "credentials": {
+            "description": "New credentials (the whole set for its kind), replacing the sealed ones."
+          },
+          "enabled": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether it may receive backups."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A new name."
+          },
+          "settings": {
+            "description": "New settings (the whole set for its kind)."
+          }
+        },
+        "additionalProperties": false
+      },
       "ChangeFtpAccount": {
         "type": "object",
         "description": "What to change; what is left out stays.",
@@ -14861,6 +15209,88 @@
               "type": "string"
             },
             "description": "Name servers the domain uses that are not the panel's."
+          }
+        }
+      },
+      "DestinationList": {
+        "type": "object",
+        "description": "The destinations.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DestinationView"
+            },
+            "description": "By name."
+          }
+        }
+      },
+      "DestinationView": {
+        "type": "object",
+        "description": "A destination.",
+        "required": [
+          "id",
+          "name",
+          "kind",
+          "settings",
+          "has_credentials",
+          "enabled",
+          "is_default"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "May receive backups."
+          },
+          "has_credentials": {
+            "type": "boolean",
+            "description": "Whether credentials are kept (they are never shown)."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Id."
+          },
+          "is_default": {
+            "type": "boolean",
+            "description": "Where new backups go unless said otherwise."
+          },
+          "kind": {
+            "type": "string",
+            "description": "`local`, `s3` or `sftp`."
+          },
+          "last_test_error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What was wrong."
+          },
+          "last_test_ok": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "The result of that test."
+          },
+          "last_tested_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When it was last tested (RFC 3339, UTC)."
+          },
+          "name": {
+            "type": "string",
+            "description": "Its name.",
+            "example": "Offsite S3"
+          },
+          "settings": {
+            "description": "What is not secret (host, bucket, path, user ...)."
           }
         }
       },
@@ -18911,6 +19341,10 @@
     {
       "name": "files",
       "description": "The file manager"
+    },
+    {
+      "name": "backups",
+      "description": "Backups"
     }
   ]
 }

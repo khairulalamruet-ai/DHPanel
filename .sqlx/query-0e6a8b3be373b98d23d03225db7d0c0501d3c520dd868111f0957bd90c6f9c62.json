@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE backup_destinations SET last_tested_at = now(), last_test_ok = $2, last_test_error = left($3, 500)\n         WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bool",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0e6a8b3be373b98d23d03225db7d0c0501d3c520dd868111f0957bd90c6f9c62"
+}

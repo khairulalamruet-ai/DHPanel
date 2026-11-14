@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO backup_destinations (name, kind, settings, created_by, is_default)\n         VALUES ($1, $2, $3, $4, NOT EXISTS (SELECT 1 FROM backup_destinations))\n         RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "backup_destinations",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Jsonb",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "53c48e0d19bb40b3aef90a2ad94616c3a8bbf9de2c93b31348a47fc6bc7d4385"
+}

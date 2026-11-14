@@ -1,0 +1,19 @@
+# Backups: where backups go, when they are made, and the backups themselves
+# (crates/modules/backups).
+[module]
+name       = "backups"
+version    = "0.1.0"
+title      = { en = "Backups", bn = "ব্যাকআপ" }
+category   = "system"
+core       = false
+depends_on = ["auth", "rbac", "audit", "system", "plans", "users"]
+
+[permissions]
+keys = ["admin.backups.read", "admin.backups.manage"]
+
+[features]
+keys = ["backups"]
+
+[ui]
+admin_nav  = { group = "System", order = 30, icon = "archive" }
+client_nav = { group = "Backups", order = 40, icon = "archive" }

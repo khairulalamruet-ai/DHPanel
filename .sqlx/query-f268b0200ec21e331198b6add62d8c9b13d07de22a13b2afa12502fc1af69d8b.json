@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM backup_destinations d WHERE d.id = $1\n           AND NOT EXISTS (SELECT 1 FROM backups b WHERE b.destination_id = d.id AND b.status <> 'deleted')\n           AND NOT EXISTS (SELECT 1 FROM backup_schedules s WHERE s.destination_id = d.id)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f268b0200ec21e331198b6add62d8c9b13d07de22a13b2afa12502fc1af69d8b"
+}

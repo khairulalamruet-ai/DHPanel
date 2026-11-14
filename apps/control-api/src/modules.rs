@@ -24,6 +24,7 @@ const EMBEDDED: &[(&str, &str)] = &[
     ("domains", dhpanel_mod_domains::MANIFEST),
     ("databases", dhpanel_mod_databases::MANIFEST),
     ("files", dhpanel_mod_files::MANIFEST),
+    ("backups", dhpanel_mod_backups::MANIFEST),
 ];
 
 /// Days the data of a deleted user is kept before it is purged.
@@ -349,6 +350,34 @@ pub fn mount(
                         None => ModuleRoutes::none(),
                     })
                 }
+                "backups" => {
+                    let (db, sessions, late_settings, master_key) = (
+                        db.clone(),
+                        sessions.clone(),
+                        late_settings.clone(),
+                        master_key.clone(),
+                    );
+                    Box::new(move || match late_settings.get() {
+                        Some(settings) => {
+                            let state = dhpanel_mod_backups::BackupsState {
+                                db: db.clone(),
+                                sessions: sessions.clone(),
+                                settings: settings.clone(),
+                                master_key: master_key.clone(),
+                            };
+                            ModuleRoutes {
+                                admin: Some(
+                                    dhpanel_mod_backups::admin_router().with_state(state.clone()),
+                                ),
+                                client: Some(
+                                    dhpanel_mod_backups::client_router().with_state(state),
+                                ),
+                                ..ModuleRoutes::none()
+                            }
+                        }
+                        None => ModuleRoutes::none(),
+                    })
+                }
                 // A manifest without code behind it has no routes.
                 _ => Box::new(ModuleRoutes::none),
             };
@@ -575,7 +604,8 @@ mod tests {
                 "users",
                 "domains",
                 "databases",
-                "files"
+                "files",
+                "backups"
             ]
         );
         // And they fit together: dependencies first.
@@ -590,6 +620,7 @@ mod tests {
                 "system",
                 "plans",
                 "users",
+                "backups",
                 "databases",
                 "domains",
                 "files"
@@ -603,6 +634,7 @@ mod tests {
                 "system",
                 "plans",
                 "users",
+                "backups",
                 "databases",
                 "domains",
                 "files"
@@ -649,12 +681,14 @@ mod tests {
             p::DomainsManage::KEY,
             p::DatabasesRead::KEY,
             p::DatabasesManage::KEY,
+            p::BackupsRead::KEY,
+            p::BackupsManage::KEY,
         ] {
             assert!(declared.iter().any(|d| d == key), "{key} is in no manifest");
         }
         assert_eq!(
             declared.len(),
-            20,
+            22,
             "a manifest declares a key the code does not know: {declared:?}"
         );
     }

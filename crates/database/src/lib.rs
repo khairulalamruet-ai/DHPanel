@@ -11,6 +11,7 @@
 
 pub mod accounts;
 pub mod admins;
+pub mod backups;
 pub mod certificates;
 pub mod databases;
 pub mod dns;
