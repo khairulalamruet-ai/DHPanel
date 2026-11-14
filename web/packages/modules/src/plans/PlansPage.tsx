@@ -27,6 +27,8 @@ import {
   Users,
   Cpu,
   Layers,
+  Network,
+  MapPin,
 } from "lucide-react";
 import { Plan, CreatePlanPayload } from "./types";
 import { PlanEditorDialog } from "./PlanEditorDialog";
@@ -235,11 +237,12 @@ export function PlansPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-[28%]">{t("plans.table.name")}</TableHead>
-                    <TableHead className="w-[24%]">{t("plans.table.resources")}</TableHead>
-                    <TableHead className="w-[20%]">{t("plans.table.limits")}</TableHead>
-                    <TableHead className="w-[14%]">{t("plans.table.users")}</TableHead>
-                    <TableHead className="w-[14%] text-right">
+                    <TableHead className="w-[22%]">{t("plans.table.name")}</TableHead>
+                    <TableHead className="w-[18%]">{t("plans.table.nodeGroup")}</TableHead>
+                    <TableHead className="w-[22%]">{t("plans.table.resources")}</TableHead>
+                    <TableHead className="w-[18%]">{t("plans.table.limits")}</TableHead>
+                    <TableHead className="w-[10%]">{t("plans.table.users")}</TableHead>
+                    <TableHead className="w-[10%] text-right">
                       {t("plans.table.actions")}
                     </TableHead>
                   </TableRow>
@@ -273,6 +276,26 @@ export function PlansPage() {
                             <Layers className="h-3 w-3" />
                             <span>{plan.feature_set_name}</span>
                           </div>
+                        </div>
+                      </TableCell>
+
+                      {/* Node Group & Placement */}
+                      <TableCell>
+                        <div className="flex flex-col gap-1 items-start">
+                          <Badge
+                            variant="outline"
+                            data-testid="plan-node-group-badge"
+                            className="text-xs font-medium gap-1 py-0.5 bg-background"
+                          >
+                            <Network className="h-3 w-3 text-primary shrink-0" />
+                            <span>{plan.node_group_name || t("plans.globalCluster")}</span>
+                          </Badge>
+                          {plan.target_region && (
+                            <div className="flex items-center gap-1 text-[11px] text-muted-foreground font-mono">
+                              <MapPin className="h-2.5 w-2.5" />
+                              <span>{plan.target_region}</span>
+                            </div>
+                          )}
                         </div>
                       </TableCell>
 

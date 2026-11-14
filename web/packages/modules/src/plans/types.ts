@@ -14,6 +14,8 @@ export interface PlanLimits {
   max_email_accounts: number; // -1 = unlimited
 }
 
+export type { NodeGroup } from "./node-groups";
+
 export interface Plan {
   id: string;
   name: string;
@@ -26,6 +28,10 @@ export interface Plan {
   limits: PlanLimits;
   created_at: string;
   updated_at: string;
+  node_group_id?: string | null;
+  node_group_name?: string | null;
+  target_tags?: string[];
+  target_region?: string | null;
 }
 
 export interface CreatePlanPayload {
@@ -36,4 +42,8 @@ export interface CreatePlanPayload {
   is_default?: boolean;
   resources: PlanResources;
   limits: PlanLimits;
+  node_group_id?: string | null;
+  node_group_name?: string | null;
+  target_tags?: string[];
+  target_region?: string | null;
 }

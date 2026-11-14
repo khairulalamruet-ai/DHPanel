@@ -535,7 +535,8 @@
       "limits": "Limits (Domains / DBs)",
       "featureSet": "Feature Set",
       "users": "Assigned Users",
-      "actions": "Actions"
+      "actions": "Actions",
+      "nodeGroup": "Node Group"
     },
     "dialog": {
       "createTitle": "Create Hosting Plan",
@@ -564,7 +565,12 @@
       "unlimitedToggle": "Unlimited",
       "cancel": "Cancel",
       "save": "Save Plan",
-      "saving": "Saving..."
+      "saving": "Saving...",
+      "nodeGroupSection": "Node Group & Cluster Placement",
+      "nodeGroupLabel": "Target Node Group",
+      "nodeGroupDesc": "Select the node group and region pool where accounts with this plan are deployed.",
+      "tagsLabel": "Placement Tags",
+      "nodesCount": "{{count}} nodes"
     },
     "deleteConfirm": {
       "title": "Delete Hosting Plan",
@@ -579,7 +585,8 @@
       "deleteSuccess": "Plan '{{name}}' deleted successfully.",
       "error": "Failed to save hosting plan."
     },
-    "empty": "No hosting plans found."
+    "empty": "No hosting plans found.",
+    "globalCluster": "Global Cluster"
   },
   "users": {
     "nav": "Users",

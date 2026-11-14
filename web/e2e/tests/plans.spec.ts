@@ -60,4 +60,39 @@ test.describe("Hosting Plans UI (T04.04)", () => {
     await expect(dialog).not.toBeVisible();
     await expect(page.locator("table").getByText("Starter Cloud E2E Renamed")).toBeVisible();
   });
+
+  test("DoD T16.03: binds a hosting plan to a node group with region and tags", async ({ page }) => {
+    // Verify existing node groups in table
+    await expect(page.locator("table").getByText("US-East General Pool")).toBeVisible();
+    await expect(page.locator("table").getByText("Singapore High-RAM Pool")).toBeVisible();
+
+    const newBtn = page.getByRole("button", { name: /New Plan|নতুন প্ল্যান/i });
+    await newBtn.click();
+
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+
+    // Fill Plan Name
+    const nameInput = dialog.getByLabel(/Plan Name|প্ল্যানের নাম/i);
+    await nameInput.fill("Frankfurt High-Security");
+
+    // Select Frankfurt EU-West Group
+    const groupSelect = dialog.getByTestId("plan-node-group-select");
+    await groupSelect.selectOption("ng_fra_isolated");
+
+    // Region badge in preview
+    await expect(dialog.getByTestId("selected-group-region")).toContainText("eu-central-1");
+
+    // Save
+    const saveBtn = dialog.getByRole("button", { name: /Save Plan|সংরক্ষণ করুন/i });
+    await saveBtn.click();
+
+    await expect(dialog).not.toBeVisible();
+
+    // Verify row has Frankfurt EU-West Group badge and region
+    const row = page.locator("tr", { hasText: "Frankfurt High-Security" });
+    await expect(row).toBeVisible();
+    await expect(row.getByTestId("plan-node-group-badge")).toContainText("Frankfurt EU-West Group");
+    await expect(row.getByText("eu-central-1")).toBeVisible();
+  });
 });
