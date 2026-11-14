@@ -1,14 +1,21 @@
 #!/usr/bin/env bash
 # Installs the DHPanel node agent on a Linux server (run as root).
 #
-#   sudo ./install.sh --binary ./dhpanel-agent [--priv-helper ./dhpanel-priv-helper] [--rootless-docker]
+#   sudo ./install.sh --binary ./dhpanel-agent [--priv-helper PATH | --no-priv-helper] [--rootless-docker] [--check]
+#
+# The root helper is installed (or updated) automatically from the file called
+# dhpanel-priv-helper next to the agent binary; --priv-helper PATH names another,
+# --no-priv-helper leaves it out. Running this again after an upgrade replaces the
+# binaries and the units and restarts the helper: nothing else to do by hand.
+# --check only looks (what is there, what would be done) and changes nothing.
 #
 # What it does (safe to run again):
 #   * creates the unprivileged system user `dhpanel-agent`
 #   * installs the binary to /usr/local/bin and the hardened systemd unit
 #   * creates /var/lib/dhpanel-agent (mode 0700, owned by the agent)
-#   * with --priv-helper: installs and starts the small root helper the agent
-#     asks for the few host changes that need root (its own hardened unit)
+#   * installs and starts the small root helper the agent asks for the few host
+#     changes that need root (its own hardened unit), and the packet filter tool
+#     (nftables) it needs for the database's remote access, if it is missing
 #   * with --rootless-docker: gives the agent its own rootless Docker daemon
 #
 # It does NOT enrol or start the agent: enrol first, with the command the panel
@@ -23,13 +30,17 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 binary=""
 helper=""
+no_helper=0
+check=0
 rootless=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --binary) binary="${2:?--binary needs a path}"; shift 2 ;;
     --priv-helper) helper="${2:?--priv-helper needs a path}"; shift 2 ;;
+    --no-priv-helper) no_helper=1; shift ;;
+    --check) check=1; shift ;;
     --rootless-docker) rootless=1; shift ;;
-    -h|--help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "install.sh: unknown option: $1" >&2; exit 64 ;;
   esac
 done
@@ -37,12 +48,35 @@ done
 die() { echo "install.sh: $*" >&2; exit 1; }
 say() { echo "==> $*"; }
 
-[ "$(id -u)" -eq 0 ] || die "run as root (sudo)"
+if [ "$check" -eq 0 ]; then
+  [ "$(id -u)" -eq 0 ] || die "run as root (sudo)"
+fi
 [ "$(uname -s)" = Linux ] || die "Linux only"
 command -v systemctl >/dev/null || die "systemd is required"
 [ -n "$binary" ] || die "give the agent binary with --binary PATH"
 [ -x "$binary" ] || die "$binary is not an executable file"
 "$binary" --version >/dev/null 2>&1 || die "$binary does not run on this machine"
+
+# The helper: the one named, or the one beside the agent binary.
+if [ "$no_helper" -eq 1 ]; then
+  helper=""
+elif [ -z "$helper" ] && [ -x "$(dirname "$binary")/dhpanel-priv-helper" ]; then
+  helper="$(dirname "$binary")/dhpanel-priv-helper"
+fi
+
+if [ "$check" -eq 1 ]; then
+  say "check only: nothing is changed"
+  say "agent binary:   $binary ($("$binary" --version 2>/dev/null | head -1))"
+  if [ -n "$helper" ]; then
+    "$helper" --version >/dev/null 2>&1 || die "$helper does not run on this machine"
+    say "root helper:    $helper ($("$helper" --version 2>/dev/null | head -1)) would be installed"
+  else
+    say "root helper:    none (use --priv-helper PATH, or put dhpanel-priv-helper next to the agent binary)"
+  fi
+  say "nftables:       $(command -v nft || echo 'missing (would be installed)')"
+  say "agent user:     $(id "$AGENT_USER" >/dev/null 2>&1 && echo present || echo 'would be created')"
+  exit 0
+fi
 
 # --- user and directories ---------------------------------------------------
 if id "$AGENT_USER" >/dev/null 2>&1; then
@@ -73,6 +107,22 @@ systemctl daemon-reload
 if [ -n "$helper" ]; then
   [ -x "$helper" ] || die "$helper is not an executable file"
   "$helper" --version >/dev/null 2>&1 || die "$helper does not run on this machine"
+  # The packet filter tool the helper uses for the database's remote access.
+  if ! command -v nft >/dev/null 2>&1 && [ ! -x /usr/sbin/nft ]; then
+    say "installing nftables"
+    if command -v apt-get >/dev/null; then
+      DEBIAN_FRONTEND=noninteractive apt-get install -y nftables >/dev/null
+    elif command -v dnf >/dev/null; then
+      dnf install -y nftables >/dev/null
+    elif command -v yum >/dev/null; then
+      yum install -y nftables >/dev/null
+    elif command -v zypper >/dev/null; then
+      zypper --non-interactive install nftables >/dev/null
+    else
+      die "nftables is missing and no known package manager was found: install it, then run this again"
+    fi
+  fi
+  [ -x /usr/sbin/nft ] || die "nftables is installed but /usr/sbin/nft is not there (the helper runs it by that path)"
   HELPER_DST=/usr/local/bin/dhpanel-priv-helper
   HELPER_UNIT=/etc/systemd/system/dhpanel-priv-helper.service
   say "installing $HELPER_DST"
@@ -92,7 +142,7 @@ if [ -n "$helper" ]; then
   done
   [ -S /run/dhpanel/priv-helper.sock ] || die "the privileged helper did not create its socket (journalctl -u dhpanel-priv-helper)"
 else
-  say "skipping the privileged helper (use --priv-helper PATH to install it)"
+  say "skipping the privileged helper (none given or found next to the agent binary)"
 fi
 
 # --- rootless Docker for the agent -------------------------------------------
@@ -137,7 +187,9 @@ fi
 
 cat <<EOF
 
-Installed. Next:
+Installed.$([ -n "$helper" ] && printf '\n\nThe database server is reached from outside the node on port 13306 only by the\naddresses a client lists, but if this machine sits behind a provider firewall, let\nthat port through there too.')
+
+Next:
   1. Enrol (once, as the agent user), using the command shown when you add the node in the panel:
        sudo -u $AGENT_USER dhpanel-agent enroll --server … --ca-fingerprint … --token …
   2. Start the service:
