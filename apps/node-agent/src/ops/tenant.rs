@@ -27,7 +27,8 @@ use dhpanel_domain::{TenantUsername, UidRange};
 use dhpanel_node_protocol::{AgentError, ErrorCode, Operation, Output};
 use dhpanel_priv_helper::protocol::{Action, ErrorCode as HelperCode, Request, Response};
 use dhpanel_tenant_stack::{
-    Allowlist, PlanResources, Role, Tenant, files_volume_name, network_name, plan_limits, render,
+    Allowlist, PlanResources, Role, Tenant, conf_volume_name, files_volume_name, network_name,
+    plan_limits, render,
 };
 use uuid::Uuid;
 
@@ -43,6 +44,9 @@ pub struct TenantContext {
     pub tenants_root: PathBuf,
     /// The agent's Docker.
     pub docker: DockerManager,
+    /// Where the web server configuration of each tenant is kept, a directory
+    /// per tenant (the agent's own; the web container only reads it).
+    pub vhosts_root: PathBuf,
 }
 
 /// Sends one request to the helper and reads its answer.
@@ -110,7 +114,7 @@ pub fn ask_helper(socket: &Path, action: Action) -> Result<(), AgentError> {
     })
 }
 
-fn docker_error(err: &DockerError) -> AgentError {
+pub(super) fn docker_error(err: &DockerError) -> AgentError {
     let message = format!("docker: {err}");
     match err {
         DockerError::Unavailable(_) => AgentError::new(ErrorCode::Internal, message).retryable(),
@@ -258,6 +262,23 @@ pub async fn provision_tenant_stack(
     .map_err(|e| invalid(&e.to_string()))?;
 
     let docker = &context.docker;
+    // The web server's configuration directory and volume (the web container
+    // mounts it); a tenant that had a stack before gets them now.
+    let conf = conf_volume_name(&username).map_err(|e| invalid(&e.to_string()))?;
+    let conf_dir = super::vhost::conf_dir(&context.vhosts_root, &username).map_err(|e| {
+        AgentError::new(
+            ErrorCode::Internal,
+            format!(
+                "cannot prepare the web configuration directory: {}",
+                e.kind()
+            ),
+        )
+        .retryable()
+    })?;
+    docker
+        .create_bind_volume(&conf, &conf_dir, &context.vhosts_root)
+        .await
+        .map_err(|e| docker_error(&e))?;
     let mut started = Vec::new();
     for spec in &stack.services {
         match docker.inspect(&spec.name).await {
@@ -588,6 +609,10 @@ pub async fn delete_tenant(
     let network = network_name(&username).map_err(|e| invalid_arg(&e.to_string()))?;
     let volume = files_volume_name(&username).map_err(|e| invalid_arg(&e.to_string()))?;
     gone_is_fine(docker.remove_volume(&volume).await)?;
+    let conf = conf_volume_name(&username).map_err(|e| invalid_arg(&e.to_string()))?;
+    gone_is_fine(docker.remove_volume(&conf).await)?;
+    // The configuration is made again from the panel's data: nothing to keep.
+    let _ = std::fs::remove_dir_all(context.vhosts_root.join(username.as_str()));
     gone_is_fine(docker.remove_network(&network).await)?;
     if purge_data {
         let socket = context.helper_socket.clone();
@@ -751,6 +776,7 @@ mod tests {
             tenants_root: "/nonexistent/tenants".into(),
             // Docker is only contacted after the helper, so any existing path will do.
             docker: DockerManager::connect(Path::new("/")).unwrap(),
+            vhosts_root: "/nonexistent/vhosts".into(),
         })
     }
 

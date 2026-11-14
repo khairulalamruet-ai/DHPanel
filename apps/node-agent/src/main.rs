@@ -367,7 +367,7 @@ fn run_command(state_dir: PathBuf, stream_url: Option<String>) -> ExitCode {
 /// unit points at the agent's rootless daemon) and the privileged helper's
 /// socket. Without Docker they are not offered, and the control plane gets
 /// "unsupported operation" instead of an error later.
-fn tenant_context() -> Option<ops::tenant::TenantContext> {
+fn tenant_context(state_dir: &std::path::Path) -> Option<ops::tenant::TenantContext> {
     let socket = std::env::var("DOCKER_HOST")
         .ok()
         .and_then(|host| host.strip_prefix("unix://").map(PathBuf::from))?;
@@ -378,6 +378,7 @@ fn tenant_context() -> Option<ops::tenant::TenantContext> {
         tenants_root: std::env::var_os("DHPANEL_AGENT_TENANTS_ROOT")
             .map_or_else(|| "/srv/tenants".into(), PathBuf::from),
         docker,
+        vhosts_root: state_dir.join("vhosts"),
     })
 }
 
@@ -413,7 +414,7 @@ fn open_executor(
         }
     };
     Executor::new(
-        Registry::builtin_with(state_dir, tenant_context()).with_web(web),
+        Registry::builtin_with(state_dir, tenant_context(state_dir)).with_web(web),
         cache,
         DEFAULT_MAX_PARALLEL,
     )

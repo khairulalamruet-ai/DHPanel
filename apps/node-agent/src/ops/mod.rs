@@ -23,6 +23,7 @@
 pub mod cache;
 pub mod capabilities;
 pub mod tenant;
+pub mod vhost;
 
 use std::{
     collections::{HashMap, HashSet},
@@ -109,8 +110,16 @@ impl Registry {
                 let context = context.clone();
                 move |op| tenant::provision_tenant_stack(context.clone(), op)
             });
-            registry.register("set_storage_quota", move |op| {
-                tenant::set_storage_quota(context.clone(), op)
+            registry.register("set_storage_quota", {
+                let context = context.clone();
+                move |op| tenant::set_storage_quota(context.clone(), op)
+            });
+            registry.register("attach_domain", {
+                let context = context.clone();
+                move |op| vhost::attach_domain(context.clone(), op)
+            });
+            registry.register("detach_domain", move |op| {
+                vhost::detach_domain(context.clone(), op)
             });
         }
         let sources = capabilities::Sources::system(data_dir);

@@ -172,6 +172,9 @@ impl std::fmt::Debug for CustomCertificate {
     }
 }
 
+/// Longest web server configuration of one domain.
+pub const MAX_VHOST_CONFIG_BYTES: usize = 32 * 1024;
+
 /// Most uploaded certificates one tenant may have on a node.
 pub const MAX_CUSTOM_CERTIFICATES_PER_TENANT: usize = 100;
 
@@ -394,6 +397,27 @@ pub enum Operation {
         /// The certificates, each with its key.
         items: Vec<CustomCertificate>,
     },
+    /// Put one domain's web server configuration (rendered by the control plane)
+    /// into the tenant's web container and have it reloaded. The file is checked
+    /// by the web server itself before it is used; when it is refused the
+    /// previous file is put back and the operation fails. Safe to repeat.
+    /// Answered with [`Output::DomainAttached`].
+    AttachDomain {
+        /// The tenant's system name.
+        username: String,
+        /// The domain, lower-case ASCII; the file is named for it.
+        domain: String,
+        /// The configuration (at most [`MAX_VHOST_CONFIG_BYTES`]).
+        config: String,
+    },
+    /// Remove one domain's web server configuration and have it reloaded. Safe
+    /// to repeat. Answered with [`Output::DomainDetached`].
+    DetachDomain {
+        /// The tenant's system name.
+        username: String,
+        /// The domain.
+        domain: String,
+    },
     /// List the certificates the node's web server holds (name, issuer, validity).
     /// Answered with [`Output::Certificates`].
     ReportCertificates,
@@ -460,6 +484,8 @@ impl Operation {
         "set_site_routes",
         "report_certificates",
         "set_custom_certificates",
+        "attach_domain",
+        "detach_domain",
         "suspend_tenant",
         "resume_tenant",
         "delete_tenant",
@@ -479,6 +505,8 @@ impl Operation {
             Self::SetSiteRoutes { .. } => "set_site_routes",
             Self::ReportCertificates => "report_certificates",
             Self::SetCustomCertificates { .. } => "set_custom_certificates",
+            Self::AttachDomain { .. } => "attach_domain",
+            Self::DetachDomain { .. } => "detach_domain",
             Self::SuspendTenant { .. } => "suspend_tenant",
             Self::ResumeTenant { .. } => "resume_tenant",
             Self::DeleteTenant { .. } => "delete_tenant",
@@ -620,6 +648,17 @@ pub enum Output {
         containers: Vec<String>,
         /// How storage limits are enforced (`xfs`), or `None` when they are not.
         storage_quota: Option<String>,
+    },
+    /// Answer to [`Operation::AttachDomain`].
+    DomainAttached {
+        /// Whether the running web server has it (it is kept either way; a web
+        /// container that is stopped loads it when it starts).
+        applied: bool,
+    },
+    /// Answer to [`Operation::DetachDomain`].
+    DomainDetached {
+        /// Whether the running web server dropped it.
+        applied: bool,
     },
     /// Answer to [`Operation::SetCustomCertificates`].
     CustomCertificatesSet {
@@ -1410,6 +1449,15 @@ mod tests {
             Operation::ResumeTenant {
                 username: "alice".into(),
             },
+            Operation::AttachDomain {
+                username: "alice".into(),
+                domain: "example.com".into(),
+                config: "server {}".into(),
+            },
+            Operation::DetachDomain {
+                username: "alice".into(),
+                domain: "example.com".into(),
+            },
             Operation::DeleteTenant {
                 tenant_id: id(),
                 username: "alice".into(),
@@ -1423,7 +1471,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            13,
+            15,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }

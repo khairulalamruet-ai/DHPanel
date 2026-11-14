@@ -24,6 +24,7 @@ use std::{collections::HashMap, path::Path, time::Duration};
 use bollard::{
     Docker,
     errors::Error as BollardError,
+    exec::{CreateExecOptions, StartExecResults},
     models::{ContainerUpdateBody, NetworkCreateRequest, VolumeCreateRequest},
     query_parameters::{
         CreateContainerOptionsBuilder, CreateImageOptionsBuilder, ListContainersOptionsBuilder,
@@ -41,6 +42,39 @@ pub use crate::spec::{
 const API_TIMEOUT_SECS: u64 = 30;
 /// Longest an image pull may take.
 pub const PULL_TIMEOUT: Duration = Duration::from_secs(600);
+
+/// Longest a command run inside a container may take.
+const EXEC_TIMEOUT: Duration = Duration::from_secs(20);
+/// Most output kept from such a command.
+const MAX_EXEC_OUTPUT: usize = 8 * 1024;
+
+/// The commands the manager runs inside a web container. Each is a fixed list of
+/// words; nothing a request says ever becomes part of one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NginxCommand {
+    /// Check the configuration (`nginx -t`).
+    Test,
+    /// Load the configuration without dropping connections (`nginx -s reload`).
+    Reload,
+}
+
+impl NginxCommand {
+    fn argv(self) -> &'static [&'static str] {
+        match self {
+            Self::Test => &["nginx", "-t"],
+            Self::Reload => &["nginx", "-s", "reload"],
+        }
+    }
+}
+
+/// How a command inside a container ended.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandResult {
+    /// Exit code (`-1` when Docker did not say).
+    pub exit_code: i64,
+    /// What it printed (stdout and stderr together), clipped.
+    pub output: String,
+}
 
 /// What went wrong.
 #[derive(Debug, thiserror::Error)]
@@ -262,6 +296,69 @@ impl DockerManager {
     /// [`DockerError::NotFound`], [`DockerError::NotManaged`].
     pub async fn inspect(&self, name: &Name) -> Result<ContainerInfo, DockerError> {
         self.require_managed_container(name).await
+    }
+
+    /// Runs one of the fixed nginx commands inside a running web container of
+    /// ours. No argument comes from the caller: the command is the variant.
+    ///
+    /// # Errors
+    /// [`DockerError::NotFound`] (no such container), [`DockerError::NotManaged`],
+    /// [`DockerError::Conflict`] when the container is not running, or an API error.
+    pub async fn run_nginx(
+        &self,
+        name: &Name,
+        command: NginxCommand,
+    ) -> Result<CommandResult, DockerError> {
+        let info = self.require_managed_container(name).await?;
+        if !info.running {
+            return Err(DockerError::Conflict("the container is not running".into()));
+        }
+        let created = self
+            .docker
+            .create_exec(
+                name.as_str(),
+                CreateExecOptions {
+                    attach_stdout: Some(true),
+                    attach_stderr: Some(true),
+                    cmd: Some(command.argv().to_vec()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .map_err(map_error)?;
+        let started = self
+            .docker
+            .start_exec(&created.id, None)
+            .await
+            .map_err(map_error)?;
+        let mut output = String::new();
+        if let StartExecResults::Attached {
+            output: mut stream, ..
+        } = started
+        {
+            let read = async {
+                while let Some(chunk) = stream.next().await {
+                    let chunk = chunk.map_err(map_error)?;
+                    if output.len() < MAX_EXEC_OUTPUT {
+                        output.push_str(&String::from_utf8_lossy(&chunk.into_bytes()));
+                    }
+                }
+                Ok::<(), DockerError>(())
+            };
+            tokio::time::timeout(EXEC_TIMEOUT, read)
+                .await
+                .map_err(|_| DockerError::Unavailable("the command timed out".into()))??;
+        }
+        output.truncate(output.floor_char_boundary(MAX_EXEC_OUTPUT));
+        let done = self
+            .docker
+            .inspect_exec(&created.id)
+            .await
+            .map_err(map_error)?;
+        Ok(CommandResult {
+            exit_code: done.exit_code.unwrap_or(-1),
+            output,
+        })
     }
 
     /// Reads a running container's resource usage once.

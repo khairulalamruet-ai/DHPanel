@@ -80,6 +80,7 @@ async fn writing_more_than_the_quota_fails_and_raising_it_lets_the_write_through
         helper_socket: helper_socket.into(),
         tenants_root: tenants_root.into(),
         docker: docker.clone(),
+        vhosts_root: std::env::temp_dir().join(format!("dh-vhosts-{}", std::process::id())),
     });
     docker
         .pull_image(&ImageRef::parse(BUSYBOX).unwrap())

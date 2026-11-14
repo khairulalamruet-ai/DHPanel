@@ -206,6 +206,9 @@ struct ServiceTemplate {
     /// Where the files volume is mounted, and whether read-only.
     files_at: &'static str,
     files_read_only: bool,
+    /// Where the web server configuration volume is mounted (read-only), if the
+    /// service reads one.
+    conf_at: Option<&'static str>,
 }
 
 const MIB: u64 = 1024 * 1024;
@@ -226,6 +229,7 @@ const WEB_PHP: &[ServiceTemplate] = &[
         ],
         files_at: "/var/www/html",
         files_read_only: true,
+        conf_at: Some("/etc/nginx/conf.d"),
     },
     ServiceTemplate {
         role: Role::Php,
@@ -236,6 +240,7 @@ const WEB_PHP: &[ServiceTemplate] = &[
         tmpfs: &[("/tmp", 64 * MIB), ("/run", MIB)],
         files_at: "/var/www/html",
         files_read_only: false,
+        conf_at: None,
     },
 ];
 
@@ -244,7 +249,7 @@ const WEB_PHP: &[ServiceTemplate] = &[
 pub struct Stack {
     /// The tenant's private network.
     pub network: Name,
-    /// The tenant's volumes (the site files).
+    /// The tenant's volumes (the site files, and the web server's configuration).
     pub volumes: Vec<Name>,
     /// Containers, in the order to start them (PHP before the web server).
     pub services: Vec<ContainerSpec>,
@@ -280,6 +285,23 @@ pub fn network_name(tenant: &TenantUsername) -> Result<Name, SpecError> {
 /// [`SpecError`] (cannot happen for a valid tenant name).
 pub fn files_volume_name(tenant: &TenantUsername) -> Result<Name, SpecError> {
     name(tenant, "www")
+}
+
+/// Name of a tenant's web container.
+///
+/// # Errors
+/// [`SpecError`] (cannot happen for a valid tenant name).
+pub fn web_container_name(tenant: &TenantUsername) -> Result<Name, SpecError> {
+    name(tenant, Role::Web.as_str())
+}
+
+/// Name of a tenant's web server configuration volume: the site files of
+/// nginx's `conf.d`, written by the node agent and only read by the container.
+///
+/// # Errors
+/// [`SpecError`] (cannot happen for a valid tenant name).
+pub fn conf_volume_name(tenant: &TenantUsername) -> Result<Name, SpecError> {
+    name(tenant, "conf")
 }
 
 /// A service's share of the plan, or why the plan is too small for it.
@@ -338,6 +360,7 @@ pub fn plan_limits(
 pub fn render(tenant: &Tenant<'_>, allowlist: &Allowlist) -> Result<Stack, StackError> {
     let network = network_name(tenant.username)?;
     let files = files_volume_name(tenant.username)?;
+    let conf = conf_volume_name(tenant.username)?;
     let user = Some((tenant.uid.get(), tenant.uid.get()));
     let mut services = Vec::new();
     // PHP first, so the web server never starts without its backend.
@@ -366,6 +389,13 @@ pub fn render(tenant: &Tenant<'_>, allowlist: &Allowlist) -> Result<Stack, Stack
             target: template.files_at.to_owned(),
             read_only: template.files_read_only,
         }];
+        if let Some(target) = template.conf_at {
+            spec.volumes.push(VolumeMount {
+                volume: conf.clone(),
+                target: target.to_owned(),
+                read_only: true,
+            });
+        }
         spec.network = Network::Named(network.clone());
         spec.restart = Restart::UnlessStopped;
         spec.cap_add = Vec::<Capability>::new();
@@ -376,7 +406,7 @@ pub fn render(tenant: &Tenant<'_>, allowlist: &Allowlist) -> Result<Stack, Stack
     }
     Ok(Stack {
         network,
-        volumes: vec![files],
+        volumes: vec![files, conf],
         services,
     })
 }
@@ -523,7 +553,7 @@ mod tests {
             let prefix = format!("dh-{owner}-");
             // The tenant's own network and volume, named after the tenant.
             assert_eq!(stack.network.as_str(), format!("{prefix}net"));
-            assert_eq!(stack.volumes.len(), 1);
+            assert_eq!(stack.volumes.len(), 2);
             assert!(stack.volumes[0].as_str().starts_with(&prefix));
             assert_eq!(stack.services.len(), 2);
             let (mut memory, mut pids, mut cpu) = (0_u64, 0_u64, 0_u64);
@@ -614,6 +644,13 @@ mod tests {
         assert!(
             stack.services[1].volumes[0].read_only,
             "the web server only reads the site"
+        );
+        // Its configuration comes from a volume of its own, read-only; PHP has none.
+        assert_eq!(stack.services[0].volumes.len(), 1);
+        let conf = &stack.services[1].volumes[1];
+        assert_eq!(
+            (conf.volume.as_str(), conf.target.as_str(), conf.read_only),
+            ("dh-alice-conf", "/etc/nginx/conf.d", true)
         );
         // Resources follow the 75 / 25 split.
         assert_eq!(stack.services[0].memory_bytes, 384 * MIB);

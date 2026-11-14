@@ -587,6 +587,11 @@ fn check_target(target: &str) -> Result<(), SpecError> {
         ));
     }
     let trimmed = target.trim_end_matches('/');
+    // The one place below `/etc` a volume may go: the web server's site
+    // configuration, which is the point of a web container.
+    if trimmed == "/etc/nginx/conf.d" {
+        return Ok(());
+    }
     let forbidden = trimmed.is_empty()
         || [
             "/proc", "/sys", "/dev", "/etc", "/bin", "/sbin", "/usr", "/lib", "/lib64", "/boot",
@@ -749,6 +754,9 @@ mod tests {
             "/sys/fs",
             "/dev/shm",
             "/etc",
+            "/etc/nginx",
+            "/etc/nginx/nginx.conf",
+            "/etc/nginx/conf.d/x",
             "/usr/local",
             "/a/../b",
             "/a//b",
@@ -764,6 +772,14 @@ mod tests {
             });
             assert!(s.validate().is_err(), "{bad:?}");
         }
+        // The web server's site configuration directory, and only that, is allowed.
+        let mut s = spec();
+        s.volumes.push(VolumeMount {
+            volume: Name::parse("dh-data").unwrap(),
+            target: "/etc/nginx/conf.d".into(),
+            read_only: true,
+        });
+        assert!(s.validate().is_ok());
         // The same place twice (also with a trailing slash).
         let mut s = spec();
         for target in ["/data", "/data/"] {

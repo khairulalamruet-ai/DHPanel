@@ -43,6 +43,7 @@ async fn the_directories_the_user_id_and_the_network_are_created_and_usable() {
         helper_socket,
         tenants_root: tenants_root.clone(),
         docker: docker.clone(),
+        vhosts_root: std::env::temp_dir().join(format!("dh-vhosts-{}", std::process::id())),
     });
     docker
         .pull_image(&ImageRef::parse(BUSYBOX).unwrap())

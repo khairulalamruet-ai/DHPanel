@@ -1,0 +1,329 @@
+//! A tenant's web server configuration on the node (T06.04): one file per domain
+//! in the tenant's configuration directory, which its web container reads as
+//! nginx's `conf.d`.
+//!
+//! The control plane renders the files. The agent writes one, has the web server
+//! check the whole configuration (`nginx -t` inside the container) and reloads
+//! it. When the check refuses, the file as it was before is put back: the site
+//! that was running keeps running.
+
+use std::{
+    os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _, PermissionsExt as _},
+    path::{Path, PathBuf},
+    sync::Arc,
+};
+
+use dhpanel_docker_manager::{DockerError, NginxCommand};
+use dhpanel_domain::{Fqdn, TenantUsername};
+use dhpanel_node_protocol::{AgentError, ErrorCode, MAX_VHOST_CONFIG_BYTES, Operation, Output};
+use dhpanel_tenant_stack::web_container_name;
+
+use super::tenant::{TenantContext, docker_error};
+
+/// One change at a time: the check and the reload look at the whole directory.
+static CHANGING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+fn invalid(message: impl Into<String>) -> AgentError {
+    AgentError::new(ErrorCode::InvalidArguments, message.into())
+}
+
+fn disk(what: &str, err: &std::io::Error) -> AgentError {
+    AgentError::new(
+        ErrorCode::Internal,
+        format!("cannot {what}: {}", err.kind()),
+    )
+    .retryable()
+}
+
+/// The directory a tenant's configuration files are kept in: created if it is
+/// not there, readable by the web container.
+///
+/// # Errors
+/// The directory cannot be made.
+pub fn conf_dir(root: &Path, username: &TenantUsername) -> std::io::Result<PathBuf> {
+    let dir = root.join(username.as_str());
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o755)
+        .create(&dir)?;
+    // Whatever umask the process has: the container's user must be able to read.
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755))?;
+    Ok(dir)
+}
+
+fn check_config(config: &str) -> Result<(), AgentError> {
+    if config.trim().is_empty() {
+        return Err(invalid("the configuration is empty"));
+    }
+    if config.len() > MAX_VHOST_CONFIG_BYTES {
+        return Err(invalid("the configuration is too large"));
+    }
+    if config
+        .chars()
+        .any(|c| c.is_control() && !matches!(c, '\n' | '\t'))
+    {
+        return Err(invalid("the configuration holds control characters"));
+    }
+    Ok(())
+}
+
+fn file_of(dir: &Path, domain: &Fqdn) -> PathBuf {
+    dir.join(format!("{}.conf", domain.as_str()))
+}
+
+/// Puts `content` in `path` (or removes the file for `None`), all at once.
+fn put(dir: &Path, path: &Path, content: Option<&[u8]>) -> std::io::Result<()> {
+    match content {
+        None => match std::fs::remove_file(path) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+            _ => Ok(()),
+        },
+        Some(bytes) => {
+            // Not named `*.conf`: the web server must never see it half-written.
+            let tmp = dir.join(format!(
+                ".{}.tmp",
+                path.file_name().and_then(|n| n.to_str()).unwrap_or("site")
+            ));
+            let _ = std::fs::remove_file(&tmp);
+            let mut out = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o644)
+                .open(&tmp)?;
+            std::io::Write::write_all(&mut out, bytes)?;
+            out.sync_all()?;
+            std::fs::rename(tmp, path)
+        }
+    }
+}
+
+/// What nginx said, shortened and on one line.
+fn reason(output: &str) -> String {
+    let line = output
+        .lines()
+        .find(|l| l.contains("[emerg]") || l.contains("[alert]") || l.contains("[crit]"))
+        .or_else(|| output.lines().next())
+        .unwrap_or("no reason given");
+    line.chars().filter(|c| !c.is_control()).take(300).collect()
+}
+
+/// Makes `new` the content of the domain's file and has the web server use it;
+/// returns whether a running web server has it now.
+async fn change(
+    context: &TenantContext,
+    username: &TenantUsername,
+    domain: &Fqdn,
+    new: Option<&str>,
+) -> Result<bool, AgentError> {
+    let _one_at_a_time = CHANGING.lock().await;
+    let dir =
+        conf_dir(&context.vhosts_root, username).map_err(|e| disk("prepare the directory", &e))?;
+    let path = file_of(&dir, domain);
+    let before = match std::fs::read(&path) {
+        Ok(bytes) => Some(bytes),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => return Err(disk("read the current file", &e)),
+    };
+    put(&dir, &path, new.map(str::as_bytes)).map_err(|e| disk("write the file", &e))?;
+    let restore = || {
+        if let Err(e) = put(&dir, &path, before.as_deref()) {
+            eprintln!(
+                "dhpanel-agent: could not put back {}: {}",
+                path.display(),
+                e.kind()
+            );
+        }
+    };
+    let name = web_container_name(username).map_err(|e| invalid(e.to_string()))?;
+    let docker = &context.docker;
+    let tested = match docker.run_nginx(&name, NginxCommand::Test).await {
+        // Nothing runs: the file is kept and the container reads it when it starts.
+        Err(DockerError::NotFound | DockerError::Conflict(_)) => return Ok(false),
+        Err(e) => {
+            restore();
+            return Err(docker_error(&e));
+        }
+        Ok(result) => result,
+    };
+    if tested.exit_code != 0 {
+        restore();
+        // The web server that was running still runs the configuration it had.
+        return Err(invalid(format!(
+            "the web server refused the configuration: {}",
+            reason(&tested.output)
+        )));
+    }
+    match docker.run_nginx(&name, NginxCommand::Reload).await {
+        Ok(result) if result.exit_code == 0 => Ok(true),
+        Ok(result) => {
+            restore();
+            // Best effort: the old file back in use.
+            let _ = docker.run_nginx(&name, NginxCommand::Reload).await;
+            Err(AgentError::new(
+                ErrorCode::Internal,
+                format!("the web server did not reload: {}", reason(&result.output)),
+            )
+            .retryable())
+        }
+        Err(e) => {
+            restore();
+            Err(docker_error(&e))
+        }
+    }
+}
+
+fn parse(username: &str, domain: &str) -> Result<(TenantUsername, Fqdn), AgentError> {
+    let username = TenantUsername::parse(username).map_err(|e| invalid(e.to_string()))?;
+    let fqdn = Fqdn::parse(domain).map_err(|e| invalid(e.to_string()))?;
+    if fqdn.as_str() != domain {
+        return Err(invalid("the domain is not in its plain form"));
+    }
+    Ok((username, fqdn))
+}
+
+/// `attach_domain`.
+///
+/// # Errors
+/// [`AgentError`]: bad arguments or a configuration the web server refuses (not
+/// retryable; the previous file is back), Docker or the disk failing (retryable).
+pub async fn attach_domain(
+    context: Arc<TenantContext>,
+    op: Operation,
+) -> Result<Output, AgentError> {
+    let Operation::AttachDomain {
+        username,
+        domain,
+        config,
+    } = op
+    else {
+        return Err(super::wrong_operation());
+    };
+    let (username, domain) = parse(&username, &domain)?;
+    check_config(&config)?;
+    let applied = change(&context, &username, &domain, Some(&config)).await?;
+    Ok(Output::DomainAttached { applied })
+}
+
+/// `detach_domain`.
+///
+/// # Errors
+/// As [`attach_domain`].
+pub async fn detach_domain(
+    context: Arc<TenantContext>,
+    op: Operation,
+) -> Result<Output, AgentError> {
+    let Operation::DetachDomain { username, domain } = op else {
+        return Err(super::wrong_operation());
+    };
+    let (username, domain) = parse(&username, &domain)?;
+    let applied = change(&context, &username, &domain, None).await?;
+    Ok(Output::DomainDetached { applied })
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::unwrap_used)]
+mod tests {
+    use dhpanel_docker_manager::DockerManager;
+
+    use super::*;
+
+    fn context(root: &Path) -> Arc<TenantContext> {
+        Arc::new(TenantContext {
+            helper_socket: "/nonexistent".into(),
+            tenants_root: "/nonexistent".into(),
+            docker: DockerManager::connect(Path::new("/")).unwrap(),
+            vhosts_root: root.to_owned(),
+        })
+    }
+
+    fn attach(domain: &str, config: &str) -> Operation {
+        Operation::AttachDomain {
+            username: "alice".into(),
+            domain: domain.into(),
+            config: config.into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn bad_arguments_are_refused_before_any_file_is_written() {
+        let root = std::env::temp_dir().join(format!("dh-vhost-unit-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let c = context(&root);
+        for op in [
+            attach("Example.com", "server {}"),
+            attach("example.com/../x", "server {}"),
+            attach("example.com", ""),
+            attach("example.com", "server {\u{0}}"),
+            attach("example.com", &"x".repeat(MAX_VHOST_CONFIG_BYTES + 1)),
+            Operation::AttachDomain {
+                username: "../root".into(),
+                domain: "example.com".into(),
+                config: "server {}".into(),
+            },
+            Operation::DetachDomain {
+                username: "alice".into(),
+                domain: "no way".into(),
+            },
+        ] {
+            let err = match op {
+                Operation::AttachDomain { .. } => attach_domain(c.clone(), op).await,
+                _ => detach_domain(c.clone(), op).await,
+            }
+            .unwrap_err();
+            assert_eq!(err.code, ErrorCode::InvalidArguments);
+            assert!(!err.retryable);
+        }
+        assert!(!root.exists(), "nothing was created");
+    }
+
+    #[tokio::test]
+    async fn when_the_web_server_cannot_be_asked_the_file_is_put_back() {
+        let root = std::env::temp_dir().join(format!("dh-vhost-keep-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        // Docker is not there at all: that is a failure (not "no such container"),
+        // and the file as it was comes back.
+        let c = context(&root);
+        let err = attach_domain(c.clone(), attach("example.com", "server {}"))
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, ErrorCode::Internal, "{err:?}");
+        assert!(!root.join("alice/example.com.conf").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn writes_are_all_or_nothing_and_readable_by_the_container() {
+        let root = std::env::temp_dir().join(format!("dh-vhost-put-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let alice = TenantUsername::parse("alice").unwrap();
+        let dir = conf_dir(&root, &alice).unwrap();
+        let domain = Fqdn::parse("example.com").unwrap();
+        let path = file_of(&dir, &domain);
+        put(&dir, &path, Some(b"one")).unwrap();
+        put(&dir, &path, Some(b"two")).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"two");
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!((mode(&dir), mode(&path)), (0o755, 0o644));
+        // Nothing but the site file is left behind for the web server to find.
+        let names: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect();
+        assert_eq!(names, ["example.com.conf"]);
+        put(&dir, &path, None).unwrap();
+        put(&dir, &path, None).unwrap();
+        assert!(!path.exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn nginx_messages_are_shortened_to_the_line_that_matters() {
+        let text = "nginx: [emerg] unknown directive \"foo\" in /etc/nginx/conf.d/a.conf:3\nnginx: configuration file /etc/nginx/nginx.conf test failed\n";
+        assert_eq!(
+            reason(text),
+            "nginx: [emerg] unknown directive \"foo\" in /etc/nginx/conf.d/a.conf:3"
+        );
+        assert_eq!(reason(""), "no reason given");
+        assert!(reason(&"x".repeat(1000)).len() <= 300);
+    }
+}

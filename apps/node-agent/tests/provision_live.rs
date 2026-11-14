@@ -48,6 +48,7 @@ async fn the_stack_runs_as_the_tenant_not_as_root_and_provisioning_can_be_repeat
         helper_socket: PathBuf::from(helper_socket),
         tenants_root: PathBuf::from(tenants_root),
         docker: docker.clone(),
+        vhosts_root: std::env::temp_dir().join(format!("dh-vhosts-{}", std::process::id())),
     });
     let tenant_id = Uuid::now_v7();
     let username = format!("p{}x", std::process::id());
@@ -174,6 +175,7 @@ async fn changing_the_plan_changes_the_limits_of_the_running_stack() {
         helper_socket: PathBuf::from(helper_socket),
         tenants_root: PathBuf::from(tenants_root),
         docker: docker.clone(),
+        vhosts_root: std::env::temp_dir().join(format!("dh-vhosts-{}", std::process::id())),
     });
     let username = format!("l{}x", std::process::id());
     let limits_op = |memory_bytes, pids| Operation::SetResourceLimits {
@@ -291,6 +293,7 @@ async fn suspend_keeps_the_files_resume_restores_the_site_and_delete_removes_eve
         helper_socket: PathBuf::from(helper_socket),
         tenants_root: tenants_root.clone(),
         docker: docker.clone(),
+        vhosts_root: std::env::temp_dir().join(format!("dh-vhosts-{}", std::process::id())),
     });
     let tenant_id = Uuid::now_v7();
     let username = format!("d{}x", std::process::id());
@@ -443,6 +446,7 @@ async fn one_operation_sets_a_tenant_up_and_repeating_it_is_fine() {
         helper_socket: PathBuf::from(helper_socket),
         tenants_root: PathBuf::from(tenants_root),
         docker: docker.clone(),
+        vhosts_root: std::env::temp_dir().join(format!("dh-vhosts-{}", std::process::id())),
     });
     let tenant_id = Uuid::now_v7();
     let username = format!("s{}x", std::process::id());
