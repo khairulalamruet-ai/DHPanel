@@ -12,6 +12,7 @@
 pub mod accounts;
 pub mod admins;
 pub mod certificates;
+pub mod databases;
 pub mod dns;
 pub mod domain_policies;
 pub mod domains;

@@ -113,6 +113,14 @@ pub mod permissions {
         pub DomainsManage = "admin.domains.manage"
     );
     crate::permission!(
+        /// See every database and database user on the panel.
+        pub DatabasesRead = "admin.databases.read"
+    );
+    crate::permission!(
+        /// Add, change and remove any account's databases and database users.
+        pub DatabasesManage = "admin.databases.manage"
+    );
+    crate::permission!(
         /// See the panel's settings.
         pub SettingsRead = "admin.settings.read"
     );

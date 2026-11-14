@@ -1500,3 +1500,85 @@ async fn error_pages_go_to_every_connected_node_once_per_version(pool: PgPool) {
     agent_stop.send(true).unwrap();
     agent.await.unwrap();
 }
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs PostgreSQL"]
+async fn database_sizes_are_asked_for_only_where_there_are_databases_and_kept(pool: PgPool) {
+    let p = plane(&pool).await;
+    let d = Dispatcher::new(p.ops.clone(), p.gateway.clone(), None, dispatch_settings());
+    let mut registry = Registry::new();
+    registry.register("report_db_sizes", |_| async move {
+        Ok(Output::DbSizes {
+            items: vec![
+                dhpanel_node_protocol::DbSize {
+                    name: "dina_shop".into(),
+                    bytes: 123_456,
+                },
+                dhpanel_node_protocol::DbSize {
+                    name: "someone_elses".into(),
+                    bytes: 9,
+                },
+            ],
+        })
+    });
+    let node = make_node_with(&p, &pool, "sizes", registry).await;
+    let (agent_stop, agent) = node.start_agent(p.addr);
+    wait_connected(&p, node.id).await;
+    let results = p.gateway.take_results().expect("results taken once");
+    tokio::spawn(d.clone().run(results, p.stop.subscribe()));
+
+    // No databases on the node: nobody is asked.
+    assert_eq!(d.request_db_sizes().await, 0);
+    let account: Uuid = sqlx::query_scalar(
+        "INSERT INTO accounts (kind, username, email, password_hash)
+         VALUES ('client', 'dina', 'dina@example.com',
+                 '$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHQ$aGFzaGhhc2hoYXNoaGFzaA') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let plan: Uuid = sqlx::query_scalar("SELECT id FROM plans WHERE is_default")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let tenant: Uuid = sqlx::query_scalar(
+        "INSERT INTO tenants (owner_account_id, node_id, plan_id, username, uid, status)
+         VALUES ($1, $2, $3, 'dina', 10004, 'active') RETURNING id",
+    )
+    .bind(account)
+    .bind(node.id)
+    .bind(plan)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO databases (tenant_id, name, status) VALUES ($1, 'dina_shop', 'ready')",
+    )
+    .bind(tenant)
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert_eq!(d.request_db_sizes().await, 1);
+    assert_eq!(d.request_db_sizes().await, 0, "once per time slot");
+    let mut size = 0_i64;
+    for _ in 0..100 {
+        size = sqlx::query_scalar("SELECT size_bytes FROM databases WHERE name = 'dina_shop'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        if size > 0 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert_eq!(size, 123_456);
+    let checked: bool = sqlx::query_scalar(
+        "SELECT size_checked_at IS NOT NULL FROM databases WHERE name = 'dina_shop'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(checked);
+    agent_stop.send(true).unwrap();
+    agent.await.unwrap();
+}

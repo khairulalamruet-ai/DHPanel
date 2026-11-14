@@ -22,6 +22,7 @@ const EMBEDDED: &[(&str, &str)] = &[
     ("plans", dhpanel_mod_plans::MANIFEST),
     ("users", dhpanel_mod_users::MANIFEST),
     ("domains", dhpanel_mod_domains::MANIFEST),
+    ("databases", dhpanel_mod_databases::MANIFEST),
 ];
 
 /// Days the data of a deleted user is kept before it is purged.
@@ -49,6 +50,7 @@ impl Module for Wired {
         match self.manifest.module.name.as_str() {
             "system" => serde_json::from_str(dhpanel_mod_system::SETTINGS_SCHEMA).ok(),
             "domains" => serde_json::from_str(dhpanel_mod_domains::SETTINGS_SCHEMA).ok(),
+            "databases" => serde_json::from_str(dhpanel_mod_databases::SETTINGS_SCHEMA).ok(),
             _ => None,
         }
     }
@@ -63,7 +65,9 @@ pub fn settings(registry: &Registry) -> Result<SettingsRegistry, Vec<String>> {
     let mut problems = Vec::new();
     for module in registry.modules() {
         let name = module.manifest().module.name.clone();
-        if matches!(name.as_str(), "system" | "domains") && module.settings_schema().is_none() {
+        if matches!(name.as_str(), "system" | "domains" | "databases")
+            && module.settings_schema().is_none()
+        {
             problems.push(format!(
                 "settings schema of module `{name}`: not valid JSON"
             ));
@@ -133,144 +137,173 @@ pub fn mount(
     let modules = manifests
         .into_iter()
         .map(|manifest| {
-            let routes: Box<dyn Fn() -> ModuleRoutes + Send + Sync> =
-                match manifest.module.name.as_str() {
-                    "auth" => {
-                        let auth = auth.clone();
-                        Box::new(move || ModuleRoutes {
-                            public: Some(dhpanel_mod_auth::router().with_state(auth.clone())),
-                            ..ModuleRoutes::none()
-                        })
-                    }
-                    "rbac" => {
-                        let admin = admin.clone();
-                        Box::new(move || ModuleRoutes {
-                            admin: Some(dhpanel_mod_admin::router().with_state(admin.clone())),
-                            ..ModuleRoutes::none()
-                        })
-                    }
-                    "audit" => {
-                        let auth = auth.clone();
-                        Box::new(move || ModuleRoutes {
-                            admin: Some(
-                                dhpanel_audit::router::<dhpanel_mod_auth::AuthState>()
-                                    .with_state(auth.clone()),
-                            ),
-                            ..ModuleRoutes::none()
-                        })
-                    }
-                    "nodes" => {
-                        let nodes = nodes.clone();
-                        Box::new(move || ModuleRoutes {
-                            admin: Some(dhpanel_mod_nodes::router().with_state(nodes.clone())),
-                            ..ModuleRoutes::none()
-                        })
-                    }
-                    "system" => {
-                        let (db, sessions, late_mount, late_settings) = (
-                            db.clone(),
-                            sessions.clone(),
-                            late_mount.clone(),
-                            late_settings.clone(),
-                        );
-                        let branding = branding.clone();
-                        Box::new(move || match (late_mount.get(), late_settings.get()) {
-                            (Some(mount), Some(settings)) => ModuleRoutes {
-                                admin: Some(dhpanel_mod_system::router().with_state(
-                                    dhpanel_mod_system::SystemState {
-                                        db: db.clone(),
-                                        sessions: sessions.clone(),
-                                        mount: mount.clone(),
-                                        settings: settings.clone(),
-                                        branding: branding.clone(),
-                                    },
-                                )),
-                                ..ModuleRoutes::none()
-                            },
-                            _ => ModuleRoutes::none(),
-                        })
-                    }
-                    "plans" => {
-                        let (db, sessions, late_mount) =
-                            (db.clone(), sessions.clone(), late_mount.clone());
-                        Box::new(move || match late_mount.get() {
-                            Some(mount) => ModuleRoutes {
-                                admin: Some(dhpanel_mod_plans::router().with_state(
-                                    dhpanel_mod_plans::PlansState {
-                                        db: db.clone(),
-                                        sessions: sessions.clone(),
-                                        mount: mount.clone(),
-                                    },
-                                )),
-                                ..ModuleRoutes::none()
-                            },
-                            None => ModuleRoutes::none(),
-                        })
-                    }
-                    "users" => {
-                        let (db, sessions, hasher) =
-                            (db.clone(), sessions.clone(), admin.hasher.clone());
-                        Box::new(move || ModuleRoutes {
-                            admin: Some(dhpanel_mod_users::router().with_state(
-                                dhpanel_mod_users::UsersState {
+            let routes: Box<dyn Fn() -> ModuleRoutes + Send + Sync> = match manifest
+                .module
+                .name
+                .as_str()
+            {
+                "auth" => {
+                    let auth = auth.clone();
+                    Box::new(move || ModuleRoutes {
+                        public: Some(dhpanel_mod_auth::router().with_state(auth.clone())),
+                        ..ModuleRoutes::none()
+                    })
+                }
+                "rbac" => {
+                    let admin = admin.clone();
+                    Box::new(move || ModuleRoutes {
+                        admin: Some(dhpanel_mod_admin::router().with_state(admin.clone())),
+                        ..ModuleRoutes::none()
+                    })
+                }
+                "audit" => {
+                    let auth = auth.clone();
+                    Box::new(move || ModuleRoutes {
+                        admin: Some(
+                            dhpanel_audit::router::<dhpanel_mod_auth::AuthState>()
+                                .with_state(auth.clone()),
+                        ),
+                        ..ModuleRoutes::none()
+                    })
+                }
+                "nodes" => {
+                    let nodes = nodes.clone();
+                    Box::new(move || ModuleRoutes {
+                        admin: Some(dhpanel_mod_nodes::router().with_state(nodes.clone())),
+                        ..ModuleRoutes::none()
+                    })
+                }
+                "system" => {
+                    let (db, sessions, late_mount, late_settings) = (
+                        db.clone(),
+                        sessions.clone(),
+                        late_mount.clone(),
+                        late_settings.clone(),
+                    );
+                    let branding = branding.clone();
+                    Box::new(move || match (late_mount.get(), late_settings.get()) {
+                        (Some(mount), Some(settings)) => ModuleRoutes {
+                            admin: Some(dhpanel_mod_system::router().with_state(
+                                dhpanel_mod_system::SystemState {
                                     db: db.clone(),
                                     sessions: sessions.clone(),
-                                    hasher: hasher.clone(),
-                                    purge_after_days: PURGE_AFTER_DAYS,
+                                    mount: mount.clone(),
+                                    settings: settings.clone(),
+                                    branding: branding.clone(),
                                 },
                             )),
                             ..ModuleRoutes::none()
-                        })
-                    }
-                    "domains" => {
-                        let (
-                            db,
-                            sessions,
-                            late_settings,
-                            resolver,
-                            ask_limiter,
-                            restart_limiter,
-                            master_key,
-                        ) = (
-                            db.clone(),
-                            sessions.clone(),
-                            late_settings.clone(),
-                            resolver.clone(),
-                            ask_limiter.clone(),
-                            restart_limiter.clone(),
-                            master_key.clone(),
-                        );
-                        Box::new(move || match late_settings.get() {
-                            Some(settings) => {
-                                let state = dhpanel_mod_domains::DomainsState {
+                        },
+                        _ => ModuleRoutes::none(),
+                    })
+                }
+                "plans" => {
+                    let (db, sessions, late_mount) =
+                        (db.clone(), sessions.clone(), late_mount.clone());
+                    Box::new(move || match late_mount.get() {
+                        Some(mount) => ModuleRoutes {
+                            admin: Some(dhpanel_mod_plans::router().with_state(
+                                dhpanel_mod_plans::PlansState {
                                     db: db.clone(),
                                     sessions: sessions.clone(),
-                                    settings: settings.clone(),
-                                    resolver: resolver.clone(),
-                                    ask_limiter: ask_limiter.clone(),
-                                    restart_limiter: restart_limiter.clone(),
-                                    master_key: master_key.clone(),
-                                };
-                                ModuleRoutes {
-                                    admin: Some(
-                                        dhpanel_mod_domains::admin_router()
-                                            .with_state(state.clone()),
-                                    ),
-                                    client: Some(
-                                        dhpanel_mod_domains::client_router()
-                                            .with_state(state.clone()),
-                                    ),
-                                    public: Some(
-                                        dhpanel_mod_domains::tls::public_router().with_state(state),
-                                    ),
-                                }
+                                    mount: mount.clone(),
+                                },
+                            )),
+                            ..ModuleRoutes::none()
+                        },
+                        None => ModuleRoutes::none(),
+                    })
+                }
+                "users" => {
+                    let (db, sessions, hasher) =
+                        (db.clone(), sessions.clone(), admin.hasher.clone());
+                    Box::new(move || ModuleRoutes {
+                        admin: Some(dhpanel_mod_users::router().with_state(
+                            dhpanel_mod_users::UsersState {
+                                db: db.clone(),
+                                sessions: sessions.clone(),
+                                hasher: hasher.clone(),
+                                purge_after_days: PURGE_AFTER_DAYS,
+                            },
+                        )),
+                        ..ModuleRoutes::none()
+                    })
+                }
+                "domains" => {
+                    let (
+                        db,
+                        sessions,
+                        late_settings,
+                        resolver,
+                        ask_limiter,
+                        restart_limiter,
+                        master_key,
+                    ) = (
+                        db.clone(),
+                        sessions.clone(),
+                        late_settings.clone(),
+                        resolver.clone(),
+                        ask_limiter.clone(),
+                        restart_limiter.clone(),
+                        master_key.clone(),
+                    );
+                    Box::new(move || match late_settings.get() {
+                        Some(settings) => {
+                            let state = dhpanel_mod_domains::DomainsState {
+                                db: db.clone(),
+                                sessions: sessions.clone(),
+                                settings: settings.clone(),
+                                resolver: resolver.clone(),
+                                ask_limiter: ask_limiter.clone(),
+                                restart_limiter: restart_limiter.clone(),
+                                master_key: master_key.clone(),
+                            };
+                            ModuleRoutes {
+                                admin: Some(
+                                    dhpanel_mod_domains::admin_router().with_state(state.clone()),
+                                ),
+                                client: Some(
+                                    dhpanel_mod_domains::client_router().with_state(state.clone()),
+                                ),
+                                public: Some(
+                                    dhpanel_mod_domains::tls::public_router().with_state(state),
+                                ),
                             }
-                            None => ModuleRoutes::none(),
-                        })
-                    }
-                    // A manifest without code behind it has no routes.
-                    _ => Box::new(ModuleRoutes::none),
-                };
+                        }
+                        None => ModuleRoutes::none(),
+                    })
+                }
+                "databases" => {
+                    let (db, sessions, late_settings, master_key) = (
+                        db.clone(),
+                        sessions.clone(),
+                        late_settings.clone(),
+                        master_key.clone(),
+                    );
+                    Box::new(move || match late_settings.get() {
+                        Some(settings) => {
+                            let state = dhpanel_mod_databases::DatabasesState {
+                                db: db.clone(),
+                                sessions: sessions.clone(),
+                                settings: settings.clone(),
+                                master_key: master_key.clone(),
+                            };
+                            ModuleRoutes {
+                                admin: Some(
+                                    dhpanel_mod_databases::admin_router().with_state(state.clone()),
+                                ),
+                                client: Some(
+                                    dhpanel_mod_databases::client_router().with_state(state),
+                                ),
+                                ..ModuleRoutes::none()
+                            }
+                        }
+                        None => ModuleRoutes::none(),
+                    })
+                }
+                // A manifest without code behind it has no routes.
+                _ => Box::new(ModuleRoutes::none),
+            };
             Arc::new(Wired { manifest, routes }) as Arc<dyn Module>
         })
         .collect();
@@ -485,7 +518,15 @@ mod tests {
         assert_eq!(
             names,
             [
-                "auth", "rbac", "audit", "nodes", "system", "plans", "users", "domains"
+                "auth",
+                "rbac",
+                "audit",
+                "nodes",
+                "system",
+                "plans",
+                "users",
+                "domains",
+                "databases"
             ]
         );
         // And they fit together: dependencies first.
@@ -493,12 +534,28 @@ mod tests {
         assert_eq!(
             registry.names().collect::<Vec<_>>(),
             [
-                "auth", "rbac", "audit", "nodes", "system", "plans", "users", "domains"
+                "auth",
+                "rbac",
+                "audit",
+                "nodes",
+                "system",
+                "plans",
+                "users",
+                "databases",
+                "domains"
             ]
         );
         assert_eq!(
             registry.dependents_of("rbac"),
-            ["audit", "nodes", "system", "plans", "users", "domains"]
+            [
+                "audit",
+                "nodes",
+                "system",
+                "plans",
+                "users",
+                "databases",
+                "domains"
+            ]
         );
         // Every dependency names a module that exists.
         for m in &manifests {
@@ -539,12 +596,14 @@ mod tests {
             p::UsersImpersonate::KEY,
             p::DomainsRead::KEY,
             p::DomainsManage::KEY,
+            p::DatabasesRead::KEY,
+            p::DatabasesManage::KEY,
         ] {
             assert!(declared.iter().any(|d| d == key), "{key} is in no manifest");
         }
         assert_eq!(
             declared.len(),
-            18,
+            20,
             "a manifest declares a key the code does not know: {declared:?}"
         );
     }

@@ -1,0 +1,24 @@
+# Databases: MySQL-compatible databases, their users and grants, in the node's
+# shared MariaDB (crates/modules/databases).
+[module]
+name       = "databases"
+version    = "0.1.0"
+title      = { en = "Databases", bn = "ডাটাবেস" }
+category   = "db"
+core       = false
+depends_on = ["auth", "rbac", "audit", "system", "plans", "users"]
+
+[permissions]
+keys = ["admin.databases.read", "admin.databases.manage"]
+
+[features]
+keys = ["databases", "db_remote"]
+
+# A plan without these keys gets the defaults.
+[limits]
+max_databases = { type = "int", default = 10, unlimited = -1 }
+max_db_users  = { type = "int", default = 10, unlimited = -1 }
+
+[ui]
+admin_nav  = { group = "Data", order = 10, icon = "database" }
+client_nav = { group = "Databases", order = 20, icon = "database" }

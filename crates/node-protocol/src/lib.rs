@@ -202,6 +202,19 @@ impl std::fmt::Debug for DbPassword {
     }
 }
 
+/// The size of one database.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DbSize {
+    /// The whole name.
+    pub name: String,
+    /// Data and indexes, in bytes.
+    pub bytes: u64,
+}
+
+/// Most databases in one size report.
+pub const MAX_DB_SIZES_PER_REPORT: usize = 5000;
+
 /// Most remote addresses one database user may have.
 pub const MAX_DB_REMOTE_HOSTS: usize = 20;
 
@@ -492,6 +505,9 @@ pub enum Operation {
         /// The user's whole name.
         name: String,
     },
+    /// Measure the size of every database on the node's shared server (data and
+    /// indexes). Answered with [`Output::DbSizes`].
+    ReportDbSizes,
     /// Let a tenant's containers reach the shared database server as `db` on their
     /// own network (the server is started first when it does not run). Safe to
     /// repeat. Answered with [`Output::TenantDbAllowed`].
@@ -664,6 +680,7 @@ impl Operation {
         "allow_tenant_databases",
         "create_database",
         "drop_database",
+        "report_db_sizes",
         "upsert_db_user",
         "grant_db",
         "revoke_db",
@@ -699,6 +716,7 @@ impl Operation {
             Self::AllowTenantDatabases { .. } => "allow_tenant_databases",
             Self::CreateDatabase { .. } => "create_database",
             Self::DropDatabase { .. } => "drop_database",
+            Self::ReportDbSizes => "report_db_sizes",
             Self::UpsertDbUser { .. } => "upsert_db_user",
             Self::GrantDb { .. } => "grant_db",
             Self::RevokeDb { .. } => "revoke_db",
@@ -877,6 +895,11 @@ pub enum Output {
     DatabaseDropped {
         /// Whether there was one to remove.
         existed: bool,
+    },
+    /// Answer to [`Operation::ReportDbSizes`].
+    DbSizes {
+        /// One entry per database (at most [`MAX_DB_SIZES_PER_REPORT`]).
+        items: Vec<DbSize>,
     },
     /// Answer to [`Operation::UpsertDbUser`].
     DbUserSet {
@@ -1750,6 +1773,7 @@ mod tests {
             },
             Operation::SetErrorPages { pages: vec![] },
             Operation::EnsureDbServer,
+            Operation::ReportDbSizes,
             Operation::CreateDatabase {
                 name: "alice_shop".into(),
             },
@@ -1807,7 +1831,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            29,
+            30,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }

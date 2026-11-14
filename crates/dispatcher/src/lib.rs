@@ -182,7 +182,7 @@ impl Dispatcher {
                 _ = capabilities.tick() => { self.request_capabilities().await; }
                 _ = purges.tick() => { self.request_purges().await; }
                 _ = routes.tick() => { self.expire_previews().await; self.request_route_syncs().await; self.request_error_pages().await; }
-                _ = certificates.tick() => { self.request_certificates().await; }
+                _ = certificates.tick() => { self.request_certificates().await; self.request_db_sizes().await; }
                 _ = expiry.tick() => { self.announce_expiring().await; }
                 Some(report) = results.recv() => self.handle_result(report).await,
             }
@@ -575,6 +575,55 @@ impl Dispatcher {
         asked
     }
 
+    /// Asks each connected node for the sizes of its databases, once per
+    /// `certificates_every` (the key carries the time slot). A node without a
+    /// database server answers "unsupported" or an error, which is recorded and
+    /// not asked about again until the next slot. Returns how many nodes were asked.
+    pub async fn request_db_sizes(&self) -> usize {
+        let slot = u64::try_from(unix_now()).unwrap_or(0)
+            / self.settings.certificates_every.as_secs().max(1);
+        let mut asked = 0;
+        for node in self.gateway.connected_nodes() {
+            // Only nodes that have databases are worth asking.
+            match dhpanel_database::databases::node_has_databases(self.ops.db(), node).await {
+                Ok(true) => {}
+                Ok(false) => continue,
+                Err(err) => {
+                    tracing::warn!(%node, error = %err, "could not look for databases");
+                    continue;
+                }
+            }
+            let request = dhpanel_operations::Request::new(
+                node,
+                dhpanel_node_protocol::Operation::ReportDbSizes,
+                format!("dbsizes:{slot}"),
+            );
+            match self.ops.enqueue(&request).await {
+                Ok(dhpanel_operations::Enqueued::Created(_)) => asked += 1,
+                Ok(dhpanel_operations::Enqueued::Existing(_)) => {}
+                Err(error) => tracing::warn!(%node, %error, "could not queue the size report"),
+            }
+        }
+        asked
+    }
+
+    async fn store_db_sizes(&self, node_id: Uuid, items: &[dhpanel_node_protocol::DbSize]) {
+        let sizes: Vec<(String, i64)> = items
+            .iter()
+            .map(|d| (d.name.clone(), i64::try_from(d.bytes).unwrap_or(i64::MAX)))
+            .collect();
+        let result = async {
+            let mut tx = self.ops.db().begin().await?;
+            let n = dhpanel_database::databases::record_sizes(&mut tx, node_id, &sizes).await?;
+            tx.commit().await?;
+            Ok::<_, dhpanel_database::sqlx::Error>(n)
+        }
+        .await;
+        if let Err(err) = result {
+            tracing::warn!(%node_id, error = %err, "could not keep the database sizes a node reported");
+        }
+    }
+
     async fn store_certificates(
         &self,
         node_id: Uuid,
@@ -769,6 +818,9 @@ impl Dispatcher {
                 }
                 if let Some(dhpanel_node_protocol::Output::Certificates { items }) = &output {
                     self.store_certificates(node_id, items).await;
+                }
+                if let Some(dhpanel_node_protocol::Output::DbSizes { items }) = &output {
+                    self.store_db_sizes(node_id, items).await;
                 }
                 let output = output
                     .and_then(|o| serde_json::to_value(o).ok())

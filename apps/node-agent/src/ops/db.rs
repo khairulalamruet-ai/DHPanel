@@ -284,6 +284,8 @@ pub async fn create_database(
         return Err(super::wrong_operation());
     };
     let quoted = identifier(&name)?;
+    // The first database of a node starts its server.
+    ensure_server(&context).await?;
     let mut conn = root_conn(&context).await?;
     let existed: Option<String> = conn
         .exec_first(
@@ -327,6 +329,17 @@ pub async fn drop_database(
         .await
         .map_err(|e| sql_error(&e))?;
     if existed.is_some() {
+        // The server keeps what users were granted on a database after it is gone: a
+        // database made later under the same name would hand it back. Take it away.
+        let who: Vec<(String, String)> = conn
+            .exec("SELECT User, Host FROM mysql.db WHERE Db = ?", (&name,))
+            .await
+            .map_err(|e| sql_error(&e))?;
+        for (user, host) in who {
+            if let (Ok(u), Ok(h)) = (user_literal(&user), host_literal(&host)) {
+                revoke_all(&mut conn, &quoted, &format!("{u}@{h}")).await?;
+            }
+        }
         conn.query_drop(format!("DROP DATABASE {quoted}"))
             .await
             .map_err(|e| sql_error(&e))?;
@@ -432,6 +445,9 @@ pub async fn upsert_db_user(
         )
     })?;
     let quoted_host = host_literal(&host)?;
+    // The server runs, and this tenant's containers can reach it.
+    ensure_server(&context).await?;
+    connect_tenant(&context, &network).await?;
     let mut conn = root_conn(&context).await?;
     let existing = hosts_of(&mut conn, &name).await?;
     let here = existing.contains(&host);
@@ -619,6 +635,40 @@ async fn grants_on(
     Ok(out)
 }
 
+/// `report_db_sizes`.
+///
+/// # Errors
+/// As [`create_database`].
+pub async fn report_db_sizes(
+    context: Arc<TenantContext>,
+    op: Operation,
+) -> Result<Output, AgentError> {
+    use mysql_async::prelude::Queryable as _;
+    let Operation::ReportDbSizes = op else {
+        return Err(super::wrong_operation());
+    };
+    let mut conn = root_conn(&context).await?;
+    // The server's own schemas are not the panel's business.
+    let rows: Vec<(String, u64)> = conn
+        .query(
+            "SELECT s.SCHEMA_NAME, CAST(COALESCE(SUM(t.DATA_LENGTH + t.INDEX_LENGTH), 0) AS UNSIGNED)
+             FROM information_schema.SCHEMATA s
+             LEFT JOIN information_schema.TABLES t ON t.TABLE_SCHEMA = s.SCHEMA_NAME
+             WHERE s.SCHEMA_NAME NOT IN ('mysql', 'information_schema', 'performance_schema', 'sys')
+             GROUP BY s.SCHEMA_NAME ORDER BY s.SCHEMA_NAME",
+        )
+        .await
+        .map_err(|e| sql_error(&e))?;
+    let _ = conn.disconnect().await;
+    Ok(Output::DbSizes {
+        items: rows
+            .into_iter()
+            .take(dhpanel_node_protocol::MAX_DB_SIZES_PER_REPORT)
+            .map(|(name, bytes)| dhpanel_node_protocol::DbSize { name, bytes })
+            .collect(),
+    })
+}
+
 /// `set_db_remote_hosts`.
 ///
 /// # Errors
@@ -755,6 +805,22 @@ pub async fn ensure_db_server(
     })
 }
 
+/// Puts the server on a tenant's network as `db`.
+async fn connect_tenant(context: &TenantContext, network: &Name) -> Result<(), AgentError> {
+    match context
+        .docker
+        .connect_network(&name(CONTAINER)?, network, ALIAS)
+        .await
+    {
+        Ok(()) => Ok(()),
+        Err(DockerError::NotFound) => Err(AgentError::new(
+            ErrorCode::InvalidArguments,
+            "the tenant has no network on this node",
+        )),
+        Err(e) => Err(docker_error(&e)),
+    }
+}
+
 /// `allow_tenant_databases`.
 ///
 /// # Errors
@@ -771,20 +837,7 @@ pub async fn allow_tenant_databases(
     let network = network_name(&username)
         .map_err(|e| AgentError::new(ErrorCode::InvalidArguments, e.to_string()))?;
     ensure_server(&context).await?;
-    match context
-        .docker
-        .connect_network(&name(CONTAINER)?, &network, ALIAS)
-        .await
-    {
-        Ok(()) => {}
-        Err(DockerError::NotFound) => {
-            return Err(AgentError::new(
-                ErrorCode::InvalidArguments,
-                "the tenant has no network on this node",
-            ));
-        }
-        Err(e) => return Err(docker_error(&e)),
-    }
+    connect_tenant(&context, &network).await?;
     Ok(Output::TenantDbAllowed {
         network: network.as_str().to_owned(),
     })

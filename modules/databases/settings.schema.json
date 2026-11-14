@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Databases",
+  "description": "How databases and their users are named.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "require_prefix": {
+      "type": "boolean",
+      "title": "Account name as a prefix",
+      "default": true,
+      "x-scope": "global",
+      "x-title": {
+        "en": "Account name as a prefix",
+        "bn": "অ্যাকাউন্টের নাম prefix হিসেবে"
+      },
+      "x-description": {
+        "en": "Every database and database user name starts with the account's system name and an underscore (alice_shop). Off: names are as typed, still unique across the panel.",
+        "bn": "প্রতিটি ডাটাবেস ও ডাটাবেস ইউজারের নাম অ্যাকাউন্টের system name ও একটি আন্ডারস্কোর দিয়ে শুরু হয় (alice_shop)। বন্ধ থাকলে নাম যেমন লেখা হয় তেমনই থাকে, তবে প্যানেলজুড়ে অনন্য।"
+      }
+    }
+  }
+}

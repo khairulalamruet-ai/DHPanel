@@ -170,7 +170,7 @@ async fn main() -> ExitCode {
             return ExitCode::from(EXIT_CONFIG);
         }
     };
-    let certificate_keys = secrets::certificate_keys(db.clone(), master_key.clone());
+    let operation_secrets = secrets::operation_secrets(db.clone(), master_key.clone());
     let minutes = |m: u32| std::time::Duration::from_secs(u64::from(m) * 60);
     let lockout = |threshold| dhpanel_cache::lockout::LockoutPolicy {
         threshold,
@@ -329,7 +329,7 @@ async fn main() -> ExitCode {
             Some(redis.clone()),
             dhpanel_dispatcher::Settings::default(),
         )
-        .with_secrets(certificate_keys);
+        .with_secrets(operation_secrets);
         Some(tokio::spawn(dispatcher.run(results, stopped.clone())))
     });
     let relay_task = tokio::spawn(relay.run(stopped.clone()));

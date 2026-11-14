@@ -269,7 +269,7 @@ async fn the_database_server_is_reached_from_its_tenants_network_and_nowhere_els
     // Users and grants, seen from inside the tenant's own network.
     {
         use dhpanel_node_agent::ops::db::{
-            create_database, drop_db_user, grant_db, revoke_db, upsert_db_user,
+            create_database, drop_database, drop_db_user, grant_db, revoke_db, upsert_db_user,
         };
         use mysql_async::prelude::Queryable as _;
         let image = dhpanel_tenant_stack::Allowlist::embedded()
@@ -543,6 +543,67 @@ async fn the_database_server_is_reached_from_its_tenants_network_and_nowhere_els
                 let _ = docker.remove_network(net).await;
             }
         }
+        // Sizes: the databases are listed (not the server's own), the one with a table has some size.
+        let Output::DbSizes { items } =
+            dhpanel_node_agent::ops::db::report_db_sizes(context.clone(), Operation::ReportDbSizes)
+                .await
+                .unwrap()
+        else {
+            panic!("not sizes")
+        };
+        let names: Vec<&str> = items.iter().map(|i| i.name.as_str()).collect();
+        assert!(
+            names.contains(&"dbtest_shop") && names.contains(&"dbtest_blog"),
+            "{names:?}"
+        );
+        assert!(
+            !names.contains(&"mysql") && !names.contains(&"information_schema"),
+            "{names:?}"
+        );
+        assert!(
+            items
+                .iter()
+                .find(|i| i.name == "dbtest_shop")
+                .unwrap()
+                .bytes
+                > 0
+        );
+        // A database dropped and made again under the same name does not hand back
+        // what was granted on the old one.
+        revoke_db(
+            context.clone(),
+            Operation::RevokeDb {
+                database: "dbtest_blog".into(),
+                user: "dbtest_web".into(),
+            },
+        )
+        .await
+        .unwrap();
+        g(grant("read_only", "dbtest_blog")).await.unwrap();
+        assert!(sql(40, &net_a, second, "SELECT * FROM dbtest_blog.t").await);
+        drop_database(
+            context.clone(),
+            Operation::DropDatabase {
+                name: "dbtest_blog".into(),
+            },
+        )
+        .await
+        .unwrap();
+        create_database(
+            context.clone(),
+            Operation::CreateDatabase {
+                name: "dbtest_blog".into(),
+            },
+        )
+        .await
+        .unwrap();
+        root.query_drop("CREATE TABLE dbtest_blog.t (a int)")
+            .await
+            .unwrap();
+        assert!(
+            !sql(41, &net_a, second, "SELECT * FROM dbtest_blog.t").await,
+            "the old grant is gone"
+        );
         // Gone.
         let dropped = drop_db_user(
             context.clone(),

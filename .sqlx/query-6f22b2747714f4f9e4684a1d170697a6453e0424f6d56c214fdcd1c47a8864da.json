@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT cidr FROM db_remote_hosts WHERE user_id = $1 ORDER BY cidr",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "cidr",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "db_remote_hosts",
+            "name": "cidr"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "6f22b2747714f4f9e4684a1d170697a6453e0424f6d56c214fdcd1c47a8864da"
+}

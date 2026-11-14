@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO db_grants (tenant_id, database_id, user_id, access) VALUES ($1, $2, $3, $4)\n         ON CONFLICT (database_id, user_id) DO UPDATE SET access = EXCLUDED.access",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "fe36c8db35bdfb378d77a42e1039d2250e6b67fc3b8a5cea5fbfe6dc1597ae28"
+}

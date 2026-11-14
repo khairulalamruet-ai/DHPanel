@@ -7308,6 +7308,803 @@
         ]
       }
     },
+    "/api/v1/client/databases": {
+      "get": {
+        "tags": [
+          "databases"
+        ],
+        "summary": "The signed-in client's databases.",
+        "operationId": "clientListDatabases",
+        "responses": {
+          "200": {
+            "description": "The databases",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseList"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "databases"
+        ],
+        "summary": "Make a database.",
+        "operationId": "clientCreateDatabase",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddDatabase"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Queued; `status` becomes `ready` when the node has made it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only`, `csrf_failed` or `feature_disabled`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`limit_reached`, `name_taken` or `tenant_not_running`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`invalid_db_name`, `db_name_too_long` or `reserved_db_name`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/databases/{id}": {
+      "delete": {
+        "tags": [
+          "databases"
+        ],
+        "summary": "Remove a database and everything in it.",
+        "operationId": "clientDeleteDatabase",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Database id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Queued; the database disappears from the list when the node has removed it"
+          },
+          "403": {
+            "description": "`client_only` or `csrf_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such database (or it is not yours)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`tenant_not_running`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/databases/{id}/grants/{user_id}": {
+      "put": {
+        "tags": [
+          "databases"
+        ],
+        "summary": "Give a user access to a database (replacing the access it had).",
+        "operationId": "clientGrantDatabase",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Database id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "user_id",
+            "in": "path",
+            "description": "User id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetAccess"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only` or `csrf_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such database or user (or not yours)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`not_ready` or `tenant_not_running`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`unknown_access`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "databases"
+        ],
+        "summary": "Take a user's access to a database away.",
+        "operationId": "clientRevokeDatabase",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Database id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "user_id",
+            "in": "path",
+            "description": "User id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Queued"
+          },
+          "403": {
+            "description": "`client_only` or `csrf_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such database, user or grant",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`tenant_not_running`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/db-users": {
+      "get": {
+        "tags": [
+          "databases"
+        ],
+        "summary": "The signed-in client's database users.",
+        "operationId": "clientListDbUsers",
+        "responses": {
+          "200": {
+            "description": "The users",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DbUserList"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "databases"
+        ],
+        "summary": "Make a database user.",
+        "operationId": "clientCreateDbUser",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddDbUser"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Queued; the password is shown this once if it was made here",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DbUserCreated"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only`, `csrf_failed` or `feature_disabled`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`limit_reached`, `name_taken` or `tenant_not_running`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A bad name or password (`password_length`, `password_weak`, ...)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/db-users/{id}": {
+      "delete": {
+        "tags": [
+          "databases"
+        ],
+        "summary": "Remove a database user.",
+        "operationId": "clientDeleteDbUser",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "User id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Queued"
+          },
+          "403": {
+            "description": "`client_only` or `csrf_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such user (or it is not yours)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`tenant_not_running`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/db-users/{id}/password": {
+      "put": {
+        "tags": [
+          "databases"
+        ],
+        "summary": "Change a database user's password.",
+        "operationId": "clientChangeDbPassword",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "User id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewPassword"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Queued; the password is shown this once if it was made here",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DbUserCreated"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only` or `csrf_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such user (or it is not yours)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`not_ready` or `tenant_not_running`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A bad password",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/db-users/{id}/remote-hosts": {
+      "get": {
+        "tags": [
+          "databases"
+        ],
+        "summary": "The addresses a user may connect from besides its own network.",
+        "operationId": "clientGetDbRemoteHosts",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "User id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The addresses",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RemoteHosts"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such user (or it is not yours)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "databases"
+        ],
+        "summary": "Replace the addresses a user may connect from (an empty list ends remote access).",
+        "operationId": "clientSetDbRemoteHosts",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "User id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RemoteHosts"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Saved and queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RemoteHosts"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only`, `csrf_failed` or `feature_disabled`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such user (or it is not yours)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`not_ready` or `tenant_not_running`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`invalid_cidr` or `too_many_hosts`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/client/dns/nameservers": {
       "get": {
         "tags": [
@@ -10016,6 +10813,43 @@
   },
   "components": {
     "schemas": {
+      "AddDatabase": {
+        "type": "object",
+        "description": "A database to make.",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The name; the account's prefix is put in front when it is not there.",
+            "example": "shop"
+          }
+        },
+        "additionalProperties": false
+      },
+      "AddDbUser": {
+        "type": "object",
+        "description": "A database user to make.",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The name; the account's prefix is put in front when it is not there.",
+            "example": "web"
+          },
+          "password": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The password; a strong one is made (and shown once) when it is left out."
+          }
+        },
+        "additionalProperties": false
+      },
       "AddDomain": {
         "type": "object",
         "description": "A domain to add.",
@@ -10867,6 +11701,167 @@
           }
         }
       },
+      "DatabaseList": {
+        "type": "object",
+        "description": "The databases of an account.",
+        "required": [
+          "items",
+          "prefix"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DatabaseView"
+            },
+            "description": "By name."
+          },
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Most databases the plan allows (`null`: no limit)."
+          },
+          "prefix": {
+            "type": "string",
+            "description": "What every name starts with (`alice_`), or empty when names are as typed."
+          }
+        }
+      },
+      "DatabaseView": {
+        "type": "object",
+        "description": "A database.",
+        "required": [
+          "id",
+          "name",
+          "status",
+          "size_bytes",
+          "users"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Id."
+          },
+          "name": {
+            "type": "string",
+            "description": "The whole name.",
+            "example": "alice_shop"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Size as last measured, in bytes (measured every few minutes)."
+          },
+          "size_checked_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When it was measured (RFC 3339, UTC)."
+          },
+          "status": {
+            "type": "string",
+            "description": "`pending`, `ready`, `failed` or `deleting`."
+          },
+          "users": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GrantView"
+            },
+            "description": "Who may use it."
+          }
+        }
+      },
+      "DbUserCreated": {
+        "type": "object",
+        "description": "A user that was made or whose password was changed.",
+        "required": [
+          "user"
+        ],
+        "properties": {
+          "password": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The password, shown this once (only when it was made here)."
+          },
+          "user": {
+            "$ref": "#/components/schemas/DbUserView",
+            "description": "The user."
+          }
+        }
+      },
+      "DbUserList": {
+        "type": "object",
+        "description": "The database users of an account.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DbUserView"
+            },
+            "description": "By name."
+          },
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Most users the plan allows (`null`: no limit)."
+          }
+        }
+      },
+      "DbUserView": {
+        "type": "object",
+        "description": "A database user.",
+        "required": [
+          "id",
+          "name",
+          "status",
+          "databases",
+          "remote_hosts"
+        ],
+        "properties": {
+          "databases": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UserGrantView"
+            },
+            "description": "What it may use."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Id."
+          },
+          "name": {
+            "type": "string",
+            "description": "The whole name.",
+            "example": "alice_web"
+          },
+          "remote_hosts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Addresses it may connect from besides its own network."
+          },
+          "status": {
+            "type": "string",
+            "description": "`pending`, `ready`, `failed` or `deleting`."
+          }
+        }
+      },
       "DelegationView": {
         "type": "object",
         "description": "What a delegation check found.",
@@ -11413,6 +12408,31 @@
           }
         }
       },
+      "GrantView": {
+        "type": "object",
+        "description": "A user's access to a database.",
+        "required": [
+          "user_id",
+          "user",
+          "access"
+        ],
+        "properties": {
+          "access": {
+            "type": "string",
+            "description": "`read_only`, `read_write` or `all`.",
+            "example": "read_write"
+          },
+          "user": {
+            "type": "string",
+            "description": "The user's name."
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The user."
+          }
+        }
+      },
       "HeaderView": {
         "type": "object",
         "description": "One response header.",
@@ -11842,6 +12862,20 @@
             ]
           }
         }
+      },
+      "NewPassword": {
+        "type": "object",
+        "description": "A new password.",
+        "properties": {
+          "password": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The password; a strong one is made (and shown once) when it is left out."
+          }
+        },
+        "additionalProperties": false
       },
       "NodeList": {
         "type": "object",
@@ -12756,6 +13790,23 @@
           }
         }
       },
+      "RemoteHosts": {
+        "type": "object",
+        "description": "Where a user may connect from.",
+        "required": [
+          "cidrs"
+        ],
+        "properties": {
+          "cidrs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "IPv4 addresses or ranges, `203.0.113.7/32` or `198.51.100.0/24` (at most 20,\nnone wider than a /8)."
+          }
+        },
+        "additionalProperties": false
+      },
       "ResetPassword": {
         "type": "object",
         "description": "A new password for a user.",
@@ -12940,6 +13991,21 @@
             "description": "Browser user agent at login."
           }
         }
+      },
+      "SetAccess": {
+        "type": "object",
+        "description": "An access level.",
+        "required": [
+          "access"
+        ],
+        "properties": {
+          "access": {
+            "type": "string",
+            "description": "`read_only`, `read_write` or `all`.",
+            "example": "read_write"
+          }
+        },
+        "additionalProperties": false
       },
       "SetModule": {
         "type": "object",
@@ -13670,6 +14736,30 @@
           }
         }
       },
+      "UserGrantView": {
+        "type": "object",
+        "description": "A database user's access to one database.",
+        "required": [
+          "database_id",
+          "database",
+          "access"
+        ],
+        "properties": {
+          "access": {
+            "type": "string",
+            "description": "The access level."
+          },
+          "database": {
+            "type": "string",
+            "description": "The database's name."
+          },
+          "database_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The database."
+          }
+        }
+      },
       "UserList": {
         "type": "object",
         "description": "A page of users.",
@@ -13898,6 +14988,10 @@
     {
       "name": "domains",
       "description": "The names a hosting account serves"
+    },
+    {
+      "name": "databases",
+      "description": "Databases, their users and grants"
     }
   ]
 }

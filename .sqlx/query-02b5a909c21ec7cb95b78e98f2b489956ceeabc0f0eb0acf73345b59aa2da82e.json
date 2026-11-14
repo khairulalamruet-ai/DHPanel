@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE databases d SET size_bytes = $3, size_checked_at = now()\n             FROM tenants t\n             WHERE d.tenant_id = t.id AND t.node_id = $1 AND d.name = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "02b5a909c21ec7cb95b78e98f2b489956ceeabc0f0eb0acf73345b59aa2da82e"
+}
