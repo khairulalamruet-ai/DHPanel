@@ -23,6 +23,7 @@
 pub mod cache;
 pub mod capabilities;
 pub mod db;
+pub mod pma;
 pub mod sqlexport;
 pub mod sqlimport;
 pub mod sqlsplit;
@@ -146,6 +147,10 @@ impl Registry {
                 let context = context.clone();
                 move |op| sqlexport::export_sql(context.clone(), op)
             });
+            registry.register("open_phpmyadmin", {
+                let context = context.clone();
+                move |op| pma::open_phpmyadmin(context.clone(), op)
+            });
             registry.register("report_import_progress", {
                 let context = context.clone();
                 move |op| sqlimport::report_import_progress(context.clone(), op)
@@ -238,6 +243,10 @@ impl Registry {
             self.register("set_site_routes", {
                 let context = context.clone();
                 move |op| crate::web::set_site_routes(context.clone(), op)
+            });
+            self.register("set_phpmyadmin_host", {
+                let context = context.clone();
+                move |op| crate::web::set_phpmyadmin_host(context.clone(), op)
             });
             self.register("set_error_pages", {
                 let context = context.clone();

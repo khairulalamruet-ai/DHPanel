@@ -7848,6 +7848,103 @@
         ]
       }
     },
+    "/api/v1/client/databases/{id}/phpmyadmin": {
+      "post": {
+        "tags": [
+          "databases"
+        ],
+        "summary": "Open a database in phpMyAdmin.",
+        "operationId": "clientOpenPhpMyAdmin",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Database id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The link",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhpMyAdminLink"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only`, `csrf_failed` or `feature_disabled`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such database",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`phpmyadmin_unavailable`, `database_not_ready` or `tenant_not_running`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many sign-ins in a short time",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`phpmyadmin_failed` (the node could not start it) or `node_busy` (it is not ready yet; try again)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/client/db-users": {
       "get": {
         "tags": [
@@ -14164,6 +14261,26 @@
           "present": {
             "type": "boolean",
             "description": "Declared by the running build. A key that is not stays listed, because\nroles may still hold it, but grants nothing that exists."
+          }
+        }
+      },
+      "PhpMyAdminLink": {
+        "type": "object",
+        "description": "A link into phpMyAdmin.",
+        "required": [
+          "url",
+          "expires_at"
+        ],
+        "properties": {
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Until when the link can be opened (RFC 3339, UTC)."
+          },
+          "url": {
+            "type": "string",
+            "description": "Open this address (it works once).",
+            "example": "https://pma.example.com/index.php?dhsignon=..."
           }
         }
       },

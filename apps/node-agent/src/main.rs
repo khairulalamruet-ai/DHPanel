@@ -317,6 +317,12 @@ fn run_command(state_dir: PathBuf, stream_url: Option<String>) -> ExitCode {
         if let Some(web) = &web {
             tokio::spawn(web.clone().keep_in_sync(std::time::Duration::from_secs(20)));
         }
+        // phpMyAdmin's temporary accounts are dropped when their time is up.
+        if let Some(context) = tenant_context(&state_dir) {
+            tokio::spawn(dhpanel_node_agent::ops::pma::sweep_forever(
+                std::sync::Arc::new(context),
+            ));
+        }
         let executor = open_executor(&state_dir, web);
         // Forget old results once an hour.
         tokio::spawn({

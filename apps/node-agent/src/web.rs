@@ -89,6 +89,8 @@ pub struct WebContext {
     certs_dir: PathBuf,
     /// The error pages an administrator set.
     pages_file: PathBuf,
+    /// The name phpMyAdmin is served under (one line), if any.
+    pma_file: PathBuf,
     agent: ureq::Agent,
     /// One change at a time: files and Caddy move together.
     busy: Mutex<()>,
@@ -109,6 +111,7 @@ impl WebContext {
             dir: state_dir.join("routes"),
             certs_dir: state_dir.join("certs"),
             pages_file: state_dir.join("error-pages.json"),
+            pma_file: state_dir.join("phpmyadmin-host"),
             agent,
             busy: Mutex::new(()),
         })
@@ -227,6 +230,54 @@ fn page(status: u16, body: &str, extra: &[(&str, &str)]) -> Value {
     json!({"handler": "static_response", "status_code": status, "headers": headers, "body": body})
 }
 
+/// Where phpMyAdmin's container listens, as the web server reaches it
+/// (`DHPANEL_AGENT_PMA_UPSTREAM`, default `dh-pma:80`).
+fn pma_upstream() -> String {
+    std::env::var("DHPANEL_AGENT_PMA_UPSTREAM")
+        .ok()
+        .filter(|u| {
+            u.len() <= 100
+                && u.bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b':'))
+        })
+        .unwrap_or_else(|| "dh-pma:80".to_owned())
+}
+
+/// The name phpMyAdmin is served under, if one was set and still passes today's checks.
+fn load_pma_host(file: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(file).ok()?;
+    Fqdn::parse(text.trim()).ok().map(|f| f.as_str().to_owned())
+}
+
+/// phpMyAdmin as a Caddy route: plain HTTP goes to HTTPS (a sign-in token is in
+/// the address), everything else to its container.
+fn pma_route(host: &str) -> Value {
+    json!({
+        "match": [{"host": [host]}],
+        "handle": [{"handler": "subroute", "routes": [
+            {
+                "match": [{"protocol": "http"}],
+                "handle": [{
+                    "handler": "static_response",
+                    "status_code": 308,
+                    "headers": {"Location": ["https://{http.request.host}{http.request.uri}"]}
+                }],
+                "terminal": true
+            },
+            {"handle": [{
+                "handler": "headers",
+                "response": {"set": {
+                    "Strict-Transport-Security": ["max-age=31536000"],
+                    "Cache-Control": ["no-store"],
+                    "Referrer-Policy": ["no-referrer"]
+                }}
+            }]},
+            {"handle": [{"handler": "reverse_proxy", "upstreams": [{"dial": pma_upstream()}]}]}
+        ]}],
+        "terminal": true
+    })
+}
+
 /// One site as a Caddy route.
 fn site_route(site: &SiteRoute, pages: &Pages) -> Value {
     let mut inner: Vec<Value> = Vec::new();
@@ -293,12 +344,11 @@ fn compile(
     uploaded: &BTreeSet<String>,
     settings: &Settings,
     pages: &Pages,
+    pma_host: Option<&str>,
 ) -> Value {
-    let mut routes: Vec<Value> = all
-        .values()
-        .flatten()
-        .map(|site| site_route(site, pages))
-        .collect();
+    // phpMyAdmin's name first: no tenant's site can take it over.
+    let mut routes: Vec<Value> = pma_host.map(pma_route).into_iter().collect();
+    routes.extend(all.values().flatten().map(|site| site_route(site, pages)));
     // Anything else: a plain "no such site", never another tenant's page.
     routes.push(json!({"handle": [page(404, &pages.get(ErrorKind::NotFound), &[])]}));
     let mut server = json!({"listen": settings.listen, "routes": routes});
@@ -584,6 +634,7 @@ impl WebContext {
             &uploaded,
             &self.settings,
             &load_pages(&self.pages_file),
+            load_pma_host(&self.pma_file).as_deref(),
         );
         let wanted = config
             .pointer(&format!("/apps/http/servers/{SERVER}"))
@@ -681,6 +732,50 @@ pub async fn set_site_routes(
             hosts,
             applied: false,
         }),
+    }
+}
+
+/// `set_phpmyadmin_host`: the name phpMyAdmin is served under (or none).
+///
+/// # Errors
+/// [`AgentError`]: a name that is not a host name or that a tenant's site already
+/// has (not retryable); kept for the next pass when Caddy cannot be reached.
+pub async fn set_phpmyadmin_host(
+    context: Arc<WebContext>,
+    op: Operation,
+) -> Result<Output, AgentError> {
+    let Operation::SetPhpMyAdminHost { host } = op else {
+        return Err(crate::ops::wrong_operation());
+    };
+    let _guard = context.busy.lock().await;
+    match host {
+        Some(host) => {
+            let host = Fqdn::parse(&host)
+                .map_err(|e| invalid(e.to_string()))?
+                .as_str()
+                .to_owned();
+            if load_all(&context.dir)
+                .values()
+                .flatten()
+                .any(|s| s.hosts.contains(&host))
+            {
+                return Err(invalid("a tenant's site already has this name"));
+            }
+            std::fs::write(&context.pma_file, format!("{host}\n")).map_err(|e| {
+                AgentError::new(ErrorCode::Internal, format!("cannot keep the name: {e}"))
+                    .retryable()
+            })?;
+        }
+        None => {
+            let _ = std::fs::remove_file(&context.pma_file);
+        }
+    }
+    match context.reconcile_locked().await {
+        Ok(_) => Ok(Output::PhpMyAdminHostSet { applied: true }),
+        Err(message) if message.starts_with("Caddy refused") => {
+            Err(AgentError::new(ErrorCode::Internal, message))
+        }
+        Err(_) => Ok(Output::PhpMyAdminHostSet { applied: false }),
     }
 }
 
@@ -1011,7 +1106,7 @@ mod tests {
             "bobby".to_owned(),
             vec![site(&["bobs.net"], Some("dh-bobby-web:8080"))],
         );
-        let config = compile(&all, &BTreeSet::new(), &settings(), &Pages::default());
+        let config = compile(&all, &BTreeSet::new(), &settings(), &Pages::default(), None);
         let server = &config["apps"]["http"]["servers"]["dhpanel"];
         assert_eq!(server["listen"], json!([":80", ":443"]));
         let routes = server["routes"].as_array().unwrap();
@@ -1050,8 +1145,8 @@ mod tests {
         assert!(!fixed.contains('{') && !fixed.contains('}'));
         // The same input gives the same output.
         assert_eq!(
-            compile(&all, &BTreeSet::new(), &settings(), &Pages::default()),
-            compile(&all, &BTreeSet::new(), &settings(), &Pages::default())
+            compile(&all, &BTreeSet::new(), &settings(), &Pages::default(), None),
+            compile(&all, &BTreeSet::new(), &settings(), &Pages::default(), None)
         );
         // Automatic HTTPS can be turned off.
         let off = compile(
@@ -1062,6 +1157,7 @@ mod tests {
                 ..settings()
             },
             &Pages::default(),
+            None,
         );
         assert_eq!(
             off["apps"]["http"]["servers"]["dhpanel"]["automatic_https"]["disable"],
@@ -1090,7 +1186,7 @@ mod tests {
             "alice".to_owned(),
             vec![secure, only_redirect, site(&["http-only.net"], None)],
         )]);
-        let config = compile(&all, &BTreeSet::new(), &settings(), &Pages::default());
+        let config = compile(&all, &BTreeSet::new(), &settings(), &Pages::default(), None);
         let routes = config["apps"]["http"]["servers"]["dhpanel"]["routes"]
             .as_array()
             .unwrap();
@@ -1230,16 +1326,41 @@ mod tests {
     fn names_with_an_uploaded_certificate_are_left_out_of_caddys_own() {
         let all = BTreeMap::from([("alice".to_owned(), vec![site(&["a.org"], None)])]);
         let uploaded = BTreeSet::from(["a.org".to_owned()]);
-        let config = compile(&all, &uploaded, &settings(), &Pages::default());
+        let config = compile(&all, &uploaded, &settings(), &Pages::default(), None);
         assert_eq!(
             config["apps"]["http"]["servers"][SERVER]["automatic_https"],
             json!({"disable_redirects": true, "skip_certificates": ["a.org"]})
         );
-        let none = compile(&all, &BTreeSet::new(), &settings(), &Pages::default());
+        let none = compile(&all, &BTreeSet::new(), &settings(), &Pages::default(), None);
         assert_eq!(
             none["apps"]["http"]["servers"][SERVER]["automatic_https"],
             json!({"disable_redirects": true})
         );
+    }
+
+    #[test]
+    fn phpmyadmin_comes_first_and_only_as_its_own_name() {
+        let all = BTreeMap::new();
+        let none = compile(&all, &BTreeSet::new(), &settings(), &Pages::default(), None);
+        let some = compile(
+            &all,
+            &BTreeSet::new(),
+            &settings(),
+            &Pages::default(),
+            Some("pma.example.com"),
+        );
+        let routes = |c: &Value| c["apps"]["http"]["servers"]["dhpanel"]["routes"].clone();
+        assert_eq!(routes(&none).as_array().unwrap().len(), 1, "just the 404");
+        let with = routes(&some);
+        assert_eq!(with.as_array().unwrap().len(), 2);
+        assert_eq!(with[0]["match"][0]["host"][0], "pma.example.com");
+        let inner = &with[0]["handle"][0]["routes"];
+        assert_eq!(
+            inner[0]["handle"][0]["status_code"], 308,
+            "plain HTTP goes to HTTPS"
+        );
+        assert_eq!(inner[2]["handle"][0]["handler"], "reverse_proxy");
+        assert!(with[1].get("match").is_none(), "the 404 is last");
     }
 
     #[test]

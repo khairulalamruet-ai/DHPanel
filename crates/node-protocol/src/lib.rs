@@ -564,6 +564,33 @@ pub enum Operation {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         token: Option<DbPassword>,
     },
+    /// Sets (or, with no host, removes) the name phpMyAdmin is served under: the
+    /// web server routes that name to the node's phpMyAdmin container. Answered with
+    /// [`Output::PhpMyAdminHostSet`].
+    #[serde(rename = "set_phpmyadmin_host")]
+    SetPhpMyAdminHost {
+        /// The host name, or none to switch it off.
+        host: Option<String>,
+    },
+    /// Lets one sign-in to phpMyAdmin happen: makes sure phpMyAdmin runs, makes a
+    /// temporary account with all rights on this one database and keeps its
+    /// credentials where only the one-time sign-in page reads them (under the
+    /// SHA-256 of the token the client holds; the token itself never reaches the
+    /// node). The account is removed when the session's time is up. Answered with
+    /// [`Output::PhpMyAdminOpened`].
+    #[serde(rename = "open_phpmyadmin")]
+    OpenPhpMyAdmin {
+        /// The tenant's system name.
+        username: String,
+        /// The database's whole name.
+        database: String,
+        /// This sign-in's id.
+        session_id: Uuid,
+        /// SHA-256 of the sign-in token, 64 lower-case hex digits.
+        token_hash: String,
+        /// How long the session lasts, in minutes (5..=720).
+        session_minutes: u32,
+    },
     /// How far an import has come. Answered with [`Output::ImportProgress`].
     ReportImportProgress {
         /// The import.
@@ -743,6 +770,8 @@ impl Operation {
         "drop_database",
         "import_sql",
         "export_sql",
+        "set_phpmyadmin_host",
+        "open_phpmyadmin",
         "report_import_progress",
         "report_db_sizes",
         "upsert_db_user",
@@ -783,6 +812,8 @@ impl Operation {
             Self::DropDatabase { .. } => "drop_database",
             Self::ImportSql { .. } => "import_sql",
             Self::ExportSql { .. } => "export_sql",
+            Self::SetPhpMyAdminHost { .. } => "set_phpmyadmin_host",
+            Self::OpenPhpMyAdmin { .. } => "open_phpmyadmin",
             Self::ReportImportProgress { .. } => "report_import_progress",
             Self::ReportDbSizes => "report_db_sizes",
             Self::UpsertDbUser { .. } => "upsert_db_user",
@@ -969,6 +1000,19 @@ pub enum Output {
     SqlImported {
         /// How many statements ran.
         statements: u64,
+    },
+    /// Answer to [`Operation::SetPhpMyAdminHost`].
+    #[serde(rename = "phpmyadmin_host_set")]
+    PhpMyAdminHostSet {
+        /// Whether the web server has the route now (otherwise it is kept and put
+        /// in place when the web server can be reached).
+        applied: bool,
+    },
+    /// Answer to [`Operation::OpenPhpMyAdmin`].
+    #[serde(rename = "phpmyadmin_opened")]
+    PhpMyAdminOpened {
+        /// Until when the sign-in link works (Unix seconds).
+        link_expires_at: i64,
     },
     /// Answer to [`Operation::ExportSql`].
     SqlExported {
@@ -1894,6 +1938,16 @@ mod tests {
                 url: "https://panel.example.com/api/v1/public/exports/x".into(),
                 token: None,
             },
+            Operation::SetPhpMyAdminHost {
+                host: Some("pma.example.com".into()),
+            },
+            Operation::OpenPhpMyAdmin {
+                username: "alice".into(),
+                database: "alice_shop".into(),
+                session_id: id(),
+                token_hash: "0".repeat(64),
+                session_minutes: 60,
+            },
             Operation::ReportImportProgress { import_id: id() },
             Operation::CreateDatabase {
                 name: "alice_shop".into(),
@@ -1955,7 +2009,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            34,
+            36,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }

@@ -494,7 +494,7 @@ pub async fn time_out_dispatched(
                    THEN NULL ELSE now() END
            WHERE status = 'dispatched'
              AND dispatched_at < now() - make_interval(
-                     secs => CASE WHEN kind IN ('import_sql', 'export_sql') THEN $3::int ELSE $1::int END)
+                     secs => CASE WHEN kind IN ('import_sql', 'export_sql', 'open_phpmyadmin') THEN $3::int ELSE $1::int END)
            RETURNING id, status AS "status!""#,
         timeout_secs,
         retry_in_secs,

@@ -19,6 +19,37 @@
         "bn": "প্রতিটি ডাটাবেস ও ডাটাবেস ইউজারের নাম অ্যাকাউন্টের system name ও একটি আন্ডারস্কোর দিয়ে শুরু হয় (alice_shop)। বন্ধ থাকলে নাম যেমন লেখা হয় তেমনই থাকে, তবে প্যানেলজুড়ে অনন্য।"
       }
     },
+    "phpmyadmin_host": {
+      "type": "string",
+      "title": "phpMyAdmin address",
+      "default": "",
+      "maxLength": 253,
+      "x-scope": "global",
+      "x-title": {
+        "en": "phpMyAdmin address",
+        "bn": "phpMyAdmin-এর ঠিকানা"
+      },
+      "x-description": {
+        "en": "The host name phpMyAdmin is served under on every node (pma.example.com). Its DNS record must point at the nodes' web servers, and the web server must be able to reach the phpMyAdmin container (the node's network dh-pma-net). Empty turns phpMyAdmin off.",
+        "bn": "প্রতিটি নোডে যে host name-এ phpMyAdmin চলবে (pma.example.com)। এর DNS record নোডের web server-এ যেতে হবে, আর web server-কে phpMyAdmin container-এ পৌঁছাতে হবে (নোডের dh-pma-net network)। ফাঁকা থাকলে phpMyAdmin বন্ধ।"
+      }
+    },
+    "phpmyadmin_session_minutes": {
+      "type": "integer",
+      "title": "phpMyAdmin session (minutes)",
+      "default": 120,
+      "minimum": 5,
+      "maximum": 720,
+      "x-scope": "global",
+      "x-title": {
+        "en": "phpMyAdmin session (minutes)",
+        "bn": "phpMyAdmin session (মিনিট)"
+      },
+      "x-description": {
+        "en": "How long a phpMyAdmin sign-in lasts; then its temporary database account is removed.",
+        "bn": "একটি phpMyAdmin sign-in কত মিনিট চলবে; তারপর এর অস্থায়ী ডাটাবেস অ্যাকাউন্ট মুছে যায়।"
+      }
+    },
     "max_export_mb": {
       "type": "integer",
       "title": "Biggest SQL export (MB)",

@@ -47,6 +47,8 @@ pub enum Role {
     Php,
     /// The node's shared database server (not part of a tenant's stack).
     Db,
+    /// The node's phpMyAdmin (not part of a tenant's stack).
+    Pma,
 }
 
 impl Role {
@@ -57,6 +59,7 @@ impl Role {
             Self::Web => "web",
             Self::Php => "php",
             Self::Db => "db",
+            Self::Pma => "pma",
         }
     }
 }
@@ -602,7 +605,7 @@ pub fn render(tenant: &Tenant<'_>, allowlist: &Allowlist) -> Result<Stack, Stack
                 }
             }
             // The database server is the node's, not a tenant's.
-            Role::Db => continue,
+            Role::Db | Role::Pma => continue,
         }
         let copies = if template.role == Role::Php {
             php_copies

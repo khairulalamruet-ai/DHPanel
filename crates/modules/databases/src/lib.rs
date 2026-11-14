@@ -22,6 +22,7 @@
 
 pub mod exports;
 pub mod imports;
+pub mod phpmyadmin;
 
 use std::{path::PathBuf, sync::Arc};
 
@@ -114,6 +115,7 @@ pub fn client_router() -> Router<DatabasesState> {
         )
         .merge(imports::client_router())
         .merge(exports::client_router())
+        .merge(phpmyadmin::client_router())
 }
 
 /// Routes without a session (the node fetching an SQL dump with its token).
@@ -230,9 +232,9 @@ async fn queue(
     op: &Operation,
     key: String,
     who: &Principal,
-) -> Result<(), AppError> {
+) -> Result<Uuid, AppError> {
     let payload = serde_json::to_value(op).map_err(internal)?;
-    operations::enqueue_in(
+    let queued = operations::enqueue_in(
         tx,
         &NewOperation {
             node_id: hosting.tenant.node_id,
@@ -253,7 +255,7 @@ async fn queue(
         ),
         other => internal(other),
     })?;
-    Ok(())
+    Ok(queued.operation().id)
 }
 
 fn name_error(err: dhpanel_domain::databases::DbNameError) -> AppError {
@@ -680,6 +682,7 @@ async fn queue_remote_access(
         who,
     )
     .await
+    .map(|_| ())
 }
 
 /// Seals a password for the dispatcher to deliver and queues the work.
@@ -711,6 +714,7 @@ async fn queue_user(
         who,
     )
     .await
+    .map(|_| ())
 }
 
 /// The password to use: the one given (checked), or a new strong one.
@@ -1209,13 +1213,15 @@ pub async fn set_remote(
         imports::start_import, imports::list_imports, imports::get_import,
         imports::put_chunk, imports::complete_import, imports::cancel_import,
         exports::start_export, exports::list_exports, exports::get_export,
-        exports::make_link, exports::delete_export
+        exports::make_link, exports::delete_export,
+        phpmyadmin::open_phpmyadmin
     ),
     components(schemas(
         GrantView, DatabaseView, DatabaseList, UserGrantView, DbUserView, DbUserList,
         DbUserCreated, AddDatabase, AddDbUser, NewPassword, SetAccess, RemoteHosts,
         imports::ImportView, imports::ImportList, imports::StartImport,
-        exports::ExportView, exports::ExportList, exports::DownloadLink
+        exports::ExportView, exports::ExportList, exports::DownloadLink,
+        phpmyadmin::PhpMyAdminLink
     )),
     tags((name = "databases", description = "Databases, their users and grants"))
 )]

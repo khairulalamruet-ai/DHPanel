@@ -1608,3 +1608,144 @@ async fn an_export_is_made_by_the_node_and_downloaded_with_a_five_minute_link(po
     );
     let _ = std::fs::remove_dir_all(&e.spool);
 }
+
+/// Plays the node for `seconds`: every operation of the kinds is taken and answered.
+fn node_plays(
+    pool: PgPool,
+    kinds: &'static [&'static str],
+    ok: bool,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        for _ in 0..200 {
+            let ids: Vec<Uuid> = sqlx::query_scalar(
+                "SELECT id FROM operations WHERE kind = ANY($1) AND status = 'pending'",
+            )
+            .bind(kinds)
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+            for id in ids {
+                sqlx::query(
+                    "UPDATE operations SET status = 'dispatched', attempts = 1 WHERE id = $1",
+                )
+                .bind(id)
+                .execute(&pool)
+                .await
+                .unwrap();
+                if ok {
+                    dhpanel_database::operations::succeed(
+                        &pool,
+                        id,
+                        &json!({"type": "phpmyadmin_opened", "link_expires_at": 4_102_444_800_i64, "applied": true}),
+                    )
+                    .await
+                    .unwrap();
+                } else {
+                    dhpanel_database::operations::fail(
+                        &pool,
+                        id,
+                        &json!({"code": "internal", "message": "no", "retryable": false}),
+                        None,
+                    )
+                    .await
+                    .unwrap();
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    })
+}
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn phpmyadmin_links_are_made_once_per_sign_in_and_the_token_never_reaches_the_ledger(
+    pool: PgPool,
+) {
+    let e = env(&pool).await;
+    let (alice, tenant) = client(&pool, "alice", 10_000).await;
+    let (bobby, _) = client(&pool, "bobby", 10_001).await;
+    let (a, b) = (e.sign_in(alice).await, e.sign_in(bobby).await);
+    let database = ready_database(&pool, tenant, "alice_shop").await;
+    let path = format!("/api/v1/client/databases/{database}/phpmyadmin");
+
+    let (status, got) = e.call(&a, "POST", &path, None).await;
+    assert_eq!(
+        (status, code(&got)),
+        (StatusCode::CONFLICT, "phpmyadmin_unavailable")
+    );
+    let mut tx = pool.begin().await.unwrap();
+    dhpanel_settings::set(
+        &e.settings,
+        &mut tx,
+        "databases",
+        Scope::Global,
+        json!({"phpmyadmin_host": "pma.example.com", "phpmyadmin_session_minutes": 45})
+            .as_object()
+            .unwrap(),
+        None,
+    )
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+    let (status, _) = e.call(&b, "POST", &path, None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "someone else's database");
+
+    let node = node_plays(
+        pool.clone(),
+        &["set_phpmyadmin_host", "open_phpmyadmin"],
+        true,
+    );
+    let (status, link) = e.call(&a, "POST", &path, None).await;
+    assert_eq!(status, StatusCode::OK, "{link}");
+    let url = link["url"].as_str().unwrap();
+    let token = url
+        .strip_prefix("https://pma.example.com/index.php?dhsignon=")
+        .expect(url);
+    assert_eq!(token.len(), 64);
+    assert_eq!(link["expires_at"], "2100-01-01T00:00:00Z");
+    let payload: Value =
+        sqlx::query_scalar("SELECT payload FROM operations WHERE kind = 'open_phpmyadmin'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(payload["database"], "alice_shop");
+    assert_eq!(payload["session_minutes"], 45);
+    assert_eq!(payload["token_hash"], sha256_hex(token.as_bytes()));
+    let everywhere: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM operations WHERE payload::text LIKE '%' || $1 || '%'",
+    )
+    .bind(token)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(everywhere, 0, "the token is never in the ledger");
+    let leaked: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_logs WHERE metadata::text LIKE '%' || $1 || '%'",
+    )
+    .bind(token)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(leaked, 0, "nor in the audit log");
+    // Another sign-in: a new token and a new session; the route is set once.
+    let (status, again) = e.call(&a, "POST", &path, None).await;
+    assert_eq!(status, StatusCode::OK, "{again}");
+    assert_ne!(again["url"], link["url"]);
+    let hosts: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM operations WHERE kind = 'set_phpmyadmin_host'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(hosts, 1);
+    node.abort();
+
+    // A node that cannot do it says so.
+    let node = node_plays(pool.clone(), &["open_phpmyadmin"], false);
+    let (status, got) = e.call(&a, "POST", &path, None).await;
+    assert_eq!(
+        (status, code(&got)),
+        (StatusCode::SERVICE_UNAVAILABLE, "phpmyadmin_failed"),
+        "{got}"
+    );
+    node.abort();
+}

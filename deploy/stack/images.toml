@@ -56,3 +56,8 @@ note      = "PHP 8.2.35 FPM, Alpine (security fixes only until the end of 2026)"
 role      = "db"
 reference = "mariadb@sha256:4ebbcf100a3ba320766dfa0e1af008df12261301db6ef72798c7650f70794aed"
 note      = "MariaDB 12.3.3 (long-term support): the node's shared database server (T07.01)"
+
+[[image]]
+role      = "pma"
+reference = "phpmyadmin@sha256:e4b3eb5305cd42d21512bb55def2bab52625d56df927ad4ee1864a9354c84d40"
+note      = "phpMyAdmin 5.2.3 (Apache), the node's one database browser; clients reach it through single sign-on only"

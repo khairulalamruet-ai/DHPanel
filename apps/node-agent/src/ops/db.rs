@@ -28,7 +28,7 @@ use super::tenant::{TenantContext, docker_error};
 /// The database container.
 pub const CONTAINER: &str = "dh-db";
 /// Its network (the tenants' networks are added to it as it is used).
-const NETWORK: &str = "dh-db-net";
+pub(super) const NETWORK: &str = "dh-db-net";
 /// Its data.
 const VOLUME: &str = "dh-db-data";
 /// The loopback port it is published on unless `DHPANEL_AGENT_DB_PORT` says another.
@@ -67,7 +67,7 @@ pub fn public_port() -> u16 {
 }
 
 /// Where the root password is kept: next to the agent's other secrets.
-fn secrets_dir(context: &TenantContext) -> PathBuf {
+pub(super) fn secrets_dir(context: &TenantContext) -> PathBuf {
     context.vhosts_root.with_file_name("secrets")
 }
 
@@ -120,7 +120,7 @@ pub fn root_password(dir: &Path) -> Result<String, AgentError> {
     Ok(secret)
 }
 
-fn name(text: &str) -> Result<Name, AgentError> {
+pub(super) fn name(text: &str) -> Result<Name, AgentError> {
     Name::parse(text).map_err(|e| AgentError::new(ErrorCode::Internal, e.to_string()))
 }
 
