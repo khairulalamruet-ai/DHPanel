@@ -1012,6 +1012,7 @@ dependencies = [
  "dhpanel-mod-admin",
  "dhpanel-mod-auth",
  "dhpanel-mod-backups",
+ "dhpanel-mod-cron",
  "dhpanel-mod-databases",
  "dhpanel-mod-domains",
  "dhpanel-mod-files",
@@ -1295,6 +1296,31 @@ dependencies = [
  "sqlx",
  "tar",
  "thiserror",
+ "tokio",
+ "tower",
+ "utoipa",
+ "uuid",
+]
+
+[[package]]
+name = "dhpanel-mod-cron"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "dhpanel-audit",
+ "dhpanel-backup",
+ "dhpanel-cache",
+ "dhpanel-database",
+ "dhpanel-http-kit",
+ "dhpanel-kernel",
+ "dhpanel-mod-auth",
+ "dhpanel-rbac",
+ "dhpanel-session",
+ "dhpanel-settings",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "sqlx",
  "tokio",
  "tower",
  "utoipa",

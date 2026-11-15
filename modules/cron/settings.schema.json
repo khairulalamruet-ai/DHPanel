@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Cron jobs",
+  "description": "How often and how long a cron job may run, and how long its command may be.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "min_interval_minutes": {
+      "type": "integer",
+      "title": "Shortest interval (minutes)",
+      "default": 5,
+      "minimum": 1,
+      "maximum": 1440,
+      "x-scope": "global",
+      "x-title": { "en": "Shortest interval (minutes)", "bn": "সর্বনিম্ন ব্যবধান (মিনিট)" },
+      "x-description": {
+        "en": "Two runs of one job may not be closer than this. A schedule such as `* * * * *` is refused when it is shorter.",
+        "bn": "একটি জবের দুটি রানের মধ্যে এর চেয়ে কম ব্যবধান চলবে না। এর চেয়ে ছোট হলে `* * * * *`-এর মতো schedule প্রত্যাখ্যাত হয়।"
+      }
+    },
+    "max_command_length": {
+      "type": "integer",
+      "title": "Longest command (characters)",
+      "default": 1000,
+      "minimum": 50,
+      "maximum": 10000,
+      "x-scope": "global",
+      "x-title": { "en": "Longest command (characters)", "bn": "সর্বোচ্চ command দৈর্ঘ্য (অক্ষর)" },
+      "x-description": {
+        "en": "The longest command line a job may have.",
+        "bn": "একটি জবের command-এর সর্বোচ্চ দৈর্ঘ্য।"
+      }
+    },
+    "max_timeout_seconds": {
+      "type": "integer",
+      "title": "Longest run (seconds)",
+      "default": 3600,
+      "minimum": 10,
+      "maximum": 86400,
+      "x-scope": "global",
+      "x-title": { "en": "Longest run (seconds)", "bn": "সর্বোচ্চ চলার সময় (সেকেন্ড)" },
+      "x-description": {
+        "en": "A job is stopped when it runs longer than its own timeout; the timeout cannot be set above this.",
+        "bn": "জব নিজের timeout-এর বেশি চললে থামানো হয়; timeout এর বেশি রাখা যায় না।"
+      }
+    }
+  }
+}

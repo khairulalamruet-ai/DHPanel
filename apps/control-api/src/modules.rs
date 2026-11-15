@@ -25,6 +25,7 @@ const EMBEDDED: &[(&str, &str)] = &[
     ("databases", dhpanel_mod_databases::MANIFEST),
     ("files", dhpanel_mod_files::MANIFEST),
     ("backups", dhpanel_mod_backups::MANIFEST),
+    ("cron", dhpanel_mod_cron::MANIFEST),
 ];
 
 /// Days the data of a deleted user is kept before it is purged.
@@ -54,6 +55,7 @@ impl Module for Wired {
             "domains" => serde_json::from_str(dhpanel_mod_domains::SETTINGS_SCHEMA).ok(),
             "databases" => serde_json::from_str(dhpanel_mod_databases::SETTINGS_SCHEMA).ok(),
             "files" => serde_json::from_str(dhpanel_mod_files::SETTINGS_SCHEMA).ok(),
+            "cron" => serde_json::from_str(dhpanel_mod_cron::SETTINGS_SCHEMA).ok(),
             _ => None,
         }
     }
@@ -378,6 +380,23 @@ pub fn mount(
                         None => ModuleRoutes::none(),
                     })
                 }
+                "cron" => {
+                    let (db, sessions, late_settings) =
+                        (db.clone(), sessions.clone(), late_settings.clone());
+                    Box::new(move || match late_settings.get() {
+                        Some(settings) => ModuleRoutes {
+                            client: Some(dhpanel_mod_cron::client_router().with_state(
+                                dhpanel_mod_cron::CronState {
+                                    db: db.clone(),
+                                    sessions: sessions.clone(),
+                                    settings: settings.clone(),
+                                },
+                            )),
+                            ..ModuleRoutes::none()
+                        },
+                        None => ModuleRoutes::none(),
+                    })
+                }
                 // A manifest without code behind it has no routes.
                 _ => Box::new(ModuleRoutes::none),
             };
@@ -605,7 +624,8 @@ mod tests {
                 "domains",
                 "databases",
                 "files",
-                "backups"
+                "backups",
+                "cron"
             ]
         );
         // And they fit together: dependencies first.
@@ -621,6 +641,7 @@ mod tests {
                 "plans",
                 "users",
                 "backups",
+                "cron",
                 "databases",
                 "domains",
                 "files"
@@ -635,6 +656,7 @@ mod tests {
                 "plans",
                 "users",
                 "backups",
+                "cron",
                 "databases",
                 "domains",
                 "files"

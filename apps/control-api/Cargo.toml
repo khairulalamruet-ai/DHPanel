@@ -38,6 +38,7 @@ dhpanel-mod-domains.workspace = true
 dhpanel-mod-databases.workspace = true
 dhpanel-mod-files.workspace = true
 dhpanel-mod-backups.workspace = true
+dhpanel-mod-cron.workspace = true
 dhpanel-backup.workspace = true
 dhpanel-backup-dest.workspace = true
 dhpanel-system-backup.workspace = true

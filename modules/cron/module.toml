@@ -1,0 +1,21 @@
+# Cron: a hosting account's scheduled commands (crates/modules/cron).
+[module]
+name       = "cron"
+version    = "0.1.0"
+title      = { en = "Cron jobs", bn = "ক্রন জব" }
+category   = "system"
+core       = false
+depends_on = ["auth", "rbac", "audit", "system", "plans", "users"]
+
+[permissions]
+keys = []
+
+[features]
+keys = ["cron"]
+
+# A plan without this key gets the default.
+[limits]
+max_cron_jobs = { type = "int", default = 10, unlimited = -1 }
+
+[ui]
+client_nav = { group = "Advanced", order = 10, icon = "clock" }

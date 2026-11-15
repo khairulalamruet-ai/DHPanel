@@ -8564,6 +8564,298 @@
         ]
       }
     },
+    "/api/v1/client/cron-jobs": {
+      "get": {
+        "tags": [
+          "cron"
+        ],
+        "summary": "The cron jobs of the account.",
+        "operationId": "clientListCronJobs",
+        "responses": {
+          "200": {
+            "description": "The jobs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobList"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only` or `feature_disabled`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "cron"
+        ],
+        "summary": "Make a cron job.",
+        "operationId": "clientCreateCronJob",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Made",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only`, `csrf_failed` or `feature_disabled`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`name_taken` or `limit_reached`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The schedule, command or timeout break the rules (`too_often`, `too_long`, ...)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/cron-jobs/{id}": {
+      "get": {
+        "tags": [
+          "cron"
+        ],
+        "summary": "One job.",
+        "operationId": "clientGetCronJob",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Job id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such job",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "cron"
+        ],
+        "summary": "Change a cron job (all its fields).",
+        "operationId": "clientChangeCronJob",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Job id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Changed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such job",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`name_taken`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The schedule, command or timeout break the rules",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "cron"
+        ],
+        "summary": "Remove a cron job.",
+        "operationId": "clientDeleteCronJob",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Job id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed"
+          },
+          "404": {
+            "description": "No such job",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/client/databases": {
       "get": {
         "tags": [
@@ -17357,6 +17649,135 @@
           }
         }
       },
+      "JobList": {
+        "type": "object",
+        "description": "The jobs of an account.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/JobView"
+            },
+            "description": "By name."
+          },
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "How many the plan allows (`null`: no limit)."
+          }
+        }
+      },
+      "JobRequest": {
+        "type": "object",
+        "description": "A job as written by the client.",
+        "required": [
+          "name",
+          "schedule",
+          "command"
+        ],
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "The command line, run as the account's user in its web container.",
+            "example": "php /var/www/html/artisan schedule:run"
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether it runs. Default: true."
+          },
+          "name": {
+            "type": "string",
+            "description": "A name for the job, unique in the account (1-80 characters).",
+            "example": "Clear the cache"
+          },
+          "schedule": {
+            "type": "string",
+            "description": "Five fields: minute hour day-of-month month day-of-week (UTC).",
+            "example": "0 * * * *"
+          },
+          "timeout_seconds": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Stopped after this many seconds. Default 300."
+          }
+        },
+        "additionalProperties": false
+      },
+      "JobView": {
+        "type": "object",
+        "description": "A job.",
+        "required": [
+          "id",
+          "name",
+          "schedule",
+          "command",
+          "enabled",
+          "timeout_seconds"
+        ],
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "The command line."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether it runs."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Id."
+          },
+          "last_exit_code": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The exit code of the last run."
+          },
+          "last_output": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The end of the last run's output."
+          },
+          "last_run_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When it last ran."
+          },
+          "last_status": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`ok`, `failed`, `timeout` or `skipped`."
+          },
+          "name": {
+            "type": "string",
+            "description": "Its name."
+          },
+          "schedule": {
+            "type": "string",
+            "description": "Five-field schedule (UTC)."
+          },
+          "timeout_seconds": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Stopped after this many seconds."
+          }
+        }
+      },
       "LimitList": {
         "type": "object",
         "description": "Every limit of the installed modules.",
@@ -20478,6 +20899,10 @@
     {
       "name": "backups",
       "description": "Backups"
+    },
+    {
+      "name": "cron",
+      "description": "Cron jobs"
     }
   ]
 }

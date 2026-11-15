@@ -141,6 +141,22 @@ impl Cron {
     }
 }
 
+impl Cron {
+    /// The shortest gap, in seconds, between two runs among the next `samples` runs after
+    /// `after`; `None` when there are fewer than two.
+    #[must_use]
+    pub fn shortest_gap(&self, after: i64, samples: u32) -> Option<i64> {
+        let mut previous = self.next_after(after)?;
+        let mut shortest: Option<i64> = None;
+        for _ in 1..samples {
+            let next = self.next_after(previous)?;
+            shortest = Some(shortest.map_or(next - previous, |s| s.min(next - previous)));
+            previous = next;
+        }
+        shortest
+    }
+}
+
 /// Year, month (1-12) and day of a day number counted from 1970-01-01.
 fn civil_from_days(days: i64) -> (i64, u32, u32) {
     let z = days + 719_468;
@@ -254,6 +270,17 @@ mod tests {
         ] {
             assert!(Cron::parse(bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn the_shortest_gap_sees_uneven_schedules() {
+        let at = |t: &str| Cron::parse(t).unwrap().shortest_gap(SUNDAY, 200);
+        assert_eq!(at("* * * * *"), Some(60));
+        assert_eq!(at("*/5 * * * *"), Some(300));
+        assert_eq!(at("0,1 * * * *"), Some(60));
+        assert_eq!(at("0 * * * *"), Some(3600));
+        assert_eq!(at("30 2 * * *"), Some(86_400));
+        assert_eq!(at("0 0 31 2 *"), None);
     }
 
     #[test]

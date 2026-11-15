@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE cron_jobs\n         SET name = $3, schedule = $4, command = $5, enabled = $6, timeout_seconds = $7,\n             version = version + 1, updated_at = now()\n         WHERE tenant_id = $1 AND id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Bool",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a457e4a52196151563bf746c5b28851346ec8d89535be3b5218afc8d4fd89748"
+}
