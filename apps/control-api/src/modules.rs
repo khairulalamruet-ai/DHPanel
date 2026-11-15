@@ -30,6 +30,7 @@ const EMBEDDED: &[(&str, &str)] = &[
     ("usage", dhpanel_mod_usage::MANIFEST),
     ("services", dhpanel_mod_services::MANIFEST),
     ("security", dhpanel_mod_security::MANIFEST),
+    ("apps", dhpanel_mod_apps::MANIFEST),
 ];
 
 /// Days the data of a deleted user is kept before it is purged.
@@ -463,6 +464,20 @@ pub fn mount(
                         }
                     })
                 }
+                "apps" => {
+                    let (db, sessions) = (db.clone(), sessions.clone());
+                    Box::new(move || {
+                        let state = dhpanel_mod_apps::AppsState {
+                            db: db.clone(),
+                            sessions: sessions.clone(),
+                        };
+                        ModuleRoutes {
+                            admin: Some(dhpanel_mod_apps::admin_router().with_state(state.clone())),
+                            client: Some(dhpanel_mod_apps::client_router().with_state(state)),
+                            ..ModuleRoutes::none()
+                        }
+                    })
+                }
                 // A manifest without code behind it has no routes.
                 _ => Box::new(ModuleRoutes::none),
             };
@@ -695,7 +710,8 @@ mod tests {
                 "logs",
                 "usage",
                 "services",
-                "security"
+                "security",
+                "apps"
             ]
         );
         // And they fit together: dependencies first.
@@ -718,6 +734,7 @@ mod tests {
                 "logs",
                 "services",
                 "usage",
+                "apps",
                 "security"
             ]
         );
@@ -737,6 +754,7 @@ mod tests {
                 "logs",
                 "services",
                 "usage",
+                "apps",
                 "security"
             ]
         );
@@ -788,12 +806,13 @@ mod tests {
             p::ServerManage::KEY,
             p::SecurityRead::KEY,
             p::SecurityManage::KEY,
+            p::AppsRead::KEY,
         ] {
             assert!(declared.iter().any(|d| d == key), "{key} is in no manifest");
         }
         assert_eq!(
             declared.len(),
-            27,
+            28,
             "a manifest declares a key the code does not know: {declared:?}"
         );
     }

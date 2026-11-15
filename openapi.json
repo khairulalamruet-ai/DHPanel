@@ -7389,6 +7389,54 @@
         ]
       }
     },
+    "/api/v1/admin/tenants/{id}/apps": {
+      "get": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "A hosting account's applications.",
+        "operationId": "adminListApps",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Hosting account id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The applications",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppList"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such hosting account",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/tenants/{id}/malware-scans": {
       "get": {
         "tags": [
@@ -10244,6 +10292,105 @@
           },
           "429": {
             "description": "Too many failed attempts",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/apps": {
+      "get": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "The account's applications.",
+        "operationId": "clientListApps",
+        "parameters": [
+          {
+            "name": "domain_id",
+            "in": "path",
+            "description": "Only those served on this domain.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The applications",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppList"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/apps/{id}": {
+      "get": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "One of the account's applications.",
+        "operationId": "clientGetApp",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Application id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The application",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not the account's",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -18553,6 +18700,99 @@
           }
         }
       },
+      "AppList": {
+        "type": "object",
+        "description": "The applications.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AppView"
+            },
+            "description": "Oldest first."
+          }
+        }
+      },
+      "AppView": {
+        "type": "object",
+        "description": "One application.",
+        "required": [
+          "id",
+          "path",
+          "kind",
+          "name",
+          "status",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Created (Unix seconds)."
+          },
+          "database_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The database it uses."
+          },
+          "domain_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The domain it is served on (`null`: the domain was removed)."
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why an install failed."
+          },
+          "fqdn": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The domain's name."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Id."
+          },
+          "kind": {
+            "type": "string",
+            "description": "The catalog slug (`wordpress`)."
+          },
+          "name": {
+            "type": "string",
+            "description": "What the owner calls it."
+          },
+          "path": {
+            "type": "string",
+            "description": "The path under the domain (`/`, `/blog`)."
+          },
+          "status": {
+            "type": "string",
+            "description": "`installing`, `active`, `failed` or `removing`."
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The version installed."
+          }
+        }
+      },
       "Applied": {
         "type": "object",
         "description": "How many accounts will send their files again.",
@@ -25644,6 +25884,10 @@
     {
       "name": "backups",
       "description": "Backups"
+    },
+    {
+      "name": "apps",
+      "description": "Applications on domains and paths"
     },
     {
       "name": "cron",

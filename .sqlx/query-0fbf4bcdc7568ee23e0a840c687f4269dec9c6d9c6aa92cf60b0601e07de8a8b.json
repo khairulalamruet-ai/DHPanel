@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE apps SET status = $2, version = COALESCE($3, version), error = $4, updated_at = now()\n         WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0fbf4bcdc7568ee23e0a840c687f4269dec9c6d9c6aa92cf60b0601e07de8a8b"
+}

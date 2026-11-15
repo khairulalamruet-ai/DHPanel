@@ -1,0 +1,15 @@
+# Apps: which application runs on which domain and path (crates/modules/apps).
+[module]
+name       = "apps"
+version    = "0.1.0"
+title      = { en = "Applications", bn = "অ্যাপ্লিকেশন" }
+category   = "apps"
+core       = false
+depends_on = ["auth", "rbac", "audit", "system", "plans", "users", "domains", "databases"]
+
+[permissions]
+keys = ["admin.apps.read"]
+
+[ui]
+admin_nav  = { group = "Hosting", order = 40, icon = "layers" }
+client_nav = { group = "Apps", order = 10, icon = "layers" }

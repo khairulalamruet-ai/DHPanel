@@ -1,0 +1,168 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT a.id, a.tenant_id, a.domain_id, d.fqdn AS \"fqdn?\", a.path, a.kind, a.name,\n                  a.version, a.status, a.database_id, a.settings, a.error,\n                  extract(epoch FROM a.created_at)::bigint AS \"created_at!\"\n           FROM apps a LEFT JOIN domains d ON d.id = a.domain_id\n           WHERE a.tenant_id = $1 AND a.id = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "apps",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "apps",
+            "name": "tenant_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "domain_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "apps",
+            "name": "domain_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "fqdn?",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "domains",
+            "name": "fqdn"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "path",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "apps",
+            "name": "path"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "kind",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "apps",
+            "name": "kind"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "apps",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "version",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "apps",
+            "name": "version"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "apps",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "database_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "apps",
+            "name": "database_id"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "settings",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "apps",
+            "name": "settings"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "error",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "apps",
+            "name": "error"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "created_at!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      false,
+      true,
+      null
+    ]
+  },
+  "hash": "d8aed42d9376e5bfbca8799ac63894ba883c03124829da73cd6a81a5fa146a1e"
+}

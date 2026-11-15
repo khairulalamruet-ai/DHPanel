@@ -40,6 +40,7 @@ pub fn document() -> utoipa::openapi::OpenApi {
     doc.merge(dhpanel_mod_databases::DatabasesApi::openapi());
     doc.merge(dhpanel_mod_files::FilesApi::openapi());
     doc.merge(dhpanel_mod_backups::BackupsApi::openapi());
+    doc.merge(dhpanel_mod_apps::AppsApi::openapi());
     doc.merge(dhpanel_mod_cron::CronApi::openapi());
     doc.merge(dhpanel_mod_logs::LogsApi::openapi());
     doc.merge(dhpanel_mod_usage::UsageApi::openapi());

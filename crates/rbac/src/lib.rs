@@ -149,6 +149,10 @@ pub mod permissions {
         pub SecurityManage = "admin.security.manage"
     );
     crate::permission!(
+        /// See the applications of every hosting account.
+        pub AppsRead = "admin.apps.read"
+    );
+    crate::permission!(
         /// See the panel's settings.
         pub SettingsRead = "admin.settings.read"
     );

@@ -43,6 +43,7 @@ members = [
     "crates/modules/domains",
     "crates/modules/databases",
     "crates/modules/files",
+    "crates/modules/apps",
     "crates/modules/backups",
     "crates/modules/cron",
     "crates/modules/logs",
@@ -92,6 +93,7 @@ dhpanel-mod-domains = { path = "crates/modules/domains" }
 dhpanel-mod-databases = { path = "crates/modules/databases" }
 dhpanel-mod-files = { path = "crates/modules/files" }
 dhpanel-mod-backups = { path = "crates/modules/backups" }
+dhpanel-mod-apps = { path = "crates/modules/apps" }
 dhpanel-mod-cron = { path = "crates/modules/cron" }
 dhpanel-mod-logs = { path = "crates/modules/logs" }
 dhpanel-mod-usage = { path = "crates/modules/usage" }
