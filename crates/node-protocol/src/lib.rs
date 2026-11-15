@@ -290,6 +290,61 @@ pub struct LogLine {
 /// Most lines one log read returns.
 pub const MAX_LOG_LINES: u32 = 2000;
 
+/// The node as a whole, as counters and levels (rates are made from two readings).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NodeMetrics {
+    /// Logical CPUs.
+    pub cpus: u32,
+    /// Jiffies (1/100 s) all CPUs spent working, since boot.
+    pub cpu_busy_jiffies: u64,
+    /// Jiffies all CPUs existed, since boot (busy and idle).
+    pub cpu_total_jiffies: u64,
+    /// Memory of the node, in bytes.
+    pub memory_total_bytes: u64,
+    /// Memory that programs could still use, in bytes.
+    pub memory_available_bytes: u64,
+    /// Swap of the node, in bytes.
+    pub swap_total_bytes: u64,
+    /// Swap in use, in bytes.
+    pub swap_used_bytes: u64,
+    /// Load averages over 1, 5 and 15 minutes, times 100.
+    pub load_x100: [u32; 3],
+    /// Seconds since boot.
+    pub uptime_seconds: u64,
+    /// The disk of the tenants' files: size and bytes in use.
+    pub disk_total_bytes: u64,
+    /// Bytes in use on that disk.
+    pub disk_used_bytes: u64,
+}
+
+/// One container's usage, as counters since it started and levels now.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ContainerMetrics {
+    /// The container's name (`dh-<account>-<role>`).
+    pub name: String,
+    /// Memory in use, in bytes.
+    pub memory_bytes: u64,
+    /// The memory limit, in bytes.
+    pub memory_limit_bytes: u64,
+    /// CPU time used since it started, in nanoseconds.
+    pub cpu_nanos: u64,
+    /// Processes right now.
+    pub pids: u64,
+    /// Bytes received since it started.
+    pub net_rx_bytes: u64,
+    /// Bytes sent since it started.
+    pub net_tx_bytes: u64,
+    /// Bytes read from disk since it started.
+    pub io_read_bytes: u64,
+    /// Bytes written to disk since it started.
+    pub io_write_bytes: u64,
+}
+
+/// Most containers in one metrics report.
+pub const MAX_METRIC_CONTAINERS: usize = 5000;
+
 /// Most runs in one report.
 pub const MAX_CRON_RUNS_PER_REPORT: usize = 500;
 
@@ -849,6 +904,9 @@ pub enum Operation {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         contains: Option<String>,
     },
+    /// Reads the node's and every running container's usage now (cheap: one statistics read
+    /// per container, a few at a time). Answered with [`Output::Metrics`].
+    CollectMetrics,
     /// Replaces the cron jobs of an account on this node; the node's scheduler runs them
     /// from now on, and keeps them across restarts. Safe to repeat. Answered with
     /// [`Output::CronSynced`].
@@ -1131,6 +1189,7 @@ impl Operation {
         "restore_backup",
         "delete_backup",
         "sync_cron_jobs",
+        "collect_metrics",
         "read_log",
         "run_cron_job",
         "report_cron_runs",
@@ -1187,6 +1246,7 @@ impl Operation {
             Self::RestoreBackup { .. } => "restore_backup",
             Self::DeleteBackup { .. } => "delete_backup",
             Self::SyncCronJobs { .. } => "sync_cron_jobs",
+            Self::CollectMetrics => "collect_metrics",
             Self::ReadLog { .. } => "read_log",
             Self::RunCronJob { .. } => "run_cron_job",
             Self::ReportCronRuns { .. } => "report_cron_runs",
@@ -1458,6 +1518,15 @@ pub enum Output {
         lines: Vec<LogLine>,
         /// More was there than one read returns.
         truncated: bool,
+    },
+    /// Answer to [`Operation::CollectMetrics`].
+    Metrics {
+        /// When it was read (Unix seconds).
+        at: i64,
+        /// The node.
+        node: NodeMetrics,
+        /// The running containers (at most [`MAX_METRIC_CONTAINERS`]).
+        containers: Vec<ContainerMetrics>,
     },
     /// Answer to [`Operation::SyncCronJobs`].
     CronSynced {
@@ -2537,7 +2606,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            50,
+            51,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }

@@ -28,6 +28,7 @@ pub mod db;
 pub mod files;
 pub mod ftp;
 pub mod logs;
+pub mod metrics;
 pub mod pma;
 pub mod sqlexport;
 pub mod sqlimport;
@@ -183,6 +184,10 @@ impl Registry {
                 move |op| backup::export_backup(context.clone(), op)
             });
             registry.register("import_export", backup::import_export);
+            registry.register("collect_metrics", {
+                let context = context.clone();
+                move |op| metrics::collect_metrics(context.clone(), op)
+            });
             registry.register("read_log", {
                 let context = context.clone();
                 move |op| logs::read_log(context.clone(), op)

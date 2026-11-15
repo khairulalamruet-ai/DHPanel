@@ -119,6 +119,47 @@ pub struct LogRead {
     pub truncated: bool,
 }
 
+fn usage_from(stats: &bollard::models::ContainerStatsResponse) -> ContainerUsage {
+    let memory = stats.memory_stats.clone().unwrap_or_default();
+    ContainerUsage {
+        memory_bytes: memory.usage.unwrap_or(0),
+        memory_limit_bytes: memory.limit.unwrap_or(0),
+        cpu_total_nanos: stats
+            .cpu_stats
+            .as_ref()
+            .and_then(|c| c.cpu_usage.as_ref())
+            .and_then(|u| u.total_usage)
+            .unwrap_or(0),
+        pids: stats
+            .pids_stats
+            .as_ref()
+            .and_then(|p| p.current)
+            .unwrap_or(0),
+        net_rx_bytes: stats
+            .networks
+            .as_ref()
+            .map_or(0, |n| n.values().map(|i| i.rx_bytes.unwrap_or(0)).sum()),
+        net_tx_bytes: stats
+            .networks
+            .as_ref()
+            .map_or(0, |n| n.values().map(|i| i.tx_bytes.unwrap_or(0)).sum()),
+        io_read_bytes: blkio_bytes(stats.blkio_stats.as_ref(), "read"),
+        io_write_bytes: blkio_bytes(stats.blkio_stats.as_ref(), "write"),
+    }
+}
+
+fn blkio_bytes(blkio: Option<&bollard::models::ContainerBlkioStats>, op: &str) -> u64 {
+    blkio
+        .and_then(|b| b.io_service_bytes_recursive.as_ref())
+        .map_or(0, |entries| {
+            entries
+                .iter()
+                .filter(|e| e.op.as_deref().is_some_and(|o| o.eq_ignore_ascii_case(op)))
+                .map(|e| e.value.unwrap_or(0))
+                .sum()
+        })
+}
+
 /// Splits Docker's `2026-11-15T07:00:00.123456789Z text` into milliseconds and text.
 fn split_timestamp(line: &str) -> (i64, &str) {
     let Some((stamp, text)) = line.split_once(' ') else {
@@ -249,7 +290,18 @@ pub struct ContainerUsage {
     pub cpu_total_nanos: u64,
     /// Processes right now.
     pub pids: u64,
+    /// Bytes received on all the container's network interfaces since it started.
+    pub net_rx_bytes: u64,
+    /// Bytes sent.
+    pub net_tx_bytes: u64,
+    /// Bytes read from block devices since it started.
+    pub io_read_bytes: u64,
+    /// Bytes written to block devices.
+    pub io_write_bytes: u64,
 }
+
+/// Containers read at once by [`DockerManager::usage_of_running`].
+const USAGE_PARALLEL: usize = 4;
 
 /// The Docker actions the agent may take.
 #[derive(Clone)]
@@ -737,17 +789,50 @@ impl DockerManager {
             .await
             .ok_or_else(|| DockerError::Api("no statistics returned".into()))?
             .map_err(map_error)?;
-        let memory = stats.memory_stats.unwrap_or_default();
-        Ok(ContainerUsage {
-            memory_bytes: memory.usage.unwrap_or(0),
-            memory_limit_bytes: memory.limit.unwrap_or(0),
-            cpu_total_nanos: stats
-                .cpu_stats
-                .and_then(|c| c.cpu_usage)
-                .and_then(|u| u.total_usage)
-                .unwrap_or(0),
-            pids: stats.pids_stats.and_then(|p| p.current).unwrap_or(0),
-        })
+        Ok(usage_from(&stats))
+    }
+
+    /// The usage of every running container of ours, read a few at a time (one call to list
+    /// them, then one statistics read each, without the checks [`DockerManager::usage`] does).
+    /// A container that stops meanwhile is left out.
+    ///
+    /// # Errors
+    /// [`DockerError::Api`] when the containers cannot be listed.
+    pub async fn usage_of_running(&self) -> Result<Vec<(String, ContainerUsage)>, DockerError> {
+        use futures_util::stream::StreamExt as _;
+        let filters: HashMap<String, Vec<String>> = [
+            ("label".to_owned(), vec![format!("{MANAGED_LABEL}=true")]),
+            ("status".to_owned(), vec!["running".to_owned()]),
+        ]
+        .into();
+        let options = ListContainersOptionsBuilder::default()
+            .filters(&filters)
+            .build();
+        let names: Vec<String> = self
+            .docker
+            .list_containers(Some(options))
+            .await
+            .map_err(map_error)?
+            .into_iter()
+            .filter_map(|c| c.names.and_then(|n| n.into_iter().next()))
+            .map(|n| n.trim_start_matches('/').to_owned())
+            .collect();
+        let mut found: Vec<(String, ContainerUsage)> = futures_util::stream::iter(names)
+            .map(|name| async move {
+                let options = StatsOptionsBuilder::default()
+                    .stream(false)
+                    .one_shot(true)
+                    .build();
+                let mut stream = self.docker.stats(&name, Some(options));
+                let stats = stream.next().await?.ok()?;
+                Some((name, usage_from(&stats)))
+            })
+            .buffer_unordered(USAGE_PARALLEL)
+            .filter_map(|r| async move { r })
+            .collect()
+            .await;
+        found.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(found)
     }
 
     /// Changes the limits of a container we created, running or not, without
