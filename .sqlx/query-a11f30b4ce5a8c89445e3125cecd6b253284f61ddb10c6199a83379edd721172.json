@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT keep_daily, keep_weekly FROM backup_schedules WHERE kind = 'system'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "keep_daily",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "backup_schedules",
+            "name": "keep_daily"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "keep_weekly",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "backup_schedules",
+            "name": "keep_weekly"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "a11f30b4ce5a8c89445e3125cecd6b253284f61ddb10c6199a83379edd721172"
+}

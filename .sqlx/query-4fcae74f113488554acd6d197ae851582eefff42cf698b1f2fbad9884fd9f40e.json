@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, tenant_id, destination_id,\n                  extract(epoch FROM created_at)::bigint AS \"created_at!\",\n                  extract(epoch FROM updated_at)::bigint AS \"stamp!\"\n           FROM backups WHERE status = 'queued' ORDER BY created_at LIMIT $1",
+  "query": "SELECT id, tenant_id, destination_id,\n                  extract(epoch FROM created_at)::bigint AS \"created_at!\",\n                  extract(epoch FROM updated_at)::bigint AS \"stamp!\"\n           FROM backups WHERE kind = 'tenant' AND status = 'queued' ORDER BY created_at LIMIT $1",
   "describe": {
     "columns": [
       {
@@ -62,5 +62,5 @@
       null
     ]
   },
-  "hash": "edb92218873c3f199df8390e8b4a5469869cc1c0313cb1f85c240e8ac0e83657"
+  "hash": "4fcae74f113488554acd6d197ae851582eefff42cf698b1f2fbad9884fd9f40e"
 }

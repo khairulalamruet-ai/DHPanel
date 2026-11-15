@@ -38,6 +38,11 @@ dhpanel-mod-domains.workspace = true
 dhpanel-mod-databases.workspace = true
 dhpanel-mod-files.workspace = true
 dhpanel-mod-backups.workspace = true
+dhpanel-backup.workspace = true
+dhpanel-backup-dest.workspace = true
+dhpanel-system-backup.workspace = true
+sha2 = "0.11"
+uuid = { version = "1", features = ["v4"] }
 dhpanel-dispatcher.workspace = true
 dhpanel-dns.workspace = true
 dhpanel-events.workspace = true

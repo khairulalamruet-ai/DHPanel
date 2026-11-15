@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM backup_schedules WHERE kind = 'system'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "306c98d897cc0a8305820d1f44bd563ce765aa321002de817cce01790b33e50e"
+}

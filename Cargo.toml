@@ -10,6 +10,7 @@ members = [
     "crates/safe-fs",
     "crates/backup",
     "crates/backup-dest",
+    "crates/system-backup",
     "crates/fileops",
     "crates/auth-core",
     "crates/cache",
@@ -65,6 +66,7 @@ dhpanel-domain = { path = "crates/domain" }
 dhpanel-safe-fs = { path = "crates/safe-fs" }
 dhpanel-backup = { path = "crates/backup" }
 dhpanel-backup-dest = { path = "crates/backup-dest" }
+dhpanel-system-backup = { path = "crates/system-backup" }
 dhpanel-fileops = { path = "crates/fileops" }
 dhpanel-database = { path = "crates/database" }
 dhpanel-http-kit = { path = "crates/http-kit" }

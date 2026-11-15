@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, tenant_id, destination_id,\n                  extract(epoch FROM created_at)::bigint AS \"created_at!\",\n                  extract(epoch FROM updated_at)::bigint AS \"stamp!\"\n           FROM backups WHERE status = 'deleting' ORDER BY updated_at LIMIT $1",
+  "query": "SELECT id, tenant_id, destination_id,\n                  extract(epoch FROM created_at)::bigint AS \"created_at!\",\n                  extract(epoch FROM updated_at)::bigint AS \"stamp!\"\n           FROM backups WHERE kind = 'system' AND status = 'deleting' ORDER BY updated_at LIMIT 20",
   "describe": {
     "columns": [
       {
@@ -50,9 +50,7 @@
       }
     ],
     "parameters": {
-      "Left": [
-        "Int8"
-      ]
+      "Left": []
     },
     "nullable": [
       false,
@@ -62,5 +60,5 @@
       null
     ]
   },
-  "hash": "ce6d93a8bf94352dc12688702de9f905e7e12c629836775abd2e1474e6eccaa9"
+  "hash": "28d60b20d470a529a0f4cf7014e21837f7c1a4aa2c4f40252601f42b8be15bfe"
 }

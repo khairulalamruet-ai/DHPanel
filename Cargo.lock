@@ -958,6 +958,7 @@ dependencies = [
  "dhpanel-safe-fs",
  "hmac",
  "rustix",
+ "serde_json",
  "sha2 0.11.1",
  "ssh2",
  "thiserror",
@@ -996,6 +997,8 @@ dependencies = [
  "axum",
  "dhpanel-audit",
  "dhpanel-auth-core",
+ "dhpanel-backup",
+ "dhpanel-backup-dest",
  "dhpanel-cache",
  "dhpanel-common",
  "dhpanel-config",
@@ -1023,8 +1026,10 @@ dependencies = [
  "dhpanel-rbac",
  "dhpanel-session",
  "dhpanel-settings",
+ "dhpanel-system-backup",
  "secrecy",
  "serde_json",
+ "sha2 0.11.1",
  "time",
  "tokio",
  "tower",
@@ -1032,6 +1037,7 @@ dependencies = [
  "tracing",
  "utoipa",
  "utoipa-scalar",
+ "uuid",
 ]
 
 [[package]]
@@ -1060,6 +1066,7 @@ dependencies = [
  "dhpanel-database",
  "dhpanel-domain",
  "dhpanel-pki",
+ "dhpanel-system-backup",
  "rpassword",
  "secrecy",
  "time",
@@ -1679,6 +1686,19 @@ dependencies = [
  "thiserror",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "dhpanel-system-backup"
+version = "0.1.0"
+dependencies = [
+ "dhpanel-backup",
+ "dhpanel-backup-dest",
+ "serde_json",
+ "sha2 0.11.1",
+ "tar",
+ "thiserror",
+ "zstd",
 ]
 
 [[package]]

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE backups SET status = 'failed', error = $2, finished_at = now(), updated_at = now()\n         WHERE id = $1 AND kind = 'system'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "98350c11fc05b0b7ced63de8e89c067c7a7e3bfed3f7cf2341dcaf46bb726eff"
+}

@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT cron, keep_daily, keep_weekly, enabled,\n                  extract(epoch FROM next_run_at)::bigint AS next_run_at,\n                  extract(epoch FROM last_run_at)::bigint AS last_run_at\n           FROM backup_schedules WHERE kind = 'system'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "cron",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "backup_schedules",
+            "name": "cron"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "keep_daily",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "backup_schedules",
+            "name": "keep_daily"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "keep_weekly",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "backup_schedules",
+            "name": "keep_weekly"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "enabled",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "backup_schedules",
+            "name": "enabled"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "next_run_at",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "last_run_at",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "2e09e630cab54cb2914dd40b2f58bc1141eed916a9be315019ef570ae12e4fff"
+}

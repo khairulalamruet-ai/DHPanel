@@ -37,6 +37,7 @@ use uuid::Uuid;
 
 pub mod client;
 pub mod runner;
+pub mod system;
 
 /// The module's manifest.
 pub const MANIFEST: &str = include_str!("../../../../modules/backups/module.toml");
@@ -80,6 +81,20 @@ pub fn admin_router() -> Router<BackupsState> {
         .route(
             "/api/v1/admin/backup-destinations/{id}/default",
             post(make_default),
+        )
+        .route(
+            "/api/v1/admin/system-backups",
+            get(system::list_system_backups).post(system::start_system_backup),
+        )
+        .route(
+            "/api/v1/admin/system-backups/{id}",
+            axum::routing::delete(system::delete_system_backup),
+        )
+        .route(
+            "/api/v1/admin/system-backup-schedule",
+            get(system::get_system_schedule)
+                .put(system::put_system_schedule)
+                .delete(system::delete_system_schedule),
         )
 }
 
@@ -657,7 +672,9 @@ pub async fn remove_destination(
     paths(
         list_destinations, add_destination, change_destination, make_default, remove_destination,
         client::list_backups, client::start_backup, client::delete_backup, client::start_restore,
-        client::list_restores, client::get_schedule, client::put_schedule, client::delete_schedule
+        client::list_restores, client::get_schedule, client::put_schedule, client::delete_schedule,
+        system::list_system_backups, system::start_system_backup, system::delete_system_backup,
+        system::get_system_schedule, system::put_system_schedule, system::delete_system_schedule
     ),
     components(schemas(
         DestinationView, DestinationList, AddDestination, ChangeDestination,

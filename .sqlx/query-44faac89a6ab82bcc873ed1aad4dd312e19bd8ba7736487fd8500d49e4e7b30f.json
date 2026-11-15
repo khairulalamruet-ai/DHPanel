@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE backups\n         SET status = CASE WHEN status = 'ready' THEN 'deleting' ELSE 'deleted' END,\n             updated_at = now()\n         WHERE id = $1 AND kind = 'system' AND status IN ('ready', 'failed')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "44faac89a6ab82bcc873ed1aad4dd312e19bd8ba7736487fd8500d49e4e7b30f"
+}

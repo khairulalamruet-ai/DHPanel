@@ -99,7 +99,16 @@ async fn start_due(db: &PgPool, master_key: &MasterKey, now: i64) -> Result<(), 
             .ok()
             .and_then(|c| c.next_after(now));
         let Some(tenant_id) = schedule.tenant_id else {
-            // The panel's own backup is made elsewhere (T09.08).
+            // The panel's own backup: a row; the control plane's executor makes it.
+            let destination = match schedule.destination_id {
+                Some(d) => Some(d),
+                None => store::default_destination(db).await?,
+            };
+            if let Some(destination) = destination
+                && !store::has_active_system_backup(db).await?
+            {
+                store::new_system_backup(db, destination, "schedule", None).await?;
+            }
             store::advance_schedule(db, schedule.id, next).await?;
             continue;
         };
@@ -228,6 +237,16 @@ async fn send_restores(db: &PgPool) -> Result<(), TickError> {
 
 /// What retention lets go is marked, and the removal follows.
 async fn apply_retention(db: &PgPool) -> Result<(), TickError> {
+    if let Some((daily, weekly)) = store::system_retention(db).await? {
+        let ready = store::ready_scheduled_system(db).await?;
+        for id in expired(
+            &ready,
+            u32::try_from(daily).unwrap_or(0),
+            u32::try_from(weekly).unwrap_or(0),
+        ) {
+            store::mark_deleting(db, id).await?;
+        }
+    }
     for rule in store::retentions(db).await? {
         let ready = store::ready_scheduled(db, rule.tenant_id).await?;
         let gone = expired(

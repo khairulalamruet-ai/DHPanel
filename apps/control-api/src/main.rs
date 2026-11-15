@@ -7,6 +7,7 @@ mod app;
 mod modules;
 mod openapi;
 mod secrets;
+mod system_backup;
 
 use std::{process::ExitCode, sync::Arc};
 
@@ -172,6 +173,7 @@ async fn main() -> ExitCode {
     };
     let operation_secrets = secrets::operation_secrets(db.clone(), master_key.clone());
     let runner_key = master_key.clone();
+    let system_key = master_key.clone();
     let minutes = |m: u32| std::time::Duration::from_secs(u64::from(m) * 60);
     let lockout = |threshold| dhpanel_cache::lockout::LockoutPolicy {
         threshold,
@@ -327,6 +329,12 @@ async fn main() -> ExitCode {
     // Scheduled backups are made, and the old ones removed (T09.07).
     tokio::spawn({
         let db = db.clone();
+        let system = system_backup::Executor::new(
+            db.clone(),
+            system_key,
+            std::sync::Arc::new(config.clone()),
+            config.imports.spool_dir.join("system-backup"),
+        );
         async move {
             let mut every = tokio::time::interval(std::time::Duration::from_secs(30));
             every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -338,6 +346,7 @@ async fn main() -> ExitCode {
                 if let Err(error) = dhpanel_mod_backups::runner::tick(&db, &runner_key, now).await {
                     tracing::warn!(%error, "the backup runner could not finish a round");
                 }
+                system.run().await;
             }
         }
     });

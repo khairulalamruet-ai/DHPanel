@@ -22,6 +22,8 @@ pub enum PartKind {
     Dns,
     /// What is needed to set the account up again (`meta.json.enc`).
     Meta,
+    /// The panel's own data (`system.tar.zst.enc`, T09.08).
+    System,
 }
 
 /// One part, as stored.
@@ -88,7 +90,7 @@ pub fn valid_part_name(name: &str) -> bool {
                 .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'_' | b'-'))
     };
     match name {
-        "files.tar.zst.enc" | "dns.json.enc" | "meta.json.enc" => true,
+        "files.tar.zst.enc" | "dns.json.enc" | "meta.json.enc" | "system.tar.zst.enc" => true,
         _ => name
             .strip_prefix("db-")
             .and_then(|r| r.strip_suffix(".sql.zst.enc"))

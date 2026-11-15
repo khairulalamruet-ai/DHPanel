@@ -270,3 +270,130 @@ async fn schedules_make_backups_and_retention_removes_the_old_ones(pool: PgPool)
     assert_ne!(again[0], key1);
     let _ = node;
 }
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL"]
+async fn the_panels_own_schedule_queues_system_backups_and_retention_removes_old_ones(
+    pool: PgPool,
+) {
+    let key = MasterKey::from_bytes(&[7u8; 32]);
+    let dest: Uuid = sqlx::query_scalar(
+        "INSERT INTO backup_destinations (name, kind, settings, is_default)
+         VALUES ('Disk', 'local', '{\"path\": \"/var/backups\"}', true) RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    dhpanel_database::backups::upsert_system_schedule(
+        &pool,
+        "0 3 * * *",
+        2,
+        0,
+        None,
+        true,
+        Some(NOW - 60),
+    )
+    .await
+    .unwrap();
+    tick(&pool, &key, NOW).await.unwrap();
+    let rows: Vec<(String, String, Option<Uuid>)> =
+        sqlx::query_as("SELECT kind, status, tenant_id FROM backups")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(rows, [("system".to_owned(), "queued".to_owned(), None)]);
+    // The executor takes it, and nobody else gets it.
+    let claimed = dhpanel_database::backups::claim_system_backups(&pool)
+        .await
+        .unwrap();
+    assert_eq!(claimed.len(), 1);
+    assert!(
+        dhpanel_database::backups::claim_system_backups(&pool)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    // Running: the schedule does not pile up another.
+    sqlx::query("UPDATE backup_schedules SET next_run_at = to_timestamp($1)")
+        .bind(NOW - 30)
+        .execute(&pool)
+        .await
+        .unwrap();
+    tick(&pool, &key, NOW).await.unwrap();
+    assert_eq!(
+        count(&pool, "SELECT count(*) FROM backups WHERE kind = 'system'").await,
+        1
+    );
+    dhpanel_database::backups::finish_system_backup(
+        &pool,
+        claimed[0].id,
+        10,
+        &json!([]),
+        &"a".repeat(64),
+    )
+    .await
+    .unwrap();
+    // Four ready scheduled ones on older days; two days are kept (the new one and one more).
+    for days_ago in 1..=4 {
+        sqlx::query(
+            "INSERT INTO backups (kind, account_name, trigger, destination_id, status, created_at)
+             VALUES ('system', 'panel', 'schedule', $1, 'ready', now() - make_interval(days => $2))",
+        )
+        .bind(dest)
+        .bind(days_ago)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    sqlx::query("UPDATE backups SET trigger = 'schedule' WHERE kind = 'system'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    tick(&pool, &key, NOW).await.unwrap();
+    assert_eq!(
+        count(
+            &pool,
+            "SELECT count(*) FROM backups WHERE status = 'deleting'"
+        )
+        .await,
+        3
+    );
+    // No node operation is made for a system backup: the control plane does it itself.
+    assert_eq!(count(&pool, "SELECT count(*) FROM operations").await, 0);
+    let gone = dhpanel_database::backups::deleting_system(&pool)
+        .await
+        .unwrap();
+    assert_eq!(gone.len(), 3);
+    dhpanel_database::backups::finish_system_removal(&pool, gone[0].id, None)
+        .await
+        .unwrap();
+    dhpanel_database::backups::finish_system_removal(&pool, gone[1].id, Some("destination down"))
+        .await
+        .unwrap();
+    assert_eq!(
+        count(
+            &pool,
+            "SELECT count(*) FROM backups WHERE status = 'deleted'"
+        )
+        .await,
+        1
+    );
+    // The failed removal is ready again, and retention takes it up once more.
+    assert_eq!(
+        count(
+            &pool,
+            "SELECT count(*) FROM backups WHERE status = 'ready' AND error IS NOT NULL"
+        )
+        .await,
+        1
+    );
+    tick(&pool, &key, NOW).await.unwrap();
+    assert_eq!(
+        count(
+            &pool,
+            "SELECT count(*) FROM backups WHERE status = 'deleting'"
+        )
+        .await,
+        2
+    );
+}

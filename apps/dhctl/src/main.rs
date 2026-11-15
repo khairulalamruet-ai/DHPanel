@@ -53,10 +53,34 @@ enum Command {
         #[command(subcommand)]
         action: AdminAction,
     },
+    /// Work with the panel's own backups (restoring on a new server).
+    SystemBackup {
+        #[command(subcommand)]
+        action: SystemBackupAction,
+    },
     /// Manage the internal certificate authority for node mTLS.
     Ca {
         #[command(subcommand)]
         action: CaAction,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum SystemBackupAction {
+    /// Decrypt a system backup (`system.tar.zst.enc`, fetched from the destination) into a
+    /// new folder: `database.dump` (for `pg_restore`), `config/control.toml`, `secrets/`
+    /// and `pki/`. Needs the master key the panel had when the backup was made; it is not
+    /// in the backup.
+    Open {
+        /// The file with the master key (its text, as in `secrets.master_key_file`).
+        #[arg(long)]
+        master_key_file: PathBuf,
+        /// The `system.tar.zst.enc` file.
+        #[arg(long)]
+        input: PathBuf,
+        /// A folder that does not exist yet (made private, mode 0700).
+        #[arg(long)]
+        output: PathBuf,
     },
 }
 
@@ -158,11 +182,42 @@ async fn main() -> ExitCode {
                 },
         } => admin_create(&username, &email, password_stdin, &role, require_mfa).await,
         Command::Ca { action } => ca(action),
+        Command::SystemBackup { action } => system_backup(&action),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(f) => f.exit(),
     }
+}
+
+#[allow(clippy::print_stdout)]
+fn system_backup(action: &SystemBackupAction) -> Result<(), Failure> {
+    let SystemBackupAction::Open {
+        master_key_file,
+        input,
+        output,
+    } = action;
+    if output.exists() {
+        return Err(Failure(
+            EXIT_DATAERR,
+            "the output folder exists already: give a new one".into(),
+        ));
+    }
+    let text = std::fs::read_to_string(master_key_file).map_err(|e| {
+        Failure(
+            EXIT_IOERR,
+            format!("cannot read the master key file: {}", e.kind()),
+        )
+    })?;
+    let key = dhpanel_system_backup::derive_key(&text);
+    let file = std::fs::File::open(input)
+        .map_err(|e| Failure(EXIT_IOERR, format!("cannot read the backup: {}", e.kind())))?;
+    let names = dhpanel_system_backup::unpack(&key, std::io::BufReader::new(file), output)
+        .map_err(|e| Failure(EXIT_DATAERR, e.to_string()))?;
+    for name in names {
+        println!("{}", output.join(name).display());
+    }
+    Ok(())
 }
 
 fn pki_failure(err: dhpanel_pki::PkiError) -> Failure {

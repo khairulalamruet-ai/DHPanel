@@ -607,3 +607,92 @@ async fn an_owner_makes_lists_restores_and_removes_backups_and_sets_a_schedule(p
         (StatusCode::FORBIDDEN, "feature_disabled")
     );
 }
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn administrators_make_list_and_remove_system_backups_and_set_their_schedule(pool: PgPool) {
+    let e = env(&pool).await;
+    let root = e
+        .sign_in(admin(&pool, "rootuser", &["super_admin"]).await)
+        .await;
+    let nobody = e.sign_in(admin(&pool, "plain", &[]).await).await;
+    let path = "/api/v1/admin/system-backups";
+    let (status, _) = e.call(&nobody, "GET", path, None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, body) = e.call(&root, "POST", path, None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "no_destination")
+    );
+    e.call(
+        &root,
+        "POST",
+        "/api/v1/admin/backup-destinations",
+        Some(
+            json!({"name": "Disk", "kind": "local", "settings": {"path": "/var/backups/dhpanel"}}),
+        ),
+    )
+    .await;
+    let (status, made) = e.call(&root, "POST", path, None).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{made}");
+    assert_eq!(
+        (made["status"].as_str(), made["trigger"].as_str()),
+        (Some("queued"), Some("manual"))
+    );
+    let (status, body) = e.call(&root, "POST", path, None).await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "backup_active")
+    );
+    let id = made["id"].as_str().unwrap().to_owned();
+    let (status, body) = e.call(&root, "DELETE", &format!("{path}/{id}"), None).await;
+    assert_eq!((status, code(&body)), (StatusCode::CONFLICT, "backup_busy"));
+    sqlx::query("UPDATE backups SET status = 'ready' WHERE id = $1::uuid")
+        .bind(&id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (_, list) = e.call(&root, "GET", path, None).await;
+    assert_eq!(list["items"].as_array().unwrap().len(), 1);
+    let (status, _) = e.call(&root, "DELETE", &format!("{path}/{id}"), None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    // The schedule.
+    let sched = "/api/v1/admin/system-backup-schedule";
+    let (status, _) = e.call(&root, "GET", sched, None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, body) = e
+        .call(
+            &root,
+            "PUT",
+            sched,
+            Some(
+                json!({"cron": "*/5 * * * *", "keep_daily": 7, "keep_weekly": 4, "enabled": true}),
+            ),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    let (status, saved) = e
+        .call(
+            &root,
+            "PUT",
+            sched,
+            Some(
+                json!({"cron": "0 3 * * *", "keep_daily": 30, "keep_weekly": 12, "enabled": true}),
+            ),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    let (status, _) = e
+        .call(
+            &nobody,
+            "PUT",
+            sched,
+            Some(
+                json!({"cron": "0 3 * * *", "keep_daily": 30, "keep_weekly": 12, "enabled": true}),
+            ),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = e.call(&root, "DELETE", sched, None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+}

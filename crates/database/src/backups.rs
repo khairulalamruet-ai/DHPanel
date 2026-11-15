@@ -559,7 +559,7 @@ pub async fn deleting(pool: &PgPool, limit: i64) -> Result<Vec<Stored>, sqlx::Er
         r#"SELECT id, tenant_id, destination_id,
                   extract(epoch FROM created_at)::bigint AS "created_at!",
                   extract(epoch FROM updated_at)::bigint AS "stamp!"
-           FROM backups WHERE status = 'deleting' ORDER BY updated_at LIMIT $1"#,
+           FROM backups WHERE kind = 'tenant' AND status = 'deleting' ORDER BY updated_at LIMIT $1"#,
         limit
     )
     .fetch_all(pool)
@@ -585,7 +585,7 @@ pub async fn queued(pool: &PgPool, limit: i64) -> Result<Vec<Stored>, sqlx::Erro
         r#"SELECT id, tenant_id, destination_id,
                   extract(epoch FROM created_at)::bigint AS "created_at!",
                   extract(epoch FROM updated_at)::bigint AS "stamp!"
-           FROM backups WHERE status = 'queued' ORDER BY created_at LIMIT $1"#,
+           FROM backups WHERE kind = 'tenant' AND status = 'queued' ORDER BY created_at LIMIT $1"#,
         limit
     )
     .fetch_all(pool)
@@ -941,4 +941,300 @@ pub async fn drop_schedule(pool: &PgPool, tenant_id: Uuid) -> Result<bool, sqlx:
     .await?
     .rows_affected()
         == 1)
+}
+
+// ------------------------------------------------------------ the panel's own backups (T09.08)
+
+/// A new system backup that is waiting to run.
+///
+/// # Errors
+/// Database errors.
+pub async fn new_system_backup(
+    pool: &PgPool,
+    destination_id: Uuid,
+    trigger: &str,
+    created_by: Option<Uuid>,
+) -> Result<Uuid, sqlx::Error> {
+    sqlx::query_scalar!(
+        "INSERT INTO backups (tenant_id, account_name, kind, trigger, destination_id, created_by)
+         VALUES (NULL, 'panel', 'system', $1, $2, $3) RETURNING id",
+        trigger,
+        destination_id,
+        created_by,
+    )
+    .fetch_one(pool)
+    .await
+}
+
+/// Whether a system backup is queued or running.
+///
+/// # Errors
+/// Database errors.
+pub async fn has_active_system_backup(pool: &PgPool) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar!(
+        r#"SELECT EXISTS (SELECT 1 FROM backups WHERE kind = 'system'
+                          AND status IN ('queued', 'running')) AS "x!""#
+    )
+    .fetch_one(pool)
+    .await
+}
+
+/// Takes the queued system backups (marking them running); several callers get different ones.
+///
+/// # Errors
+/// Database errors.
+pub async fn claim_system_backups(pool: &PgPool) -> Result<Vec<Stored>, sqlx::Error> {
+    let rows = sqlx::query!(
+        r#"UPDATE backups SET status = 'running', updated_at = now()
+           WHERE id IN (SELECT id FROM backups WHERE kind = 'system' AND status = 'queued'
+                        ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED)
+           RETURNING id, tenant_id, destination_id,
+                     extract(epoch FROM created_at)::bigint AS "created_at!",
+                     extract(epoch FROM updated_at)::bigint AS "stamp!""#
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| Stored {
+            id: r.id,
+            tenant_id: r.tenant_id,
+            destination_id: r.destination_id,
+            created_at: r.created_at,
+            stamp: r.stamp,
+        })
+        .collect())
+}
+
+/// A system backup is ready.
+///
+/// # Errors
+/// Database errors.
+pub async fn finish_system_backup(
+    pool: &PgPool,
+    id: Uuid,
+    size_bytes: i64,
+    parts: &serde_json::Value,
+    manifest_sha256: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        "UPDATE backups SET status = 'ready', size_bytes = $2, parts = $3, manifest_sha256 = $4,
+                finished_at = now(), updated_at = now()
+         WHERE id = $1 AND kind = 'system'",
+        id,
+        size_bytes,
+        parts,
+        manifest_sha256,
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// A system backup failed.
+///
+/// # Errors
+/// Database errors.
+pub async fn fail_system_backup(pool: &PgPool, id: Uuid, error: &str) -> Result<(), sqlx::Error> {
+    let error: String = error.chars().take(500).collect();
+    sqlx::query!(
+        "UPDATE backups SET status = 'failed', error = $2, finished_at = now(), updated_at = now()
+         WHERE id = $1 AND kind = 'system'",
+        id,
+        error,
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// The system backups that still exist, newest first.
+///
+/// # Errors
+/// Database errors.
+pub async fn system_backups(pool: &PgPool) -> Result<Vec<Backup>, sqlx::Error> {
+    let rows = sqlx::query!(
+        r#"SELECT id, tenant_id, trigger, status, size_bytes, parts, error, destination_id,
+                  extract(epoch FROM created_at)::bigint AS "created_at!",
+                  extract(epoch FROM finished_at)::bigint AS finished_at
+           FROM backups WHERE kind = 'system' AND status <> 'deleted'
+           ORDER BY created_at DESC LIMIT 200"#
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| Backup {
+            id: r.id,
+            tenant_id: r.tenant_id,
+            trigger: r.trigger,
+            status: r.status,
+            size_bytes: r.size_bytes,
+            parts: r.parts,
+            error: r.error,
+            destination_id: r.destination_id,
+            created_at: r.created_at,
+            finished_at: r.finished_at,
+        })
+        .collect())
+}
+
+/// Starts removing a system backup that is ready (a failed one is marked gone).
+///
+/// # Errors
+/// Database errors.
+pub async fn discard_system(pool: &PgPool, id: Uuid) -> Result<bool, sqlx::Error> {
+    Ok(sqlx::query!(
+        "UPDATE backups
+         SET status = CASE WHEN status = 'ready' THEN 'deleting' ELSE 'deleted' END,
+             updated_at = now()
+         WHERE id = $1 AND kind = 'system' AND status IN ('ready', 'failed')",
+        id
+    )
+    .execute(pool)
+    .await?
+    .rows_affected()
+        == 1)
+}
+
+/// System backups being removed.
+///
+/// # Errors
+/// Database errors.
+pub async fn deleting_system(pool: &PgPool) -> Result<Vec<Stored>, sqlx::Error> {
+    let rows = sqlx::query!(
+        r#"SELECT id, tenant_id, destination_id,
+                  extract(epoch FROM created_at)::bigint AS "created_at!",
+                  extract(epoch FROM updated_at)::bigint AS "stamp!"
+           FROM backups WHERE kind = 'system' AND status = 'deleting' ORDER BY updated_at LIMIT 20"#
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| Stored {
+            id: r.id,
+            tenant_id: r.tenant_id,
+            destination_id: r.destination_id,
+            created_at: r.created_at,
+            stamp: r.stamp,
+        })
+        .collect())
+}
+
+/// A system backup's removal ended: gone, or (`error`) put back as ready to be tried again.
+///
+/// # Errors
+/// Database errors.
+pub async fn finish_system_removal(
+    pool: &PgPool,
+    id: Uuid,
+    error: Option<&str>,
+) -> Result<(), sqlx::Error> {
+    let error: Option<String> = error.map(|e| e.chars().take(500).collect());
+    sqlx::query!(
+        "UPDATE backups SET status = CASE WHEN $2::text IS NULL THEN 'deleted' ELSE 'ready' END,
+                error = $2, updated_at = now()
+         WHERE id = $1 AND kind = 'system' AND status = 'deleting'",
+        id,
+        error,
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Scheduled system backups that are ready: `(id, created_at)` in Unix seconds.
+///
+/// # Errors
+/// Database errors.
+pub async fn ready_scheduled_system(pool: &PgPool) -> Result<Vec<(Uuid, i64)>, sqlx::Error> {
+    let rows = sqlx::query!(
+        r#"SELECT id, extract(epoch FROM created_at)::bigint AS "at!" FROM backups
+           WHERE kind = 'system' AND trigger = 'schedule' AND status = 'ready'"#
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.into_iter().map(|r| (r.id, r.at)).collect())
+}
+
+/// The retention rule of the panel's own schedule.
+///
+/// # Errors
+/// Database errors.
+pub async fn system_retention(pool: &PgPool) -> Result<Option<(i32, i32)>, sqlx::Error> {
+    let row =
+        sqlx::query!("SELECT keep_daily, keep_weekly FROM backup_schedules WHERE kind = 'system'")
+            .fetch_optional(pool)
+            .await?;
+    Ok(row.map(|r| (r.keep_daily, r.keep_weekly)))
+}
+
+/// The panel's own schedule.
+///
+/// # Errors
+/// Database errors.
+pub async fn system_schedule(pool: &PgPool) -> Result<Option<Schedule>, sqlx::Error> {
+    let row = sqlx::query!(
+        r#"SELECT cron, keep_daily, keep_weekly, enabled,
+                  extract(epoch FROM next_run_at)::bigint AS next_run_at,
+                  extract(epoch FROM last_run_at)::bigint AS last_run_at
+           FROM backup_schedules WHERE kind = 'system'"#
+    )
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(|r| Schedule {
+        cron: r.cron,
+        keep_daily: r.keep_daily,
+        keep_weekly: r.keep_weekly,
+        enabled: r.enabled,
+        next_run_at: r.next_run_at,
+        last_run_at: r.last_run_at,
+    }))
+}
+
+/// Makes or changes the panel's own schedule.
+///
+/// # Errors
+/// Database errors.
+pub async fn upsert_system_schedule(
+    pool: &PgPool,
+    cron: &str,
+    keep_daily: i32,
+    keep_weekly: i32,
+    destination_id: Option<Uuid>,
+    enabled: bool,
+    next_run_at: Option<i64>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        "INSERT INTO backup_schedules
+             (tenant_id, kind, cron, keep_daily, keep_weekly, destination_id, enabled, next_run_at)
+         VALUES (NULL, 'system', $1, $2, $3, $4, $5, to_timestamp($6::bigint))
+         ON CONFLICT (kind) WHERE kind = 'system' DO UPDATE
+         SET cron = $1, keep_daily = $2, keep_weekly = $3, destination_id = $4,
+             enabled = $5, next_run_at = to_timestamp($6::bigint), updated_at = now()",
+        cron,
+        keep_daily,
+        keep_weekly,
+        destination_id,
+        enabled,
+        next_run_at,
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Removes the panel's own schedule.
+///
+/// # Errors
+/// Database errors.
+pub async fn drop_system_schedule(pool: &PgPool) -> Result<bool, sqlx::Error> {
+    Ok(
+        sqlx::query!("DELETE FROM backup_schedules WHERE kind = 'system'")
+            .execute(pool)
+            .await?
+            .rows_affected()
+            == 1,
+    )
 }

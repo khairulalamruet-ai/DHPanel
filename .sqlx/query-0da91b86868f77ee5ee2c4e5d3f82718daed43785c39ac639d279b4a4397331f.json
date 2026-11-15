@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO backup_schedules\n             (tenant_id, kind, cron, keep_daily, keep_weekly, destination_id, enabled, next_run_at)\n         VALUES (NULL, 'system', $1, $2, $3, $4, $5, to_timestamp($6::bigint))\n         ON CONFLICT (kind) WHERE kind = 'system' DO UPDATE\n         SET cron = $1, keep_daily = $2, keep_weekly = $3, destination_id = $4,\n             enabled = $5, next_run_at = to_timestamp($6::bigint), updated_at = now()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int4",
+        "Int4",
+        "Uuid",
+        "Bool",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0da91b86868f77ee5ee2c4e5d3f82718daed43785c39ac639d279b4a4397331f"
+}

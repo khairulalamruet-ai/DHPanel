@@ -133,7 +133,7 @@ pub struct BackupView {
     pub finished_at: Option<String>,
 }
 
-fn backup_view(b: Backup) -> BackupView {
+pub(crate) fn backup_view(b: Backup) -> BackupView {
     let parts = b
         .parts
         .as_array()
@@ -373,7 +373,7 @@ fn restore_view(r: Restore) -> RestoreView {
     }
 }
 
-fn bad(name: &'static str, code: &'static str, message: &str) -> AppError {
+pub(crate) fn bad(name: &'static str, code: &'static str, message: &str) -> AppError {
     AppError::validation(vec![FieldError::new(name, code, message)])
 }
 
@@ -542,7 +542,7 @@ pub struct ScheduleView {
     pub last_run_at: Option<String>,
 }
 
-fn schedule_view(s: store::Schedule) -> ScheduleView {
+pub(crate) fn schedule_view(s: store::Schedule) -> ScheduleView {
     ScheduleView {
         cron: s.cron,
         keep_daily: s.keep_daily,
@@ -577,7 +577,7 @@ pub async fn get_schedule(
         .ok_or_else(|| AppError::not_found("schedule"))
 }
 
-fn now() -> i64 {
+pub(crate) fn now() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(0))

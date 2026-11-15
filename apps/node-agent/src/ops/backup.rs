@@ -24,12 +24,7 @@ use dhpanel_backup::{
     KEY_LEN, Manifest, Part, PartKind, StreamReader, StreamWriter,
     manifest::{Counting, hex},
 };
-use dhpanel_backup_dest::{
-    Destination,
-    local::Local,
-    s3::{S3, S3Config},
-    sftp::{Login, Sftp, SftpConfig},
-};
+use dhpanel_backup_dest::Destination;
 use dhpanel_node_protocol::{
     AgentError, BackupPartInfo, BackupTarget, DbPassword, Operation, Output,
 };
@@ -54,74 +49,22 @@ fn transfers_dir(context: &TenantContext) -> PathBuf {
     )
 }
 
-fn text<'a>(v: &'a serde_json::Value, key: &str) -> Option<&'a str> {
-    v.get(key).and_then(serde_json::Value::as_str)
-}
-
 /// Opens the destination a backup goes to (blocking: an SFTP login happens here).
 pub(super) fn open_destination(
     target: &BackupTarget,
     credentials: Option<&DbPassword>,
 ) -> Result<Box<dyn Destination>, AgentError> {
-    let bad = |what: &str| invalid(&format!("the destination: {what}"));
     let secrets: serde_json::Value = credentials
-        .map(|c| serde_json::from_str(&c.0).map_err(|_| bad("unreadable credentials")))
+        .map(|c| {
+            serde_json::from_str(&c.0)
+                .map_err(|_| invalid("the destination: unreadable credentials"))
+        })
         .transpose()?
         .unwrap_or(serde_json::Value::Null);
-    let dest_error = |e: dhpanel_backup_dest::DestError| failed(&e.to_string()).retryable();
-    let s = &target.settings;
-    match target.kind.as_str() {
-        "local" => {
-            let path = text(s, "path").ok_or_else(|| bad("no folder"))?;
-            Ok(Box::new(
-                Local::open(std::path::Path::new(path)).map_err(dest_error)?,
-            ))
-        }
-        "s3" => {
-            let config = S3Config {
-                endpoint: text(s, "endpoint")
-                    .ok_or_else(|| bad("no endpoint"))?
-                    .to_owned(),
-                bucket: text(s, "bucket")
-                    .ok_or_else(|| bad("no bucket"))?
-                    .to_owned(),
-                region: text(s, "region").unwrap_or("us-east-1").to_owned(),
-                prefix: text(s, "prefix").unwrap_or("").trim_matches('/').to_owned(),
-                path_style: s
-                    .get("path_style")
-                    .and_then(serde_json::Value::as_bool)
-                    .unwrap_or(true),
-                access_key: text(&secrets, "access_key")
-                    .ok_or_else(|| bad("no access key"))?
-                    .to_owned(),
-                secret_key: text(&secrets, "secret_key")
-                    .ok_or_else(|| bad("no secret key"))?
-                    .to_owned(),
-            };
-            Ok(Box::new(S3::new(config).map_err(dest_error)?))
-        }
-        "sftp" => {
-            let login = match (text(&secrets, "password"), text(&secrets, "private_key")) {
-                (Some(p), None) => Login::Password(p.to_owned()),
-                (None, Some(k)) => Login::Key(k.to_owned()),
-                _ => return Err(bad("no password or key")),
-            };
-            let config = SftpConfig {
-                host: text(s, "host").ok_or_else(|| bad("no host"))?.to_owned(),
-                port: s
-                    .get("port")
-                    .and_then(serde_json::Value::as_u64)
-                    .and_then(|p| u16::try_from(p).ok())
-                    .unwrap_or(22),
-                user: text(s, "user").ok_or_else(|| bad("no user"))?.to_owned(),
-                path: text(s, "path").unwrap_or("/").to_owned(),
-                host_key_sha256: text(s, "host_key_sha256").map(str::to_owned),
-                login,
-            };
-            Ok(Box::new(Sftp::connect(&config).map_err(dest_error)?))
-        }
-        _ => Err(bad("an unknown kind")),
-    }
+    dhpanel_backup_dest::open::open(&target.kind, &target.settings, &secrets).map_err(|e| match e {
+        dhpanel_backup_dest::open::OpenError::Settings(_) => invalid(&e.to_string()),
+        dhpanel_backup_dest::open::OpenError::Destination(_) => failed(&e.to_string()).retryable(),
+    })
 }
 
 /// Reads another reader and counts and hashes what passes (the stored size and checksum).
@@ -639,7 +582,7 @@ pub async fn restore_backup(
                                 .as_ref()
                                 .is_some_and(|d| databases.contains(d))
                     }
-                    PartKind::Dns | PartKind::Meta => verify_only,
+                    PartKind::Dns | PartKind::Meta | PartKind::System => verify_only,
                 };
                 if wanted {
                     needed.push(part.name.clone());

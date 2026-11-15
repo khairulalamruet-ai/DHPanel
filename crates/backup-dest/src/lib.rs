@@ -7,6 +7,7 @@
 //! plain byte: what it stores is already encrypted.
 
 pub mod local;
+pub mod open;
 pub mod s3;
 pub mod sftp;
 

@@ -1,0 +1,20 @@
+[package]
+name = "dhpanel-system-backup"
+description = "The panel's own backup: the control database, its config and the node CA (T09.08)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+dhpanel-backup.workspace = true
+dhpanel-backup-dest.workspace = true
+serde_json = "1"
+sha2 = "0.11"
+tar = { version = "0.4.46", default-features = false }
+thiserror = "2.0.21"
+zstd = { version = "0.14", default-features = false }

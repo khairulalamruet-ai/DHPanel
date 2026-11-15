@@ -18,6 +18,7 @@ dhpanel-config.workspace = true
 dhpanel-database.workspace = true
 dhpanel-domain.workspace = true
 dhpanel-pki.workspace = true
+dhpanel-system-backup.workspace = true
 # Subcommand parsing; dhctl grows many commands (migrate, admin, ca, ...).
 clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
