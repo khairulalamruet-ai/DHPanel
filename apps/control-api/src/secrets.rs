@@ -50,6 +50,55 @@ pub fn operation_secrets(
                         password,
                     });
                 }
+                // The two passwords of a WordPress install: sealed by the API, opened here
+                // for this one message.
+                Operation::InstallWordPress {
+                    app_id,
+                    tenant_id,
+                    username,
+                    uid,
+                    path,
+                    database,
+                    database_password: None,
+                    site,
+                    admin_password: None,
+                    version,
+                    locale,
+                    plugins,
+                } => {
+                    let open = |name: &'static str| {
+                        let (db, master_key) = (db.clone(), master_key.clone());
+                        async move {
+                            let sealed = dhpanel_database::apps::sealed_secret(&db, app_id, name)
+                                .await
+                                .map_err(|_| "could not read an install secret".to_owned())?
+                                .ok_or_else(|| "this install has ended".to_owned())?;
+                            let bytes = master_key
+                                .open(
+                                    &dhpanel_database::apps::secret_context(app_id, name),
+                                    &sealed,
+                                )
+                                .map_err(|_| "an install secret does not open".to_owned())?;
+                            String::from_utf8(bytes)
+                                .map_err(|_| "an install secret is not text".to_owned())
+                                .map(dhpanel_node_protocol::DbPassword)
+                        }
+                    };
+                    return Ok(Operation::InstallWordPress {
+                        app_id,
+                        tenant_id,
+                        username,
+                        uid,
+                        path,
+                        database,
+                        database_password: Some(open("db_password").await?),
+                        site,
+                        admin_password: Some(open("admin_password").await?),
+                        version,
+                        locale,
+                        plugins,
+                    });
+                }
                 // The download credential of an SQL import: sealed by the API, opened
                 // for this one message. Once the import has ended there is none, and
                 // the node's download (which would be refused anyway) is not tried.

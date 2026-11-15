@@ -1788,3 +1788,177 @@ async fn a_disk_usage_answer_is_kept_for_the_account(pool: PgPool) {
     agent_stop.send(true).unwrap();
     agent.await.unwrap();
 }
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs PostgreSQL"]
+async fn a_wordpress_install_moves_from_the_database_to_the_grant_to_the_installer_to_active(
+    pool: PgPool,
+) {
+    let p = plane(&pool).await;
+    let d = Dispatcher::new(p.ops.clone(), p.gateway.clone(), None, dispatch_settings());
+    let mut registry = Registry::new();
+    registry.register("grant_db", |_| async move { Ok(Output::DbGranted) });
+    registry.register("install_wordpress", |op| async move {
+        // The passwords arrive only on the wire; the node would refuse without them.
+        let Operation::InstallWordPress {
+            database_password,
+            admin_password,
+            path,
+            ..
+        } = op
+        else {
+            return Err(AgentError::new(ErrorCode::Internal, "wrong operation"));
+        };
+        if database_password.is_some() || admin_password.is_some() {
+            // (No secret filler in this test: they stay absent.)
+            return Err(AgentError::new(ErrorCode::Internal, "unexpected secrets"));
+        }
+        assert_eq!(path, "blog");
+        Ok(Output::WordPressInstalled {
+            version: "7.1.4".into(),
+        })
+    });
+    let node = make_node_with(&p, &pool, "wp", registry).await;
+    let (agent_stop, agent) = node.start_agent(p.addr);
+    wait_connected(&p, node.id).await;
+    let results = p.gateway.take_results().expect("results taken once");
+    tokio::spawn(d.clone().run(results, p.stop.subscribe()));
+    let account: Uuid = sqlx::query_scalar(
+        "INSERT INTO accounts (kind, username, email, password_hash)
+         VALUES ('client', 'eva', 'eva@example.com',
+                 '$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHQ$aGFzaGhhc2hoYXNoaGFzaA') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let plan: Uuid = sqlx::query_scalar("SELECT id FROM plans WHERE is_default")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let tenant: Uuid = sqlx::query_scalar(
+        "INSERT INTO tenants (owner_account_id, node_id, plan_id, username, uid, status)
+         VALUES ($1, $2, $3, 'eva', 10005, 'active') RETURNING id",
+    )
+    .bind(account)
+    .bind(node.id)
+    .bind(plan)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let database: Uuid = sqlx::query_scalar(
+        "INSERT INTO databases (tenant_id, name, status) VALUES ($1, 'eva_wp1', 'pending') RETURNING id",
+    )
+    .bind(tenant)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let user: Uuid = sqlx::query_scalar(
+        "INSERT INTO db_users (tenant_id, name, status) VALUES ($1, 'eva_wp1', 'pending') RETURNING id",
+    )
+    .bind(tenant)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let domain: Uuid = sqlx::query_scalar(
+        "INSERT INTO domains (tenant_id, fqdn, kind) VALUES ($1, 'eva.example', 'primary') RETURNING id",
+    )
+    .bind(tenant)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let settings = serde_json::json!({
+        "stage": "setup", "folder": "blog", "url": "https://eva.example/blog", "title": "Eva",
+        "admin_user": "eva", "admin_email": "eva@example.com", "database": "eva_wp1",
+        "db_id": database.to_string(), "user_id": user.to_string(), "plugins": []
+    });
+    let app: Uuid = sqlx::query_scalar(
+        "INSERT INTO apps (tenant_id, domain_id, path, kind, name, database_id, settings)
+         VALUES ($1, $2, '/blog', 'wordpress', 'Eva', $3, $4) RETURNING id",
+    )
+    .bind(tenant)
+    .bind(domain)
+    .bind(database)
+    .bind(settings)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let status = |pool: PgPool| async move {
+        sqlx::query_scalar::<_, String>("SELECT status FROM apps WHERE id = $1")
+            .bind(app)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+    };
+    // Nothing happens while the database and its user are not ready.
+    assert_eq!(d.request_app_installs().await, 0);
+    assert_eq!(status(pool.clone()).await, "installing");
+    sqlx::query("UPDATE databases SET status = 'ready' WHERE id = $1")
+        .bind(database)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        d.request_app_installs().await,
+        0,
+        "the user is not ready yet"
+    );
+    sqlx::query("UPDATE db_users SET status = 'ready' WHERE id = $1")
+        .bind(user)
+        .execute(&pool)
+        .await
+        .unwrap();
+    // Ready: the user is given the database.
+    assert_eq!(d.request_app_installs().await, 1);
+    let grant: String =
+        sqlx::query_scalar("SELECT access FROM db_grants WHERE database_id = $1 AND user_id = $2")
+            .bind(database)
+            .bind(user)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(grant, "all");
+    // Once the node has done it, the installer goes; then the app turns active.
+    let mut moved = 0;
+    for _ in 0..100 {
+        moved += d.request_app_installs().await;
+        if status(pool.clone()).await == "active" {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert_eq!(status(pool.clone()).await, "active");
+    assert_eq!(moved, 1, "the installer was sent once");
+    let version: Option<String> = sqlx::query_scalar("SELECT version FROM apps WHERE id = $1")
+        .bind(app)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(version.as_deref(), Some("7.1.4"));
+    // A failed database fails the app and forgets its secrets.
+    let failing: Uuid = sqlx::query_scalar(
+        "INSERT INTO apps (tenant_id, domain_id, path, kind, name, settings)
+         VALUES ($1, $2, '/other', 'wordpress', 'Other', $3) RETURNING id",
+    )
+    .bind(tenant)
+    .bind(domain)
+    .bind(serde_json::json!({"stage": "setup", "db_id": database.to_string(), "user_id": user.to_string()}))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE databases SET status = 'failed' WHERE id = $1")
+        .bind(database)
+        .execute(&pool)
+        .await
+        .unwrap();
+    d.request_app_installs().await;
+    let (s, e): (String, Option<String>) =
+        sqlx::query_as("SELECT status, error FROM apps WHERE id = $1")
+            .bind(failing)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(s, "failed");
+    assert!(e.unwrap().contains("database"));
+    agent_stop.send(true).unwrap();
+    agent.await.unwrap();
+}

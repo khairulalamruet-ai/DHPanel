@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO app_secrets (app_id, name, sealed) VALUES ($1, $2, $3)\n         ON CONFLICT (app_id, name) DO UPDATE SET sealed = EXCLUDED.sealed",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Bytea"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ba8e622a635868be64501858c0dc267e4642216a8501cd9a6bee19ddf836f478"
+}

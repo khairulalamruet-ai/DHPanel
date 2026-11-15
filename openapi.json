@@ -10359,6 +10359,83 @@
         ]
       }
     },
+    "/api/v1/client/apps/wordpress": {
+      "post": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "Install WordPress on a domain (and path) of the account: a database and a user of its own\nare made, then WordPress is downloaded, checked, configured and installed on the node. The\nanswer is the application, `installing`; it turns `active` (or `failed`, with the reason)\nwithin a minute or two.",
+        "operationId": "clientInstallWordPress",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstallWordPress"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only` or `feature_disabled`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`place_taken`, `limit_reached` or `tenant_not_running`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A value that is not valid, or a domain that is not the account's",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/client/apps/{id}": {
       "get": {
         "tags": [
@@ -21427,6 +21504,62 @@
           "signature": {
             "type": "string",
             "description": "The signature that matched (`Php.Trojan.Agent`)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "InstallWordPress": {
+        "type": "object",
+        "description": "A WordPress site to install.",
+        "required": [
+          "domain_id",
+          "title",
+          "admin_user",
+          "admin_email",
+          "admin_password"
+        ],
+        "properties": {
+          "admin_email": {
+            "type": "string",
+            "description": "Their email address."
+          },
+          "admin_password": {
+            "type": "string",
+            "description": "Their password (12 to 128 characters)."
+          },
+          "admin_user": {
+            "type": "string",
+            "description": "The first administrator's login (3 to 60: letters, digits, `_`, `.`, `-`)."
+          },
+          "domain_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The domain it is served on (one of the account's)."
+          },
+          "locale": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A locale such as `bn_BD` (`en_US` when absent)."
+          },
+          "path": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The path under the domain (`/` when absent, `/blog`)."
+          },
+          "plugins": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Plugins of wordpress.org to install and switch on (at most 10)."
+          },
+          "title": {
+            "type": "string",
+            "description": "The site's title."
           }
         },
         "additionalProperties": false

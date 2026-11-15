@@ -1,0 +1,65 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT d.name AS \"database!\", d.status AS \"database_status!\",\n                  u.name AS \"user!\", u.status AS \"user_status!\"\n           FROM databases d, db_users u WHERE d.id = $1 AND u.id = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "database!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "databases",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "database_status!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "databases",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "user!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "db_users",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "user_status!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "db_users",
+            "name": "status"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "c4b5fdf7914beaee88b86cd4194846b5b7d2d26324741d72beab8d8001eb85fd"
+}

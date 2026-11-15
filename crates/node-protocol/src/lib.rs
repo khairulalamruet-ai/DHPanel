@@ -167,6 +167,30 @@ pub struct WafSetting {
     pub disabled_rules: Vec<u32>,
 }
 
+/// The database a WordPress site uses (on the node's database server, reached as `db`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WpDatabase {
+    /// The whole name, `alice_blog`.
+    pub name: String,
+    /// The user's whole name, `alice_web`.
+    pub user: String,
+}
+
+/// A new WordPress site.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WpSite {
+    /// Its address, `https://example.com/blog`.
+    pub url: String,
+    /// Its title.
+    pub title: String,
+    /// The first administrator's login.
+    pub admin_user: String,
+    /// Their email address.
+    pub admin_email: String,
+}
+
 /// One vulnerability Trivy found in an image.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -1504,6 +1528,42 @@ pub enum Operation {
         /// The tenant's numeric user id.
         uid: u32,
     },
+    /// Installs WordPress in a folder of a tenant's files with WP-CLI, in a container of its own
+    /// that runs as the tenant's user on the tenant's network (it reaches the database as the
+    /// site will). The database and its user must exist. The core is downloaded with its
+    /// checksum verified, the configuration gets fresh salts made on the node, and the first
+    /// administrator is made. Answered with [`Output::WordPressInstalled`].
+    InstallWordPress {
+        /// The application's id (the control plane finds the passwords by it).
+        app_id: Uuid,
+        /// The tenant.
+        tenant_id: Uuid,
+        /// The tenant's system name.
+        username: String,
+        /// The tenant's numeric user id.
+        uid: u32,
+        /// The folder under the tenant's `www` (empty: `www` itself).
+        path: String,
+        /// The database.
+        database: WpDatabase,
+        /// The database user's password; absent in the ledger, present on the wire.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        database_password: Option<DbPassword>,
+        /// The site.
+        site: WpSite,
+        /// The first administrator's password; absent in the ledger, present on the wire.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        admin_password: Option<DbPassword>,
+        /// A WordPress version (`6.8.2`); the latest when absent.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        version: Option<String>,
+        /// A locale (`bn_BD`); `en_US` when absent.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        locale: Option<String>,
+        /// Plugins of wordpress.org to install and switch on (at most 10).
+        #[serde(default)]
+        plugins: Vec<String>,
+    },
     /// Looks for known vulnerabilities in an image with Trivy (it reads the image from its
     /// registry; no Docker socket is involved). Answered with [`Output::ImageScanned`].
     ScanImage {
@@ -1663,6 +1723,7 @@ impl Operation {
         "sync_cron_jobs",
         "set_firewall_rules",
         "scan_tenant",
+        "install_wordpress",
         "scan_image",
         "check_image_updates",
         "inventory_wordpress",
@@ -1740,6 +1801,7 @@ impl Operation {
             Self::SyncCronJobs { .. } => "sync_cron_jobs",
             Self::SetFirewallRules { .. } => "set_firewall_rules",
             Self::ScanTenant { .. } => "scan_tenant",
+            Self::InstallWordPress { .. } => "install_wordpress",
             Self::ScanImage { .. } => "scan_image",
             Self::CheckImageUpdates { .. } => "check_image_updates",
             Self::InventoryWordPress { .. } => "inventory_wordpress",
@@ -1941,6 +2003,11 @@ pub enum Output {
     WordPressInventory {
         /// The installations found (at most 20).
         installs: Vec<WpInstall>,
+    },
+    /// Answer to [`Operation::InstallWordPress`].
+    WordPressInstalled {
+        /// The version now installed.
+        version: String,
     },
     /// Answer to [`Operation::ScanImage`].
     ImageScanned {
@@ -3208,7 +3275,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            71,
+            72,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }

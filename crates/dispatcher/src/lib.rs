@@ -184,7 +184,7 @@ impl Dispatcher {
                 _ = tick.tick() => { self.tick().await; }
                 _ = capabilities.tick() => { self.request_capabilities().await; }
                 _ = purges.tick() => { self.request_purges().await; }
-                _ = routes.tick() => { self.expire_previews().await; self.request_route_syncs().await; self.request_error_pages().await; self.request_user_agents().await; self.request_firewalls().await; self.request_scans().await; self.request_signature_updates().await; self.request_image_checks().await; self.request_import_progress().await; self.request_cron_runs().await; self.request_metrics().await; self.request_services().await; }
+                _ = routes.tick() => { self.expire_previews().await; self.request_route_syncs().await; self.request_error_pages().await; self.request_user_agents().await; self.request_firewalls().await; self.request_scans().await; self.request_signature_updates().await; self.request_image_checks().await; self.request_app_installs().await; self.request_import_progress().await; self.request_cron_runs().await; self.request_metrics().await; self.request_services().await; }
                 _ = certificates.tick() => { self.request_certificates().await; self.request_db_sizes().await; }
                 _ = expiry.tick() => { self.announce_expiring().await; }
                 Some(report) = results.recv() => self.handle_result(report).await,
@@ -931,6 +931,255 @@ impl Dispatcher {
                 }
             }
             _ => {}
+        }
+    }
+
+    /// Moves the installs of applications along (T12.02): once the database and its user
+    /// are ready the user is given the database, once that is done the installer is sent
+    /// to the node, and when it has answered the application is `active` or `failed`.
+    /// Returns how many operations were queued.
+    pub async fn request_app_installs(&self) -> usize {
+        let db = self.ops.db();
+        let apps = match dhpanel_database::apps::installing(db, 20).await {
+            Ok(a) => a,
+            Err(err) => {
+                tracing::warn!(error = %err, "could not look for installs under way");
+                return 0;
+            }
+        };
+        let mut queued = 0;
+        for app in apps {
+            if app.kind != "wordpress" {
+                continue;
+            }
+            match self.step_wordpress_install(&app).await {
+                Ok(true) => queued += 1,
+                Ok(false) => {}
+                Err(err) => {
+                    tracing::warn!(app = %app.id, error = %err, "an install could not be moved on");
+                }
+            }
+        }
+        queued
+    }
+
+    async fn fail_app(
+        &self,
+        app: &dhpanel_database::apps::Installing,
+        why: &str,
+    ) -> Result<bool, String> {
+        let db = self.ops.db();
+        let why: String = why.chars().filter(|c| !c.is_control()).take(400).collect();
+        dhpanel_database::apps::set_status(db, app.id, "failed", None, Some(&why))
+            .await
+            .map_err(|e| e.to_string())?;
+        dhpanel_database::apps::forget_secrets(db, app.id)
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(false)
+    }
+
+    async fn step_wordpress_install(
+        &self,
+        app: &dhpanel_database::apps::Installing,
+    ) -> Result<bool, String> {
+        let db = self.ops.db();
+        let text = |key: &str| {
+            app.settings
+                .get(key)
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        };
+        let id_of = |key: &str| text(key).and_then(|s| s.parse::<Uuid>().ok());
+        let mut settings = app.settings.clone();
+        match text("stage").as_deref() {
+            Some("setup") => {
+                let (Some(db_id), Some(user_id)) = (id_of("db_id"), id_of("user_id")) else {
+                    return Ok(false);
+                };
+                let Some(state) = dhpanel_database::apps::setup_state(db, db_id, user_id)
+                    .await
+                    .map_err(|e| e.to_string())?
+                else {
+                    return self.fail_app(app, "the database was removed").await;
+                };
+                if state.database_status == "failed" || state.user_status == "failed" {
+                    return self.fail_app(app, "the database could not be made").await;
+                }
+                if state.database_status != "ready" || state.user_status != "ready" {
+                    return Ok(false);
+                }
+                let mut conn = db.acquire().await.map_err(|e| e.to_string())?;
+                dhpanel_database::databases::set_grant(
+                    &mut conn,
+                    app.tenant_id,
+                    db_id,
+                    user_id,
+                    "all",
+                )
+                .await
+                .map_err(|e| e.to_string())?;
+                drop(conn);
+                let mut request = dhpanel_operations::Request::new(
+                    app.node_id,
+                    dhpanel_node_protocol::Operation::GrantDb {
+                        database: state.database,
+                        user: state.user,
+                        access: "all".to_owned(),
+                    },
+                    format!("appgrant:{}", app.id.simple()),
+                );
+                request.tenant_id = Some(app.tenant_id);
+                let op = match self
+                    .ops
+                    .enqueue(&request)
+                    .await
+                    .map_err(|e| e.to_string())?
+                {
+                    dhpanel_operations::Enqueued::Created(op)
+                    | dhpanel_operations::Enqueued::Existing(op) => op,
+                };
+                settings["stage"] = "grant".into();
+                settings["op"] = op.id.to_string().into();
+                dhpanel_database::apps::set_settings(db, app.id, &settings)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                Ok(true)
+            }
+            Some("grant") => {
+                let Some(op_id) = id_of("op") else {
+                    return self
+                        .fail_app(app, "the install lost track of its operation")
+                        .await;
+                };
+                let Some(row) = self.ops.get(op_id).await.map_err(|e| e.to_string())? else {
+                    return self
+                        .fail_app(app, "the install lost track of its operation")
+                        .await;
+                };
+                match row.status {
+                    dhpanel_database::operations::Status::Succeeded => {}
+                    dhpanel_database::operations::Status::Failed => {
+                        return self
+                            .fail_app(app, "the database could not be given to its user")
+                            .await;
+                    }
+                    _ => return Ok(false),
+                }
+                let (Some(db_name), Some(url), Some(title), Some(admin_user), Some(admin_email)) = (
+                    text("database"),
+                    text("url"),
+                    text("title"),
+                    text("admin_user"),
+                    text("admin_email"),
+                ) else {
+                    return self
+                        .fail_app(app, "the install's settings are incomplete")
+                        .await;
+                };
+                let plugins: Vec<String> = app
+                    .settings
+                    .get("plugins")
+                    .and_then(|p| serde_json::from_value(p.clone()).ok())
+                    .unwrap_or_default();
+                let mut request = dhpanel_operations::Request::new(
+                    app.node_id,
+                    dhpanel_node_protocol::Operation::InstallWordPress {
+                        app_id: app.id,
+                        tenant_id: app.tenant_id,
+                        username: app.username.clone(),
+                        uid: u32::try_from(app.uid).unwrap_or_default(),
+                        path: text("folder").unwrap_or_default(),
+                        database: dhpanel_node_protocol::WpDatabase {
+                            name: db_name.clone(),
+                            user: db_name,
+                        },
+                        // Not in the ledger: opened from the sealed copies at send time.
+                        database_password: None,
+                        site: dhpanel_node_protocol::WpSite {
+                            url,
+                            title,
+                            admin_user,
+                            admin_email,
+                        },
+                        admin_password: None,
+                        version: None,
+                        locale: text("locale"),
+                        plugins,
+                    },
+                    format!("appinstall:{}", app.id.simple()),
+                );
+                request.tenant_id = Some(app.tenant_id);
+                request.ttl = std::time::Duration::from_secs(3600);
+                request.max_attempts = 2;
+                let op = match self
+                    .ops
+                    .enqueue(&request)
+                    .await
+                    .map_err(|e| e.to_string())?
+                {
+                    dhpanel_operations::Enqueued::Created(op)
+                    | dhpanel_operations::Enqueued::Existing(op) => op,
+                };
+                settings["stage"] = "install".into();
+                settings["op"] = op.id.to_string().into();
+                dhpanel_database::apps::set_settings(db, app.id, &settings)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                Ok(true)
+            }
+            Some("install") => {
+                let Some(op_id) = id_of("op") else {
+                    return self
+                        .fail_app(app, "the install lost track of its operation")
+                        .await;
+                };
+                let Some(row) = self.ops.get(op_id).await.map_err(|e| e.to_string())? else {
+                    return self
+                        .fail_app(app, "the install lost track of its operation")
+                        .await;
+                };
+                match row.status {
+                    dhpanel_database::operations::Status::Succeeded => {
+                        let version = row
+                            .output
+                            .and_then(|o| {
+                                serde_json::from_value::<dhpanel_node_protocol::Output>(o).ok()
+                            })
+                            .and_then(|o| match o {
+                                dhpanel_node_protocol::Output::WordPressInstalled { version } => {
+                                    Some(version)
+                                }
+                                _ => None,
+                            });
+                        dhpanel_database::apps::set_status(
+                            db,
+                            app.id,
+                            "active",
+                            version.as_deref(),
+                            None,
+                        )
+                        .await
+                        .map_err(|e| e.to_string())?;
+                        dhpanel_database::apps::forget_secrets(db, app.id)
+                            .await
+                            .map_err(|e| e.to_string())?;
+                        Ok(false)
+                    }
+                    dhpanel_database::operations::Status::Failed => {
+                        let message = row
+                            .error
+                            .as_ref()
+                            .and_then(|e| e.get("message"))
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("the install failed")
+                            .to_owned();
+                        self.fail_app(app, &message).await
+                    }
+                    _ => Ok(false),
+                }
+            }
+            _ => Ok(false),
         }
     }
 

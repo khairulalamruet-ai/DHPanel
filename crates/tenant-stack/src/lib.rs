@@ -53,6 +53,9 @@ pub enum Role {
     Sftp,
     /// The node's malware scanner, run for one scan at a time (not part of a tenant's stack).
     Clamav,
+    /// WP-CLI with the PHP extensions WordPress needs, run once per install or change of a
+    /// WordPress site (not part of a tenant's stack).
+    Wpcli,
     /// The node's image vulnerability scanner, run for one image at a time (not part of a
     /// tenant's stack).
     Trivy,
@@ -70,6 +73,7 @@ impl Role {
             Self::Sftp => "sftp",
             Self::Clamav => "clamav",
             Self::Trivy => "trivy",
+            Self::Wpcli => "wpcli",
         }
     }
 }
@@ -668,7 +672,9 @@ pub fn render(tenant: &Tenant<'_>, allowlist: &Allowlist) -> Result<Stack, Stack
                 }
             }
             // The database server is the node's, not a tenant's.
-            Role::Db | Role::Pma | Role::Sftp | Role::Clamav | Role::Trivy => continue,
+            Role::Db | Role::Pma | Role::Sftp | Role::Clamav | Role::Trivy | Role::Wpcli => {
+                continue;
+            }
         }
         let copies = if template.role == Role::Php {
             php_copies

@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT max(substring(name FROM char_length($2) + 1)::bigint) AS \"n\"\n           FROM (SELECT name FROM databases WHERE tenant_id = $1 AND name ~ ('^' || $2 || '[0-9]+$')\n                 UNION ALL\n                 SELECT name FROM db_users WHERE tenant_id = $1 AND name ~ ('^' || $2 || '[0-9]+$')) x",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "n",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "4f4e2e281f7b3486ff9d8903771caef189f0eed6c17b9c38977cad05771cd285"
+}

@@ -465,11 +465,13 @@ pub fn mount(
                     })
                 }
                 "apps" => {
-                    let (db, sessions) = (db.clone(), sessions.clone());
+                    let (db, sessions, master_key) =
+                        (db.clone(), sessions.clone(), master_key.clone());
                     Box::new(move || {
                         let state = dhpanel_mod_apps::AppsState {
                             db: db.clone(),
                             sessions: sessions.clone(),
+                            master_key: master_key.clone(),
                         };
                         ModuleRoutes {
                             admin: Some(dhpanel_mod_apps::admin_router().with_state(state.clone())),

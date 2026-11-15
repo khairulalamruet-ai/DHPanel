@@ -41,6 +41,7 @@ pub mod sqlsplit;
 pub mod tenant;
 pub mod transfer;
 pub mod vhost;
+pub mod wpinstall;
 
 use std::{
     collections::{HashMap, HashSet},
@@ -202,6 +203,10 @@ impl Registry {
                 move |op| nodeservices::read_service_log(context.clone(), op)
             });
             registry.register("report_server_info", server::report_server_info);
+            registry.register("install_wordpress", {
+                let context = context.clone();
+                move |op| wpinstall::install_wordpress(context.clone(), op)
+            });
             registry.register("scan_image", {
                 let context = context.clone();
                 move |op| imagescan::scan_image(context.clone(), op)

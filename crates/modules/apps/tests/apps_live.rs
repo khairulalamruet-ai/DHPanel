@@ -63,10 +63,12 @@ async fn env(pool: &PgPool) -> Env {
                 admin: Some(admin_router().with_state(AppsState {
                     db: pool.clone(),
                     sessions: sessions.clone(),
+                    master_key: dhpanel_auth_core::secretbox::MasterKey::from_bytes(&[42; 32]),
                 })),
                 client: Some(client_router().with_state(AppsState {
                     db: pool.clone(),
                     sessions: sessions.clone(),
+                    master_key: dhpanel_auth_core::secretbox::MasterKey::from_bytes(&[42; 32]),
                 })),
                 ..ModuleRoutes::none()
             }
@@ -360,4 +362,92 @@ async fn what_runs_where_is_tracked_one_application_per_place(pool: PgPool) {
             .iter()
             .any(|i| i["domain_id"].is_null())
     );
+}
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn wordpress_is_asked_for_with_a_database_of_its_own_and_sealed_passwords(pool: PgPool) {
+    let e = env(&pool).await;
+    let (alice_account, alice) = client(&pool, "alice", 10_000).await;
+    let a = e.sign_in(alice_account).await;
+    let site = domain(&pool, alice, "alice.example").await;
+    let (_, bob) = client(&pool, "bob", 10_001).await;
+    let bobs = domain(&pool, bob, "bob.example").await;
+    let path = "/api/v1/client/apps/wordpress";
+    let good = json!({"domain_id": site, "path": "/blog", "title": "Alice's blog",
+        "admin_user": "boss", "admin_email": "boss@example.com",
+        "admin_password": "a-long-enough-pass-1", "plugins": ["classic-editor"]});
+    let (status, made) = e.call(&a, "POST", path, Some(good.clone())).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{made}");
+    assert_eq!(
+        (
+            made["status"].as_str(),
+            made["kind"].as_str(),
+            made["path"].as_str()
+        ),
+        (Some("installing"), Some("wordpress"), Some("/blog"))
+    );
+    // A database and a user of its own, and the two operations that make them.
+    let names: Vec<String> = sqlx::query_scalar("SELECT name FROM databases WHERE tenant_id = $1")
+        .bind(alice)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    assert_eq!(names, ["alice_wp1"]);
+    let kinds: Vec<String> =
+        sqlx::query_scalar("SELECT kind FROM operations WHERE tenant_id = $1 ORDER BY kind")
+            .bind(alice)
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(kinds, ["create_database", "upsert_db_user"]);
+    // Neither password is in the ledger, and the sealed ones are not the text.
+    let ledger: String =
+        sqlx::query_scalar("SELECT string_agg(payload::text, ' ') FROM operations")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(!ledger.contains("a-long-enough-pass-1"));
+    let sealed: Vec<Vec<u8>> = sqlx::query_scalar("SELECT sealed FROM app_secrets ORDER BY name")
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    assert_eq!(sealed.len(), 2);
+    assert!(
+        sealed
+            .iter()
+            .all(|s| !String::from_utf8_lossy(s).contains("a-long-enough-pass-1"))
+    );
+    // The tracked place is taken; a second site gets the next database name.
+    let (status, again) = e.call(&a, "POST", path, Some(good.clone())).await;
+    assert_eq!(
+        (status, again["code"].as_str()),
+        (StatusCode::CONFLICT, Some("place_taken")),
+        "{again}"
+    );
+    let mut second = good.clone();
+    second["path"] = json!("/shop");
+    let (status, _) = e.call(&a, "POST", path, Some(second)).await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    let names: Vec<String> =
+        sqlx::query_scalar("SELECT name FROM databases WHERE tenant_id = $1 ORDER BY name")
+            .bind(alice)
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(names, ["alice_wp1", "alice_wp2"]);
+    // Not valid, and not somebody else's domain.
+    for bad in [
+        json!({"domain_id": site, "path": "/a b", "title": "t", "admin_user": "boss", "admin_email": "b@e.com", "admin_password": "a-long-enough-pass-1"}),
+        json!({"domain_id": site, "path": "/../x", "title": "t", "admin_user": "boss", "admin_email": "b@e.com", "admin_password": "a-long-enough-pass-1"}),
+        json!({"domain_id": site, "title": "", "admin_user": "boss", "admin_email": "b@e.com", "admin_password": "a-long-enough-pass-1"}),
+        json!({"domain_id": site, "title": "t", "admin_user": "x", "admin_email": "b@e.com", "admin_password": "a-long-enough-pass-1"}),
+        json!({"domain_id": site, "title": "t", "admin_user": "boss", "admin_email": "nope", "admin_password": "a-long-enough-pass-1"}),
+        json!({"domain_id": site, "title": "t", "admin_user": "boss", "admin_email": "b@e.com", "admin_password": "short"}),
+        json!({"domain_id": site, "title": "t", "admin_user": "boss", "admin_email": "b@e.com", "admin_password": "a-long-enough-pass-1", "plugins": ["Bad Slug"]}),
+        json!({"domain_id": bobs, "title": "t", "admin_user": "boss", "admin_email": "b@e.com", "admin_password": "a-long-enough-pass-1"}),
+    ] {
+        let (status, body) = e.call(&a, "POST", path, Some(bad.clone())).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{bad} -> {body}");
+    }
 }

@@ -86,3 +86,9 @@ role      = "trivy"
 reference = "aquasec/trivy@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb"
 tag       = "latest"
 note      = "Trivy 0.76.2: run once per image scan, reads images straight from their registry (no Docker socket), never as a service"
+
+[[image]]
+role      = "wpcli"
+reference = "wordpress@sha256:a4fff017eb08c03187e90fe52d4bff8d3a4d4a5103de05829a6e747c4ca3056e"
+tag       = "cli"
+note      = "WP-CLI 2.x with PHP 8.3 and mysqli, gd, zip, intl: run once per WordPress install or change (T12.02), as the tenant's own user, never as a service"
