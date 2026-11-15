@@ -33,6 +33,7 @@ vi.mock("@dhpanel/i18n", () => ({
         "nodes.status.revoked": "Revoked",
         "nodes.table.node": "Node / Hostname",
         "nodes.table.status": "Status",
+        "nodes.table.saturation": "Fullness (%)",
         "nodes.table.cpu": "CPU",
         "nodes.table.ram": "RAM",
         "nodes.table.disk": "Disk",
@@ -40,7 +41,46 @@ vi.mock("@dhpanel/i18n", () => ({
         "nodes.table.lastSeen": "Last Seen",
         "nodes.table.actions": "Actions",
         "nodes.table.viewDetails": "View Specs",
+        "nodes.table.editCapacity": "Capacity / Oversell",
+        "nodes.table.drain": "Drain",
+        "nodes.table.undrain": "Undrain",
         "nodes.table.revoke": "Revoke",
+        "nodes.capacity.title": "Node Capacity & Saturation",
+        "nodes.capacity.totalNodes": "Total Nodes",
+        "nodes.capacity.saturation": "Saturation",
+        "nodes.capacity.fullness": "Fullness",
+        "nodes.capacity.tenants": "Tenants",
+        "nodes.capacity.clusterFullness": "Cluster Fullness",
+        "nodes.capacity.avgSaturation": "Avg Saturation",
+        "nodes.capacity.configureOversell": "Configure Oversell",
+        "nodes.capacity.oversellSettings": "Oversell Settings",
+        "nodes.capacity.oversellDesc": "Configure CPU, RAM, and Disk oversell allocation multipliers for this node.",
+        "nodes.capacity.cpuRatioLabel": "CPU Oversell Multiplier",
+        "nodes.capacity.ramRatioLabel": "RAM Oversell Multiplier",
+        "nodes.capacity.diskRatioLabel": "Disk Oversell Multiplier",
+        "nodes.capacity.maxTenantsLabel": "Maximum Tenants Capacity",
+        "nodes.capacity.saveSuccess": "Node capacity & oversell settings updated successfully.",
+        "nodes.capacity.drainSuccess": "Node set to draining mode. No new tenants will be scheduled.",
+        "nodes.capacity.undrainSuccess": "Node restored to active service.",
+        "nodes.scheduler.title": "Placement Scheduler & Policies",
+        "nodes.scheduler.desc": "Configure automated cluster placement policy for incoming tenants",
+        "nodes.scheduler.configure": "Placement Policy",
+        "nodes.scheduler.policyLabel": "Active Placement Algorithm",
+        "nodes.scheduler.leastLoadedTitle": "Least-Loaded (Resource Saturation)",
+        "nodes.scheduler.leastLoadedDesc": "Automatically routes new tenants to the node with the lowest resource load",
+        "nodes.scheduler.roundRobinTitle": "Round-Robin (Cyclic Distribution)",
+        "nodes.scheduler.roundRobinDesc": "Distributes new tenants sequentially",
+        "nodes.scheduler.drainInvariantTitle": "Drainage Invariant",
+        "nodes.scheduler.drainInvariantDesc": "Nodes in draining or maintenance mode are strictly disqualified",
+        "nodes.scheduler.simulationTitle": "Live Placement Simulation",
+        "nodes.scheduler.nextTarget": "Next Scheduled Destination",
+        "nodes.scheduler.excludedNodesTitle": "Disqualified Draining / Offline Nodes",
+        "nodes.scheduler.saveSuccess": "Placement scheduler policy updated successfully.",
+        "nodes.scheduler.drain": "Drain",
+        "nodes.scheduler.undrain": "Undrain",
+        "nodes.scheduler.drainSuccess": "Node set to draining mode.",
+        "nodes.scheduler.undrainSuccess": "Node restored to active cluster service.",
+        "common.save": "Save Changes",
         "nodes.enrollments.title": "Enrollment Tokens",
         "nodes.enrollments.desc": "Single-use tokens issued for server onboarding.",
         "nodes.enrollments.name": "Node Name",
@@ -76,6 +116,30 @@ vi.mock("@dhpanel/i18n", () => ({
         "nodes.revoke.desc": "Are you sure you want to revoke this node?",
         "nodes.revoke.confirmPrompt": "Type the node name to confirm revocation:",
         "nodes.revoke.success": "Node revoked successfully",
+        "nodes.update.actionBtn": "Update Agent",
+        "nodes.update.dialogTitle": "Signed Agent Self-Update",
+        "nodes.update.dialogDesc": "Cryptographically verify and apply signed release updates",
+        "nodes.update.currentNodeLabel": "Target Node",
+        "nodes.update.targetReleaseLabel": "Target Release",
+        "nodes.update.manifestTitle": "Signed Release Manifest",
+        "nodes.update.corruptSigLabel": "Fault Injection: Simulate Invalid Signature",
+        "nodes.update.corruptSigDesc": "Simulate corrupted signature",
+        "nodes.update.rejectedTitle": "Signature Verification Failed",
+        "nodes.update.rejectedError": "ERR_SIGNATURE_MISMATCH: Agent binary signature verification failed. Update rejected.",
+        "nodes.update.verifiedTitle": "Cryptographic Signature Verified",
+        "nodes.update.verifiedDesc": "Agent binary successfully verified and upgraded to v0.2.0.",
+        "nodes.update.applyBtn": "Apply Signed Update",
+        "nodes.update.verifying": "Verifying Signature...",
+        "nodes.update.successToast": "Agent self-update verified and applied successfully.",
+        "nodes.health.alertTitle": "Node Offline Alert (Heartbeat missed > 60s)",
+        "nodes.health.alertDesc": "Node {{nodes}} is unreachable. Failover may be initiated.",
+        "nodes.health.triggerFailover": "Trigger Failover",
+        "nodes.health.failoverModalTitle": "Emergency Node Failover",
+        "nodes.health.failoverModalDesc": "Evacuate and failover hosted tenants",
+        "nodes.health.sourceNode": "Offline Source Node",
+        "nodes.health.targetNode": "Target Destination Node",
+        "nodes.health.executeFailover": "Execute Failover",
+        "nodes.health.failoverSuccess": "Failover initiated successfully",
         "common.loading": "Loading...",
         "common.reload": "Reload",
         "common.cancel": "Cancel",
@@ -113,6 +177,19 @@ const mockNodesList = [
       docker_version: "27.3.1",
       security_features: ["seccomp", "apparmor"],
     },
+    capacity: {
+      allocated_cpu_cores: 12,
+      allocated_ram_bytes: 18 * 1024 * 1024 * 1024,
+      allocated_disk_bytes: 160 * 1024 * 1024 * 1024,
+      tenants_count: 24,
+      max_tenants: 50,
+      saturation_pct: 68,
+      oversell: {
+        cpu_ratio: 2.0,
+        ram_ratio: 1.25,
+        disk_ratio: 1.0,
+      },
+    },
   },
   {
     id: "node_02",
@@ -124,6 +201,42 @@ const mockNodesList = [
     fingerprint: "SHA256:1a2b3c4d5e6f",
     last_seen_at: "2026-11-11T20:00:00Z",
     enrolled_at: "2026-11-05T00:00:00Z",
+    capabilities: {
+      cpu_cores: 4,
+      cpu_model: "Intel Xeon E-2288G",
+      cpu_usage_pct: 0,
+      ram_total_bytes: 8 * 1024 * 1024 * 1024,
+      ram_used_bytes: 1.1 * 1024 * 1024 * 1024,
+      disk_total_bytes: 100 * 1024 * 1024 * 1024,
+      disk_used_bytes: 20 * 1024 * 1024 * 1024,
+      kernel: "Linux 6.5.0",
+      docker_version: "26.1.4",
+      security_features: ["seccomp"],
+    },
+    capacity: {
+      allocated_cpu_cores: 6,
+      allocated_ram_bytes: 7 * 1024 * 1024 * 1024,
+      allocated_disk_bytes: 80 * 1024 * 1024 * 1024,
+      tenants_count: 48,
+      max_tenants: 60,
+      saturation_pct: 85,
+      oversell: {
+        cpu_ratio: 2.0,
+        ram_ratio: 1.25,
+        disk_ratio: 1.0,
+      },
+    },
+  },
+  {
+    id: "node_03",
+    name: "node-worker-03-backup",
+    hostname: "worker3.dhpanel.net",
+    ip_address: "167.104.101.83",
+    status: "offline" as const,
+    version: "0.1.0",
+    fingerprint: "SHA256:3c4d5e6f7a8b",
+    last_seen_at: "2026-11-10T12:00:00Z",
+    enrolled_at: "2026-11-01T00:00:00Z",
     capabilities: {
       cpu_cores: 4,
       cpu_model: "Intel Xeon E-2288G",
@@ -179,6 +292,38 @@ describe("NodesPage", () => {
       if (url.includes("/revoke")) {
         return { success: true, message: "Node revoked successfully" };
       }
+      if (url.includes("/release-manifest")) {
+        return {
+          version: "0.2.0",
+          channel: "stable",
+          signing_key_id: "ed25519-release-v1",
+          signature: "ed25519:7a8b9c0d",
+          checksum_sha256: "b94d27b9934d",
+        };
+      }
+      if (url.includes("/update-agent") && opts?.method === "POST") {
+        const body = JSON.parse(opts.body || "{}");
+        if (body.corrupt_signature || body.manifest_signature?.includes("invalid")) {
+          throw new Error("ERR_SIGNATURE_MISMATCH: Agent binary signature verification failed. Update rejected.");
+        }
+        return {
+          success: true,
+          version: "0.2.0",
+          message: "Agent self-update verified and applied successfully",
+        };
+      }
+      if (url.includes("/drain") || url.includes("/undrain")) {
+        return { success: true, status: "draining" };
+      }
+      if (url.includes("/capacity") && opts?.method === "PUT") {
+        return { success: true };
+      }
+      if (url.includes("/cluster/scheduler") && opts?.method === "PUT") {
+        return { success: true };
+      }
+      if (url.includes("/failover")) {
+        return { success: true, message: "Failover completed successfully", migrated_tenants: 12 };
+      }
       return {};
     });
   });
@@ -190,7 +335,7 @@ describe("NodesPage", () => {
       </ToastProvider>
     );
 
-    expect(screen.getByText("Cluster Nodes")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Cluster Nodes" })).toBeInTheDocument();
 
     await waitFor(() => {
       expect(screen.getByText("node-master-01")).toBeInTheDocument();
@@ -396,5 +541,234 @@ describe("NodesPage", () => {
       </ToastProvider>
     );
     expect(screen.getByText("Permission denied")).toBeInTheDocument();
+  });
+
+  it("rejects agent update when Ed25519 signature verification fails (DoD T16.08)", async () => {
+    render(
+      <ToastProvider>
+        <NodesPage />
+      </ToastProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("btn-update-agent-node_01")).toBeInTheDocument();
+    });
+
+    // Open Agent Update Dialog
+    fireEvent.click(screen.getByTestId("btn-update-agent-node_01"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Signed Agent Self-Update")).toBeInTheDocument();
+      expect(screen.getByTestId("toggle-corrupt-signature")).toBeInTheDocument();
+    });
+
+    // Toggle corrupt signature
+    fireEvent.click(screen.getByTestId("toggle-corrupt-signature"));
+
+    // Click Apply Signed Update
+    fireEvent.click(screen.getByTestId("btn-apply-agent-update"));
+
+    // Verify rejection alert (DoD T16.08)
+    await waitFor(() => {
+      expect(screen.getByTestId("agent-update-rejected-alert")).toBeInTheDocument();
+      expect(screen.getByTestId("badge-signature-rejected")).toHaveTextContent("REJECTED");
+      expect(screen.getByText(/ERR_SIGNATURE_MISMATCH/i)).toBeInTheDocument();
+    });
+  });
+
+  it("applies agent update when cryptographic signature is valid (DoD T16.08)", async () => {
+    render(
+      <ToastProvider>
+        <NodesPage />
+      </ToastProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("btn-update-agent-node_01")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId("btn-update-agent-node_01"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("btn-apply-agent-update")).toBeInTheDocument();
+    });
+
+    // Valid signature (untoggled corrupt signature)
+    fireEvent.click(screen.getByTestId("btn-apply-agent-update"));
+
+    // Verify success banner and verified status
+    await waitFor(() => {
+      expect(screen.getByTestId("agent-update-success-alert")).toBeInTheDocument();
+      expect(screen.getByTestId("badge-update-verified")).toHaveTextContent("VERIFIED & UPDATED");
+    });
+  });
+
+  it("renders node fullness/saturation percentage in table (DoD: T16.01)", async () => {
+    render(
+      <ToastProvider>
+        <NodesPage />
+      </ToastProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("node-master-01")).toBeInTheDocument();
+    });
+
+    // DoD check: Admin UI shows node saturation/fullness percentage
+    expect(screen.getByText("68%")).toBeInTheDocument();
+    expect(screen.getByText("85%")).toBeInTheDocument();
+    expect(screen.getByText("Fullness (%)")).toBeInTheDocument();
+  });
+
+  it("renders cluster capacity overview metrics", async () => {
+    render(
+      <ToastProvider>
+        <NodesPage />
+      </ToastProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("cluster-capacity-overview")).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("Cluster Fullness")).toBeInTheDocument();
+    expect(screen.getByText("Placement Scheduler")).toBeInTheDocument();
+  });
+
+  it("toggles node drain and undrain actions", async () => {
+    const apiFetchSpy = vi.spyOn(dhpanelApi, "apiFetch");
+
+    render(
+      <ToastProvider>
+        <NodesPage />
+      </ToastProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("node-master-01")).toBeInTheDocument();
+    });
+
+    // node-master-01 is online, so it has a Drain button
+    const drainBtn = screen.getAllByRole("button", { name: /^Drain$/i })[0];
+    expect(drainBtn).toBeInTheDocument();
+    fireEvent.click(drainBtn);
+
+    await waitFor(() => {
+      expect(apiFetchSpy).toHaveBeenCalledWith(
+        "/api/v1/admin/nodes/node_01/drain",
+        expect.objectContaining({ method: "POST" })
+      );
+    });
+
+    // node-worker-02 is draining, so it has an Undrain button
+    const undrainBtn = screen.getAllByRole("button", { name: /^Undrain$/i })[0];
+    expect(undrainBtn).toBeInTheDocument();
+    fireEvent.click(undrainBtn);
+
+    await waitFor(() => {
+      expect(apiFetchSpy).toHaveBeenCalledWith(
+        "/api/v1/admin/nodes/node_02/undrain",
+        expect.objectContaining({ method: "POST" })
+      );
+    });
+  });
+
+  it("opens oversell configuration dialog and saves updated ratios", async () => {
+    const apiFetchSpy = vi.spyOn(dhpanelApi, "apiFetch");
+
+    render(
+      <ToastProvider>
+        <NodesPage />
+      </ToastProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("node-master-01")).toBeInTheDocument();
+    });
+
+    const editCapacityBtns = screen.getAllByRole("button", { name: /Capacity \/ Oversell/i });
+    fireEvent.click(editCapacityBtns[0]);
+
+    await waitFor(() => {
+      expect(screen.getByText("Oversell Settings")).toBeInTheDocument();
+    });
+
+    const saveBtn = screen.getByRole("button", { name: /Save Changes/i });
+    fireEvent.click(saveBtn);
+
+    await waitFor(() => {
+      expect(apiFetchSpy).toHaveBeenCalledWith(
+        "/api/v1/admin/nodes/node_01/capacity",
+        expect.objectContaining({ method: "PUT" })
+      );
+    });
+  });
+
+  it("opens placement scheduler configuration dialog and verifies live simulation (DoD T16.02)", async () => {
+    const apiFetchSpy = vi.spyOn(dhpanelApi, "apiFetch");
+
+    render(
+      <ToastProvider>
+        <NodesPage />
+      </ToastProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("node-master-01")).toBeInTheDocument();
+    });
+
+    const schedulerBtn = screen.getByTestId("configure-scheduler-btn");
+    expect(schedulerBtn).toBeInTheDocument();
+    fireEvent.click(schedulerBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText("Placement Scheduler & Policies")).toBeInTheDocument();
+      expect(screen.getByTestId("placement-simulation-card")).toBeInTheDocument();
+    });
+
+    // Check that excluded nodes list contains draining nodes
+    expect(screen.getByText(/Disqualified Draining \/ Offline Nodes/i)).toBeInTheDocument();
+
+    // Click Save Changes
+    const saveBtn = screen.getByRole("button", { name: /Save Changes/i });
+    fireEvent.click(saveBtn);
+
+    await waitFor(() => {
+      expect(apiFetchSpy).toHaveBeenCalledWith(
+        "/api/v1/admin/cluster/scheduler",
+        expect.objectContaining({ method: "PUT" })
+      );
+    });
+  });
+
+  it("displays node offline alert banner and triggers emergency failover (DoD T16.07)", async () => {
+    render(
+      <ToastProvider>
+        <NodesPage />
+      </ToastProvider>
+    );
+
+    // Verify alert banner is displayed for offline node
+    await waitFor(() => {
+      expect(screen.getByTestId("node-offline-alert-banner")).toBeInTheDocument();
+      expect(screen.getByText("node-worker-03-backup")).toBeInTheDocument();
+      expect(screen.getByTestId("btn-trigger-failover")).toBeInTheDocument();
+    });
+
+    // Click trigger failover
+    fireEvent.click(screen.getByTestId("btn-trigger-failover"));
+
+    // Verify modal opens
+    await waitFor(() => {
+      expect(screen.getByText("Emergency Node Failover")).toBeInTheDocument();
+      expect(screen.getByTestId("btn-confirm-failover")).toBeInTheDocument();
+    });
+
+    // Confirm failover
+    fireEvent.click(screen.getByTestId("btn-confirm-failover"));
+
+    await waitFor(() => {
+      expect(screen.queryByText("Emergency Node Failover")).not.toBeInTheDocument();
+    });
   });
 });

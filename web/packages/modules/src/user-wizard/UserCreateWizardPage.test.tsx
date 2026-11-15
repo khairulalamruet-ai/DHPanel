@@ -132,4 +132,78 @@ describe("UserCreateWizardPage (T04.16)", () => {
     // Verify container name displayed
     expect(screen.getByText("dh-tenant-demouser")).toBeInTheDocument();
   });
+
+  it("DoD T16.02: auto placement strictly excludes draining nodes from scheduling", async () => {
+    renderWithProviders(<UserCreateWizardPage />);
+
+    // Fill Step 1
+    fireEvent.change(screen.getByLabelText(/Username|ইউজারনেম/i), { target: { value: "autouser" } });
+    fireEvent.change(screen.getByLabelText(/Email|ইমেইল/i), { target: { value: "auto@example.com" } });
+    fireEvent.change(screen.getByLabelText(/Password|পাসওয়ার্ড/i), { target: { value: "SecretPassword123!" } });
+
+    // Step 1 -> Step 2
+    fireEvent.click(screen.getByRole("button", { name: /Next Step|পরবর্তী ধাপ/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Select Hosting Plan|হোস্টিং প্যাকেজ নির্বাচন/i)).toBeInTheDocument();
+    });
+
+    // Step 2 -> Step 3
+    fireEvent.click(screen.getByRole("button", { name: /Next Step|পরবর্তী ধাপ/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Cluster Node Assignment|ক্লাস্টার নোড নির্ধারণ/i)).toBeInTheDocument();
+    });
+
+    // Auto placement should display least-loaded node and notice of excluded draining nodes
+    expect(screen.getAllByText(/node-sgp-01/i).length).toBeGreaterThan(0);
+    expect(
+      screen.getByText(/draining node\(s\) automatically excluded|ড্রেনিং নোড প্লেসমেন্ট থেকে স্বয়ংক্রিয়ভাবে বাদ/i)
+    ).toBeInTheDocument();
+  });
+
+  it("DoD T16.02: manual node selection blocks selecting draining nodes and prevents step advancement", async () => {
+    renderWithProviders(<UserCreateWizardPage />);
+
+    // Fill Step 1
+    fireEvent.change(screen.getByLabelText(/Username|ইউজারনেম/i), { target: { value: "manualuser" } });
+    fireEvent.change(screen.getByLabelText(/Email|ইমেইল/i), { target: { value: "manual@example.com" } });
+    fireEvent.change(screen.getByLabelText(/Password|পাসওয়ার্ড/i), { target: { value: "SecretPassword123!" } });
+
+    // Step 1 -> Step 2
+    fireEvent.click(screen.getByRole("button", { name: /Next Step|পরবর্তী ধাপ/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Select Hosting Plan|হোস্টিং প্যাকেজ নির্বাচন/i)).toBeInTheDocument();
+    });
+
+    // Step 2 -> Step 3
+    fireEvent.click(screen.getByRole("button", { name: /Next Step|পরবর্তী ধাপ/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Cluster Node Assignment|ক্লাস্টার নোড নির্ধারণ/i)).toBeInTheDocument();
+    });
+
+    // Find draining node card
+    const drainingNode = screen.getByTestId("node-item-draining");
+    expect(drainingNode).toBeInTheDocument();
+
+    // Click draining node
+    fireEvent.click(drainingNode);
+
+    // Validation error must appear
+    expect(
+      screen.getByText(/Cannot place new tenant on a draining node|ড্রেনিং মোডে থাকা নোডে নতুন টেন্যান্ট স্থাপন করা যায় না/i)
+    ).toBeInTheDocument();
+
+    // Clicking Next button should block advancement
+    const nextBtn = screen.getByRole("button", { name: /Next Step|পরবর্তী ধাপ/i });
+    fireEvent.click(nextBtn);
+
+    // Still on Step 3
+    expect(screen.getByText(/Cluster Node Assignment|ক্লাস্টার নোড নির্ধারণ/i)).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { level: 3, name: /Primary Domain|প্রাথমিক ডোমেইন/i })
+    ).not.toBeInTheDocument();
+  });
 });

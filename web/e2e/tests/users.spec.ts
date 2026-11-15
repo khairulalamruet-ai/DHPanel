@@ -21,7 +21,7 @@ test.describe("Users Management UI (T04.15)", () => {
     await expect(page.getByText(/Page 1 of 100|[1১][0০][0০] পৃষ্ঠার মধ্যে [1১] নং পৃষ্ঠা/i)).toBeVisible();
 
     // Navigate to page 2
-    const nextBtn = page.getByRole("button", { name: "Next page" });
+    const nextBtn = page.getByRole("button", { name: /Next page|পরবর্তী পৃষ্ঠা/i });
     await expect(nextBtn).toBeEnabled();
     await nextBtn.click();
 
@@ -80,5 +80,15 @@ test.describe("Users Management UI (T04.15)", () => {
     await confirmBtn.click();
 
     await expect(dialog).not.toBeVisible();
+  });
+
+  test("displays node offline badge for tenants hosted on offline nodes (T16.07)", async ({ page }) => {
+    // In mockUsers, users on node-nyc-01 (e.g. gamma) are on offline nodes
+    await expect(page.locator("table").getByText("gamma", { exact: true })).toBeVisible();
+
+    // Verify tenant-node-offline-badge is visible
+    const offlineBadge = page.getByTestId("tenant-node-offline-badge").first();
+    await expect(offlineBadge).toBeVisible();
+    await expect(offlineBadge).toContainText(/Node Offline|নোড অফলাইন/i);
   });
 });

@@ -9,13 +9,14 @@ import { ThemeProvider, ToastProvider } from "@dhpanel/ui";
 import { SessionProvider, useSession, LoginPage, AccountSecurityPage } from "@dhpanel/auth";
 import { queryClient, QueryClientProvider } from "@dhpanel/api";
 import { AppShell, NotFoundPage, RouteErrorFallback } from "@dhpanel/shell";
-import { ClientDashboardPage, ClientDomainsPage, DnsEditorPage, SslPage, PhpManagementPage, ServicesPage, ClientDatabasesPage, FileManagerPage, DiskUsagePage, FtpAccountsPage, ClientBackupsPage, CronJobsPage, LogViewerPage, ClientUsagePage, ClientProcessesPage, ClientWafPage } from "@dhpanel/modules";
+import { ClientDashboardPage, ClientDomainsPage, DnsEditorPage, SslPage, PhpManagementPage, ServicesPage, ClientDatabasesPage, FileManagerPage, DiskUsagePage, FtpAccountsPage, ClientBackupsPage, CronJobsPage, LogViewerPage, ClientUsagePage, ClientProcessesPage, ClientWafPage, ClientFirewallPage, AppsPage, ClientEmailPage, ResellerPortalPage, MigrationPage, NotificationBell, NotificationPreferencesPage, CommandPalette, CommandPaletteTrigger } from "@dhpanel/modules";
 import { useTranslation } from "@dhpanel/i18n";
-import { LayoutDashboard, ShieldCheck, ShieldAlert, Globe, Lock, Database, Folder, Server, Archive, Clock, FileText, Activity, Terminal } from "lucide-react";
+import { LayoutDashboard, ShieldCheck, ShieldAlert, Globe, Lock, Database, Folder, Server, Archive, Clock, FileText, Activity, Terminal, Flame, Boxes, Mail, Briefcase, ArrowRightLeft } from "lucide-react";
 
 function AuthenticatedContent() {
   const { data: session, isLoading } = useSession();
   const { t } = useTranslation();
+  const [commandPaletteOpen, setCommandPaletteOpen] = React.useState(false);
 
   const navItems = [
     {
@@ -97,6 +98,36 @@ function AuthenticatedContent() {
       href: "/waf",
     },
     {
+      id: "firewall",
+      labelKey: "firewall.nav",
+      icon: <Flame className="h-4 w-4" />,
+      href: "/firewall",
+    },
+    {
+      id: "apps",
+      labelKey: "apps.nav",
+      icon: <Boxes className="h-4 w-4" />,
+      href: "/apps",
+    },
+    {
+      id: "email",
+      labelKey: "email.nav",
+      icon: <Mail className="h-4 w-4" />,
+      href: "/email",
+    },
+    {
+      id: "reseller",
+      labelKey: "reseller.nav",
+      icon: <Briefcase className="h-4 w-4" />,
+      href: "/reseller",
+    },
+    {
+      id: "migration",
+      labelKey: "migration.nav",
+      icon: <ArrowRightLeft className="h-4 w-4" />,
+      href: "/migration",
+    },
+    {
       id: "security",
       labelKey: "security.nav",
       icon: <ShieldCheck className="h-4 w-4" />,
@@ -122,9 +153,25 @@ function AuthenticatedContent() {
   }
 
   return (
-    <AppShell title={t("common.clientTitle")} navItems={navItems}>
-      <Outlet />
-    </AppShell>
+    <>
+      <AppShell
+        title={t("common.clientTitle")}
+        navItems={navItems}
+        headerActions={
+          <div className="flex items-center gap-2">
+            <CommandPaletteTrigger onClick={() => setCommandPaletteOpen(true)} />
+            <NotificationBell settingsHref="/settings/notifications" />
+          </div>
+        }
+      >
+        <Outlet />
+      </AppShell>
+      <CommandPalette
+        open={commandPaletteOpen}
+        onOpenChange={setCommandPaletteOpen}
+        onNavigate={(href) => router.navigate({ to: href as any })}
+      />
+    </>
   );
 }
 
@@ -244,10 +291,52 @@ const wafRoute = createRoute({
   component: ClientWafPage,
 });
 
+const firewallRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/firewall",
+  component: ClientFirewallPage,
+});
+
+const appsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/apps",
+  component: AppsPage,
+});
+
+const emailRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/email",
+  component: ClientEmailPage,
+});
+
+const resellerRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/reseller",
+  component: ResellerPortalPage,
+});
+
+const migrationRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/migration",
+  component: MigrationPage,
+});
+
 const securityRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/security",
   component: AccountSecurityPage,
+});
+
+const notificationsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/notifications",
+  component: NotificationPreferencesPage,
+});
+
+const settingsNotificationsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/settings/notifications",
+  component: NotificationPreferencesPage,
 });
 
 const loginRoute = createRoute({
@@ -264,7 +353,7 @@ const loginRoute = createRoute({
   },
 });
 
-const routeTree = rootRoute.addChildren([indexRoute, domainsRoute, dnsRoute, sslRoute, phpRoute, servicesRoute, databasesRoute, filesRoute, diskUsageRoute, ftpRoute, backupsRoute, cronRoute, logsRoute, usageRoute, processesRoute, wafRoute, securityRoute, loginRoute]);
+const routeTree = rootRoute.addChildren([indexRoute, domainsRoute, dnsRoute, sslRoute, phpRoute, servicesRoute, databasesRoute, filesRoute, diskUsageRoute, ftpRoute, backupsRoute, cronRoute, logsRoute, usageRoute, processesRoute, wafRoute, firewallRoute, appsRoute, emailRoute, resellerRoute, migrationRoute, securityRoute, notificationsRoute, settingsNotificationsRoute, loginRoute]);
 
 export const router = createRouter({
   routeTree,

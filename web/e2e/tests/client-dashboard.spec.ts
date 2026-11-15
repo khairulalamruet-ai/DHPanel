@@ -56,18 +56,20 @@ test.describe("Client Dashboard UI (T04.18)", () => {
     // Section header
     await expect(page.getByText(/Quick Tools & Shortcuts|দ্রুত সরঞ্জাম ও শর্টকাট/i)).toBeVisible();
 
+    const shortcutsGrid = page.getByTestId("all-shortcuts-grid");
+
     // Shortcut cards
-    await expect(page.getByRole("heading", { name: "File Manager" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Domain Names" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Databases" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "SSL / TLS" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Cron Jobs" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "PHP Configuration" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Backup & Restore" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Account Security" })).toBeVisible();
+    await expect(shortcutsGrid.getByRole("heading", { name: "File Manager" })).toBeVisible();
+    await expect(shortcutsGrid.getByRole("heading", { name: "Domain Names" })).toBeVisible();
+    await expect(shortcutsGrid.getByRole("heading", { name: "Databases" })).toBeVisible();
+    await expect(shortcutsGrid.getByRole("heading", { name: "SSL / TLS" })).toBeVisible();
+    await expect(shortcutsGrid.getByRole("heading", { name: "Cron Jobs" })).toBeVisible();
+    await expect(shortcutsGrid.getByRole("heading", { name: "PHP Configuration" })).toBeVisible();
+    await expect(shortcutsGrid.getByRole("heading", { name: "Backup & Restore" })).toBeVisible();
+    await expect(shortcutsGrid.getByRole("heading", { name: "Account Security" })).toBeVisible();
 
     // Click upcoming shortcut to verify notification toast
-    const fileManagerCard = page.getByRole("heading", { name: "File Manager" });
+    const fileManagerCard = shortcutsGrid.getByRole("heading", { name: "File Manager" });
     await fileManagerCard.click();
     await expect(page.getByText(/Scheduled for delivery in Phase 05/i)).toBeVisible();
   });
@@ -85,5 +87,41 @@ test.describe("Client Dashboard UI (T04.18)", () => {
     await expect(page.getByText("user.login")).toBeVisible();
     await expect(page.getByText("Client portal session active")).toBeVisible();
     await expect(page.getByText("ssl.renewed")).toBeVisible();
+  });
+
+  test("displays SSL warnings and latest backup card (T18.02)", async ({ page }) => {
+    // SSL warning banner
+    await expect(page.getByTestId("client-ssl-warning-banner")).toBeVisible();
+    await expect(
+      page.getByText(/SSL Certificate Expiring Soon|এসএসএল সার্টিফিকেটের মেয়াদ/i).first()
+    ).toBeVisible();
+
+    // Latest Backup card
+    await expect(page.getByTestId("client-last-backup-card")).toBeVisible();
+    await expect(page.getByText(/Latest Backup|সর্বশেষ ব্যাকআপ/i)).toBeVisible();
+    await expect(page.getByText("248 MB")).toBeVisible();
+    await expect(page.getByTestId("btn-manage-backups")).toBeVisible();
+  });
+
+  test("supports pinning and toggling favorite shortcuts with persistence", async ({ page }) => {
+    // Verify favorites section is rendered
+    await expect(page.getByTestId("client-favorites-section")).toBeVisible();
+
+    // Toggle favorite star for cron
+    const cronStarBtn = page.getByTestId("btn-favorite-cron").first();
+    await expect(cronStarBtn).toBeVisible();
+    await cronStarBtn.click();
+
+    // Check localStorage in browser
+    const stored = await page.evaluate(() => localStorage.getItem("dhpanel-client-favorites"));
+    expect(stored).toBeTruthy();
+  });
+
+  test("DoD: client dashboard loads and renders in under 2 seconds", async ({ page }) => {
+    const start = Date.now();
+    await page.goto("/client");
+    await expect(page.getByTestId("client-dashboard-page")).toBeVisible();
+    const loadDuration = Date.now() - start;
+    expect(loadDuration).toBeLessThan(2000);
   });
 });

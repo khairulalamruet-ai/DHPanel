@@ -33,6 +33,13 @@ vi.mock("@dhpanel/i18n", () => ({
         "clientDashboard.primaryDomain.desc": "Web host details, web server document root, and SSL encryption status",
         "clientDashboard.activity.title": "Recent Stack Events",
         "clientDashboard.activity.desc": "Audit records and automated container health maintenance events",
+        "clientDashboard.sslWarningTitle": "SSL Certificate Expiring Soon",
+        "clientDashboard.sslWarningDesc": "The SSL certificate for {{domain}} expires in {{days}} days.",
+        "clientDashboard.renewSsl": "Renew Certificate",
+        "clientDashboard.lastBackupTitle": "Latest Backup",
+        "clientDashboard.lastBackupDesc": "Snapshot state and automatic backup protection",
+        "clientDashboard.manageBackups": "Manage Backups",
+        "clientDashboard.favoritesTitle": "Favorite Tools",
       };
       return dict[key] || key;
     },
@@ -112,6 +119,20 @@ const mockDashboardData = {
       description: "SSL Certificate auto-renewed for alpha-hosting.com",
     },
   ],
+  last_backup: {
+    created_at: "2026-11-13T10:00:00Z",
+    size_mb: 248,
+    status: "completed" as const,
+    type: "automatic" as const,
+  },
+  ssl_warnings: [
+    {
+      domain: "staging.alpha-hosting.com",
+      issuer: "Let's Encrypt",
+      expires_in_days: 7,
+      severity: "warning" as const,
+    },
+  ],
 };
 
 const mockApiFetch = vi.fn();
@@ -119,10 +140,25 @@ vi.mock("@dhpanel/api", () => ({
   apiFetch: (...args: any[]) => mockApiFetch(...args),
 }));
 
+const mockLocalStorage: Record<string, string> = {};
+
 describe("ClientDashboardPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockApiFetch.mockResolvedValue(mockDashboardData);
+    Object.keys(mockLocalStorage).forEach((k) => delete mockLocalStorage[k]);
+    vi.stubGlobal("localStorage", {
+      getItem: vi.fn((key: string) => mockLocalStorage[key] || null),
+      setItem: vi.fn((key: string, val: string) => {
+        mockLocalStorage[key] = val;
+      }),
+      removeItem: vi.fn((key: string) => {
+        delete mockLocalStorage[key];
+      }),
+      clear: vi.fn(() => {
+        Object.keys(mockLocalStorage).forEach((k) => delete mockLocalStorage[k]);
+      }),
+    });
   });
 
   it("renders tenant welcome card with username, plan, and container status", async () => {
@@ -180,13 +216,13 @@ describe("ClientDashboardPage", () => {
       expect(screen.getByText("Quick Tools & Shortcuts")).toBeInTheDocument();
     });
 
-    expect(screen.getByText("File Manager")).toBeInTheDocument();
-    expect(screen.getByText("Domain Names")).toBeInTheDocument();
+    expect(screen.getAllByText("File Manager").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("Domain Names").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("Databases").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText("SSL / TLS")).toBeInTheDocument();
-    expect(screen.getByText("Cron Jobs")).toBeInTheDocument();
-    expect(screen.getByText("PHP Configuration")).toBeInTheDocument();
-    expect(screen.getByText("Backup & Restore")).toBeInTheDocument();
+    expect(screen.getAllByText("SSL / TLS").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("Cron Jobs").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("PHP Configuration").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("Backup & Restore").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("Account Security").length).toBeGreaterThanOrEqual(1);
 
     // Check phase badges
@@ -221,14 +257,54 @@ describe("ClientDashboardPage", () => {
     renderWithToast(<ClientDashboardPage />);
 
     await waitFor(() => {
-      expect(screen.getByText("File Manager")).toBeInTheDocument();
+      expect(screen.getAllByText("File Manager").length).toBeGreaterThanOrEqual(1);
     });
 
-    const fileCard = screen.getByText("File Manager");
+    const fileCard = screen.getAllByText("File Manager")[0];
     fireEvent.click(fileCard);
 
     await waitFor(() => {
       expect(screen.getByText("Scheduled for delivery in Phase 05")).toBeInTheDocument();
     });
+  });
+
+  it("renders SSL expiration warning banner and latest backup card", async () => {
+    renderWithToast(<ClientDashboardPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("client-ssl-warning-banner")).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("SSL Certificate Expiring Soon")).toBeInTheDocument();
+    expect(screen.getByText(/7 days left/i)).toBeInTheDocument();
+
+    // Latest Backup Card
+    expect(screen.getByTestId("client-last-backup-card")).toBeInTheDocument();
+    expect(screen.getByText("COMPLETED")).toBeInTheDocument();
+    expect(screen.getByText("248 MB")).toBeInTheDocument();
+  });
+
+  it("pins and unpins favorite tools with localStorage persistence", async () => {
+    renderWithToast(<ClientDashboardPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("client-favorites-section")).toBeInTheDocument();
+    });
+
+    const cronFavBtn = screen.getByTestId("btn-favorite-cron");
+    fireEvent.click(cronFavBtn);
+
+    const savedFavs = JSON.parse(localStorage.getItem("dhpanel-client-favorites") || "[]");
+    expect(savedFavs).toContain("cron");
+  });
+
+  it("DoD: renders complete dashboard in under 2 seconds", async () => {
+    const startTime = performance.now();
+    renderWithToast(<ClientDashboardPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId("client-dashboard-page")).toBeInTheDocument();
+    });
+    const duration = performance.now() - startTime;
+    expect(duration).toBeLessThan(2000);
   });
 });

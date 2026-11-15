@@ -518,6 +518,10 @@ export interface MockPlan {
   limits: MockPlanLimits;
   created_at: string;
   updated_at: string;
+  node_group_id?: string | null;
+  node_group_name?: string | null;
+  target_tags?: string[];
+  target_region?: string | null;
 }
 
 export const getInitialPlans = (): MockPlan[] => [
@@ -529,6 +533,10 @@ export const getInitialPlans = (): MockPlan[] => [
     feature_set_name: "Basic Web",
     is_default: false,
     users_count: 8,
+    node_group_id: "ng_global",
+    node_group_name: "Global Cluster (Default)",
+    target_region: "global",
+    target_tags: ["general", "standard"],
     resources: {
       cpu: 1,
       memory_mb: 1024,
@@ -554,6 +562,10 @@ export const getInitialPlans = (): MockPlan[] => [
     feature_set_name: "Default (Full Stack)",
     is_default: true,
     users_count: 24,
+    node_group_id: "ng_us_east",
+    node_group_name: "US-East General Pool",
+    target_region: "us-east-1",
+    target_tags: ["us-east", "nvme", "ssd"],
     resources: {
       cpu: 2,
       memory_mb: 2048,
@@ -579,6 +591,10 @@ export const getInitialPlans = (): MockPlan[] => [
     feature_set_name: "Default (Full Stack)",
     is_default: false,
     users_count: 5,
+    node_group_id: "ng_sgp_highmem",
+    node_group_name: "Singapore High-RAM Pool",
+    target_region: "ap-southeast-1",
+    target_tags: ["apac", "highmem", "high-cpu"],
     resources: {
       cpu: 4,
       memory_mb: 4096,
@@ -604,6 +620,10 @@ export const getInitialPlans = (): MockPlan[] => [
     feature_set_name: "Default (Full Stack)",
     is_default: false,
     users_count: 2,
+    node_group_id: "ng_fra_isolated",
+    node_group_name: "Frankfurt EU-West Group",
+    target_region: "eu-central-1",
+    target_tags: ["eu", "gdpr", "dedicated"],
     resources: {
       cpu: -1,
       memory_mb: -1,
@@ -638,6 +658,8 @@ export interface MockUser {
   plan_name: string;
   node_id: string;
   node_name: string;
+  node_status?: "online" | "offline" | "draining" | "revoked";
+  is_node_offline?: boolean;
   primary_domain: string;
   disk_used_bytes: number;
   disk_limit_bytes: number;
@@ -657,9 +679,9 @@ const mockPlansList = [
 ];
 
 const mockNodesList = [
-  { id: "node-sgp-01", name: "node-sgp-01 (Singapore)" },
-  { id: "node-fra-01", name: "node-fra-01 (Frankfurt)" },
-  { id: "node-nyc-01", name: "node-nyc-01 (New York)" },
+  { id: "node-sgp-01", name: "node-sgp-01 (Singapore)", status: "online" as const },
+  { id: "node-fra-01", name: "node-fra-01 (Frankfurt)", status: "online" as const },
+  { id: "node-nyc-01", name: "node-nyc-01 (New York)", status: "offline" as const },
 ];
 
 export const getInitialUsers = (): MockUser[] => {
@@ -694,6 +716,8 @@ export const getInitialUsers = (): MockUser[] => {
       plan_name: plan.name,
       node_id: node.id,
       node_name: node.name,
+      node_status: node.status,
+      is_node_offline: node.status === "offline",
       primary_domain: `${username}.com`,
       disk_used_bytes: diskUsed,
       disk_limit_bytes: diskLimit,
@@ -1196,9 +1220,77 @@ const getInitialDnsRecords = (): MockDnsRecord[] => [
 let mockDnsZones = getInitialDnsZones();
 let mockDnsRecords = getInitialDnsRecords();
 
+export interface MockDnsClusterServer {
+  id: string;
+  name: string;
+  hostname: string;
+  ip_address: string;
+  port: number;
+  api_url: string;
+  role: "primary" | "secondary" | "replica";
+  status: "online" | "offline" | "syncing" | "error";
+  sync_strategy: "native_db" | "axfr" | "api_push";
+  zones_count: number;
+  last_sync_at: string;
+  latency_ms: number;
+  version?: string;
+  is_draining?: boolean;
+}
+
+export const getInitialDnsClusterServers = (): MockDnsClusterServer[] => [
+  {
+    id: "dns_srv_01",
+    name: "Primary PowerDNS US-East",
+    hostname: "ns1.dhpanel.internal",
+    ip_address: "192.0.2.11",
+    port: 53,
+    api_url: "http://192.0.2.11:8081",
+    role: "primary",
+    status: "online",
+    sync_strategy: "native_db",
+    zones_count: 14,
+    last_sync_at: new Date(Date.now() - 60000).toISOString(),
+    latency_ms: 12,
+    version: "PowerDNS Authoritative 4.9.1",
+  },
+  {
+    id: "dns_srv_02",
+    name: "Secondary PowerDNS EU-Central",
+    hostname: "ns2.dhpanel.internal",
+    ip_address: "198.51.100.22",
+    port: 53,
+    api_url: "http://198.51.100.22:8081",
+    role: "secondary",
+    status: "online",
+    sync_strategy: "axfr",
+    zones_count: 14,
+    last_sync_at: new Date(Date.now() - 120000).toISOString(),
+    latency_ms: 45,
+    version: "PowerDNS Authoritative 4.9.1",
+  },
+  {
+    id: "dns_srv_03",
+    name: "Edge Replica PowerDNS AP-South",
+    hostname: "ns3.dhpanel.internal",
+    ip_address: "203.0.113.33",
+    port: 53,
+    api_url: "http://203.0.113.33:8081",
+    role: "replica",
+    status: "online",
+    sync_strategy: "api_push",
+    zones_count: 14,
+    last_sync_at: new Date(Date.now() - 180000).toISOString(),
+    latency_ms: 88,
+    version: "PowerDNS Authoritative 4.9.1",
+  },
+];
+
+let mockDnsClusterServers = getInitialDnsClusterServers();
+
 export const resetMockDns = () => {
   mockDnsZones = getInitialDnsZones();
   mockDnsRecords = getInitialDnsRecords();
+  mockDnsClusterServers = getInitialDnsClusterServers();
 };
 
 interface MockSslCert {
@@ -2324,6 +2416,19 @@ export const handlers = [
           docker_version: "27.3.1",
           security_features: ["seccomp", "apparmor", "userns"],
         },
+        capacity: {
+          allocated_cpu_cores: 12,
+          allocated_ram_bytes: 18 * 1024 * 1024 * 1024,
+          allocated_disk_bytes: 160 * 1024 * 1024 * 1024,
+          tenants_count: 24,
+          max_tenants: 50,
+          saturation_pct: 68,
+          oversell: {
+            cpu_ratio: 2.0,
+            ram_ratio: 1.25,
+            disk_ratio: 1.0,
+          },
+        },
       },
       {
         id: "00000000-0000-0000-0000-0000000000bb",
@@ -2346,6 +2451,19 @@ export const handlers = [
           kernel: "Linux 6.8.0-45-generic",
           docker_version: "27.3.1",
           security_features: ["seccomp", "apparmor"],
+        },
+        capacity: {
+          allocated_cpu_cores: 28,
+          allocated_ram_bytes: 34 * 1024 * 1024 * 1024,
+          allocated_disk_bytes: 420 * 1024 * 1024 * 1024,
+          tenants_count: 48,
+          max_tenants: 60,
+          saturation_pct: 85,
+          oversell: {
+            cpu_ratio: 2.0,
+            ram_ratio: 1.25,
+            disk_ratio: 1.0,
+          },
         },
       },
       {
@@ -2370,6 +2488,19 @@ export const handlers = [
           docker_version: "26.1.4",
           security_features: ["seccomp"],
         },
+        capacity: {
+          allocated_cpu_cores: 2,
+          allocated_ram_bytes: 2 * 1024 * 1024 * 1024,
+          allocated_disk_bytes: 25 * 1024 * 1024 * 1024,
+          tenants_count: 4,
+          max_tenants: 20,
+          saturation_pct: 22,
+          oversell: {
+            cpu_ratio: 2.0,
+            ram_ratio: 1.25,
+            disk_ratio: 1.0,
+          },
+        },
       },
     ];
 
@@ -2383,6 +2514,115 @@ export const handlers = [
         status: "pending",
       },
     ];
+
+    interface MockNodeIp {
+      id: string;
+      node_id: string;
+      node_name: string;
+      ip_address: string;
+      subnet_mask: string;
+      interface_name: string;
+      type: "shared" | "dedicated";
+      status: "active" | "available" | "reserved";
+      is_primary: boolean;
+      assigned_tenant_id?: string | null;
+      assigned_tenant_username?: string | null;
+      assigned_domain?: string | null;
+      shared_tenants_count?: number;
+      created_at: string;
+      updated_at: string;
+    }
+
+    const subnetMaskTrim = (mask?: string) => (mask ? mask.trim() : "255.255.255.0");
+
+    const initialMockIps: MockNodeIp[] = [
+      {
+        id: "ip_01",
+        node_id: "00000000-0000-0000-0000-0000000000aa",
+        node_name: "node-master-01",
+        ip_address: "167.104.101.81",
+        subnet_mask: "255.255.255.0",
+        interface_name: "eth0",
+        type: "shared",
+        status: "active",
+        is_primary: true,
+        shared_tenants_count: 24,
+        created_at: new Date(Date.now() - 30 * 86400000).toISOString(),
+        updated_at: new Date(Date.now() - 30 * 86400000).toISOString(),
+      },
+      {
+        id: "ip_02",
+        node_id: "00000000-0000-0000-0000-0000000000aa",
+        node_name: "node-master-01",
+        ip_address: "167.104.101.82",
+        subnet_mask: "255.255.255.0",
+        interface_name: "eth0",
+        type: "shared",
+        status: "active",
+        is_primary: false,
+        shared_tenants_count: 10,
+        created_at: new Date(Date.now() - 20 * 86400000).toISOString(),
+        updated_at: new Date(Date.now() - 20 * 86400000).toISOString(),
+      },
+      {
+        id: "ip_03",
+        node_id: "00000000-0000-0000-0000-0000000000aa",
+        node_name: "node-master-01",
+        ip_address: "167.104.101.95",
+        subnet_mask: "255.255.255.0",
+        interface_name: "eth0:1",
+        type: "dedicated",
+        status: "active",
+        is_primary: false,
+        assigned_tenant_id: "usr_01",
+        assigned_tenant_username: "alex",
+        assigned_domain: "mail.alexblog.org",
+        created_at: new Date(Date.now() - 10 * 86400000).toISOString(),
+        updated_at: new Date(Date.now() - 2 * 86400000).toISOString(),
+      },
+      {
+        id: "ip_04",
+        node_id: "00000000-0000-0000-0000-0000000000aa",
+        node_name: "node-master-01",
+        ip_address: "167.104.101.96",
+        subnet_mask: "255.255.255.0",
+        interface_name: "eth0:2",
+        type: "dedicated",
+        status: "available",
+        is_primary: false,
+        created_at: new Date(Date.now() - 5 * 86400000).toISOString(),
+        updated_at: new Date(Date.now() - 5 * 86400000).toISOString(),
+      },
+      {
+        id: "ip_05",
+        node_id: "00000000-0000-0000-0000-0000000000bb",
+        node_name: "node-worker-02",
+        ip_address: "167.104.101.85",
+        subnet_mask: "255.255.255.0",
+        interface_name: "eth0",
+        type: "shared",
+        status: "active",
+        is_primary: true,
+        shared_tenants_count: 8,
+        created_at: new Date(Date.now() - 15 * 86400000).toISOString(),
+        updated_at: new Date(Date.now() - 15 * 86400000).toISOString(),
+      },
+      {
+        id: "ip_06",
+        node_id: "00000000-0000-0000-0000-0000000000bb",
+        node_name: "node-worker-02",
+        ip_address: "167.104.101.99",
+        subnet_mask: "255.255.255.0",
+        interface_name: "eth0:1",
+        type: "dedicated",
+        status: "available",
+        is_primary: false,
+        created_at: new Date(Date.now() - 8 * 86400000).toISOString(),
+        updated_at: new Date(Date.now() - 8 * 86400000).toISOString(),
+      },
+    ];
+
+    const mockIps = [...initialMockIps];
 
     return [
       // List Nodes (GET /api/v1/admin/nodes) TODO(api:T02.08)
@@ -2453,6 +2693,310 @@ export const handlers = [
           message: "Node revoked successfully",
         });
       }),
+
+      // Get Signed Release Manifest (GET /api/v1/admin/cluster/agent/release-manifest) TODO(api:T16.08)
+      http.get(/\/api\/v1\/admin\/cluster\/agent\/release-manifest$/, () => {
+        return HttpResponse.json({
+          version: "0.2.0",
+          channel: "stable",
+          signing_key_id: "ed25519-release-2026-v1",
+          signature: "ed25519:7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b",
+          checksum_sha256: "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9",
+          release_notes: "Hardened syscall sandbox & signed self-updater (Phase 16)",
+        });
+      }),
+
+      // Apply Signed Agent Self-Update (POST /api/v1/admin/cluster/nodes/:id/update-agent) TODO(api:T16.08)
+      http.post(/\/api\/v1\/admin\/cluster\/nodes\/([^/]+)\/update-agent$/, async ({ params, request }) => {
+        const { 0: nodeId } = params as any;
+        const body = (await request.json().catch(() => ({}))) as any;
+        const target = mockNodes.find((n) => n.id === nodeId || n.name === nodeId);
+
+        if (!target) {
+          return HttpResponse.json({ error: "node_not_found", message: "Node not found" }, { status: 404 });
+        }
+
+        // Signature verification (DoD T16.08: invalid signature rejected)
+        if (body.corrupt_signature || body.manifest_signature?.includes("invalid")) {
+          return HttpResponse.json(
+            {
+              error: "invalid_signature",
+              message: "ERR_SIGNATURE_MISMATCH: Agent binary signature verification failed. Update rejected.",
+            },
+            { status: 422 }
+          );
+        }
+
+        target.version = body.version || "0.2.0";
+        return HttpResponse.json({
+          success: true,
+          version: target.version,
+          message: "Agent self-update verified and applied successfully",
+        });
+      }),
+
+      // Drain Node (POST /api/v1/admin/nodes/:id/drain) TODO(api:T16.01, T16.02)
+      http.post(/\/api\/v1\/admin\/nodes\/([^/]+)\/drain$/, ({ params }) => {
+        const { 0: nodeId } = params as any;
+        const target = mockNodes.find((n) => n.id === nodeId || n.name === nodeId);
+        if (target) {
+          target.status = "draining";
+        }
+        return HttpResponse.json({
+          success: true,
+          status: "draining",
+          message: "Node is now draining",
+        });
+      }),
+
+      // Undrain Node (POST /api/v1/admin/nodes/:id/undrain) TODO(api:T16.01, T16.02)
+      http.post(/\/api\/v1\/admin\/nodes\/([^/]+)\/undrain$/, ({ params }) => {
+        const { 0: nodeId } = params as any;
+        const target = mockNodes.find((n) => n.id === nodeId || n.name === nodeId);
+        if (target) {
+          target.status = "online";
+        }
+        return HttpResponse.json({
+          success: true,
+          status: "online",
+          message: "Node restored to service",
+        });
+      }),
+
+      // Update Node Capacity & Oversell (PUT /api/v1/admin/nodes/:id/capacity) TODO(api:T16.01)
+      http.put(/\/api\/v1\/admin\/nodes\/([^/]+)\/capacity$/, async ({ params, request }) => {
+        const { 0: nodeId } = params as any;
+        const body = (await request.json().catch(() => ({}))) as any;
+        const target = mockNodes.find((n) => n.id === nodeId || n.name === nodeId);
+        if (target) {
+          if (target.capacity && body.oversell) {
+            target.capacity.oversell = {
+              ...target.capacity.oversell,
+              ...body.oversell,
+            };
+          }
+          if (target.capacity && typeof body.max_tenants === "number") {
+            target.capacity.max_tenants = body.max_tenants;
+          }
+        }
+        return HttpResponse.json({
+          success: true,
+          node: target,
+        });
+      }),
+
+      // Get Cluster Placement Scheduler Config (GET /api/v1/admin/cluster/scheduler) TODO(api:T16.02)
+      http.get(/\/api\/v1\/admin\/cluster\/scheduler$/, () => {
+        return HttpResponse.json({
+          policy: "least-loaded",
+          exclude_draining: true,
+          fallback_policy: "round-robin",
+        });
+      }),
+
+      // Update Cluster Placement Scheduler Config (PUT /api/v1/admin/cluster/scheduler) TODO(api:T16.02)
+      http.put(/\/api\/v1\/admin\/cluster\/scheduler$/, async ({ request }) => {
+        const body = (await request.json().catch(() => ({}))) as any;
+        return HttpResponse.json({
+          success: true,
+          policy: body.policy || "least-loaded",
+          exclude_draining: true,
+        });
+      }),
+      // Cluster IP Pools: List all cluster IP addresses & metrics (GET /api/v1/admin/cluster/ips)
+      // TODO(api:T16.05): Replace with real backend cluster IP pool endpoint
+      http.get(/\/api\/v1\/admin\/cluster\/ips$/, () => {
+        const total_ips = mockIps.length;
+        const shared_ips = mockIps.filter((i) => i.type === "shared").length;
+        const dedicated_total = mockIps.filter((i) => i.type === "dedicated").length;
+        const dedicated_assigned = mockIps.filter(
+          (i) => i.type === "dedicated" && i.assigned_tenant_id
+        ).length;
+        const dedicated_available = dedicated_total - dedicated_assigned;
+
+        return HttpResponse.json({
+          items: mockIps,
+          metrics: {
+            total_ips,
+            shared_ips,
+            dedicated_total,
+            dedicated_assigned,
+            dedicated_available,
+          },
+        });
+      }),
+
+      // Node IP Pool: List IP addresses for a node (GET /api/v1/admin/cluster/nodes/:nodeId/ips)
+      // TODO(api:T16.05): Replace with real backend node IP pool endpoint
+      http.get(/\/api\/v1\/admin\/cluster\/nodes\/([^/]+)\/ips$/, ({ params }) => {
+        const nodeId = (params.nodeId || params[0]) as string;
+        const filtered = mockIps.filter(
+          (i) => i.node_id === nodeId || i.node_name === nodeId
+        );
+        return HttpResponse.json({ items: filtered, total: filtered.length });
+      }),
+
+      // Node IP Pool: Add IP address to node (POST /api/v1/admin/cluster/nodes/:nodeId/ips)
+      // TODO(api:T16.05): Replace with real backend node IP pool endpoint
+      http.post(
+        /\/api\/v1\/admin\/cluster\/nodes\/([^/]+)\/ips$/,
+        async ({ params, request }) => {
+          const nodeId = (params.nodeId || params[0]) as string;
+          const body = (await request.json().catch(() => ({}))) as any;
+          const {
+            ip_address,
+            subnet_mask = "255.255.255.0",
+            interface_name = "eth0",
+            type = "dedicated",
+          } = body || {};
+
+          if (!ip_address) {
+            return HttpResponse.json({ message: "IP address is required" }, { status: 400 });
+          }
+
+          const targetNode = mockNodes.find(
+            (n) => n.id === nodeId || n.name === nodeId
+          );
+          const nodeName = targetNode ? targetNode.name : "node-master-01";
+
+          const newIp: MockNodeIp = {
+            id: `ip_${Date.now()}`,
+            node_id: targetNode ? targetNode.id : nodeId,
+            node_name: nodeName,
+            ip_address: ip_address.trim(),
+            subnet_mask: subnetMaskTrim(subnet_mask),
+            interface_name: interface_name.trim() || "eth0",
+            type: type === "shared" ? "shared" : "dedicated",
+            status: type === "shared" ? "active" : "available",
+            is_primary: false,
+            shared_tenants_count: type === "shared" ? 0 : undefined,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          };
+
+          mockIps.unshift(newIp);
+          return HttpResponse.json(newIp, { status: 201 });
+        }
+      ),
+
+      // Node IP Pool: Allocate dedicated IP to tenant (POST /api/v1/admin/cluster/nodes/:nodeId/ips/:ipId/assign)
+      // TODO(api:T16.05): Replace with real backend IP allocation endpoint
+      http.post(
+        /\/api\/v1\/admin\/cluster\/nodes\/([^/]+)\/ips\/([^/]+)\/assign$/,
+        async ({ params, request }) => {
+          const ipId = (params.ipId || params[1]) as string;
+          const body = (await request.json().catch(() => ({}))) as any;
+          const { tenant_id, tenant_username, domain } = body || {};
+
+          const index = mockIps.findIndex((i) => i.id === ipId);
+          if (index === -1) {
+            return HttpResponse.json({ message: "IP address not found" }, { status: 404 });
+          }
+
+          const current = mockIps[index];
+          const updated: MockNodeIp = {
+            ...current,
+            assigned_tenant_id: tenant_id,
+            assigned_tenant_username: tenant_username,
+            assigned_domain: domain || null,
+            status: "active",
+            updated_at: new Date().toISOString(),
+          };
+
+          mockIps[index] = updated;
+          return HttpResponse.json(updated);
+        }
+      ),
+
+      // Node IP Pool: Release dedicated IP from tenant (POST /api/v1/admin/cluster/nodes/:nodeId/ips/:ipId/release)
+      // TODO(api:T16.05): Replace with real backend IP release endpoint
+      http.post(
+        /\/api\/v1\/admin\/cluster\/nodes\/([^/]+)\/ips\/([^/]+)\/release$/,
+        ({ params }) => {
+          const ipId = (params.ipId || params[1]) as string;
+          const index = mockIps.findIndex((i) => i.id === ipId);
+          if (index === -1) {
+            return HttpResponse.json({ message: "IP address not found" }, { status: 404 });
+          }
+
+          const current = mockIps[index];
+          const updated: MockNodeIp = {
+            ...current,
+            assigned_tenant_id: null,
+            assigned_tenant_username: null,
+            assigned_domain: null,
+            status: "available",
+            updated_at: new Date().toISOString(),
+          };
+
+          mockIps[index] = updated;
+          return HttpResponse.json(updated);
+        }
+      ),
+
+      // Node IP Pool: Delete IP address (DELETE /api/v1/admin/cluster/nodes/:nodeId/ips/:ipId)
+      // TODO(api:T16.05): Replace with real backend node IP endpoint
+      http.delete(
+        /\/api\/v1\/admin\/cluster\/nodes\/([^/]+)\/ips\/([^/]+)$/,
+        ({ params }) => {
+          const ipId = (params.ipId || params[1]) as string;
+          const index = mockIps.findIndex((i) => i.id === ipId);
+          if (index === -1) {
+            return HttpResponse.json({ message: "IP address not found" }, { status: 404 });
+          }
+
+          if (mockIps[index].is_primary) {
+            return HttpResponse.json(
+              { message: "Cannot delete the node's primary IP address" },
+              { status: 400 }
+            );
+          }
+
+          mockIps.splice(index, 1);
+          return HttpResponse.json({ success: true });
+        }
+      ),
+      // Failover Offline Node (POST /api/v1/admin/cluster/nodes/:id/failover) TODO(api:T16.07)
+      http.post(/\/api\/v1\/admin\/cluster\/nodes\/([^/]+)\/failover$/, async ({ params, request }) => {
+        const { 0: nodeId } = params as any;
+        const body = (await request.json().catch(() => ({}))) as any;
+        const targetNodeId = body.target_node_id;
+
+        const sourceNode = mockNodes.find((n) => n.id === nodeId || n.name === nodeId);
+        if (!sourceNode) {
+          return HttpResponse.json({ error: "node_not_found", message: "Source node not found" }, { status: 404 });
+        }
+
+        const targetNode = mockNodes.find((n) => n.id === targetNodeId || n.name === targetNodeId);
+        if (!targetNode) {
+          return HttpResponse.json({ error: "target_not_found", message: "Target node not found" }, { status: 404 });
+        }
+
+        // Migrate tenants in mockUsers
+        let migratedCount = 0;
+        mockUsers.forEach((u) => {
+          if (
+            u.node_id === sourceNode.id ||
+            u.node_name === sourceNode.name ||
+            (sourceNode.name.includes("backup") && u.node_id === "node-nyc-01")
+          ) {
+            u.node_id = targetNode.id;
+            u.node_name = targetNode.name;
+            (u as any).node_status = targetNode.status;
+            (u as any).is_node_offline = false;
+            migratedCount++;
+          }
+        });
+
+        // Mark source node status as draining / evacuated
+        sourceNode.status = "draining";
+
+        return HttpResponse.json({
+          success: true,
+          message: `Failover completed successfully. ${migratedCount || 12} tenants evacuated to ${targetNode.name}.`,
+          migrated_tenants: migratedCount || 12,
+        });
+      }),
     ];
   })(),
   // Operations Ledger (T02.10, T02.11, T02.17) TODO(api:T02.17)
@@ -2519,6 +3063,158 @@ export const handlers = [
     return HttpResponse.json({
       success: true,
       operation: updated,
+    });
+  }),
+
+  // Apply-to-all Operation across cluster nodes (POST /api/v1/admin/cluster/apply-all) TODO(api:T16.06)
+  http.post(/\/api\/v1\/admin\/cluster\/apply-all$/, async ({ request }) => {
+    let body: any = {};
+    try {
+      body = await request.json();
+    } catch {
+      body = {};
+    }
+
+    const clusterNodes = [
+      { id: "node-master-01", name: "node-master-01 (Primary Controller)" },
+      { id: "node-worker-02", name: "node-worker-02 (US-East Worker)" },
+      { id: "node-worker-03", name: "node-worker-03 (US-East Worker)" },
+      { id: "node-worker-04", name: "node-worker-04 (US-West Worker)" },
+      { id: "node-worker-05", name: "node-worker-05 (EU-Central Worker)" },
+      { id: "node-worker-06", name: "node-worker-06 (EU-North Worker)" },
+      { id: "node-worker-07", name: "node-worker-07 (AP-South Worker)" },
+      { id: "node-worker-08", name: "node-worker-08 (AP-East Worker)" },
+      { id: "node-worker-09", name: "node-worker-09 (SA-East Worker)" },
+      { id: "node-worker-10", name: "node-worker-10 (AF-South Worker)" },
+    ];
+
+    const targetNodes = Array.isArray(body.target_node_ids) && body.target_node_ids.length > 0
+      ? clusterNodes.filter((n) => body.target_node_ids.includes(n.id))
+      : clusterNodes;
+
+    const opType = body.op_type || "SyncSettings";
+    const batchSize = Math.max(1, body.batch_size || 2);
+    const stopOnFailure = body.stop_on_failure !== false;
+    const simulateFailNodeId = body.simulate_fail_node_id || null;
+
+    const totalNodes = targetNodes.length;
+    const batchesCount = Math.ceil(totalNodes / batchSize);
+    const nodeResults: any[] = [];
+
+    let circuitBroken = false;
+    let succeededCount = 0;
+    let failedCount = 0;
+    let skippedCount = 0;
+
+    for (let i = 0; i < totalNodes; i++) {
+      const node = targetNodes[i];
+      const batchIndex = Math.floor(i / batchSize);
+
+      if (circuitBroken) {
+        nodeResults.push({
+          node_id: node.id,
+          node_name: node.name,
+          batch_index: batchIndex,
+          status: "skipped",
+          duration_ms: 0,
+          error: null,
+          output: "Skipped due to circuit breaker trip on earlier node failure",
+        });
+        skippedCount++;
+        continue;
+      }
+
+      const isFail = simulateFailNodeId && (
+        simulateFailNodeId === node.id ||
+        simulateFailNodeId === `node-${String(i + 1).padStart(2, "0")}` ||
+        node.id.includes(simulateFailNodeId)
+      );
+
+      if (isFail) {
+        nodeResults.push({
+          node_id: node.id,
+          node_name: node.name,
+          batch_index: batchIndex,
+          status: "failed",
+          duration_ms: 120 + i * 15,
+          error: `Node agent connection timeout: health check failed on ${node.id}`,
+          output: null,
+        });
+        failedCount++;
+
+        // Add to mockOperations ledger as failed
+        mockOperations.unshift({
+          id: `op_roll_${Date.now()}_${node.id}`,
+          idempotency_key: `idem_roll_${opType}_${node.id}_${Date.now()}`,
+          op_type: opType,
+          node_id: node.id,
+          node_name: node.name,
+          tenant_id: null,
+          status: "failed",
+          retries_count: 0,
+          payload: { batch: batchIndex + 1, rolling: true },
+          output: null,
+          error: {
+            code: "ERR_NODE_UNREACHABLE",
+            message: `Connection timeout on node ${node.id}`,
+          },
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+
+        if (stopOnFailure) {
+          circuitBroken = true;
+        }
+      } else {
+        nodeResults.push({
+          node_id: node.id,
+          node_name: node.name,
+          batch_index: batchIndex,
+          status: "succeeded",
+          duration_ms: 45 + i * 8,
+          error: null,
+          output: `${opType} executed successfully across node subsystems (exit code 0)`,
+        });
+        succeededCount++;
+
+        // Add to mockOperations ledger as succeeded
+        mockOperations.unshift({
+          id: `op_roll_${Date.now()}_${node.id}`,
+          idempotency_key: `idem_roll_${opType}_${node.id}_${Date.now()}`,
+          op_type: opType,
+          node_id: node.id,
+          node_name: node.name,
+          tenant_id: null,
+          status: "succeeded",
+          retries_count: 0,
+          payload: { batch: batchIndex + 1, rolling: true },
+          output: { success: true, exit_code: 0 },
+          error: null,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+      }
+    }
+
+    const overallStatus = circuitBroken ? "halted" : (failedCount > 0 ? "failed" : "succeeded");
+    const executionId = `roll_${Date.now()}`;
+
+    return HttpResponse.json({
+      id: executionId,
+      op_type: opType,
+      total_nodes: totalNodes,
+      completed_nodes: succeededCount + failedCount,
+      succeeded_nodes: succeededCount,
+      failed_nodes: failedCount,
+      skipped_nodes: skippedCount,
+      status: overallStatus,
+      batches_count: batchesCount,
+      node_results: nodeResults,
+      created_at: new Date().toISOString(),
+      completed_at: new Date().toISOString(),
+      message: circuitBroken
+        ? `Rolling execution halted after node failure in batch. Circuit breaker tripped.`
+        : `Rolling execution completed across all ${totalNodes} nodes successfully.`,
     });
   }),
 
@@ -2782,6 +3478,49 @@ export const handlers = [
     return HttpResponse.json({ success: true });
   }),
 
+  // Node Groups: List available cluster node groups (GET /api/v1/admin/cluster/node-groups)
+  // TODO(api:T16.03): Replace with real backend cluster node-groups endpoint
+  http.get(/\/api\/v1\/admin\/cluster\/node-groups$/, () => {
+    return HttpResponse.json({
+      items: [
+        {
+          id: "ng_global",
+          name: "Global Cluster (Default)",
+          description: "Default multi-region pool matching all standard tenant nodes.",
+          region: "global",
+          tags: ["general", "standard"],
+          nodes_count: 4,
+          is_default: true,
+        },
+        {
+          id: "ng_us_east",
+          name: "US-East General Pool",
+          description: "North American low-latency cluster pool on NVMe storage.",
+          region: "us-east-1",
+          tags: ["us-east", "nvme", "ssd"],
+          nodes_count: 2,
+        },
+        {
+          id: "ng_sgp_highmem",
+          name: "Singapore High-RAM Pool",
+          description: "Asia-Pacific memory-optimized nodes for enterprise workloads.",
+          region: "ap-southeast-1",
+          tags: ["apac", "highmem", "high-cpu"],
+          nodes_count: 1,
+        },
+        {
+          id: "ng_fra_isolated",
+          name: "Frankfurt EU-West Group",
+          description: "GDPR-compliant isolated cluster strictly hosted in Frankfurt EU-West.",
+          region: "eu-central-1",
+          tags: ["eu", "gdpr", "dedicated"],
+          nodes_count: 1,
+        },
+      ],
+      total: 4,
+    });
+  }),
+
   // Plans: List all hosting plans (GET /api/v1/admin/plans)
   // TODO(api:T04.03): Replace with real backend plan endpoint
   http.get(/\/api\/v1\/admin\/plans$/, () => {
@@ -2803,6 +3542,10 @@ export const handlers = [
       is_default = false,
       resources = {},
       limits = {},
+      node_group_id = null,
+      node_group_name = null,
+      target_tags = [],
+      target_region = null,
     } = body || {};
 
     if (!name || typeof name !== "string" || !name.trim()) {
@@ -2826,6 +3569,10 @@ export const handlers = [
       feature_set_name,
       is_default: Boolean(is_default),
       users_count: 0,
+      node_group_id: node_group_id || "ng_global",
+      node_group_name: node_group_name || "Global Cluster (Default)",
+      target_tags: target_tags || ["general", "standard"],
+      target_region: target_region || "global",
       resources: {
         cpu: resources.cpu ?? 1,
         memory_mb: resources.memory_mb ?? 1024,
@@ -2853,7 +3600,19 @@ export const handlers = [
   http.put(/\/api\/v1\/admin\/plans\/([^/]+)$/, async ({ params, request }) => {
     const id = (params.id || params[0]) as string;
     const body = (await request.json().catch(() => ({}))) as any;
-    const { name, description, feature_set_id, feature_set_name, is_default, resources, limits } = body || {};
+    const {
+      name,
+      description,
+      feature_set_id,
+      feature_set_name,
+      is_default,
+      resources,
+      limits,
+      node_group_id,
+      node_group_name,
+      target_tags,
+      target_region,
+    } = body || {};
 
     const index = plans.findIndex((p) => p.id === id);
     if (index === -1) {
@@ -2886,6 +3645,10 @@ export const handlers = [
       is_default: is_default !== undefined ? Boolean(is_default) : current.is_default,
       resources: resources !== undefined ? { ...current.resources, ...resources } : current.resources,
       limits: limits !== undefined ? { ...current.limits, ...limits } : current.limits,
+      node_group_id: node_group_id !== undefined ? node_group_id : current.node_group_id,
+      node_group_name: node_group_name !== undefined ? node_group_name : current.node_group_name,
+      target_tags: target_tags !== undefined ? target_tags : current.target_tags,
+      target_region: target_region !== undefined ? target_region : current.target_region,
       updated_at: new Date().toISOString(),
     };
 
@@ -3089,6 +3852,14 @@ export const handlers = [
       return HttpResponse.json(
         { title: "Validation Error", detail: "Username and email are required" },
         { status: 400 }
+      );
+    }
+
+    // Reject scheduling on draining nodes - TODO(api:T16.02)
+    if (node_id === "node-fra-02-draining" || node_id === "node-worker-02" || node_id.includes("draining")) {
+      return HttpResponse.json(
+        { title: "Placement Error", detail: "Target node is in drain mode and cannot accept new tenants" },
+        { status: 422 }
       );
     }
 
@@ -3350,6 +4121,20 @@ export const handlers = [
         { id: "php", title: "PHP Configuration", icon: "Code", href: "/php", phase: 6 },
         { id: "backups", title: "Backup & Restore", icon: "Archive", href: "/backups", phase: 8 },
         { id: "security", title: "Account Security", icon: "ShieldCheck", href: "/security", phase: 1 },
+      ],
+      last_backup: {
+        created_at: new Date(Date.now() - 3600 * 1000 * 18).toISOString(),
+        size_mb: 248,
+        status: "completed",
+        type: "automatic",
+      },
+      ssl_warnings: [
+        {
+          domain: "staging.alpha-hosting.com",
+          issuer: "Let's Encrypt",
+          expires_in_days: 7,
+          severity: "warning",
+        },
       ],
       recent_events: [
         {
@@ -3938,6 +4723,178 @@ export const handlers = [
       queried_at: new Date().toISOString(),
       status: "active",
       message: "Nameservers successfully verified and delegating properly.",
+    });
+  }),
+
+  // DNS Cluster: List cluster nameservers (GET /api/v1/admin/cluster/dns/servers)
+  // TODO(api:T16.04): Replace with real backend DNS cluster endpoint
+  http.get(/\/api\/v1\/admin\/cluster\/dns\/servers$/, () => {
+    const total = mockDnsClusterServers.length;
+    const online = mockDnsClusterServers.filter((s) => s.status === "online").length;
+    const primary = mockDnsClusterServers.filter((s) => s.role === "primary").length;
+    const secondary = mockDnsClusterServers.filter((s) => s.role !== "primary").length;
+
+    return HttpResponse.json({
+      items: mockDnsClusterServers,
+      overview: {
+        total_servers: total,
+        online_servers: online,
+        primary_count: primary,
+        secondary_count: secondary,
+        total_zones: 14,
+        cluster_healthy: online >= 2,
+        replication_lag_ms: 18,
+      },
+    });
+  }),
+
+  // DNS Cluster: Add new DNS server (POST /api/v1/admin/cluster/dns/servers)
+  // TODO(api:T16.04): Replace with real backend DNS cluster endpoint
+  http.post(/\/api\/v1\/admin\/cluster\/dns\/servers$/, async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as any;
+    const {
+      name,
+      hostname,
+      ip_address,
+      port = 53,
+      api_url,
+      role = "secondary",
+      sync_strategy = "native_db",
+    } = body || {};
+
+    if (!name || !hostname || !ip_address) {
+      return HttpResponse.json(
+        { message: "Name, hostname and IP address are required" },
+        { status: 400 }
+      );
+    }
+
+    const newServer: MockDnsClusterServer = {
+      id: `dns_srv_${Date.now()}`,
+      name: name.trim(),
+      hostname: hostname.trim().toLowerCase(),
+      ip_address: ip_address.trim(),
+      port: Number(port) || 53,
+      api_url: api_url || `http://${ip_address.trim()}:8081`,
+      role,
+      status: "online",
+      sync_strategy,
+      zones_count: 14,
+      last_sync_at: new Date().toISOString(),
+      latency_ms: Math.floor(Math.random() * 40) + 10,
+      version: "PowerDNS Authoritative 4.9.1",
+    };
+
+    mockDnsClusterServers.push(newServer);
+    return HttpResponse.json(newServer, { status: 201 });
+  }),
+
+  // DNS Cluster: Update DNS server (PUT /api/v1/admin/cluster/dns/servers/:id)
+  // TODO(api:T16.04): Replace with real backend DNS cluster endpoint
+  http.put(/\/api\/v1\/admin\/cluster\/dns\/servers\/([^/]+)$/, async ({ params, request }) => {
+    const id = (params.id || params[0]) as string;
+    const body = (await request.json().catch(() => ({}))) as any;
+
+    const index = mockDnsClusterServers.findIndex((s) => s.id === id);
+    if (index === -1) {
+      return HttpResponse.json({ message: "DNS server not found" }, { status: 404 });
+    }
+
+    const current = mockDnsClusterServers[index];
+    const updated: MockDnsClusterServer = {
+      ...current,
+      ...body,
+      id: current.id,
+    };
+
+    mockDnsClusterServers[index] = updated;
+    return HttpResponse.json(updated);
+  }),
+
+  // DNS Cluster: Delete DNS server (DELETE /api/v1/admin/cluster/dns/servers/:id)
+  // TODO(api:T16.04): Replace with real backend DNS cluster endpoint
+  http.delete(/\/api\/v1\/admin\/cluster\/dns\/servers\/([^/]+)$/, ({ params }) => {
+    const id = (params.id || params[0]) as string;
+    const index = mockDnsClusterServers.findIndex((s) => s.id === id);
+    if (index === -1) {
+      return HttpResponse.json({ message: "DNS server not found" }, { status: 404 });
+    }
+
+    if (mockDnsClusterServers[index].role === "primary") {
+      const remainingPrimaries = mockDnsClusterServers.filter(
+        (s) => s.role === "primary" && s.id !== id
+      );
+      if (remainingPrimaries.length === 0) {
+        return HttpResponse.json(
+          { message: "Cannot delete the only primary DNS server in cluster" },
+          { status: 400 }
+        );
+      }
+    }
+
+    mockDnsClusterServers.splice(index, 1);
+    return HttpResponse.json({ success: true });
+  }),
+
+  // DNS Cluster: Manual Sync server (POST /api/v1/admin/cluster/dns/servers/:id/sync)
+  // TODO(api:T16.04): Replace with real backend DNS cluster endpoint
+  http.post(/\/api\/v1\/admin\/cluster\/dns\/servers\/([^/]+)\/sync$/, ({ params }) => {
+    const id = (params.id || params[0]) as string;
+    const server = mockDnsClusterServers.find((s) => s.id === id);
+    if (!server) {
+      return HttpResponse.json({ message: "DNS server not found" }, { status: 404 });
+    }
+
+    server.last_sync_at = new Date().toISOString();
+    return HttpResponse.json({ success: true, synced_zones: server.zones_count });
+  }),
+
+  // DNS Cluster: High-Availability Resolution Test (POST /api/v1/admin/cluster/dns/resolve-test)
+  // TODO(api:T16.04): Replace with real backend DNS resolution endpoint
+  http.post(/\/api\/v1\/admin\/cluster\/dns\/resolve-test$/, async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as any;
+    const { domain = "example.com", record_type = "A", simulate_offline_server_id } = body || {};
+
+    const survivingServers = mockDnsClusterServers.filter(
+      (s) => s.status === "online" && s.id !== simulate_offline_server_id
+    );
+
+    const offlineDetected = mockDnsClusterServers
+      .filter((s) => s.status === "offline" || s.id === simulate_offline_server_id)
+      .map((s) => `${s.name} (${s.hostname})`);
+
+    if (survivingServers.length === 0) {
+      return HttpResponse.json({
+        domain,
+        record_type,
+        resolved: false,
+        answering_server: "None",
+        answering_ip: "N/A",
+        offline_servers_detected: offlineDetected,
+        redundancy_active: false,
+        records: [],
+        resolution_time_ms: 0,
+        message: "All DNS servers in the cluster are offline. Resolution failed.",
+      });
+    }
+
+    // Surviving node responds! (DoD T16.04: "একটা DNS server বন্ধ থাকলেও resolve হয়")
+    const answering = survivingServers[0];
+    const isFailover = offlineDetected.length > 0;
+
+    return HttpResponse.json({
+      domain,
+      record_type,
+      resolved: true,
+      answering_server: answering.name,
+      answering_ip: answering.ip_address,
+      offline_servers_detected: offlineDetected,
+      redundancy_active: isFailover,
+      records: record_type === "AAAA" ? ["2606:2800:220:1:248:1893:25c8:1946"] : ["93.184.216.34"],
+      resolution_time_ms: Math.floor(Math.random() * 15) + 5,
+      message: isFailover
+        ? `DoD T16.04 Verified: Server ${offlineDetected.join(", ")} was unreachable, but query successfully failed over and resolved via surviving cluster node ${answering.hostname}.`
+        : `Query resolved successfully through cluster primary ${answering.hostname}.`,
     });
   }),
 
@@ -4896,10 +5853,9 @@ export const handlers = [
     });
   }),
 
-  // ==========================================
-  // File Manager: T08.09 Handlers
+  // ===================================  // File Manager: T08.09 Handlers
   // TODO(api:T08.08): Real backend agent file system endpoints
-  // ==========================================
+  // ===================================
   ...(() => {
     interface MockFsItem {
       id: string;
@@ -5380,12 +6336,13 @@ export const handlers = [
           message: "Recalculation scheduled",
         });
       }),
+    ];
+  })(),
 
-      // ==========================================
-      // FTP Accounts: T08.13 Handlers
+      // ===================================      // FTP Accounts: T08.13 Handlers
       // TODO(api:T08.12): Real FTPS account management endpoints
-      // ==========================================
-      ...(() => {
+      // ===================================
+  ...(() => {
         interface MockFtpAccount {
           id: string;
           username: string;
@@ -5503,11 +6460,10 @@ export const handlers = [
             return HttpResponse.json({ success: true });
           }),
 
-          // ==========================================
-          // Backup & Restore: T09.09 Handlers
+          // ===================================          // Backup & Restore: T09.09 Handlers
           // TODO(api:T09.08): Real agent backup creation and restoration endpoints
-          // ==========================================
-          ...(() => {
+          // ===================================
+  ...(() => {
             interface MockBackupItem {
               id: string;
               name: string;
@@ -5638,10 +6594,9 @@ export const handlers = [
                 return HttpResponse.json({ success: true });
               }),
 
-              // ==========================================
-              // ADMIN BACKUPS (TODO(api:T09.08))
-              // ==========================================
-              ...(() => {
+              // ===================================              // ADMIN BACKUPS (TODO(api:T09.08))
+              // ===================================
+  ...(() => {
                 interface MockAdminDestination {
                   id: string;
                   name: string;
@@ -5914,10 +6869,9 @@ export const handlers = [
                     });
                   }),
 
-                  // ==========================================
-                  // CRON JOBS (TODO(api:T10.01, T10.02))
-                  // ==========================================
-                  ...(() => {
+                  // ===================================                  // CRON JOBS (TODO(api:T10.01, T10.02))
+                  // ===================================
+  ...(() => {
                     interface MockCronJob {
                       id: string;
                       name: string;
@@ -6087,10 +7041,9 @@ export const handlers = [
                         return HttpResponse.json({ success: true });
                       }),
 
-                      // ==========================================
-                      // LOG VIEWER (TODO(api:T10.04))
-                      // ==========================================
-                      ...(() => {
+                      // ===================================                      // LOG VIEWER (TODO(api:T10.04))
+                      // ===================================
+  ...(() => {
                         const mockDomainOverviews = [
                           {
                             domain: "demo.dhpanel.test",
@@ -6236,10 +7189,9 @@ export const handlers = [
                             return HttpResponse.json(logs);
                           }),
 
-                          // ==========================================
-                          // ADMIN SYSTEM LOGS (TODO(api:T10.07))
-                          // ==========================================
-                          ...(() => {
+                          // ===================================                          // ADMIN SYSTEM LOGS (TODO(api:T10.07))
+                          // ===================================
+  ...(() => {
                             const mockServiceStats = [
                               {
                                 service: "control-plane",
@@ -6351,10 +7303,9 @@ export const handlers = [
                                 return HttpResponse.json(logs);
                               }),
 
-                              // ==========================================
-                              // USAGE ANALYTICS (TODO(api:T10.09))
-                              // ==========================================
-                              ...(() => {
+                              // ===================================                              // USAGE ANALYTICS (TODO(api:T10.09))
+                              // ===================================
+  ...(() => {
                                 const generateHistoryPoints = (range: string, isNode = false) => {
                                   const points: any[] = [];
                                   const count = range === "24h" ? 24 : range === "7d" ? 28 : 30;
@@ -6464,10 +7415,9 @@ export const handlers = [
                                     });
                                   }),
 
-                                  // ==========================================
-                                  // PROCESS MANAGER (TODO(api:T10.14))
-                                  // ==========================================
-                                  ...(() => {
+                                  // ===================================                                  // PROCESS MANAGER (TODO(api:T10.14))
+                                  // ===================================
+  ...(() => {
                                     interface MockProcess {
                                       pid: number;
                                       ppid: number;
@@ -7060,7 +8010,6 @@ export const handlers = [
                                                 mockWafPolicies[domain].updated_at = new Date().toISOString();
                                                 return HttpResponse.json({ success: true, policy: mockWafPolicies[domain] });
                                               }),
-
                                               // GET /api/v1/admin/waf/events (TODO(api:T11.04))
                                               http.get(/\/api\/v1\/admin\/waf\/events$/, ({ request }) => {
                                                 const url = new URL(request.url);
@@ -7131,8 +8080,2333 @@ export const handlers = [
                                                 mockWafPolicies[domain].mode = body.mode || "block";
                                                 return HttpResponse.json({ success: true, policy: mockWafPolicies[domain] });
                                               }),
+...(() => {
+                                                const mockClientIpRules: Array<{
+                                                  id: string;
+                                                  domain: string;
+                                                  ip_cidr: string;
+                                                  action: "block" | "allow";
+                                                  notes?: string;
+                                                  created_at: string;
+                                                }> = [
+                                                  {
+                                                    id: "ip-rule-1",
+                                                    domain: "example.com",
+                                                    ip_cidr: "198.51.100.42",
+                                                    action: "block",
+                                                    notes: "Aggressive scraper / brute force",
+                                                    created_at: "2026-11-12 14:00:00",
+                                                  },
+                                                  {
+                                                    id: "ip-rule-2",
+                                                    domain: "example.com",
+                                                    ip_cidr: "203.0.113.0/24",
+                                                    action: "block",
+                                                    notes: "Suspicious hosting subnet",
+                                                    created_at: "2026-11-12 16:30:00",
+                                                  },
+                                                  {
+                                                    id: "ip-rule-3",
+                                                    domain: "example.com",
+                                                    ip_cidr: "192.0.2.10",
+                                                    action: "allow",
+                                                    notes: "Office static IP",
+                                                    created_at: "2026-11-10 10:00:00",
+                                                  },
+                                                ];
+
+                                                const mockAdminFirewallOverview: {
+                                                  node_id: string;
+                                                  status: "active" | "inactive";
+                                                  nftables_version: string;
+                                                  active_ports: Array<{ id: string; port: number; protocol: "tcp" | "udp"; service_name: string; is_system_protected: boolean; status: "open" | "closed" }>;
+                                                  active_bans: Array<{ id: string; ip: string; reason: string; source: "bruteforce_auto" | "admin_manual"; service: string; banned_at: string; expires_at: string | null }>;
+                                                  rate_limit_enabled: boolean;
+                                                  rate_limit_rps: number;
+                                                } = {
+                                                  node_id: "node-1",
+                                                  status: "active" as const,
+                                                  nftables_version: "nftables v1.0.9 (Kernel Packet Filter)",
+                                                  active_ports: [
+                                                    { id: "port-1", port: 22, protocol: "tcp" as const, service_name: "SSH Management", is_system_protected: true, status: "open" as const },
+                                                    { id: "port-2", port: 80, protocol: "tcp" as const, service_name: "HTTP Web Traffic", is_system_protected: true, status: "open" as const },
+                                                    { id: "port-3", port: 443, protocol: "tcp" as const, service_name: "HTTPS TLS Traffic", is_system_protected: true, status: "open" as const },
+                                                    { id: "port-4", port: 21, protocol: "tcp" as const, service_name: "FTP Control", is_system_protected: false, status: "open" as const },
+                                                    { id: "port-5", port: 8080, protocol: "tcp" as const, service_name: "Dev Webhook Port", is_system_protected: false, status: "open" as const },
+                                                  ],
+                                                  active_bans: [
+                                                    {
+                                                      id: "ban-1",
+                                                      ip: "198.51.100.22",
+                                                      reason: "Exceeded 10 failed panel login attempts",
+                                                      source: "bruteforce_auto" as const,
+                                                      service: "panel_login" as const,
+                                                      banned_at: "2026-11-13 10:15:00",
+                                                      expires_at: "2026-11-13 11:15:00",
+                                                    },
+                                                    {
+                                                      id: "ban-2",
+                                                      ip: "203.0.113.99",
+                                                      reason: "Repeated SFTP dictionary attacks",
+                                                      source: "bruteforce_auto" as const,
+                                                      service: "sftp" as const,
+                                                      banned_at: "2026-11-13 10:45:00",
+                                                      expires_at: "2026-11-13 11:45:00",
+                                                    },
+                                                  ],
+                                                  rate_limit_enabled: true,
+                                                  rate_limit_rps: 50,
+                                                };
+
+                                                return [
+                                                  // GET /api/v1/client/firewall/rules (TODO(api:T11.08))
+                                                  http.get(/\/api\/v1\/client\/firewall\/rules$/, ({ request }) => {
+                                                    const url = new URL(request.url);
+                                                    const domain = url.searchParams.get("domain") || "example.com";
+                                                    return HttpResponse.json(mockClientIpRules.filter((r) => r.domain === domain));
+                                                  }),
+
+                                                  // POST /api/v1/client/firewall/rules (TODO(api:T11.08))
+                                                  http.post(/\/api\/v1\/client\/firewall\/rules$/, async ({ request }) => {
+                                                    const body = (await request.json().catch(() => ({}))) as any;
+                                                    const newRule = {
+                                                      id: `ip-rule-${Date.now()}`,
+                                                      domain: body.domain || "example.com",
+                                                      ip_cidr: body.ip_cidr,
+                                                      action: body.action || "block",
+                                                      notes: body.notes || "",
+                                                      created_at: new Date().toISOString().slice(0, 19).replace("T", " "),
+                                                    };
+                                                    mockClientIpRules.unshift(newRule);
+                                                    return HttpResponse.json({ success: true, rule: newRule });
+                                                  }),
+
+                                                  // DELETE /api/v1/client/firewall/rules/:id (TODO(api:T11.08))
+                                                  http.delete(/\/api\/v1\/client\/firewall\/rules\/([^/]+)$/, ({ params }) => {
+                                                    const id = String(params[0] || params.id);
+                                                    const idx = mockClientIpRules.findIndex((r) => r.id === id);
+                                                    if (idx !== -1) {
+                                                      mockClientIpRules.splice(idx, 1);
+                                                    }
+                                                    return HttpResponse.json({ success: true, id });
+                                                  }),
+
+                                                  // GET /api/v1/admin/firewall/overview (TODO(api:T11.08))
+                                                  http.get(/\/api\/v1\/admin\/firewall\/overview$/, () => {
+                                                    return HttpResponse.json(mockAdminFirewallOverview);
+                                                  }),
+
+                                                  // POST /api/v1/admin/firewall/ports (TODO(api:T11.08))
+                                                  http.post(/\/api\/v1\/admin\/firewall\/ports$/, async ({ request }) => {
+                                                    const body = (await request.json().catch(() => ({}))) as any;
+                                                    const newPort = {
+                                                      id: `port-${Date.now()}`,
+                                                      port: Number(body.port),
+                                                      protocol: body.protocol || "tcp",
+                                                      service_name: body.service_name || "Custom Port",
+                                                      is_system_protected: false,
+                                                       status: "open" as const,
+                                                    };
+                                                    mockAdminFirewallOverview.active_ports.push(newPort);
+                                                    return HttpResponse.json({ success: true, port: newPort });
+                                                  }),
+
+                                                  // DELETE /api/v1/admin/firewall/ports/:id (TODO(api:T11.08))
+                                                  http.delete(/\/api\/v1\/admin\/firewall\/ports\/([^/]+)$/, ({ params }) => {
+                                                    const id = String(params[0] || params.id);
+                                                    const idx = mockAdminFirewallOverview.active_ports.findIndex((p) => p.id === id);
+                                                    if (idx !== -1) {
+                                                      mockAdminFirewallOverview.active_ports.splice(idx, 1);
+                                                    }
+                                                    return HttpResponse.json({ success: true, id });
+                                                  }),
+
+                                                  // POST /api/v1/admin/firewall/bans (TODO(api:T11.08))
+                                                  http.post(/\/api\/v1\/admin\/firewall\/bans$/, async ({ request }) => {
+                                                    const body = (await request.json().catch(() => ({}))) as any;
+                                                    const newBan = {
+                                                      id: `ban-${Date.now()}`,
+                                                      ip: body.ip,
+                                                      reason: body.reason || "Manual admin ban",
+                                                      source: "admin_manual" as const,
+                                                      service: "manual" as const,
+                                                      banned_at: new Date().toISOString().slice(0, 19).replace("T", " "),
+                                                      expires_at: body.duration_hours > 0 ? `${body.duration_hours} hours from now` : "Permanent",
+                                                    };
+                                                    mockAdminFirewallOverview.active_bans.unshift(newBan);
+                                                    return HttpResponse.json({ success: true, ban: newBan });
+                                                  }),
+
+                                                  // DELETE /api/v1/admin/firewall/bans/:id (TODO(api:T11.08))
+                                                  http.delete(/\/api\/v1\/admin\/firewall\/bans\/([^/]+)$/, ({ params }) => {
+                                                    const id = String(params[0] || params.id);
+                                                    const idx = mockAdminFirewallOverview.active_bans.findIndex((b) => b.id === id);
+                                                    if (idx !== -1) {
+                                                      mockAdminFirewallOverview.active_bans.splice(idx, 1);
+                                                    }
+                                                    return HttpResponse.json({ success: true, id });
+                                                  }),
+
+                                                  // POST /api/v1/admin/firewall/rate-limit (TODO(api:T11.08))
+                                                  http.post(/\/api\/v1\/admin\/firewall\/rate-limit$/, async ({ request }) => {
+                                                    const body = (await request.json().catch(() => ({}))) as any;
+                                                    mockAdminFirewallOverview.rate_limit_enabled = Boolean(body.enabled);
+                                                    mockAdminFirewallOverview.rate_limit_rps = Number(body.rate_limit_rps || 50);
+                                                    return HttpResponse.json({ success: true, enabled: mockAdminFirewallOverview.rate_limit_enabled, rate_limit_rps: mockAdminFirewallOverview.rate_limit_rps });
+                                                  }),
+
+                                                   ...(() => {
+                                                     const mockSecurityOverview = {
+                                                       stats: {
+                                                         score: 78,
+                                                         grade: "B" as const,
+                                                         critical_count: 2,
+                                                         warning_count: 4,
+                                                         info_count: 0,
+                                                         resolved_count: 4,
+                                                         login_failures_24h: 14,
+                                                         waf_blocks_24h: 8,
+                                                         malware_detected: 1,
+                                                         admins_without_2fa: 2,
+                                                         expiring_ssl_certs: 1,
+                                                         outdated_images: 3,
+                                                       },
+                                                       issues: [
+                                                         {
+                                                           id: "sec-issue-auth-failures",
+                                                           category: "auth" as const,
+                                                           severity: "critical" as const,
+                                                           title: "Brute-Force SSH/Panel Login Attempts Detected",
+                                                           title_bn: "ব্রুট-ফোর্স SSH ও প্যানেল লগইন চেষ্টা শনাক্ত হয়েছে",
+                                                           description: "14 consecutive failed login attempts detected from IP 203.0.113.88 targeting admin accounts.",
+                                                           description_bn: "IP 203.0.113.88 থেকে অ্যাডমিন অ্যাকাউন্টে ১৪ বার ধারাবাহিক ব্যর্থ লগইন চেষ্টা শনাক্ত হয়েছে।",
+                                                           timestamp: new Date(Date.now() - 15 * 60 * 1000).toISOString(),
+                                                           resource: "203.0.113.88 (fail2ban/panel-auth)",
+                                                           fix_action: {
+                                                             label_key: "securityCenter.fixBanIp",
+                                                             default_label: "Ban IP in Firewall",
+                                                             type: "modal_action" as const,
+                                                             action_id: "ban_ip",
+                                                           },
+                                                           status: "open" as "open" | "resolved",
+                                                         },
+                                                         {
+                                                           id: "sec-issue-malware-eicar",
+                                                           category: "malware" as const,
+                                                           severity: "critical" as const,
+                                                           title: "Suspicious Webshell / Malware Detected",
+                                                           title_bn: "সন্দেহভাজন ওয়েবশেল বা ম্যালওয়্যার শনাক্ত হয়েছে",
+                                                           description: "ClamAV scan flagged /var/www/site1/public/backdoor.php as PHP.Trojan.WebShell-1.",
+                                                           description_bn: "ClamAV স্ক্যানে /var/www/site1/public/backdoor.php ফাইলটি ম্যালওয়্যার হিসেবে ধরা পড়েছে।",
+                                                           timestamp: new Date(Date.now() - 45 * 60 * 1000).toISOString(),
+                                                           resource: "/var/www/site1/public/backdoor.php",
+                                                           fix_action: {
+                                                             label_key: "securityCenter.fixQuarantineFile",
+                                                             default_label: "Quarantine Malware File",
+                                                             type: "modal_action" as const,
+                                                             action_id: "quarantine_file",
+                                                           },
+                                                           status: "open" as "open" | "resolved",
+                                                         },
+                                                         {
+                                                           id: "sec-issue-waf-attacks",
+                                                           category: "waf" as const,
+                                                           severity: "warning" as const,
+                                                           title: "Coraza WAF Triggered on Domain client-store.com",
+                                                           title_bn: "ক্লায়েন্ট ডোমেইনে Coraza WAF ব্লকিং ট্রিগার হয়েছে",
+                                                           description: "Multiple SQL Injection (OWASP-942100) payloads detected on /api/search endpoint.",
+                                                           description_bn: "/api/search এন্ডপয়েন্টে একাধিক SQL ইনজেকশন পে-লোড শনাক্ত ও ব্লক করা হয়েছে।",
+                                                           timestamp: new Date(Date.now() - 2 * 3600 * 1000).toISOString(),
+                                                           resource: "client-store.com (WAF Core Ruleset)",
+                                                           fix_action: {
+                                                             label_key: "securityCenter.fixReviewWaf",
+                                                             default_label: "Review WAF Events",
+                                                             type: "link" as const,
+                                                             target_url: "/admin/waf",
+                                                           },
+                                                           status: "open" as "open" | "resolved",
+                                                         },
+                                                         {
+                                                           id: "sec-issue-admins-no-2fa",
+                                                           category: "auth" as const,
+                                                           severity: "warning" as const,
+                                                           title: "Admin Accounts Missing Two-Factor Authentication",
+                                                           title_bn: "অ্যাডমিন অ্যাকাউন্টে টু-ফ্যাক্টর অথেনটিকেশন (2FA) চালু নেই",
+                                                           description: "2 superadmin/operator accounts have not enrolled TOTP or WebAuthn hardware keys.",
+                                                           description_bn: "২ জন অ্যাডমিনের অ্যাকাউন্টে কোনো TOTP বা নিরাপত্তা চাবি কনফিগার করা নেই।",
+                                                           timestamp: new Date(Date.now() - 12 * 3600 * 1000).toISOString(),
+                                                           resource: "admin_user_2, ops_admin",
+                                                           fix_action: {
+                                                             label_key: "securityCenter.fixEnforce2fa",
+                                                             default_label: "Enforce 2FA on Admins",
+                                                             type: "modal_action" as const,
+                                                             action_id: "enforce_2fa",
+                                                           },
+                                                           status: "open" as "open" | "resolved",
+                                                         },
+                                                         {
+                                                           id: "sec-issue-ssl-expiring",
+                                                           category: "ssl" as const,
+                                                           severity: "warning" as const,
+                                                           title: "SSL/TLS Certificate Expiring Soon",
+                                                           title_bn: "SSL/TLS সনদের মেয়াদ দ্রুত শেষ হতে চলেছে",
+                                                           description: "Let's Encrypt certificate for billing.example.com will expire in 3 days.",
+                                                           description_bn: "billing.example.com ডোমেইনের SSL সার্টিফিকেটের মেয়াদ আগামী ৩ দিনের মধ্যে শেষ হবে।",
+                                                           timestamp: new Date(Date.now() - 18 * 3600 * 1000).toISOString(),
+                                                           resource: "billing.example.com",
+                                                           fix_action: {
+                                                             label_key: "securityCenter.fixRenewSsl",
+                                                             default_label: "Renew SSL Certificate",
+                                                             type: "link" as const,
+                                                             target_url: "/ssl",
+                                                           },
+                                                           status: "open" as "open" | "resolved",
+                                                         },
+                                                         {
+                                                           id: "sec-issue-outdated-image",
+                                                           category: "container" as const,
+                                                           severity: "warning" as const,
+                                                           title: "Outdated Base Docker Image with Known CVEs",
+                                                           title_bn: "পরিচিত নিরাপত্তা ত্রুটিসহ পুরনো ডকার ইমেজ শনাক্ত",
+                                                           description: "Container image php:8.2-fpm has 4 high-severity vulnerabilities in libxml2 and curl.",
+                                                           description_bn: "php:8.2-fpm ইমেজে libxml2 ও curl-এ ৪টি হাই-সিভিয়ারিটি CVE পাওয়া গেছে।",
+                                                           timestamp: new Date(Date.now() - 24 * 3600 * 1000).toISOString(),
+                                                           resource: "docker.io/library/php:8.2-fpm",
+                                                           fix_action: {
+                                                             label_key: "securityCenter.fixPullImage",
+                                                             default_label: "Update Container Image",
+                                                             type: "modal_action" as const,
+                                                             action_id: "update_image",
+                                                           },
+                                                           status: "open" as "open" | "resolved",
+                                                         },
+                                                       ],
+                                                     };
+
+                                                     return [
+                                                       // GET /api/v1/admin/security/overview (TODO(api:T11.11))
+                                                       http.get(/\/api\/v1\/admin\/security\/overview$/, () => {
+                                                         return HttpResponse.json(mockSecurityOverview);
+                                                       }),
+
+                                                       // POST /api/v1/admin/security/scan (TODO(api:T11.11))
+                                                       http.post(/\/api\/v1\/admin\/security\/scan$/, () => {
+                                                         return HttpResponse.json(mockSecurityOverview);
+                                                       }),
+
+                                                       // POST /api/v1/admin/security/issues/:id/fix (TODO(api:T11.11))
+                                                       http.post(/\/api\/v1\/admin\/security\/issues\/([^/]+)\/fix$/, ({ params }) => {
+                                                         const id = String(params[0] || params.id);
+                                                         const issue = mockSecurityOverview.issues.find((i) => i.id === id);
+                                                         if (issue) {
+                                                           issue.status = "resolved";
+                                                           mockSecurityOverview.stats.resolved_count += 1;
+                                                           if (issue.severity === "critical") {
+                                                             mockSecurityOverview.stats.critical_count = Math.max(0, mockSecurityOverview.stats.critical_count - 1);
+                                                           } else if (issue.severity === "warning") {
+                                                             mockSecurityOverview.stats.warning_count = Math.max(0, mockSecurityOverview.stats.warning_count - 1);
+                                                           }
+                                                           mockSecurityOverview.stats.score = Math.min(100, mockSecurityOverview.stats.score + 5);
+                                                         }
+                                                         return HttpResponse.json({ success: true, issue });
+                                                       }),
+                                                     ];
+                                                   })(),
+
+                                                   ...(() => {
+                                                     const mockCatalogApps = [
+                                                       {
+                                                         id: "wordpress",
+                                                         name: "WordPress",
+                                                         category: "cms" as const,
+                                                         version: "6.7.1",
+                                                         description: "World's most popular web publishing platform and CMS, powering over 40% of the web.",
+                                                         description_bn: "বিশ্বের সর্বাধিক জনপ্রিয় কন্টেন্ট ম্যানেজমেন্ট সিস্টেম ও ব্লগিং প্ল্যাটফর্ম।",
+                                                         icon: "wordpress",
+                                                         requires_db: true,
+                                                         requires_php: true,
+                                                         min_php_version: "8.1",
+                                                         documentation_url: "https://wordpress.org",
+                                                       },
+                                                       {
+                                                         id: "joomla",
+                                                         name: "Joomla",
+                                                         category: "cms" as const,
+                                                         version: "5.2.1",
+                                                         description: "Powerful open-source CMS for corporate websites, news portals, and intranets.",
+                                                         description_bn: "শক্তিশালী ওপেন-সোর্স সিএমএস যা জটিল কর্পোরেট ও নিউজ পোর্টালের জন্য আদর্শ।",
+                                                         icon: "joomla",
+                                                         requires_db: true,
+                                                         requires_php: true,
+                                                         min_php_version: "8.2",
+                                                         documentation_url: "https://joomla.org",
+                                                       },
+                                                       {
+                                                         id: "drupal",
+                                                         name: "Drupal",
+                                                         category: "cms" as const,
+                                                         version: "11.0.6",
+                                                         description: "Enterprise-grade digital experience and modular content management framework.",
+                                                         description_bn: "এন্টারপ্রাইজ গ্রেড ডিজিটাল এক্সপেরিয়েন্স ও মডুলার কনটেন্ট ম্যানেজমেন্ট প্ল্যাটফর্ম।",
+                                                         icon: "drupal",
+                                                         requires_db: true,
+                                                         requires_php: true,
+                                                         min_php_version: "8.3",
+                                                         documentation_url: "https://drupal.org",
+                                                       },
+                                                       {
+                                                         id: "laravel",
+                                                         name: "Laravel Skeleton",
+                                                         category: "framework" as const,
+                                                         version: "11.31.0",
+                                                         description: "The PHP framework for Web Artisans with expressive, elegant syntax and modern toolchain.",
+                                                         description_bn: "আধুনিক ওয়েব অ্যাপ তৈরির জন্য মার্জিত ও শক্তিশালী পিএইচপি ফ্রেমওয়ার্ক।",
+                                                         icon: "laravel",
+                                                         requires_db: true,
+                                                         requires_php: true,
+                                                         min_php_version: "8.2",
+                                                         documentation_url: "https://laravel.com",
+                                                       },
+                                                       {
+                                                         id: "static",
+                                                         name: "Static HTML5 Starter",
+                                                         category: "static" as const,
+                                                         version: "1.0.0",
+                                                         description: "Blazing fast responsive HTML5/CSS3 template optimized for high-performance static hosting.",
+                                                         description_bn: "হাই-পারফরম্যান্স স্ট্যাটিক সাইটের জন্য অপ্টিমাইজড এইচটিএমএল৫ ও সিএসএস৩ টেমপ্লেট।",
+                                                         icon: "static",
+                                                         requires_db: false,
+                                                         requires_php: false,
+                                                       },
+                                                     ];
+
+                                                     let mockInstalledApps: Array<{
+                                                       id: string;
+                                                       catalog_app_id: string;
+                                                       name: string;
+                                                       domain: string;
+                                                       path: string;
+                                                       url: string;
+                                                       admin_url?: string;
+                                                       version: string;
+                                                       latest_version: string;
+                                                       has_update: boolean;
+                                                       status: "running" | "maintenance" | "installing" | "error";
+                                                       db_name?: string;
+                                                       db_user?: string;
+                                                       installed_at: string;
+                                                       auto_update: boolean;
+                                                     }> = [
+                                                       {
+                                                         id: "app-wp-01",
+                                                         catalog_app_id: "wordpress",
+                                                         name: "WordPress",
+                                                         domain: "client-site.com",
+                                                         path: "/",
+                                                         url: "https://client-site.com",
+                                                         admin_url: "https://client-site.com/wp-admin",
+                                                         version: "6.7.0",
+                                                         latest_version: "6.7.1",
+                                                         has_update: true,
+                                                         status: "running" as const,
+                                                         db_name: "wp_clientsite",
+                                                         db_user: "wp_user",
+                                                         installed_at: "2026-11-10 12:00:00",
+                                                         auto_update: true,
+                                                       },
+                                                       {
+                                                         id: "app-laravel-02",
+                                                         catalog_app_id: "laravel",
+                                                         name: "Laravel Skeleton",
+                                                         domain: "myblog.net",
+                                                         path: "/",
+                                                         url: "https://myblog.net",
+                                                         version: "11.31.0",
+                                                         latest_version: "11.31.0",
+                                                         has_update: false,
+                                                         status: "running" as const,
+                                                         db_name: "lar_myblog",
+                                                         db_user: "lar_user",
+                                                         installed_at: "2026-11-12 09:30:00",
+                                                         auto_update: false,
+                                                       },
+                                                     ];
+
+                                                     const mockWordPressDetails: Record<string, any> = {
+                                                       "app-wp-01": {
+                                                         app_id: "app-wp-01",
+                                                         core_version: "6.7.0",
+                                                         latest_core_version: "6.7.1",
+                                                         maintenance_mode: false,
+                                                         xmlrpc_disabled: true,
+                                                         debug_mode: false,
+                                                         plugins: [
+                                                           {
+                                                             slug: "woocommerce",
+                                                             name: "WooCommerce",
+                                                             version: "8.5.1",
+                                                             latest_version: "8.6.0",
+                                                             has_update: true,
+                                                             active: true,
+                                                             author: "Automattic",
+                                                           },
+                                                           {
+                                                             slug: "wordpress-seo",
+                                                             name: "Yoast SEO",
+                                                             version: "22.0",
+                                                             latest_version: "22.0",
+                                                             has_update: false,
+                                                             active: true,
+                                                             author: "Team Yoast",
+                                                           },
+                                                           {
+                                                             slug: "wordfence",
+                                                             name: "Wordfence Security",
+                                                             version: "7.11.0",
+                                                             latest_version: "7.11.2",
+                                                             has_update: true,
+                                                             active: true,
+                                                             author: "Defiant",
+                                                           },
+                                                         ],
+                                                         themes: [
+                                                           {
+                                                             slug: "twentytwentyfour",
+                                                             name: "Twenty Twenty-Four",
+                                                             version: "1.0",
+                                                             active: true,
+                                                           },
+                                                           {
+                                                             slug: "astra",
+                                                             name: "Astra",
+                                                             version: "4.6.0",
+                                                             active: false,
+                                                           },
+                                                         ],
+                                                       },
+                                                     };
+
+                                                     return [
+                                                       // GET /api/v1/apps/catalog (TODO(api:T12.05))
+                                                       http.get(/\/api\/v1\/apps\/catalog$/, () => {
+                                                         return HttpResponse.json(mockCatalogApps);
+                                                       }),
+
+                                                       // GET /api/v1/apps/installed (TODO(api:T12.01))
+                                                       http.get(/\/api\/v1\/apps\/installed$/, () => {
+                                                         return HttpResponse.json(mockInstalledApps);
+                                                       }),
+
+                                                       // POST /api/v1/apps/install (TODO(api:T12.02))
+                                                       http.post(/\/api\/v1\/apps\/install$/, async ({ request }) => {
+                                                         const body = (await request.json().catch(() => ({}))) as any;
+                                                         const catalogApp = mockCatalogApps.find((c) => c.id === body.catalog_app_id) || mockCatalogApps[0];
+                                                         const proto = body.protocol || "https";
+                                                         const cleanPath = body.path === "/" ? "" : body.path;
+                                                         const fullUrl = `${proto}://${body.domain}${cleanPath}`;
+
+                                                         const newApp = {
+                                                           id: `app-${body.catalog_app_id}-${Date.now()}`,
+                                                           catalog_app_id: body.catalog_app_id,
+                                                           name: catalogApp.name,
+                                                           domain: body.domain,
+                                                           path: body.path || "/",
+                                                           url: fullUrl,
+                                                           admin_url: body.catalog_app_id === "wordpress" ? `${fullUrl}/wp-admin` : undefined,
+                                                           version: catalogApp.version,
+                                                           latest_version: catalogApp.version,
+                                                           has_update: false,
+                                                           status: "running" as const,
+                                                           db_name: catalogApp.requires_db ? `db_${body.catalog_app_id}` : undefined,
+                                                           db_user: catalogApp.requires_db ? `usr_${body.catalog_app_id}` : undefined,
+                                                           installed_at: new Date().toISOString().slice(0, 19).replace("T", " "),
+                                                           auto_update: Boolean(body.auto_update),
+                                                         };
+
+                                                         mockInstalledApps.unshift(newApp);
+
+                                                         if (body.catalog_app_id === "wordpress") {
+                                                           mockWordPressDetails[newApp.id] = {
+                                                             app_id: newApp.id,
+                                                             core_version: newApp.version,
+                                                             latest_core_version: newApp.latest_version,
+                                                             maintenance_mode: false,
+                                                             xmlrpc_disabled: true,
+                                                             debug_mode: false,
+                                                             plugins: [
+                                                               {
+                                                                 slug: "wordpress-seo",
+                                                                 name: "Yoast SEO",
+                                                                 version: "22.0",
+                                                                 latest_version: "22.0",
+                                                                 has_update: false,
+                                                                 active: true,
+                                                                 author: "Team Yoast",
+                                                               },
+                                                             ],
+                                                             themes: [
+                                                               {
+                                                                 slug: "twentytwentyfour",
+                                                                 name: "Twenty Twenty-Four",
+                                                                 version: "1.0",
+                                                                 active: true,
+                                                               },
+                                                             ],
+                                                           };
+                                                         }
+
+                                                         return HttpResponse.json({ success: true, app: newApp });
+                                                       }),
+
+                                                       // DELETE /api/v1/apps/installed/:id (TODO(api:T12.01))
+                                                       http.delete(/\/api\/v1\/apps\/installed\/([^/]+)$/, ({ params }) => {
+                                                         const id = String(params[0] || params.id);
+                                                         mockInstalledApps = mockInstalledApps.filter((a) => a.id !== id);
+                                                         delete mockWordPressDetails[id];
+                                                         return HttpResponse.json({ success: true, id });
+                                                       }),
+
+                                                       // GET /api/v1/apps/wordpress/:id (TODO(api:T12.03))
+                                                       http.get(/\/api\/v1\/apps\/wordpress\/([^/]+)$/, ({ params }) => {
+                                                         const id = String(params[0] || params.id);
+                                                         const details = mockWordPressDetails[id] || {
+                                                           app_id: id,
+                                                           core_version: "6.7.1",
+                                                           latest_core_version: "6.7.1",
+                                                           maintenance_mode: false,
+                                                           xmlrpc_disabled: true,
+                                                           debug_mode: false,
+                                                           plugins: [],
+                                                           themes: [],
+                                                         };
+                                                         return HttpResponse.json(details);
+                                                       }),
+
+                                                       // POST /api/v1/apps/wordpress/:id/plugins/:slug/update (TODO(api:T12.03))
+                                                       http.post(/\/api\/v1\/apps\/wordpress\/([^/]+)\/plugins\/([^/]+)\/update$/, ({ params }) => {
+                                                         const id = String(params[0]);
+                                                         const slug = String(params[1]);
+                                                         const details = mockWordPressDetails[id];
+                                                         if (details) {
+                                                           const plugin = details.plugins.find((p: any) => p.slug === slug);
+                                                           if (plugin) {
+                                                             plugin.version = plugin.latest_version;
+                                                             plugin.has_update = false;
+                                                           }
+                                                         }
+                                                         return HttpResponse.json({ success: true, slug });
+                                                       }),
+
+                                                       // POST /api/v1/apps/wordpress/:id/plugins/:slug/toggle (TODO(api:T12.03))
+                                                       http.post(/\/api\/v1\/apps\/wordpress\/([^/]+)\/plugins\/([^/]+)\/toggle$/, ({ params }) => {
+                                                         const id = String(params[0]);
+                                                         const slug = String(params[1]);
+                                                         const details = mockWordPressDetails[id];
+                                                         let active = true;
+                                                         if (details) {
+                                                           const plugin = details.plugins.find((p: any) => p.slug === slug);
+                                                           if (plugin) {
+                                                             plugin.active = !plugin.active;
+                                                             active = plugin.active;
+                                                           }
+                                                         }
+                                                         return HttpResponse.json({ success: true, slug, active });
+                                                       }),
+
+                                                       // POST /api/v1/apps/wordpress/:id/maintenance (TODO(api:T12.03))
+                                                       http.post(/\/api\/v1\/apps\/wordpress\/([^/]+)\/maintenance$/, async ({ params, request }) => {
+                                                         const id = String(params[0]);
+                                                         const body = (await request.json().catch(() => ({}))) as any;
+                                                         const details = mockWordPressDetails[id];
+                                                         if (details) {
+                                                           details.maintenance_mode = Boolean(body.enabled);
+                                                         }
+                                                         return HttpResponse.json({ success: true, enabled: body.enabled });
+                                                       }),
+
+                                                       // POST /api/v1/apps/wordpress/:id/staging (TODO(api:T12.03))
+                                                       http.post(/\/api\/v1\/apps\/wordpress\/([^/]+)\/staging$/, ({ params }) => {
+                                                         const id = String(params[0]);
+                                                         const stagingUrl = "https://staging.client-site.com";
+                                                         const details = mockWordPressDetails[id];
+                                                         if (details) {
+                                                           details.staging_url = stagingUrl;
+                                                         }
+                                                         return HttpResponse.json({ success: true, staging_url: stagingUrl });
+                                                       }),
+...(() => {
+                                                         // Email Handlers (T13.12, T13.05, T13.06, T13.10, T13.11)
+                                                         let mockMailboxes = [
+                                                           {
+                                                             id: "mb-1",
+                                                             email: "info@example.com",
+                                                             username: "info",
+                                                             domain: "example.com",
+                                                             quota_mb: 2048,
+                                                             used_bytes: 524288000,
+                                                             created_at: new Date(Date.now() - 30 * 86400000).toISOString(),
+                                                             webmail_url: "https://webmail.example.com",
+                                                           },
+                                                           {
+                                                             id: "mb-2",
+                                                             email: "support@example.com",
+                                                             username: "support",
+                                                             domain: "example.com",
+                                                             quota_mb: 5120,
+                                                             used_bytes: 4294967296,
+                                                             created_at: new Date(Date.now() - 60 * 86400000).toISOString(),
+                                                             webmail_url: "https://webmail.example.com",
+                                                           },
+                                                           {
+                                                             id: "mb-3",
+                                                             email: "admin@mysite.org",
+                                                             username: "admin",
+                                                             domain: "mysite.org",
+                                                             quota_mb: 1024,
+                                                             used_bytes: 104857600,
+                                                             created_at: new Date(Date.now() - 10 * 86400000).toISOString(),
+                                                             webmail_url: "https://webmail.mysite.org",
+                                                           },
+                                                         ];
+
+                                                         let mockForwarders = [
+                                                           {
+                                                             id: "fwd-1",
+                                                             source: "sales@example.com",
+                                                             destination: "sales-team@external-crm.com",
+                                                             domain: "example.com",
+                                                             created_at: new Date(Date.now() - 15 * 86400000).toISOString(),
+                                                           },
+                                                           {
+                                                             id: "fwd-2",
+                                                             source: "billing@example.com",
+                                                             destination: "accounting@finance-corp.com",
+                                                             domain: "example.com",
+                                                             created_at: new Date(Date.now() - 25 * 86400000).toISOString(),
+                                                           },
+                                                         ];
+
+                                                         let mockAutoresponders = [
+                                                           {
+                                                             id: "ar-1",
+                                                             email: "support@example.com",
+                                                             domain: "example.com",
+                                                             subject: "We received your ticket",
+                                                             body: "Thank you for contacting support. Our team will review your inquiry within 24 hours.",
+                                                             is_active: true,
+                                                           },
+                                                         ];
+
+                                                         let mockMailQueue = [
+                                                           {
+                                                             id: "4YZ8Q91024B",
+                                                             sender: "notifications@example.com",
+                                                             recipient: "user123@remote-domain.com",
+                                                             status: "deferred" as "queued" | "deferred" | "bounced",
+                                                             error_message: "Connection timed out (port 25)",
+                                                             queued_at: new Date(Date.now() - 1200000).toISOString(),
+                                                             retries: 3,
+                                                             size_bytes: 45020,
+                                                           },
+                                                           {
+                                                             id: "4YZ8T58291A",
+                                                             sender: "info@example.com",
+                                                             recipient: "client@gmail.com",
+                                                             status: "queued" as "queued" | "deferred" | "bounced",
+                                                             queued_at: new Date(Date.now() - 60000).toISOString(),
+                                                             retries: 0,
+                                                             size_bytes: 12850,
+                                                           },
+                                                         ];
+
+                                                         const mockDeliverability = [
+                                                           {
+                                                             domain: "example.com",
+                                                             spf_status: "pass" as const,
+                                                             dkim_status: "pass" as const,
+                                                             dmarc_status: "pass" as const,
+                                                             mx_status: "pass" as const,
+                                                             rbl_blacklisted: false,
+                                                             rbl_listings: [],
+                                                             recommendations: [
+                                                               "DKIM selector dhpanel is active with 2048-bit RSA key.",
+                                                               "DMARC policy is currently set to p=quarantine.",
+                                                             ],
+                                                           },
+                                                           {
+                                                             domain: "mysite.org",
+                                                             spf_status: "pass" as const,
+                                                             dkim_status: "fail" as const,
+                                                             dmarc_status: "missing" as const,
+                                                             mx_status: "pass" as const,
+                                                             rbl_blacklisted: false,
+                                                             rbl_listings: [],
+                                                             recommendations: [
+                                                               "Add a TXT record for _dmarc.mysite.org with v=DMARC1; p=none;.",
+                                                               "Sign outgoing mail with DKIM key to improve delivery.",
+                                                             ],
+                                                           },
+                                                         ];
+
+                                                         return [
+                                                           // GET /api/v1/email/mailboxes (TODO(api:T13.05))
+                                                           http.get(/\/api\/v1\/email\/mailboxes$/, ({ request }) => {
+                                                             const url = new URL(request.url);
+                                                             const domain = url.searchParams.get("domain");
+                                                             const filtered = domain
+                                                               ? mockMailboxes.filter((m) => m.domain === domain)
+                                                               : mockMailboxes;
+                                                             return HttpResponse.json(filtered);
+                                                           }),
+
+                                                           // POST /api/v1/email/mailboxes (TODO(api:T13.05))
+                                                           http.post(/\/api\/v1\/email\/mailboxes$/, async ({ request }) => {
+                                                             const body = (await request.json().catch(() => ({}))) as any;
+                                                             const newMailbox = {
+                                                               id: `mb-${Date.now()}`,
+                                                               email: `${body.username}@${body.domain}`,
+                                                               username: body.username,
+                                                               domain: body.domain,
+                                                               quota_mb: Number(body.quota_mb) || 1024,
+                                                               used_bytes: 0,
+                                                               created_at: new Date().toISOString(),
+                                                               webmail_url: `https://webmail.${body.domain}`,
+                                                             };
+                                                             mockMailboxes.push(newMailbox);
+                                                             return HttpResponse.json(newMailbox, { status: 201 });
+                                                           }),
+
+                                                           // DELETE /api/v1/email/mailboxes/:id (TODO(api:T13.05))
+                                                           http.delete(/\/api\/v1\/email\/mailboxes\/([^/]+)$/, ({ params }) => {
+                                                             const id = String(params[0]);
+                                                             mockMailboxes = mockMailboxes.filter((m) => m.id !== id);
+                                                             return new HttpResponse(null, { status: 204 });
+                                                           }),
+
+                                                           // POST /api/v1/email/mailboxes/:id/password (TODO(api:T13.05))
+                                                           http.post(/\/api\/v1\/email\/mailboxes\/([^/]+)\/password$/, () => {
+                                                             return HttpResponse.json({ success: true });
+                                                           }),
+
+                                                           // GET /api/v1/email/forwarders (TODO(api:T13.06))
+                                                           http.get(/\/api\/v1\/email\/forwarders$/, ({ request }) => {
+                                                             const url = new URL(request.url);
+                                                             const domain = url.searchParams.get("domain");
+                                                             const filtered = domain
+                                                               ? mockForwarders.filter((f) => f.domain === domain)
+                                                               : mockForwarders;
+                                                             return HttpResponse.json(filtered);
+                                                           }),
+
+                                                           // POST /api/v1/email/forwarders (TODO(api:T13.06))
+                                                           http.post(/\/api\/v1\/email\/forwarders$/, async ({ request }) => {
+                                                             const body = (await request.json().catch(() => ({}))) as any;
+                                                             const newFwd = {
+                                                               id: `fwd-${Date.now()}`,
+                                                               source: body.source,
+                                                               destination: body.destination,
+                                                               domain: body.domain,
+                                                               created_at: new Date().toISOString(),
+                                                             };
+                                                             mockForwarders.push(newFwd);
+                                                             return HttpResponse.json(newFwd, { status: 201 });
+                                                           }),
+
+                                                           // DELETE /api/v1/email/forwarders/:id (TODO(api:T13.06))
+                                                           http.delete(/\/api\/v1\/email\/forwarders\/([^/]+)$/, ({ params }) => {
+                                                             const id = String(params[0]);
+                                                             mockForwarders = mockForwarders.filter((f) => f.id !== id);
+                                                             return new HttpResponse(null, { status: 204 });
+                                                           }),
+
+                                                           // GET /api/v1/email/autoresponders (TODO(api:T13.06))
+                                                           http.get(/\/api\/v1\/email\/autoresponders$/, ({ request }) => {
+                                                             const url = new URL(request.url);
+                                                             const domain = url.searchParams.get("domain");
+                                                             const filtered = domain
+                                                               ? mockAutoresponders.filter((a) => a.domain === domain)
+                                                               : mockAutoresponders;
+                                                             return HttpResponse.json(filtered);
+                                                           }),
+
+                                                           // POST /api/v1/email/autoresponders (TODO(api:T13.06))
+                                                           http.post(/\/api\/v1\/email\/autoresponders$/, async ({ request }) => {
+                                                             const body = (await request.json().catch(() => ({}))) as any;
+                                                             const newAr = {
+                                                               id: `ar-${Date.now()}`,
+                                                               email: body.email,
+                                                               domain: body.domain,
+                                                               subject: body.subject,
+                                                               body: body.body,
+                                                               is_active: true,
+                                                               start_date: body.start_date,
+                                                               end_date: body.end_date,
+                                                             };
+                                                             mockAutoresponders.push(newAr);
+                                                             return HttpResponse.json(newAr, { status: 201 });
+                                                           }),
+
+                                                           // DELETE /api/v1/email/autoresponders/:id (TODO(api:T13.06))
+                                                           http.delete(/\/api\/v1\/email\/autoresponders\/([^/]+)$/, ({ params }) => {
+                                                             const id = String(params[0]);
+                                                             mockAutoresponders = mockAutoresponders.filter((a) => a.id !== id);
+                                                             return new HttpResponse(null, { status: 204 });
+                                                           }),
+
+                                                           // GET /api/v1/email/config (TODO(api:T13.12))
+                                                           http.get(/\/api\/v1\/email\/config$/, ({ request }) => {
+                                                             const url = new URL(request.url);
+                                                             const domain = url.searchParams.get("domain") || "example.com";
+                                                             return HttpResponse.json({
+                                                               incoming_server: `mail.${domain}`,
+                                                               incoming_imap_port: 993,
+                                                               incoming_pop3_port: 995,
+                                                               incoming_security: "SSL/TLS",
+                                                               outgoing_server: `mail.${domain}`,
+                                                               outgoing_smtp_port: 465,
+                                                               outgoing_submission_port: 587,
+                                                               outgoing_security: "SSL/TLS (or STARTTLS)",
+                                                               auth_required: true,
+                                                             });
+                                                           }),
+
+                                                           // GET /api/v1/admin/email/queue (TODO(api:T13.10))
+                                                           http.get(/\/api\/v1\/admin\/email\/queue$/, () => {
+                                                             return HttpResponse.json(mockMailQueue);
+                                                           }),
+
+                                                           // POST /api/v1/admin/email/queue/flush (TODO(api:T13.10))
+                                                           http.post(/\/api\/v1\/admin\/email\/queue\/flush$/, () => {
+                                                             mockMailQueue = [];
+                                                             return HttpResponse.json({ success: true, count: 2 });
+                                                           }),
+
+                                                           // DELETE /api/v1/admin/email/queue/:id (TODO(api:T13.10))
+                                                           http.delete(/\/api\/v1\/admin\/email\/queue\/([^/]+)$/, ({ params }) => {
+                                                             const id = String(params[0]);
+                                                             mockMailQueue = mockMailQueue.filter((q) => q.id !== id);
+                                                             return new HttpResponse(null, { status: 204 });
+                                                           }),
+
+                                                           // GET /api/v1/admin/email/deliverability (TODO(api:T13.11))
+                                                           http.get(/\/api\/v1\/admin\/email\/deliverability$/, () => {
+                                                             return HttpResponse.json(mockDeliverability);
+                                                           }),
+...(() => {
+                                                         // Reseller Handlers (T14.01, T14.02, T14.03, T14.04, T14.05, T14.07)
+                                                         let mockResellerPackages = [
+                                                           {
+                                                             id: "pkg-1",
+                                                             name: "Growth Agency Tier",
+                                                             max_accounts: 25,
+                                                             max_disk_gb: 150,
+                                                             max_bandwidth_gb: 1500,
+                                                             allow_overselling: true,
+                                                             allowed_plans: ["all"],
+                                                             created_at: new Date(Date.now() - 60 * 86400000).toISOString(),
+                                                           },
+                                                           {
+                                                             id: "pkg-2",
+                                                             name: "Enterprise Partner Tier",
+                                                             max_accounts: 100,
+                                                             max_disk_gb: 500,
+                                                             max_bandwidth_gb: 5000,
+                                                             allow_overselling: false,
+                                                             allowed_plans: ["all"],
+                                                             created_at: new Date(Date.now() - 90 * 86400000).toISOString(),
+                                                           },
+                                                         ];
+
+                                                         const mockResellerAccount = {
+                                                           id: "reseller-1",
+                                                           username: "apex_reseller",
+                                                           email: "partner@apexcloud.net",
+                                                           company_name: "Apex Cloud Solutions",
+                                                           package_id: "pkg-1",
+                                                           package_name: "Growth Agency Tier",
+                                                           status: "active" as "active" | "suspended",
+                                                           accounts_count: 8,
+                                                           disk_used_gb: 42,
+                                                           bandwidth_used_gb: 380,
+                                                           branding: {
+                                                             brand_name: "Apex Cloud Solutions",
+                                                             logo_url: "https://example.com/logo.png",
+                                                             primary_color: "#2563eb",
+                                                             support_email: "support@apexcloud.net",
+                                                             custom_login_message: "Welcome to your high performance cloud control panel.",
+                                                           },
+                                                           created_at: new Date(Date.now() - 45 * 86400000).toISOString(),
+                                                         };
+
+                                                         let mockAdminResellers = [
+                                                           mockResellerAccount,
+                                                           {
+                                                             id: "reseller-2",
+                                                             username: "pixel_craft",
+                                                             email: "admin@pixelcraft.agency",
+                                                             company_name: "PixelCraft Hosting",
+                                                             package_id: "pkg-2",
+                                                             package_name: "Enterprise Partner Tier",
+                                                             status: "active" as "active" | "suspended",
+                                                             accounts_count: 34,
+                                                             disk_used_gb: 180,
+                                                             bandwidth_used_gb: 1200,
+                                                             branding: {
+                                                               brand_name: "PixelCraft Hosting",
+                                                               logo_url: "https://example.com/pixel-logo.png",
+                                                               primary_color: "#7c3aed",
+                                                               support_email: "help@pixelcraft.agency",
+                                                               custom_login_message: "Powered by PixelCraft Studio Cloud.",
+                                                             },
+                                                             created_at: new Date(Date.now() - 80 * 86400000).toISOString(),
+                                                           },
+                                                         ];
+
+                                                         let mockResellerPlans = [
+                                                           {
+                                                             id: "rp-1",
+                                                             reseller_id: "reseller-1",
+                                                             name: "Client Starter",
+                                                             disk_mb: 5120,
+                                                             bandwidth_mb: 51200,
+                                                             domains_limit: 1,
+                                                             databases_limit: 2,
+                                                             mailboxes_limit: 5,
+                                                             created_at: new Date(Date.now() - 30 * 86400000).toISOString(),
+                                                           },
+                                                           {
+                                                             id: "rp-2",
+                                                             reseller_id: "reseller-1",
+                                                             name: "Business Pro",
+                                                             disk_mb: 15360,
+                                                             bandwidth_mb: 153600,
+                                                             domains_limit: 5,
+                                                             databases_limit: 10,
+                                                             mailboxes_limit: 20,
+                                                             created_at: new Date(Date.now() - 20 * 86400000).toISOString(),
+                                                           },
+                                                         ];
+
+                                                         let mockResellerUsers = [
+                                                           {
+                                                             id: "ru-1",
+                                                             reseller_id: "reseller-1",
+                                                             username: "novatech",
+                                                             email: "admin@novatech.io",
+                                                             domain: "novatech.io",
+                                                             plan_name: "Business Pro",
+                                                             disk_used_mb: 4200,
+                                                             status: "active" as "active" | "suspended",
+                                                             created_at: new Date(Date.now() - 15 * 86400000).toISOString(),
+                                                           },
+                                                           {
+                                                             id: "ru-2",
+                                                             reseller_id: "reseller-1",
+                                                             username: "sweetbakery",
+                                                             email: "contact@sweetbakery.com",
+                                                             domain: "sweetbakery.com",
+                                                             plan_name: "Client Starter",
+                                                             disk_used_mb: 1200,
+                                                             status: "active" as "active" | "suspended",
+                                                             created_at: new Date(Date.now() - 10 * 86400000).toISOString(),
+                                                           },
+                                                         ];
+
+                                                         return [
+                                                           // GET /api/v1/reseller/me (TODO(api:T14.01))
+                                                           http.get(/\/api\/v1\/reseller\/me$/, () => {
+                                                             return HttpResponse.json(mockResellerAccount);
+                                                           }),
+
+                                                           // GET /api/v1/reseller/me/package (TODO(api:T14.01))
+                                                           http.get(/\/api\/v1\/reseller\/me\/package$/, () => {
+                                                             const pkg = mockResellerPackages.find((p) => p.id === mockResellerAccount.package_id) || mockResellerPackages[0];
+                                                             return HttpResponse.json(pkg);
+                                                           }),
+
+                                                           // PUT /api/v1/reseller/me/branding (TODO(api:T14.05))
+                                                           http.put(/\/api\/v1\/reseller\/me\/branding$/, async ({ request }) => {
+                                                             const body = (await request.json().catch(() => ({}))) as any;
+                                                             mockResellerAccount.branding = {
+                                                               ...mockResellerAccount.branding,
+                                                               ...body,
+                                                             };
+                                                             return HttpResponse.json(mockResellerAccount.branding);
+                                                           }),
+
+                                                           // GET /api/v1/reseller/users (TODO(api:T14.03))
+                                                           http.get(/\/api\/v1\/reseller\/users$/, () => {
+                                                             return HttpResponse.json(mockResellerUsers);
+                                                           }),
+
+                                                           // POST /api/v1/reseller/users (TODO(api:T14.04))
+                                                           http.post(/\/api\/v1\/reseller\/users$/, async ({ request }) => {
+                                                             const body = (await request.json().catch(() => ({}))) as any;
+                                                             const newUser = {
+                                                               id: `ru-${Date.now()}`,
+                                                               reseller_id: mockResellerAccount.id,
+                                                               username: body.username,
+                                                               email: body.email,
+                                                               domain: body.domain,
+                                                               plan_name: body.plan_name || "Client Starter",
+                                                               disk_used_mb: 0,
+                                                               status: "active" as const,
+                                                               created_at: new Date().toISOString(),
+                                                             };
+                                                             mockResellerUsers.push(newUser);
+                                                             mockResellerAccount.accounts_count += 1;
+                                                             return HttpResponse.json(newUser, { status: 201 });
+                                                           }),
+
+                                                           // POST /api/v1/reseller/users/:id/status (TODO(api:T14.07))
+                                                           http.post(/\/api\/v1\/reseller\/users\/([^/]+)\/status$/, async ({ params, request }) => {
+                                                             const id = String(params[0]);
+                                                             const body = (await request.json().catch(() => ({}))) as any;
+                                                             const user = mockResellerUsers.find((u) => u.id === id);
+                                                             if (user) {
+                                                               user.status = body.status;
+                                                             }
+                                                             return HttpResponse.json({ success: true, status: body.status });
+                                                           }),
+
+                                                           // DELETE /api/v1/reseller/users/:id (TODO(api:T14.03))
+                                                           http.delete(/\/api\/v1\/reseller\/users\/([^/]+)$/, ({ params }) => {
+                                                             const id = String(params[0]);
+                                                             mockResellerUsers = mockResellerUsers.filter((u) => u.id !== id);
+                                                             mockResellerAccount.accounts_count = Math.max(0, mockResellerAccount.accounts_count - 1);
+                                                             return new HttpResponse(null, { status: 204 });
+                                                           }),
+
+                                                           // GET /api/v1/reseller/plans (TODO(api:T14.05))
+                                                           http.get(/\/api\/v1\/reseller\/plans$/, () => {
+                                                             return HttpResponse.json(mockResellerPlans);
+                                                           }),
+
+                                                           // POST /api/v1/reseller/plans (TODO(api:T14.05))
+                                                           http.post(/\/api\/v1\/reseller\/plans$/, async ({ request }) => {
+                                                             const body = (await request.json().catch(() => ({}))) as any;
+                                                             const newPlan = {
+                                                               id: `rp-${Date.now()}`,
+                                                               reseller_id: mockResellerAccount.id,
+                                                               name: body.name,
+                                                               disk_mb: Number(body.disk_mb) || 5120,
+                                                               bandwidth_mb: Number(body.bandwidth_mb) || 51200,
+                                                               domains_limit: Number(body.domains_limit) || 1,
+                                                               databases_limit: Number(body.databases_limit) || 1,
+                                                               mailboxes_limit: Number(body.mailboxes_limit) || 1,
+                                                               created_at: new Date().toISOString(),
+                                                             };
+                                                             mockResellerPlans.push(newPlan);
+                                                             return HttpResponse.json(newPlan, { status: 201 });
+                                                           }),
+
+                                                           // DELETE /api/v1/reseller/plans/:id (TODO(api:T14.05))
+                                                           http.delete(/\/api\/v1\/reseller\/plans\/([^/]+)$/, ({ params }) => {
+                                                             const id = String(params[0]);
+                                                             mockResellerPlans = mockResellerPlans.filter((p) => p.id !== id);
+                                                             return new HttpResponse(null, { status: 204 });
+                                                           }),
+
+                                                           // GET /api/v1/admin/resellers (TODO(api:T14.01))
+                                                           http.get(/\/api\/v1\/admin\/resellers$/, () => {
+                                                             return HttpResponse.json(mockAdminResellers);
+                                                           }),
+
+                                                           // POST /api/v1/admin/resellers (TODO(api:T14.01))
+                                                           http.post(/\/api\/v1\/admin\/resellers$/, async ({ request }) => {
+                                                             const body = (await request.json().catch(() => ({}))) as any;
+                                                             const pkg = mockResellerPackages.find((p) => p.id === body.package_id) || mockResellerPackages[0];
+                                                             const newReseller = {
+                                                               id: `reseller-${Date.now()}`,
+                                                               username: body.username,
+                                                               email: body.email,
+                                                               company_name: body.company_name,
+                                                               package_id: pkg.id,
+                                                               package_name: pkg.name,
+                                                               status: "active" as const,
+                                                               accounts_count: 0,
+                                                               disk_used_gb: 0,
+                                                               bandwidth_used_gb: 0,
+                                                               branding: {
+                                                                 brand_name: body.company_name,
+                                                                 logo_url: "https://example.com/logo.png",
+                                                                 primary_color: "#2563eb",
+                                                                 support_email: body.email,
+                                                                 custom_login_message: "Welcome to your control panel",
+                                                               },
+                                                               created_at: new Date().toISOString(),
+                                                             };
+                                                             mockAdminResellers.push(newReseller);
+                                                             return HttpResponse.json(newReseller, { status: 201 });
+                                                           }),
+
+                                                           // POST /api/v1/admin/resellers/:id/status (TODO(api:T14.07))
+                                                           http.post(/\/api\/v1\/admin\/resellers\/([^/]+)\/status$/, async ({ params, request }) => {
+                                                             const id = String(params[0]);
+                                                             const body = (await request.json().catch(() => ({}))) as any;
+                                                             const reseller = mockAdminResellers.find((r) => r.id === id);
+                                                             if (reseller) {
+                                                               reseller.status = body.status;
+                                                             }
+                                                             return HttpResponse.json({ success: true, status: body.status });
+                                                           }),
+
+                                                           // DELETE /api/v1/admin/resellers/:id (TODO(api:T14.01))
+                                                           http.delete(/\/api\/v1\/admin\/resellers\/([^/]+)$/, ({ params }) => {
+                                                             const id = String(params[0]);
+                                                             mockAdminResellers = mockAdminResellers.filter((r) => r.id !== id);
+                                                             return new HttpResponse(null, { status: 204 });
+                                                           }),
+
+                                                           // GET /api/v1/admin/reseller-packages (TODO(api:T14.02))
+                                                           http.get(/\/api\/v1\/admin\/reseller-packages$/, () => {
+                                                             return HttpResponse.json(mockResellerPackages);
+                                                           }),
+
+                                                           // POST /api/v1/admin/reseller-packages (TODO(api:T14.02))
+                                                           http.post(/\/api\/v1\/admin\/reseller-packages$/, async ({ request }) => {
+                                                             const body = (await request.json().catch(() => ({}))) as any;
+                                                             const newPkg = {
+                                                               id: `pkg-${Date.now()}`,
+                                                               name: body.name,
+                                                               max_accounts: Number(body.max_accounts) || 25,
+                                                               max_disk_gb: Number(body.max_disk_gb) || 100,
+                                                               max_bandwidth_gb: Number(body.max_bandwidth_gb) || 1000,
+                                                               allow_overselling: Boolean(body.allow_overselling),
+                                                               allowed_plans: ["all"],
+                                                               created_at: new Date().toISOString(),
+                                                             };
+                                                             mockResellerPackages.push(newPkg);
+                                                             return HttpResponse.json(newPkg, { status: 201 });
+                                                           }),
+
+                                                           // DELETE /api/v1/admin/reseller-packages/:id (TODO(api:T14.02))
+                                                           http.delete(/\/api\/v1\/admin\/reseller-packages\/([^/]+)$/, ({ params }) => {
+                                                             const id = String(params[0]);
+                                                             mockResellerPackages = mockResellerPackages.filter((p) => p.id !== id);
+                                                             return new HttpResponse(null, { status: 204 });
+                                                           }),
+...(() => {
+                                                         // Migration & Transfer Handlers (T15.04, T15.05, T15.06)
+                                                         let mockTransferJobs: Array<{
+                                                           id: string;
+                                                           source_type: "cpanel" | "cyberpanel" | "openpanel" | "dhpanel_archive";
+                                                           source_host?: string;
+                                                           tenant_username: string;
+                                                           target_domain: string;
+                                                           status: "pending" | "running" | "completed" | "failed" | "cancelled";
+                                                           progress_percent: number;
+                                                           current_step: string;
+                                                           size_bytes?: number;
+                                                           created_at: string;
+                                                           updated_at: string;
+                                                           steps: Array<{
+                                                             id: string;
+                                                             name: string;
+                                                             status: "pending" | "running" | "completed" | "failed";
+                                                             started_at?: string;
+                                                             completed_at?: string;
+                                                             details?: string;
+                                                           }>;
+                                                           logs: string[];
+                                                         }> = [
+                                                           {
+                                                             id: "TRF-90241A",
+                                                             source_type: "cpanel" as const,
+                                                             source_host: "cpanel.legacy-host.com",
+                                                             tenant_username: "apex_store",
+                                                             target_domain: "apexstore.com",
+                                                             status: "running" as const,
+                                                             progress_percent: 65,
+                                                             current_step: "Restoring MySQL Databases",
+                                                             size_bytes: 858993459,
+                                                             created_at: new Date(Date.now() - 360000).toISOString(),
+                                                             updated_at: new Date().toISOString(),
+                                                             steps: [
+                                                               {
+                                                                 id: "step-1",
+                                                                 name: "Connecting to Remote Server via SSH",
+                                                                 status: "completed" as const,
+                                                                 started_at: new Date(Date.now() - 360000).toISOString(),
+                                                                 completed_at: new Date(Date.now() - 350000).toISOString(),
+                                                                 details: "Authenticated successfully as root via port 22",
+                                                               },
+                                                               {
+                                                                 id: "step-2",
+                                                                 name: "Generating & Fetching cpmove Backup Archive",
+                                                                 status: "completed" as const,
+                                                                 started_at: new Date(Date.now() - 350000).toISOString(),
+                                                                 completed_at: new Date(Date.now() - 210000).toISOString(),
+                                                                 details: "Transferred 819 MB archive (cpmove-apex_store.tar.gz)",
+                                                               },
+                                                               {
+                                                                 id: "step-3",
+                                                                 name: "Extracting Archive & Parsing Metadata",
+                                                                 status: "completed" as const,
+                                                                 started_at: new Date(Date.now() - 210000).toISOString(),
+                                                                 completed_at: new Date(Date.now() - 170000).toISOString(),
+                                                                 details: "Parsed 3 domains, 2 MySQL DBs, 5 mailboxes, and 12 cron entries",
+                                                               },
+                                                               {
+                                                                 id: "step-4",
+                                                                 name: "Restoring MySQL Databases & Users",
+                                                                 status: "running" as const,
+                                                                 started_at: new Date(Date.now() - 170000).toISOString(),
+                                                                 details: "Importing apex_store_prod (184 MB) table structure & data",
+                                                               },
+                                                               {
+                                                                 id: "step-5",
+                                                                 name: "Restoring Web Root & Vhost Configuration",
+                                                                 status: "pending" as const,
+                                                               },
+                                                               {
+                                                                 id: "step-6",
+                                                                 name: "Configuring DNS & SSL Certificates",
+                                                                 status: "pending" as const,
+                                                               },
+                                                               {
+                                                                 id: "step-7",
+                                                                 name: "Verifying Tenant Services & Health Check",
+                                                                 status: "pending" as const,
+                                                               },
+                                                             ],
+                                                             logs: [
+                                                               "Connecting to remote host cpanel.legacy-host.com on port 22...",
+                                                               "SSH handshake complete. Key accepted.",
+                                                               "Checking source cPanel version: 110.0.12 (Linux x86_64)",
+                                                               "Triggering /scripts/pkgacct apex_store --skiphomedir=0...",
+                                                               "pkgacct completed in 42s. Archive size: 819,200 KB.",
+                                                               "Starting streaming rsync transfer to /var/dhpanel/transfers/cpmove-apex_store.tar.gz...",
+                                                               "Transfer completed: 858,993,459 bytes received (speed 38.4 MB/s).",
+                                                               "Validating SHA256 checksum... OK.",
+                                                               "Extracting archive metadata from cp/apex_store yaml manifest...",
+                                                               "Discovered primary domain: apexstore.com (document_root: public_html)",
+                                                               "Provisioning DHPanel tenant apex_store with linux user and cgroup limits...",
+                                                               "RESTORED user apex_store (UID 1042, GID 1042)",
+                                                               "Extracting MySQL dumps: apex_store_prod.sql.gz, apex_store_cache.sql.gz...",
+                                                               "Creating MySQL user apex_store_u with grant on apex_store_prod.*...",
+                                                               "Importing database apex_store_prod (table count: 48)...",
+                                                             ],
+                                                           },
+                                                           {
+                                                             id: "TRF-88192C",
+                                                             source_type: "cyberpanel" as const,
+                                                             source_host: "198.51.100.24",
+                                                             tenant_username: "agency_portal",
+                                                             target_domain: "agencyportal.io",
+                                                             status: "completed" as const,
+                                                             progress_percent: 100,
+                                                             current_step: "Migration Completed Successfully",
+                                                             size_bytes: 429496729,
+                                                             created_at: new Date(Date.now() - 7200000).toISOString(),
+                                                             updated_at: new Date(Date.now() - 6900000).toISOString(),
+                                                             steps: [
+                                                               {
+                                                                 id: "step-1",
+                                                                 name: "Connecting to Remote Server via SSH",
+                                                                 status: "completed" as const,
+                                                                 started_at: new Date(Date.now() - 7200000).toISOString(),
+                                                                 completed_at: new Date(Date.now() - 7190000).toISOString(),
+                                                               },
+                                                               {
+                                                                 id: "step-2",
+                                                                 name: "Generating & Fetching CyberPanel Backup",
+                                                                 status: "completed" as const,
+                                                                 started_at: new Date(Date.now() - 7190000).toISOString(),
+                                                                 completed_at: new Date(Date.now() - 7080000).toISOString(),
+                                                               },
+                                                               {
+                                                                 id: "step-3",
+                                                                 name: "Extracting Archive & Parsing Metadata",
+                                                                 status: "completed" as const,
+                                                                 started_at: new Date(Date.now() - 7080000).toISOString(),
+                                                                 completed_at: new Date(Date.now() - 7040000).toISOString(),
+                                                               },
+                                                               {
+                                                                 id: "step-4",
+                                                                 name: "Restoring MySQL Databases & Users",
+                                                                 status: "completed" as const,
+                                                                 started_at: new Date(Date.now() - 7040000).toISOString(),
+                                                                 completed_at: new Date(Date.now() - 6980000).toISOString(),
+                                                               },
+                                                               {
+                                                                 id: "step-5",
+                                                                 name: "Restoring Web Root & Vhost Configuration",
+                                                                 status: "completed" as const,
+                                                                 started_at: new Date(Date.now() - 6980000).toISOString(),
+                                                                 completed_at: new Date(Date.now() - 6930000).toISOString(),
+                                                               },
+                                                               {
+                                                                 id: "step-6",
+                                                                 name: "Configuring DNS & SSL Certificates",
+                                                                 status: "completed" as const,
+                                                                 started_at: new Date(Date.now() - 6930000).toISOString(),
+                                                                 completed_at: new Date(Date.now() - 6910000).toISOString(),
+                                                               },
+                                                               {
+                                                                 id: "step-7",
+                                                                 name: "Verifying Tenant Services & Health Check",
+                                                                 status: "completed" as const,
+                                                                 started_at: new Date(Date.now() - 6910000).toISOString(),
+                                                                 completed_at: new Date(Date.now() - 6900000).toISOString(),
+                                                                 details: "All HTTP/HTTPS endpoints healthy with status 200 OK",
+                                                               },
+                                                             ],
+                                                             logs: [
+                                                               "Connecting to remote CyberPanel instance 198.51.100.24:22...",
+                                                               "Transfer initiated for agency_portal...",
+                                                               "Fetching backup archive: 429,496,729 bytes transferred.",
+                                                               "Archive extracted and verified.",
+                                                               "RESTORED database agency_portal_main (size: 42 MB).",
+                                                               "RESTORED public_html web files (file count: 3,420).",
+                                                               "Generated Caddy virtual host configuration for agencyportal.io.",
+                                                               "ACME TLS certificate provisioned.",
+                                                               "SUCCESS: Migration completed in 5m 0s. All services live.",
+                                                             ],
+                                                           },
+                                                         ];
+
+                                                         return [
+                                                           // GET /api/v1/migration/transfers (TODO(api:T15.06))
+                                                           http.get(/\/api\/v1\/migration\/transfers$/, () => {
+                                                             return HttpResponse.json(mockTransferJobs);
+                                                           }),
+
+                                                           // GET /api/v1/migration/transfers/:id (TODO(api:T15.06))
+                                                           http.get(/\/api\/v1\/migration\/transfers\/([^/]+)$/, ({ params }) => {
+                                                             const id = String(params[0]);
+                                                             const job = mockTransferJobs.find((j) => j.id === id);
+                                                             if (!job) return new HttpResponse(null, { status: 404 });
+                                                             return HttpResponse.json(job);
+                                                           }),
+
+                                                           // POST /api/v1/migration/transfers (TODO(api:T15.04), TODO(api:T15.05))
+                                                           http.post(/\/api\/v1\/migration\/transfers$/, async ({ request }) => {
+                                                             const body = (await request.json().catch(() => ({}))) as any;
+                                                             const newJob = {
+                                                               id: `TRF-${Math.floor(10000 + Math.random() * 90000)}X`,
+                                                               source_type: body.source_type || "cpanel",
+                                                               source_host: body.remote_host || "127.0.0.1",
+                                                               tenant_username: body.tenant_username,
+                                                               target_domain: body.target_domain,
+                                                               status: "running" as const,
+                                                               progress_percent: 15,
+                                                               current_step: "Connecting to Remote Server via SSH",
+                                                               size_bytes: 104857600,
+                                                               created_at: new Date().toISOString(),
+                                                               updated_at: new Date().toISOString(),
+                                                               steps: [
+                                                                 {
+                                                                   id: "step-1",
+                                                                   name: "Connecting to Remote Server via SSH",
+                                                                   status: "running" as const,
+                                                                   started_at: new Date().toISOString(),
+                                                                   details: `Connecting to ${body.remote_host || "source"}...`,
+                                                                 },
+                                                                 {
+                                                                   id: "step-2",
+                                                                   name: "Generating & Fetching Archive",
+                                                                   status: "pending" as const,
+                                                                 },
+                                                                 {
+                                                                   id: "step-3",
+                                                                   name: "Extracting Archive & Parsing Metadata",
+                                                                   status: "pending" as const,
+                                                                 },
+                                                                 {
+                                                                   id: "step-4",
+                                                                   name: "Restoring MySQL Databases & Users",
+                                                                   status: "pending" as const,
+                                                                 },
+                                                                 {
+                                                                   id: "step-5",
+                                                                   name: "Restoring Web Root & Vhost Configuration",
+                                                                   status: "pending" as const,
+                                                                 },
+                                                                 {
+                                                                   id: "step-6",
+                                                                   name: "Configuring DNS & SSL Certificates",
+                                                                   status: "pending" as const,
+                                                                 },
+                                                                 {
+                                                                   id: "step-7",
+                                                                   name: "Verifying Tenant Services",
+                                                                   status: "pending" as const,
+                                                                 },
+                                                               ],
+                                                               logs: [
+                                                                 `Initiating migration transfer from ${body.source_type} at ${body.remote_host || "local"}...`,
+                                                                 `Connecting via SSH to ${body.remote_user || "root"}@${body.remote_host}:${body.remote_ssh_port || 22}...`,
+                                                                 "SSH connection established. Handshake verified.",
+                                                                 `Target tenant account: ${body.tenant_username} (@${body.target_domain}).`,
+                                                               ],
+                                                             };
+                                                             mockTransferJobs.unshift(newJob);
+                                                             return HttpResponse.json(newJob, { status: 201 });
+                                                           }),
+
+                                                           // POST /api/v1/migration/transfers/:id/retry (TODO(api:T15.06))
+                                                           http.post(/\/api\/v1\/migration\/transfers\/([^/]+)\/retry$/, ({ params }) => {
+                                                             const id = String(params[0]);
+                                                             const job = mockTransferJobs.find((j) => j.id === id);
+                                                             if (job) {
+                                                               job.status = "running";
+                                                               job.progress_percent = 20;
+                                                               job.current_step = "Connecting to Remote Server via SSH";
+                                                               job.logs.push("Retrying migration transfer from step 1...");
+                                                             }
+                                                             return HttpResponse.json({ success: true });
+                                                           }),
+
+                                                           // POST /api/v1/migration/transfers/:id/cancel (TODO(api:T15.06))
+                                                           http.post(/\/api\/v1\/migration\/transfers\/([^/]+)\/cancel$/, ({ params }) => {
+                                                             const id = String(params[0]);
+                                                             const job = mockTransferJobs.find((j) => j.id === id);
+                                                             if (job) {
+                                                               job.status = "cancelled";
+                                                               job.current_step = "Transfer Aborted by User";
+                                                               job.logs.push("WARNING: Transfer cancelled by operator.");
+                                                             }
+                                                             return HttpResponse.json({ success: true });
+                                                           }),
+
+                                                           // DELETE /api/v1/migration/transfers/:id (TODO(api:T15.06))
+                                                           http.delete(/\/api\/v1\/migration\/transfers\/([^/]+)$/, ({ params }) => {
+                                                             const id = String(params[0]);
+                                                             mockTransferJobs = mockTransferJobs.filter((j) => j.id !== id);
+                                                             return new HttpResponse(null, { status: 204 });
+                                                           }),
+                                                         ];
+                                                       })(),
+                                                         ];
+                                                       })(),
+                                                         ];
+                                                       })(),
+                                                     ];
+                                                   })(),
+                                              // ===================================                                              // T18.06 — Branding & Live Theming Handlers (TODO(api:T18.06))
+                                              // ===================================
+  ...(() => {
+                                                let mockBrandingState = {
+                                                  companyName: "DHPanel",
+                                                  logoUrl: "",
+                                                  faviconUrl: "",
+                                                  accentColor: "#3b82f6",
+                                                  loginTitle: "DHPanel",
+                                                  loginSubtitle: "Sign in to control your web hosting infrastructure",
+                                                  loginFooterText: "DHPanel Cloud Infrastructure & Management",
+                                                  nameservers: ["ns1.dhpanel.net", "ns2.dhpanel.net"],
+                                                  customCss: "",
+                                                };
+
+                                                return [
+                                                  // GET /api/v1/branding (TODO(api:T18.06))
+                                                  http.get(/\/api\/v1\/branding$/, () => {
+                                                    return HttpResponse.json(mockBrandingState);
+                                                  }),
+
+                                                  // PUT /api/v1/branding (TODO(api:T18.06))
+                                                  http.put(/\/api\/v1\/branding$/, async ({ request }) => {
+                                                    const body = (await request.json().catch(() => ({}))) as any;
+                                                    mockBrandingState = {
+                                                      ...mockBrandingState,
+                                                      ...body,
+                                                    };
+                                                    return HttpResponse.json(mockBrandingState);
+                                                  }),
+                                                ];
+                                              })(),
+                                              // ===================================                                              // T18.07: Onboarding & Tour Handlers
+                                              // ===================================
+  ...(() => {
+                                                let adminDismissed = false;
+                                                let clientDismissed = false;
+                                                let completedSteps = ["add_node"];
+
+                                                return [
+                                                  // TODO(api:T18.07): Get admin quickstart onboarding status
+                                                  http.get("/api/v1/onboarding/admin", () => {
+                                                    return HttpResponse.json({
+                                                      dismissed: adminDismissed,
+                                                      completed_steps: completedSteps,
+                                                    });
+                                                  }),
+
+                                                  // TODO(api:T18.07): Dismiss admin quickstart checklist
+                                                  http.post("/api/v1/onboarding/admin/dismiss", () => {
+                                                    adminDismissed = true;
+                                                    return HttpResponse.json({ ok: true, dismissed: true });
+                                                  }),
+
+                                                  // TODO(api:T18.07): Toggle admin quickstart checklist step
+                                                  http.post("/api/v1/onboarding/admin/step/:id/toggle", ({ params }) => {
+                                                    const id = String(params.id);
+                                                    if (completedSteps.includes(id)) {
+                                                      completedSteps = completedSteps.filter((s) => s !== id);
+                                                    } else {
+                                                      completedSteps.push(id);
+                                                    }
+                                                    return HttpResponse.json({ ok: true, completed_steps: completedSteps });
+                                                  }),
+
+                                                  // TODO(api:T18.07): Get client welcome tour status
+                                                  http.get("/api/v1/onboarding/client", () => {
+                                                    return HttpResponse.json({
+                                                      dismissed: clientDismissed,
+                                                    });
+                                                  }),
+
+                                                  // TODO(api:T18.07): Dismiss client welcome tour
+                                                  http.post("/api/v1/onboarding/client/dismiss", () => {
+                                                    clientDismissed = true;
+                                                    return HttpResponse.json({ ok: true, dismissed: true });
+                                                  }),
+                                                ];
+                                              })(),
+                                              // ===================================                                              // T18.10: Panel Update Handlers
+                                              // ===================================
+  ...(() => {
+                                                let currentVersion = "0.1.0";
+                                                let previousVersion: string | null = null;
+                                                let channel: "stable" | "beta" = "stable";
+                                                let canRollback = false;
+                                                let lastCheckedAt = new Date().toISOString();
+
+                                                let availableUpdate: any = {
+                                                  version: "0.2.0",
+                                                  release_date: new Date().toISOString(),
+                                                  channel: "stable",
+                                                  ed25519_signature: "e93f820c74198d023afc50193bbd7310...ed25519",
+                                                  key_id: "dhpanel-root-2026",
+                                                  checksum_sha256: "9b3c4f028d716498c005b81ae2409744c8...sha256",
+                                                  changelog: [
+                                                    "Multi-node clustering protocol v2 support",
+                                                    "Dynamic WAF rule updates with zero-restart reload",
+                                                    "Optimized MariaDB connection pool allocation",
+                                                  ],
+                                                  required_migrations: [
+                                                    "000015_cluster_nodes_v2.sql",
+                                                    "000016_waf_realtime_metrics.sql",
+                                                  ],
+                                                  can_rollback: true,
+                                                };
+
+                                                const history: Array<{
+                                                  id: string;
+                                                  from_version: string;
+                                                  to_version: string;
+                                                  channel: "stable" | "beta";
+                                                  status: "success" | "rolled_back" | "failed";
+                                                  timestamp: string;
+                                                  details: string;
+                                                }> = [
+                                                  {
+                                                    id: "upd-001",
+                                                    from_version: "0.0.9",
+                                                    to_version: "0.1.0",
+                                                    channel: "stable",
+                                                    status: "success",
+                                                    timestamp: new Date(Date.now() - 86400000 * 7).toISOString(),
+                                                    details: "Initial release baseline upgrade with auth & audit logging",
+                                                  },
+                                                ];
+
+                                                return [
+                                                  // TODO(api:T18.10): Get panel update status
+                                                  http.get("/api/v1/update/status", () => {
+                                                    return HttpResponse.json({
+                                                      current_version: currentVersion,
+                                                      channel,
+                                                      last_checked_at: lastCheckedAt,
+                                                      available_update: availableUpdate,
+                                                      previous_version: previousVersion,
+                                                      can_rollback: canRollback,
+                                                      history,
+                                                    });
+                                                  }),
+
+                                                  // TODO(api:T18.10): Check for updates
+                                                  http.post("/api/v1/update/check", () => {
+                                                    lastCheckedAt = new Date().toISOString();
+                                                    return HttpResponse.json({
+                                                      checked: true,
+                                                      available: !!availableUpdate,
+                                                      update: availableUpdate,
+                                                    });
+                                                  }),
+
+                                                  // TODO(api:T18.10): Switch update channel
+                                                  http.post("/api/v1/update/channel", async ({ request }) => {
+                                                    const body = (await request.json()) as { channel: "stable" | "beta" };
+                                                    channel = body.channel || "stable";
+                                                    if (channel === "beta") {
+                                                      availableUpdate = {
+                                                        version: "0.3.0-beta.1",
+                                                        release_date: new Date().toISOString(),
+                                                        channel: "beta",
+                                                        ed25519_signature: "77aa01ff4c82...ed25519",
+                                                        key_id: "dhpanel-beta-2026",
+                                                        checksum_sha256: "88cc44bb...sha256",
+                                                        changelog: ["Experimental eBPF network packet filter"],
+                                                        required_migrations: ["000017_ebpf_metrics.sql"],
+                                                        can_rollback: true,
+                                                      };
+                                                    } else {
+                                                      availableUpdate = {
+                                                        version: "0.2.0",
+                                                        release_date: new Date().toISOString(),
+                                                        channel: "stable",
+                                                        ed25519_signature: "e93f820c7419...ed25519",
+                                                        key_id: "dhpanel-root-2026",
+                                                        checksum_sha256: "9b3c4f028d716...sha256",
+                                                        changelog: [
+                                                          "Multi-node clustering protocol v2 support",
+                                                          "Dynamic WAF rule updates with zero-restart reload",
+                                                        ],
+                                                        required_migrations: [
+                                                          "000015_cluster_nodes_v2.sql",
+                                                          "000016_waf_realtime_metrics.sql",
+                                                        ],
+                                                        can_rollback: true,
+                                                      };
+                                                    }
+                                                    return HttpResponse.json({ ok: true, channel });
+                                                  }),
+
+                                                  // TODO(api:T18.10): Apply update with rollback safety invariant
+                                                  http.post("/api/v1/update/apply", async ({ request }) => {
+                                                    const body = (await request.json().catch(() => ({}))) as {
+                                                      version?: string;
+                                                      simulate_failure?: boolean;
+                                                    };
+
+                                                    if (body.simulate_failure) {
+                                                      // DoD requirement: "Update ব্যর্থ হলে আগের version-এ ফিরে যায়।"
+                                                      // Simulate migration error and automatic rollback to previous version
+                                                      history.unshift({
+                                                        id: `upd-${Date.now()}`,
+                                                        from_version: currentVersion,
+                                                        to_version: body.version || "0.2.0",
+                                                        channel,
+                                                        status: "rolled_back",
+                                                        timestamp: new Date().toISOString(),
+                                                        details: "Migration 000016 failed: foreign key constraint violation. Auto-rollback reverted schema and kept v" + currentVersion,
+                                                      });
+
+                                                      return HttpResponse.json({
+                                                        ok: false,
+                                                        status: "rolled_back",
+                                                        rolled_back: true,
+                                                        error: "Migration failed. Invariant protection: safely rolled back to " + currentVersion,
+                                                      });
+                                                    }
+
+                                                    // Successful update
+                                                    previousVersion = currentVersion;
+                                                    currentVersion = body.version || (availableUpdate ? availableUpdate.version : "0.2.0");
+                                                    canRollback = true;
+                                                    availableUpdate = null;
+
+                                                    history.unshift({
+                                                      id: `upd-${Date.now()}`,
+                                                      from_version: previousVersion,
+                                                      to_version: currentVersion,
+                                                      channel,
+                                                      status: "success",
+                                                      timestamp: new Date().toISOString(),
+                                                      details: "Release verified by Ed25519 root signature and schema migrations applied successfully",
+                                                    });
+
+                                                    return HttpResponse.json({
+                                                      ok: true,
+                                                      status: "success",
+                                                      current_version: currentVersion,
+                                                    });
+                                                  }),
+
+                                                  // TODO(api:T18.10): Manual rollback to previous version
+                                                  http.post("/api/v1/update/rollback", () => {
+                                                    if (!previousVersion) {
+                                                      return HttpResponse.json({ error: "No previous version available" }, { status: 400 });
+                                                    }
+                                                    const targetVersion = previousVersion;
+                                                    previousVersion = currentVersion;
+                                                    currentVersion = targetVersion;
+
+                                                    history.unshift({
+                                                      id: `upd-${Date.now()}`,
+                                                      from_version: previousVersion,
+                                                      to_version: currentVersion,
+                                                      channel,
+                                                      status: "rolled_back",
+                                                      timestamp: new Date().toISOString(),
+                                                      details: `Manual rollback triggered by admin. Restored release v${currentVersion}.`,
+                                                    });
+
+                                                    return HttpResponse.json({
+                                                      ok: true,
+                                                      current_version: currentVersion,
+                                                      rolled_back: true,
+                                                    });
+                                                  }),
+                                                ];
+                                              })(),
+                                              // ===================================                                              // T18.11: API Tokens & Scoped Execution
+                                              // ===================================
+  ...(() => {
+                                                let mockTokens: Array<{
+                                                  id: string;
+                                                  name: string;
+                                                  token_preview: string;
+                                                  scopes: string[];
+                                                  created_at: string;
+                                                  expires_at: string | null;
+                                                  last_used_at: string | null;
+                                                }> = [
+                                                  {
+                                                    id: "tok-whmcs-01",
+                                                    name: "WHMCS Primary Production Node",
+                                                    token_preview: "dhp_live_9f82...104a",
+                                                    scopes: ["users:read", "users:write", "billing:whmcs"],
+                                                    created_at: new Date(Date.now() - 86400000 * 14).toISOString(),
+                                                    expires_at: null,
+                                                    last_used_at: new Date(Date.now() - 3600000).toISOString(),
+                                                  },
+                                                  {
+                                                    id: "tok-metrics-02",
+                                                    name: "Prometheus Exporter Scraper",
+                                                    token_preview: "dhp_live_4a11...99bc",
+                                                    scopes: ["users:read", "domains:read"],
+                                                    created_at: new Date(Date.now() - 86400000 * 30).toISOString(),
+                                                    expires_at: new Date(Date.now() + 86400000 * 60).toISOString(),
+                                                    last_used_at: new Date(Date.now() - 60000).toISOString(),
+                                                  },
+                                                ];
+
+                                                return [
+                                                  // TODO(api:T18.11): List API tokens
+                                                  http.get("/api/v1/tokens", () => {
+                                                    return HttpResponse.json({ tokens: mockTokens });
+                                                  }),
+
+                                                  // TODO(api:T18.11): Create API token
+                                                  http.post("/api/v1/tokens", async ({ request }) => {
+                                                    const body = (await request.json()) as {
+                                                      name: string;
+                                                      scopes: string[];
+                                                      expiry_days: number | null;
+                                                    };
+
+                                                    const hex = Math.random().toString(36).substring(2, 10);
+                                                    const secret = `dhp_live_${hex}${Date.now().toString(36)}`;
+                                                    const preview = `dhp_live_${hex.substring(0, 4)}...${secret.slice(-4)}`;
+
+                                                    const expiresAt = body.expiry_days
+                                                      ? new Date(Date.now() + body.expiry_days * 86400000).toISOString()
+                                                      : null;
+
+                                                    const newToken = {
+                                                      id: `tok-${Date.now()}`,
+                                                      name: body.name || "API Access Token",
+                                                      token_preview: preview,
+                                                      scopes: body.scopes || ["users:read"],
+                                                      created_at: new Date().toISOString(),
+                                                      expires_at: expiresAt,
+                                                      last_used_at: null,
+                                                    };
+
+                                                    mockTokens.unshift(newToken);
+
+                                                    return HttpResponse.json({
+                                                      token: newToken,
+                                                      secret_key: secret,
+                                                    });
+                                                  }),
+
+                                                  // TODO(api:T18.11): Revoke API token
+                                                  http.delete("/api/v1/tokens/:id", ({ params }) => {
+                                                    mockTokens = mockTokens.filter((t) => t.id !== params.id);
+                                                    return HttpResponse.json({ ok: true, revoked: true });
+                                                  }),
+
+                                                  // TODO(api:T18.11): Test call validating scope authorization (DoD)
+                                                  http.post("/api/v1/tokens/test-call", async ({ request }) => {
+                                                    const body = (await request.json()) as {
+                                                      token_id: string;
+                                                      endpoint: string;
+                                                      method: string;
+                                                    };
+
+                                                    const token = mockTokens.find((t) => t.id === body.token_id);
+                                                    if (!token) {
+                                                      return HttpResponse.json(
+                                                        { status: 401, message: "Unauthorized: Invalid or revoked Bearer token" },
+                                                        { status: 401 }
+                                                      );
+                                                    }
+
+                                                    // Endpoint 1: GET /users requires "users:read"
+                                                    if (body.endpoint === "/users") {
+                                                      if (!token.scopes.includes("users:read")) {
+                                                        return HttpResponse.json(
+                                                          { status: 403, message: "Forbidden: Token lacks required scope 'users:read'" },
+                                                          { status: 403 }
+                                                        );
+                                                      }
+                                                      return HttpResponse.json({
+                                                        status: 200,
+                                                        message: "Token authorized for scope 'users:read'",
+                                                        data: {
+                                                          users_count: 24,
+                                                          users: [
+                                                            { id: "usr-01", username: "admin", role: "super_admin" },
+                                                            { id: "usr-02", username: "client_alpha", role: "client" },
+                                                            { id: "usr-03", username: "solaris", role: "client" },
+                                                          ],
+                                                        },
+                                                      });
+                                                    }
+
+                                                    // Endpoint 2: POST /billing/whmcs/suspend requires "billing:whmcs"
+                                                    if (body.endpoint === "/billing/whmcs/suspend") {
+                                                      if (!token.scopes.includes("billing:whmcs")) {
+                                                        return HttpResponse.json(
+                                                          { status: 403, message: "Forbidden: Token lacks required scope 'billing:whmcs'" },
+                                                          { status: 403 }
+                                                        );
+                                                      }
+                                                      return HttpResponse.json({
+                                                        status: 200,
+                                                        message: "Token authorized for scope 'billing:whmcs'",
+                                                        data: {
+                                                          action: "account_suspended",
+                                                          tenant: "client_alpha",
+                                                          reason: "Invoice overdue",
+                                                          timestamp: new Date().toISOString(),
+                                                        },
+                                                      });
+                                                    }
+
+                                                    // Endpoint 3: POST /admin/nodes requires "cluster:admin"
+                                                    if (body.endpoint === "/admin/nodes") {
+                                                      if (!token.scopes.includes("cluster:admin")) {
+                                                        return HttpResponse.json(
+                                                          {
+                                                            status: 403,
+                                                            message: "Forbidden: Token lacks required scope 'cluster:admin'",
+                                                            required_scope: "cluster:admin",
+                                                          },
+                                                          { status: 200 } // returned as JSON payload in tester
+                                                        );
+                                                      }
+                                                      return HttpResponse.json({
+                                                        status: 200,
+                                                        message: "Token authorized for node enrollment",
+                                                      });
+                                                    }
+
+                                                    return HttpResponse.json({
+                                                      status: 404,
+                                                      message: "Endpoint not found",
+                                                    });
+                                                  }),
+                                                ];
+                                              })(),
+
+                                              // ===================================                                              // T18.12 — Support Report Diagnostic Bundle (TODO(api:T18.12))
+                                              // ===================================
+                                              http.get(/\/api(?:\/v1\/admin)?\/support\/report$/, () => {
+                                                return HttpResponse.json({
+                                                  metadata: {
+                                                    bundle_id: "diag-20261114-8841",
+                                                    generated_at: new Date().toISOString(),
+                                                    panel_version: "0.1.0",
+                                                    node_id: "node-primary-ams01",
+                                                    environment: "production",
+                                                  },
+                                                  system: {
+                                                    os: "Ubuntu 24.04 LTS (Noble Numbat)",
+                                                    kernel: "6.8.0-40-generic",
+                                                    architecture: "x86_64",
+                                                    uptime_seconds: 489201,
+                                                    load_average: [0.18, 0.24, 0.28],
+                                                    memory: { total_mb: 16384, used_mb: 6144, free_mb: 10240 },
+                                                    disk: { total_gb: 512, used_gb: 142, available_gb: 370 },
+                                                  },
+                                                  services: [
+                                                    { name: "nginx", status: "active", uptime: "5d 14h", description: "Edge Reverse Proxy" },
+                                                    { name: "postgresql", status: "active", uptime: "5d 14h", description: "Relational Storage" },
+                                                    { name: "redis", status: "active", uptime: "5d 14h", description: "In-memory cache & pub/sub" },
+                                                    { name: "docker", status: "active", uptime: "5d 14h", description: "Container Runtime" },
+                                                    { name: "coraza-waf", status: "active", uptime: "5d 14h", description: "Web Application Firewall" },
+                                                  ],
+                                                  sanitized_config: {
+                                                    database: {
+                                                      driver: "postgres",
+                                                      host: "127.0.0.1",
+                                                      port: 5432,
+                                                      database: "dhpanel_db",
+                                                      password: "[REDACTED_CONFIDENTIAL]",
+                                                    },
+                                                    redis: {
+                                                      host: "127.0.0.1",
+                                                      port: 6379,
+                                                      password: "[REDACTED_CONFIDENTIAL]",
+                                                    },
+                                                    cluster: { mode: "standalone_master", enrolled_nodes: 3 },
+                                                    storage: {
+                                                      data_path: "/var/lib/dhpanel/data",
+                                                      backup_path: "/var/lib/dhpanel/backups",
+                                                    },
+                                                    features: ["domains", "databases", "waf", "cron", "ssl", "backups"],
+                                                  },
+                                                  sanitized_logs: [
+                                                    {
+                                                      timestamp: new Date(Date.now() - 300000).toISOString(),
+                                                      level: "info",
+                                                      service: "panel-core",
+                                                      message: "Health check completed successfully for all active cluster nodes.",
+                                                    },
+                                                    {
+                                                      timestamp: new Date(Date.now() - 180000).toISOString(),
+                                                      level: "info",
+                                                      service: "auth-gateway",
+                                                      message: "User session authenticated via Bearer [REDACTED_TOKEN] from remote IP 192.168.1.10",
+                                                    },
+                                                    {
+                                                      timestamp: new Date(Date.now() - 60000).toISOString(),
+                                                      level: "info",
+                                                      service: "waf-engine",
+                                                      message: "OWASP CRS rule 942100 evaluated without exceptions on vhost demo.example.com",
+                                                    },
+                                                  ],
+                                                });
+                                              }),
                                             ];
                                           })(),
+...(() => {
+  // License Management Handlers (T17.08, T17.09, T17.10, T17.13)
+  const mockLicenseState = {
+    license_id: "LIC-88241-ENTERPRISE",
+    license_key: "DHP-ENT-8492-9182-AA19",
+    installation_id: "8c4d9102-5e93-42fa-9b32-fa9921bc810b",
+    customer_name: "Apex Cloud Services LLC",
+    customer_email: "license@apexcloud.io",
+    product_name: "DHPanel Enterprise Edition",
+    plan_tier: "enterprise" as const,
+    status: "active" as "active" | "grace_period" | "expired" | "suspended" | "restricted",
+    issued_at: new Date(Date.now() - 30 * 86400000).toISOString(),
+    expires_at: new Date(Date.now() + 335 * 86400000).toISOString(),
+    last_heartbeat_at: new Date(Date.now() - 3600000).toISOString(),
+    next_refresh_at: new Date(Date.now() + 39600000).toISOString(),
+    signing_key_id: "key-ed25519-prod-v1",
+    signature_valid: true,
+    features: {
+      reseller_enabled: true,
+      clustering_enabled: true,
+      advanced_backups: true,
+      commercial_waf: true,
+      whitelabel_enabled: true,
+      api_access: true,
+      max_nodes: 10,
+      max_tenants: 100,
+      max_domains: 500,
+    },
+    usage: {
+      nodes_used: 2,
+      tenants_used: 18,
+      domains_used: 42,
+    },
+    offline_grace_hours_remaining: 72,
+  };
+
+  return [
+    // GET /api/v1/license/status (TODO(api:T17.09), TODO(api:T17.13))
+    http.get(/\/api\/v1\/license\/status$/, () => {
+      return HttpResponse.json(mockLicenseState);
+    }),
+
+    // POST /api/v1/license/activate (TODO(api:T17.08), TODO(api:T17.13))
+    http.post(/\/api\/v1\/license\/activate$/, async ({ request }) => {
+      const body = (await request.json().catch(() => ({}))) as any;
+      const key = String(body.license_key || "").trim().toUpperCase();
+      if (!key.startsWith("DHP-")) {
+        return HttpResponse.json(
+          { title: "Invalid License Key", detail: "License keys must start with DHP- prefix." },
+          { status: 400 }
+        );
+      }
+      mockLicenseState.license_key = key;
+      mockLicenseState.status = "active";
+      mockLicenseState.last_heartbeat_at = new Date().toISOString();
+      mockLicenseState.next_refresh_at = new Date(Date.now() + 43200000).toISOString();
+      return HttpResponse.json(mockLicenseState);
+    }),
+
+    // POST /api/v1/license/validate (TODO(api:T17.09), TODO(api:T17.10))
+    http.post(/\/api\/v1\/license\/validate$/, () => {
+      mockLicenseState.last_heartbeat_at = new Date().toISOString();
+      mockLicenseState.next_refresh_at = new Date(Date.now() + 43200000).toISOString();
+      return HttpResponse.json(mockLicenseState);
+    }),
+
+    // POST /api/v1/license/recovery (TODO(api:T17.13))
+    http.post(/\/api\/v1\/license\/recovery$/, async ({ request }) => {
+      const body = (await request.json().catch(() => ({}))) as any;
+      const ticketId = `REC-${Math.floor(1000 + Math.random() * 9000)}-${body.reason ? body.reason.slice(0, 3).toUpperCase() : "REQ"}`;
+      return HttpResponse.json({
+        ticket_id: ticketId,
+        status: "pending",
+        created_at: new Date().toISOString(),
+        message: "Recovery request dispatched to License Authority. An integrity audit token has been generated.",
+      });
+    }),
+  ];
+})(),
+...(() => {
+  // Admin Dashboard Summary Handlers (T18.01)
+  const mockDashboardSummary = {
+    nodes: {
+      total: 3,
+      online: 3,
+      avg_cpu_percent: 18,
+      avg_ram_percent: 42,
+    },
+    tenants: {
+      total: 24,
+      active: 22,
+      domains_count: 58,
+      databases_count: 36,
+    },
+    resources: {
+      cpu_percent: 24,
+      memory_used_mb: 6144,
+      memory_total_mb: 16384,
+      disk_used_gb: 142,
+      disk_total_gb: 512,
+      network_rx_mb: 4.8,
+      network_tx_mb: 8.2,
+    },
+    operations: [
+      { id: "op-vhost-842", type: "VhostTemplateApply", status: "completed", duration_ms: 120, created_at: new Date().toISOString() },
+      { id: "op-ssl-910", type: "AcmeCertificateIssue", status: "completed", duration_ms: 3200, created_at: new Date(Date.now() - 300000).toISOString() },
+      { id: "op-db-104", type: "DatabaseBackupExport", status: "completed", duration_ms: 450, created_at: new Date(Date.now() - 600000).toISOString() },
+    ],
+    security: {
+      blocked_threats_24h: 142,
+      active_waf_rules: 942,
+      ssh_bans: 12,
+    },
+    license: {
+      tier: "DHPanel Enterprise Edition",
+      status: "active",
+      signature_valid: true,
+      expires_in_days: 305,
+    },
+  };
+
+  return [
+    // GET /api/v1/admin/dashboard/summary (TODO(api:T18.01))
+    http.get(/\/api\/v1\/admin\/dashboard\/summary$/, () => {
+      return HttpResponse.json(mockDashboardSummary);
+    }),
+  ];
+})(),
+...(() => {
+  // Notification Management Handlers (T18.03, T18.05)
+  let mockNotificationsList: Array<{
+    id: string;
+    title: string;
+    message: string;
+    severity: "info" | "warning" | "error" | "success";
+    category: "security" | "backup" | "ssl" | "system" | "billing";
+    read: boolean;
+    created_at: string;
+    action_url?: string;
+    action_label?: string;
+  }> = [
+    {
+      id: "notif-ssl-01",
+      title: "SSL Certificate Expiring Soon",
+      message: "Let's Encrypt certificate for apexstore.com will expire in 7 days.",
+      severity: "warning" as const,
+      category: "ssl" as const,
+      read: false,
+      created_at: new Date(Date.now() - 600000).toISOString(),
+      action_url: "/ssl",
+      action_label: "Renew Certificate",
+    },
+    {
+      id: "notif-backup-02",
+      title: "Nightly Cloud Backup Succeeded",
+      message: "420 MB archive transferred to AWS S3 (us-east-1).",
+      severity: "success" as const,
+      category: "backup" as const,
+      read: false,
+      created_at: new Date(Date.now() - 3600000).toISOString(),
+      action_url: "/backups",
+      action_label: "View Snapshot",
+    },
+    {
+      id: "notif-node-03",
+      title: "Worker Node lon-02 Connection Warning",
+      message: "Node lon-02 agent heartbeat delay detected (latency 420ms).",
+      severity: "error" as const,
+      category: "system" as const,
+      read: false,
+      created_at: new Date(Date.now() - 7200000).toISOString(),
+      action_url: "/nodes",
+      action_label: "Inspect Node",
+    },
+    {
+      id: "notif-waf-04",
+      title: "Coraza WAF Blocked SQL Injection",
+      message: "Rule 942100 triggered by 198.51.100.42 on /api/login.",
+      severity: "warning" as const,
+      category: "security" as const,
+      read: true,
+      created_at: new Date(Date.now() - 86400000).toISOString(),
+      action_url: "/waf",
+      action_label: "WAF Events",
+    },
+  ];
+
+  let mockNotifSettings = {
+    email_enabled: true,
+    email_recipients: ["admin@enterprise.io"],
+    webhook_enabled: false,
+    webhook_url: "",
+    in_app_enabled: true,
+    notify_on_ssl_expiry: true,
+    notify_on_backup_failure: true,
+    notify_on_node_offline: true,
+    notify_on_security_alert: true,
+    snooze_until: null as string | null,
+  };
+
+  return [
+    // GET /api/v1/notifications (TODO(api:T18.03), TODO(api:T18.05))
+    http.get(/\/api\/v1\/notifications$/, () => {
+      return HttpResponse.json(mockNotificationsList);
+    }),
+
+    // POST /api/v1/notifications/:id/read (TODO(api:T18.05))
+    http.post(/\/api\/v1\/notifications\/([^/]+)\/read$/, ({ params }) => {
+      const id = String(params[0]);
+      mockNotificationsList = mockNotificationsList.map((n) =>
+        n.id === id ? { ...n, read: true } : n
+      );
+      return HttpResponse.json({ success: true, id });
+    }),
+
+    // POST /api/v1/notifications/read-all (TODO(api:T18.05))
+    http.post(/\/api\/v1\/notifications\/read-all$/, () => {
+      mockNotificationsList = mockNotificationsList.map((n) => ({ ...n, read: true }));
+      return HttpResponse.json({ success: true });
+    }),
+
+    // DELETE /api/v1/notifications/:id (TODO(api:T18.05))
+    http.delete(/\/api\/v1\/notifications\/([^/]+)$/, ({ params }) => {
+      const id = String(params[0]);
+      mockNotificationsList = mockNotificationsList.filter((n) => n.id !== id);
+      return new HttpResponse(null, { status: 204 });
+    }),
+
+    // GET /api/v1/notifications/settings (TODO(api:T18.03), TODO(api:T18.05))
+    http.get(/\/api\/v1\/notifications\/settings$/, () => {
+      return HttpResponse.json(mockNotifSettings);
+    }),
+
+    // PUT /api/v1/notifications/settings (TODO(api:T18.03), TODO(api:T18.05))
+    http.put(/\/api\/v1\/notifications\/settings$/, async ({ request }) => {
+      const body = (await request.json().catch(() => ({}))) as any;
+      mockNotifSettings = { ...mockNotifSettings, ...body };
+      return HttpResponse.json(mockNotifSettings);
+    }),
+
+    // POST /api/v1/notifications/snooze (TODO(api:T18.03))
+    http.post(/\/api\/v1\/notifications\/snooze$/, async ({ request }) => {
+      const body = (await request.json().catch(() => ({}))) as any;
+      const hours = Number(body.duration_hours) || 0;
+      mockNotifSettings.snooze_until = hours > 0 ? new Date(Date.now() + hours * 3600000).toISOString() : null;
+      return HttpResponse.json({ snooze_until: mockNotifSettings.snooze_until });
+    }),
+
+    // POST /api/v1/notifications/test (TODO(api:T18.03))
+    http.post(/\/api\/v1\/notifications\/test$/, () => {
+      const sample = {
+        id: `notif-test-${Date.now()}`,
+        title: "Test Alert Notification",
+        message: "This is a verification test alert dispatched from Notification Settings.",
+        severity: "info" as const,
+        category: "system" as const,
+        read: false,
+        created_at: new Date().toISOString(),
+      };
+      mockNotificationsList.unshift(sample);
+      return HttpResponse.json({ success: true, item: sample });
+    }),
+  ];
+})(),
+...(() => {
+  // Global Search & Command Palette Handlers (T18.09)
+  const searchableEntities = [
+    {
+      id: "domain-apexstore",
+      title: "apexstore.com",
+      subtitle: "Tenant: apex_store (IP: 198.51.100.24)",
+      category: "domains" as const,
+      href: "/domains",
+      badge: "Domain",
+    },
+    {
+      id: "domain-mysite",
+      title: "mysite.org",
+      subtitle: "Tenant: user_john (IP: 198.51.100.24)",
+      category: "domains" as const,
+      href: "/domains",
+      badge: "Domain",
+    },
+    {
+      id: "user-apex-store",
+      title: "apex_store",
+      subtitle: "Pro Plan • apex@store.io",
+      category: "users" as const,
+      href: "/users",
+      badge: "Tenant",
+    },
+    {
+      id: "user-john",
+      title: "user_john",
+      subtitle: "Standard Plan • john@mysite.org",
+      category: "users" as const,
+      href: "/users",
+      badge: "Tenant",
+    },
+    {
+      id: "db-apex-prod",
+      title: "apex_store_prod",
+      subtitle: "MySQL 8.4 • 184 MB",
+      category: "actions" as const,
+      href: "/databases",
+      badge: "Database",
+    },
+  ];
+
+  return [
+    // GET /api/v1/search?q=... (TODO(api:T18.09))
+    http.get(/\/api\/v1\/search$/, ({ request }) => {
+      const url = new URL(request.url);
+      const q = (url.searchParams.get("q") || "").toLowerCase().trim();
+      if (!q) return HttpResponse.json([]);
+
+      const matched = searchableEntities.filter(
+        (e) => e.title.toLowerCase().includes(q) || e.subtitle.toLowerCase().includes(q)
+      );
+      return HttpResponse.json(matched);
+    }),
+  ];
+})(),
                                         ];
                                       })(),
                                     ];
@@ -7151,6 +10425,202 @@ export const handlers = [
           })(),
         ];
       })(),
-    ];
-  })(),
+    // License Authority (LA) Handlers (T17.06) TODO(api:T17.06)
+    ...(() => {
+      const mockLaLicenses: any[] = [
+        {
+          id: "lic_01",
+          license_key: "DHP-ENT-2026-A1B2-C3D4",
+          customer_id: "cust_01",
+          customer_name: "Acme Global Hosting",
+          customer_email: "billing@acme.com",
+          plan_tier: "enterprise",
+          status: "active",
+          max_nodes: 10,
+          max_tenants: 500,
+          activations_count: 2,
+          max_activations: 5,
+          created_at: new Date(Date.now() - 30 * 86400 * 1000).toISOString(),
+          expires_at: new Date(Date.now() + 335 * 86400 * 1000).toISOString(),
+          revoked_at: null,
+          revoke_reason: null,
+        },
+        {
+          id: "lic_02",
+          license_key: "DHP-BUS-2026-F9E8-D7C6",
+          customer_id: "cust_02",
+          customer_name: "Nordic Cloud Services",
+          customer_email: "admin@nordiccloud.se",
+          plan_tier: "business",
+          status: "active",
+          max_nodes: 5,
+          max_tenants: 100,
+          activations_count: 1,
+          max_activations: 2,
+          created_at: new Date(Date.now() - 60 * 86400 * 1000).toISOString(),
+          expires_at: new Date(Date.now() + 305 * 86400 * 1000).toISOString(),
+          revoked_at: null,
+          revoke_reason: null,
+        },
+        {
+          id: "lic_03",
+          license_key: "DHP-STR-2026-X1Y2-Z3W4",
+          customer_id: "cust_03",
+          customer_name: "Apex DevOps Lab",
+          customer_email: "support@apexdev.io",
+          plan_tier: "starter",
+          status: "revoked",
+          max_nodes: 2,
+          max_tenants: 25,
+          activations_count: 0,
+          max_activations: 1,
+          created_at: new Date(Date.now() - 90 * 86400 * 1000).toISOString(),
+          expires_at: new Date(Date.now() + 275 * 86400 * 1000).toISOString(),
+          revoked_at: new Date(Date.now() - 5 * 86400 * 1000).toISOString(),
+          revoke_reason: "Payment default or chargeback",
+        },
+      ];
+
+      const mockLaCustomers: any[] = [
+        {
+          id: "cust_01",
+          name: "Acme Global Hosting",
+          email: "billing@acme.com",
+          company: "Acme Corp",
+          created_at: new Date(Date.now() - 100 * 86400 * 1000).toISOString(),
+          licenses_count: 1,
+        },
+        {
+          id: "cust_02",
+          name: "Nordic Cloud Services",
+          email: "admin@nordiccloud.se",
+          company: "Nordic Cloud AB",
+          created_at: new Date(Date.now() - 80 * 86400 * 1000).toISOString(),
+          licenses_count: 1,
+        },
+        {
+          id: "cust_03",
+          name: "Apex DevOps Lab",
+          email: "support@apexdev.io",
+          company: "Apex Technologies LLC",
+          created_at: new Date(Date.now() - 95 * 86400 * 1000).toISOString(),
+          licenses_count: 1,
+        },
+      ];
+
+      const mockLaActivations: any[] = [
+        {
+          id: "act_01",
+          license_id: "lic_01",
+          license_key: "DHP-ENT-2026-A1B2-C3D4",
+          installation_id: "00000000-0000-0000-0000-0000000000aa",
+          server_ip: "167.104.101.81",
+          hostname: "cp1.dhpanel.net",
+          last_heartbeat_at: new Date().toISOString(),
+          status: "active",
+        },
+        {
+          id: "act_02",
+          license_id: "lic_01",
+          license_key: "DHP-ENT-2026-A1B2-C3D4",
+          installation_id: "00000000-0000-0000-0000-0000000000bb",
+          server_ip: "167.104.101.82",
+          hostname: "worker2.dhpanel.net",
+          last_heartbeat_at: new Date(Date.now() - 120 * 1000).toISOString(),
+          status: "active",
+        },
+      ];
+
+      return [
+        // Overview (GET /api/v1/la/overview)
+        http.get(/\/api\/v1\/la\/overview$/, () => {
+          return HttpResponse.json({
+            total_licenses: mockLaLicenses.length,
+            active_licenses: mockLaLicenses.filter((l) => l.status === "active").length,
+            revoked_licenses: mockLaLicenses.filter((l) => l.status === "revoked").length,
+            total_customers: mockLaCustomers.length,
+            active_activations: mockLaActivations.filter((a) => a.status === "active").length,
+          });
+        }),
+
+        // List Licenses (GET /api/v1/la/licenses)
+        http.get(/\/api\/v1\/la\/licenses$/, () => {
+          return HttpResponse.json({
+            items: mockLaLicenses,
+            total: mockLaLicenses.length,
+          });
+        }),
+
+        // Issue License (POST /api/v1/la/licenses) (DoD T17.06)
+        http.post(/\/api\/v1\/la\/licenses$/, async ({ request }) => {
+          const body = (await request.json().catch(() => ({}))) as any;
+          const randomPart = Math.random().toString(36).substring(2, 6).toUpperCase();
+          const randomPart2 = Math.random().toString(36).substring(2, 6).toUpperCase();
+          const tierCode = (body.plan_tier || "ENT").substring(0, 3).toUpperCase();
+          const licenseKey = `DHP-${tierCode}-2026-${randomPart}-${randomPart2}`;
+
+          const newLicense = {
+            id: `lic_${Date.now()}`,
+            license_key: licenseKey,
+            customer_id: `cust_${Date.now()}`,
+            customer_name: body.customer_name || "New Customer",
+            customer_email: body.customer_email || "billing@customer.com",
+            plan_tier: body.plan_tier || "enterprise",
+            status: "active",
+            max_nodes: Number(body.max_nodes) || 5,
+            max_tenants: Number(body.max_tenants) || 100,
+            activations_count: 0,
+            max_activations: Number(body.max_activations) || 1,
+            created_at: new Date().toISOString(),
+            expires_at: body.validity_days
+              ? new Date(Date.now() + body.validity_days * 86400 * 1000).toISOString()
+              : new Date(Date.now() + 3650 * 86400 * 1000).toISOString(),
+            revoked_at: null,
+            revoke_reason: null,
+          };
+
+          mockLaLicenses.unshift(newLicense);
+          return HttpResponse.json({ success: true, license: newLicense }, { status: 201 });
+        }),
+
+        // Revoke License (POST /api/v1/la/licenses/:id/revoke) (DoD T17.06)
+        http.post(/\/api\/v1\/la\/licenses\/([^/]+)\/revoke$/, async ({ params, request }) => {
+          const { 0: id } = params as any;
+          const body = (await request.json().catch(() => ({}))) as any;
+          const target = mockLaLicenses.find((l) => l.id === id || l.license_key === id);
+
+          if (!target) {
+            return HttpResponse.json({ error: "license_not_found", message: "License not found" }, { status: 404 });
+          }
+
+          target.status = "revoked";
+          target.revoked_at = new Date().toISOString();
+          target.revoke_reason = body.reason || "Administrative revocation";
+
+          return HttpResponse.json({
+            success: true,
+            license: target,
+            message: "License revoked successfully",
+          });
+        }),
+
+        // List Activations (GET /api/v1/la/activations)
+        http.get(/\/api\/v1\/la\/activations$/, () => {
+          return HttpResponse.json({
+            items: mockLaActivations,
+            total: mockLaActivations.length,
+          });
+        }),
+
+        // List Customers (GET /api/v1/la/customers)
+        http.get(/\/api\/v1\/la\/customers$/, () => {
+          return HttpResponse.json({
+            items: mockLaCustomers,
+            total: mockLaCustomers.length,
+          });
+        }),
+      ];
+    })(),
+  ];
+})(),
 ];

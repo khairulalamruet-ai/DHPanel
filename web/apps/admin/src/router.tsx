@@ -16,6 +16,7 @@ import {
   DummyModulePage,
   ModuleManagerPage,
   NodesPage,
+  AdminIpPoolsPage,
   OperationsPage,
   SettingsPage,
   FeatureSetsPage,
@@ -49,6 +50,26 @@ import {
   AdminServerToolsPage,
   ClientWafPage,
   AdminWafPage,
+  MigrationPage,
+  LicensePage,
+  LaAdminPage,
+  NotificationBell,
+  NotificationPreferencesPage,
+  BrandingPage,
+  CommandPalette,
+  CommandPaletteTrigger,
+  UpdatePage,
+  ApiTokensPage,
+  SupportReportPage,
+  AdminDnsClusterPage,
+  AppsPage,
+  ClientEmailPage,
+  AdminMailQueuePage,
+  ClientFirewallPage,
+  AdminFirewallPage,
+  ResellerPortalPage,
+  AdminResellersPage,
+  AdminSecurityCenterPage,
   filterNavItems,
   registeredFrontendModules,
 } from "@dhpanel/modules";
@@ -57,6 +78,7 @@ import { useTranslation } from "@dhpanel/i18n";
 function AuthenticatedContent() {
   const { data: session, isLoading } = useSession();
   const { t } = useTranslation();
+  const [commandPaletteOpen, setCommandPaletteOpen] = React.useState(false);
 
   const navItems = filterNavItems(registeredFrontendModules, session, "admin");
 
@@ -78,12 +100,25 @@ function AuthenticatedContent() {
   }
 
   return (
-    <AppShell
-      title={t("common.adminTitle")}
-      navItems={navItems}
-    >
-      <Outlet />
-    </AppShell>
+    <>
+      <AppShell
+        title={t("common.adminTitle")}
+        navItems={navItems}
+        headerActions={
+          <div className="flex items-center gap-2">
+            <CommandPaletteTrigger onClick={() => setCommandPaletteOpen(true)} />
+            <NotificationBell settingsHref="/settings/notifications" />
+          </div>
+        }
+      >
+        <Outlet />
+      </AppShell>
+      <CommandPalette
+        open={commandPaletteOpen}
+        onOpenChange={setCommandPaletteOpen}
+        onNavigate={(href) => router.navigate({ to: href as any })}
+      />
+    </>
   );
 }
 
@@ -155,6 +190,13 @@ const nodesRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/nodes",
   component: NodesPage,
+});
+
+// IP Pools route (T16.05)
+const ipPoolsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/ip-pools",
+  component: AdminIpPoolsPage,
 });
 
 // 9. Operations route (Operation Ledger T02.17)
@@ -232,6 +274,13 @@ const dnsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/dns",
   component: DnsEditorPage,
+});
+
+// DNS Cluster route (T16.04)
+const adminDnsClusterRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/dns-cluster",
+  component: AdminDnsClusterPage,
 });
 
 // 20. SSL / TLS Certificate route (T05.19)
@@ -445,6 +494,192 @@ const adminWafRoute = createRoute({
   component: AdminWafPage,
 });
 
+// 44. Migration & Transfer routes (T15.06)
+const adminMigrationRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/migration",
+  component: MigrationPage,
+});
+
+const clientMigrationRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/migration",
+  component: MigrationPage,
+});
+
+// 45. License routes (T17.13)
+const adminLicenseRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/license",
+  component: LicensePage,
+});
+
+const licenseRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/license",
+  component: LicensePage,
+});
+
+// 46. License Authority route (T17.06)
+const laRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/la",
+  component: LaAdminPage,
+});
+
+// 47. Notification routes (T18.05)
+const adminNotificationsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/notifications",
+  component: NotificationPreferencesPage,
+});
+
+const settingsNotificationsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/settings/notifications",
+  component: NotificationPreferencesPage,
+});
+
+// 48. Branding routes (T18.06)
+const adminBrandingRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/branding",
+  component: BrandingPage,
+});
+
+const brandingRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/branding",
+  component: BrandingPage,
+});
+
+// 49. Update routes (T18.10)
+const updateRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/update",
+  component: UpdatePage,
+});
+
+const adminUpdateRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/update",
+  component: UpdatePage,
+});
+
+// 50. API Tokens & Docs routes (T18.11)
+const apiTokensRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/tokens",
+  component: ApiTokensPage,
+});
+
+const adminApiTokensRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/api-tokens",
+  component: ApiTokensPage,
+});
+const adminSupportReportRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/support-report",
+  component: SupportReportPage,
+});
+
+const supportReportRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/support-report",
+  component: SupportReportPage,
+});
+
+// 51. Firewall routes (T11.08)
+const clientFirewallRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/firewall",
+  component: ClientFirewallPage,
+});
+
+const adminFirewallRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/firewall",
+  component: AdminFirewallPage,
+});
+
+// 52. Security Center routes (T11.11)
+const adminSecurityRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/security",
+  component: AdminSecurityCenterPage,
+});
+
+const adminSecurityCenterRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/security-center",
+  component: AdminSecurityCenterPage,
+});
+
+const securityCenterRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/security-center",
+  component: AdminSecurityCenterPage,
+});
+
+// 53. Apps routes (T12.06 & T12.03)
+const appsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/apps",
+  component: AppsPage,
+});
+
+const adminAppsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/apps",
+  component: AppsPage,
+});
+
+// 54. Email & Mail Queue routes (T13.12, T13.10, T13.11)
+const emailRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/email",
+  component: ClientEmailPage,
+});
+
+const adminMailRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/mail",
+  component: AdminMailQueuePage,
+});
+
+const adminEmailRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/email",
+  component: AdminMailQueuePage,
+});
+
+// 55. Reseller routes (T14.05, T14.02, T14.07)
+const resellerRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/reseller",
+  component: ResellerPortalPage,
+});
+
+const adminResellersRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/resellers",
+  component: AdminResellersPage,
+});
+
+const adminResellerRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/reseller",
+  component: AdminResellersPage,
+});
+
+// 56. License Authority Admin alias
+const adminLaRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/la",
+  component: LaAdminPage,
+});
+
 // 18. Login route
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -469,6 +704,7 @@ const routeTree = rootRoute.addChildren([
   dummyRoute,
   modulesRoute,
   nodesRoute,
+  ipPoolsRoute,
   operationsRoute,
   settingsRoute,
   featureSetsRoute,
@@ -480,6 +716,7 @@ const routeTree = rootRoute.addChildren([
   clientDomainsRoute,
   domainsRoute,
   dnsRoute,
+  adminDnsClusterRoute,
   sslRoute,
   vhostRoute,
   phpRoute,
@@ -512,6 +749,35 @@ const routeTree = rootRoute.addChildren([
   adminServerToolsRoute,
   clientWafRoute,
   adminWafRoute,
+  clientFirewallRoute,
+  adminFirewallRoute,
+  adminSecurityRoute,
+  adminSecurityCenterRoute,
+  securityCenterRoute,
+  appsRoute,
+  adminAppsRoute,
+  emailRoute,
+  adminMailRoute,
+  adminEmailRoute,
+  resellerRoute,
+  adminResellersRoute,
+  adminResellerRoute,
+  adminMigrationRoute,
+  clientMigrationRoute,
+  adminLicenseRoute,
+  licenseRoute,
+  laRoute,
+  adminLaRoute,
+  adminNotificationsRoute,
+  settingsNotificationsRoute,
+  adminBrandingRoute,
+  brandingRoute,
+  updateRoute,
+  adminUpdateRoute,
+  apiTokensRoute,
+  adminApiTokensRoute,
+  adminSupportReportRoute,
+  supportReportRoute,
   loginRoute,
 ]);
 

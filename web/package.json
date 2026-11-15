@@ -11,9 +11,14 @@
     "typecheck": "tsc --noEmit",
     "generate:api": "pnpm --filter @dhpanel/api generate:api",
     "test": "vitest run",
-    "test:e2e": "pnpm --filter @dhpanel/e2e test"
+    "test:e2e": "pnpm --filter @dhpanel/e2e test",
+    "check:i18n": "node packages/i18n/scripts/check-translations.mjs",
+    "audit": "pnpm audit --audit-level=high",
+    "generate:sbom": "cdxgen -t js -o sbom.json",
+    "sbom": "cdxgen -t js -o sbom.json"
   },
   "devDependencies": {
+    "@cyclonedx/cdxgen": "^12.9.2",
     "@eslint/js": "^9.20.0",
     "@tanstack/react-router": "^1.114.0",
     "@testing-library/jest-dom": "^6.6.3",
@@ -32,11 +37,5 @@
     "typescript-eslint": "^8.24.0",
     "vite": "^6.1.0",
     "vitest": "^3.0.5"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild",
-      "msw"
-    ]
   }
 }

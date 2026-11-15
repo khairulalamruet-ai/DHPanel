@@ -21,7 +21,7 @@ export interface LoginPageProps {
 
 export function LoginPage({ title, onSuccess }: LoginPageProps) {
   const { t } = useTranslation();
-  const { refetch } = useSession();
+  const { refetch, data: session } = useSession();
 
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -107,20 +107,32 @@ export function LoginPage({ title, onSuccess }: LoginPageProps) {
 
   return (
     <div className="min-h-screen flex flex-col justify-center items-center bg-muted/30 px-4 py-8 relative">
+      {session?.branding?.customCss && (
+        <style id="dhpanel-login-custom-css" dangerouslySetInnerHTML={{ __html: session.branding.customCss }} />
+      )}
       <div className="absolute top-4 right-4 flex items-center gap-2">
         <LanguageSwitcher />
       </div>
 
       <div className="w-full max-w-md space-y-6">
         <div className="flex flex-col items-center space-y-2 text-center">
-          <div className="h-12 w-12 rounded-xl bg-primary/10 flex items-center justify-center text-primary mb-2 shadow-sm">
-            <ShieldCheck className="h-7 w-7" />
-          </div>
-          <h1 className="text-2xl font-bold tracking-tight">
-            {title || t("common.appName")}
+          {session?.branding?.logoUrl ? (
+            <img
+              src={session.branding.logoUrl}
+              alt="Logo"
+              className="h-12 w-auto object-contain mb-2"
+              data-testid="login-brand-logo"
+            />
+          ) : (
+            <div className="h-12 w-12 rounded-xl bg-primary/10 flex items-center justify-center text-primary mb-2 shadow-sm">
+              <ShieldCheck className="h-7 w-7" />
+            </div>
+          )}
+          <h1 className="text-2xl font-bold tracking-tight" data-testid="login-brand-title">
+            {session?.branding?.loginTitle || session?.branding?.companyName || title || t("common.appName")}
           </h1>
-          <p className="text-sm text-muted-foreground">
-            {step === "credentials" ? t("auth.signInDesc") : t("auth.totpDesc")}
+          <p className="text-sm text-muted-foreground" data-testid="login-brand-subtitle">
+            {session?.branding?.loginSubtitle || (step === "credentials" ? t("auth.signInDesc") : t("auth.totpDesc"))}
           </p>
         </div>
 
@@ -244,6 +256,12 @@ export function LoginPage({ title, onSuccess }: LoginPageProps) {
             </CardFooter>
           </form>
         </Card>
+
+        {session?.branding?.loginFooterText && (
+          <p className="text-xs text-center text-muted-foreground" data-testid="login-footer-text">
+            {session.branding.loginFooterText}
+          </p>
+        )}
       </div>
     </div>
   );

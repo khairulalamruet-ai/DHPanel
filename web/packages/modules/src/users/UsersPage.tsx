@@ -34,6 +34,7 @@ import {
   CheckCircle2,
   XCircle,
   AlertCircle,
+  AlertTriangle,
   Trash2,
 } from "lucide-react";
 import { UserItem, UsersListResponse, UserStatus } from "./types";
@@ -615,9 +616,21 @@ export function UsersPage() {
                           </Badge>
                         </TableCell>
                         <TableCell>
-                          <span className="text-xs font-mono text-muted-foreground">
-                            {user.node_name || user.node_id}
-                          </span>
+                          <div className="flex flex-col gap-1 items-start">
+                            <span className="text-xs font-mono text-muted-foreground">
+                              {user.node_name || user.node_id}
+                            </span>
+                            {(user.node_status === "offline" || user.is_node_offline) && (
+                              <Badge
+                                variant="destructive"
+                                data-testid="tenant-node-offline-badge"
+                                className="text-[10px] px-1.5 py-0 font-medium flex items-center gap-1"
+                              >
+                                <AlertTriangle className="h-2.5 w-2.5" />
+                                {t("users.nodeOffline")}
+                              </Badge>
+                            )}
+                          </div>
                         </TableCell>
                         <TableCell>
                           {user.status === "active" ? (

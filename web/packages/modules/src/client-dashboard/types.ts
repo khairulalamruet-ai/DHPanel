@@ -64,6 +64,20 @@ export interface ClientRecentEvent {
   description: string;
 }
 
+export interface ClientLastBackupInfo {
+  created_at: string;
+  size_mb: number;
+  status: "completed" | "in_progress" | "failed" | "none";
+  type: "automatic" | "manual";
+}
+
+export interface ClientSslWarning {
+  domain: string;
+  issuer: string;
+  expires_in_days: number;
+  severity: "warning" | "critical";
+}
+
 export interface ClientDashboardData {
   tenant: ClientTenantInfo;
   container: ClientContainerInfo;
@@ -71,4 +85,6 @@ export interface ClientDashboardData {
   primary_domain: ClientPrimaryDomainInfo;
   shortcuts: ClientShortcut[];
   recent_events: ClientRecentEvent[];
+  last_backup?: ClientLastBackupInfo;
+  ssl_warnings?: ClientSslWarning[];
 }

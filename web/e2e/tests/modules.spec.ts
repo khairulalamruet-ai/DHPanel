@@ -6,7 +6,7 @@ test.describe("Frontend Module Registry & Feature Gate (T03.11)", () => {
 
     // Verify core navigation items are present
     await expect(page.getByRole("link", { name: /Dashboard|ড্যাশবোর্ড/i })).toBeVisible();
-    await expect(page.getByRole("link", { name: /Security|নিরাপত্তা/i })).toBeVisible();
+    await expect(page.getByRole("link", { name: /^Security$|^নিরাপত্তা$/i })).toBeVisible();
 
     // Verify that non-active/dummy module is not rendered in the sidebar by default
     await expect(page.getByRole("link", { name: /Dummy Module|ডামি মডিউল/i })).not.toBeVisible();

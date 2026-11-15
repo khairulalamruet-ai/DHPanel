@@ -25,10 +25,11 @@ export interface NavItem {
 export interface AppShellProps {
   title: string;
   navItems?: NavItem[];
+  headerActions?: React.ReactNode;
   children: React.ReactNode;
 }
 
-export function AppShell({ title, navItems, children }: AppShellProps) {
+export function AppShell({ title, navItems, headerActions, children }: AppShellProps) {
   const { data: session, logout } = useSession();
   const { t } = useTranslation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -69,6 +70,9 @@ export function AppShell({ title, navItems, children }: AppShellProps) {
 
   return (
     <div className="min-h-screen bg-background text-foreground font-sans">
+      {session?.branding?.customCss && (
+        <style id="dhpanel-live-custom-css" dangerouslySetInnerHTML={{ __html: session.branding.customCss }} />
+      )}
       {/* Mobile Top Navigation */}
       <div className="flex items-center justify-between border-b px-4 py-3 md:hidden">
         <div className="flex items-center gap-2">
@@ -80,11 +84,16 @@ export function AppShell({ title, navItems, children }: AppShellProps) {
             {sidebarOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </button>
           <div className="flex items-center gap-2 font-bold text-lg text-primary">
-            <Server className="h-5 w-5 text-primary" />
-            <span>{title}</span>
+            {session?.branding?.logoUrl ? (
+              <img src={session.branding.logoUrl} alt="Logo" className="h-5 w-auto object-contain" />
+            ) : (
+              <Server className="h-5 w-5 text-primary" />
+            )}
+            <span data-testid="mobile-brand-title">{session?.branding?.companyName || title}</span>
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {headerActions}
           <LanguageSwitcher />
           <ThemeToggle />
         </div>
@@ -98,8 +107,14 @@ export function AppShell({ title, navItems, children }: AppShellProps) {
           }`}
         >
           <div className="hidden md:flex items-center gap-2 px-2 py-4 border-b">
-            <Server className="h-6 w-6 text-primary" />
-            <span className="text-xl font-bold tracking-tight text-primary">{title}</span>
+            {session?.branding?.logoUrl ? (
+              <img src={session.branding.logoUrl} alt="Logo" className="h-6 w-auto object-contain" />
+            ) : (
+              <Server className="h-6 w-6 text-primary" />
+            )}
+            <span className="text-xl font-bold tracking-tight text-primary" data-testid="app-brand-title">
+              {session?.branding?.companyName || title}
+            </span>
           </div>
 
           <div className="py-4">
@@ -151,6 +166,7 @@ export function AppShell({ title, navItems, children }: AppShellProps) {
               </h2>
             </div>
             <div className="flex items-center gap-3">
+              {headerActions}
               <LanguageSwitcher />
               <ThemeToggle />
               <button

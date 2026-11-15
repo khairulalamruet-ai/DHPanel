@@ -17,7 +17,7 @@ export interface NodeOption {
   region: string;
   cpu_usage_pct: number;
   memory_usage_pct: number;
-  status: "healthy" | "busy" | "offline";
+  status: "healthy" | "busy" | "offline" | "draining";
 }
 
 export interface UserWizardFormData {
