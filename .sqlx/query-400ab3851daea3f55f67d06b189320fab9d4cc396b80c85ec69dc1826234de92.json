@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT mode, disabled_rules FROM waf_policies WHERE scope = 'tenant' AND tenant_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "mode",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "waf_policies",
+            "name": "mode"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "disabled_rules",
+        "type_info": "Int4Array",
+        "origin": {
+          "Table": {
+            "table": "waf_policies",
+            "name": "disabled_rules"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "400ab3851daea3f55f67d06b189320fab9d4cc396b80c85ec69dc1826234de92"
+}

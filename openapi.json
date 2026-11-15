@@ -8414,6 +8414,477 @@
         ]
       }
     },
+    "/api/v1/admin/waf/domains/{id}": {
+      "get": {
+        "tags": [
+          "security"
+        ],
+        "summary": "One domain's policy.",
+        "operationId": "adminGetDomainWafPolicy",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Domain id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The policy and what applies",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyState"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such domain",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "security"
+        ],
+        "summary": "Set one domain's policy.",
+        "operationId": "adminPutDomainWafPolicy",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Domain id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PolicyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Set",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyState"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such domain",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A mode or rule that is not usable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "security"
+        ],
+        "summary": "Remove one domain's policy.",
+        "operationId": "adminDeleteDomainWafPolicy",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Domain id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed"
+          },
+          "404": {
+            "description": "No such domain or no policy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/waf/policy": {
+      "get": {
+        "tags": [
+          "security"
+        ],
+        "summary": "The panel-wide policy.",
+        "operationId": "adminGetWafPolicy",
+        "responses": {
+          "200": {
+            "description": "The policy and what applies",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyState"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied` (needs admin.security.read)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "security"
+        ],
+        "summary": "Set the panel-wide policy.",
+        "operationId": "adminPutWafPolicy",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PolicyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Set",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyState"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A mode or rule that is not usable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "security"
+        ],
+        "summary": "Remove the panel-wide policy (the default, `detect`, applies).",
+        "operationId": "adminDeleteWafPolicy",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed"
+          },
+          "404": {
+            "description": "There is none",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/waf/tenants/{id}": {
+      "get": {
+        "tags": [
+          "security"
+        ],
+        "summary": "One account's policy.",
+        "operationId": "adminGetTenantWafPolicy",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Account id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The policy and what applies",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyState"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such account",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "security"
+        ],
+        "summary": "Set one account's policy.",
+        "operationId": "adminPutTenantWafPolicy",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Account id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PolicyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Set",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyState"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such account",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A mode or rule that is not usable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "security"
+        ],
+        "summary": "Remove one account's policy.",
+        "operationId": "adminDeleteTenantWafPolicy",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Account id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed"
+          },
+          "404": {
+            "description": "No such account or no policy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/auth/logout": {
       "post": {
         "tags": [
@@ -15957,6 +16428,167 @@
         ]
       }
     },
+    "/api/v1/client/waf/domains": {
+      "get": {
+        "tags": [
+          "security"
+        ],
+        "summary": "The account's domains with their firewall policy and what applies to each.",
+        "operationId": "clientListWaf",
+        "responses": {
+          "200": {
+            "description": "The domains",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DomainWafList"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/waf/domains/{id}": {
+      "put": {
+        "tags": [
+          "security"
+        ],
+        "summary": "Set the policy of one of the account's domains (`detect` or `block`).",
+        "operationId": "clientPutWaf",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Domain id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PolicyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Set",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyState"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not one of the account's domains",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`off`, a mode or a rule that is not usable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "security"
+        ],
+        "summary": "Remove the policy of one of the account's domains (the account's or the panel's applies).",
+        "operationId": "clientDeleteWaf",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Domain id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed"
+          },
+          "404": {
+            "description": "Not one of the account's domains, or no policy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/public/auth/impersonate": {
       "post": {
         "tags": [
@@ -18159,6 +18791,57 @@
           }
         }
       },
+      "DomainWaf": {
+        "type": "object",
+        "description": "A domain with its firewall.",
+        "required": [
+          "domain_id",
+          "fqdn",
+          "effective"
+        ],
+        "properties": {
+          "domain_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The domain's id."
+          },
+          "effective": {
+            "$ref": "#/components/schemas/EffectiveView",
+            "description": "What really applies."
+          },
+          "fqdn": {
+            "type": "string",
+            "description": "Its name."
+          },
+          "policy": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PolicyView",
+                "description": "The domain's own policy (`null`: none)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "DomainWafList": {
+        "type": "object",
+        "description": "The domains of the account.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DomainWaf"
+            },
+            "description": "By name."
+          }
+        }
+      },
       "DownloadLink": {
         "type": "object",
         "description": "A download link.",
@@ -18176,6 +18859,33 @@
             "type": "string",
             "description": "Where to download from (a path on this panel); the file is `<database>.sql.gz`.",
             "example": "/api/v1/public/exports/0190.../download?token=..."
+          }
+        }
+      },
+      "EffectiveView": {
+        "type": "object",
+        "description": "What applies in the end.",
+        "required": [
+          "mode",
+          "mode_from",
+          "disabled_rules"
+        ],
+        "properties": {
+          "disabled_rules": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "description": "The rules switched off, all policies together."
+          },
+          "mode": {
+            "type": "string",
+            "description": "`off`, `detect` or `block`."
+          },
+          "mode_from": {
+            "type": "string",
+            "description": "Which policy decided the mode: `domain`, `tenant`, `global` or `default`."
           }
         }
       },
@@ -20479,6 +21189,52 @@
             "type": "integer",
             "format": "int64",
             "description": "Accounts on this plan."
+          }
+        }
+      },
+      "PolicyRequest": {
+        "type": "object",
+        "description": "A policy as written.",
+        "required": [
+          "mode"
+        ],
+        "properties": {
+          "disabled_rules": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "description": "Rule ids that do not apply (such as `942100`), at most 200."
+          },
+          "mode": {
+            "type": "string",
+            "description": "`off`, `detect` or `block`."
+          }
+        },
+        "additionalProperties": false
+      },
+      "PolicyState": {
+        "type": "object",
+        "description": "A policy and what applies.",
+        "required": [
+          "effective"
+        ],
+        "properties": {
+          "effective": {
+            "$ref": "#/components/schemas/EffectiveView",
+            "description": "What really applies (for a domain; for the others the policy or the default)."
+          },
+          "policy": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PolicyView",
+                "description": "The policy set exactly here (`null`: none)."
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       },
@@ -23065,6 +23821,10 @@
     {
       "name": "services",
       "description": "An account's own services"
+    },
+    {
+      "name": "security",
+      "description": "The web application firewall"
     }
   ]
 }

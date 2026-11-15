@@ -44,6 +44,7 @@ pub mod tenants;
 pub mod usage;
 pub mod users;
 pub mod vhost_templates;
+pub mod waf;
 
 use std::{future::Future, pin::Pin, time::Duration};
 

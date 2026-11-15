@@ -1,0 +1,15 @@
+# Security: the web application firewall's policies (crates/modules/security).
+[module]
+name       = "security"
+version    = "0.1.0"
+title      = { en = "Security", bn = "নিরাপত্তা" }
+category   = "system"
+core       = false
+depends_on = ["auth", "rbac", "audit", "system", "plans", "users", "domains"]
+
+[permissions]
+keys = ["admin.security.read", "admin.security.manage"]
+
+[ui]
+admin_nav  = { group = "System", order = 60, icon = "shield" }
+client_nav = { group = "Security", order = 50, icon = "shield" }

@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT mode, disabled_rules FROM waf_policies WHERE scope = 'global'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "mode",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "waf_policies",
+            "name": "mode"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "disabled_rules",
+        "type_info": "Int4Array",
+        "origin": {
+          "Table": {
+            "table": "waf_policies",
+            "name": "disabled_rules"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "ef0feb01d6e8396c739e6156274abe6f2b7a3496f8120a299d2de5b1ab8038f2"
+}

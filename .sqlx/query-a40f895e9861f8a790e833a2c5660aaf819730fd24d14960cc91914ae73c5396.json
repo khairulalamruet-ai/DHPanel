@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM waf_policies WHERE scope = 'global'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "a40f895e9861f8a790e833a2c5660aaf819730fd24d14960cc91914ae73c5396"
+}

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM waf_policies WHERE scope = 'domain' AND domain_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "84f74aeb03e5563546624d813c4825f9a9a4c60a82b607520a23fef363115f1e"
+}

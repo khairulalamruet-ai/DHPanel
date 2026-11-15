@@ -29,6 +29,7 @@ const EMBEDDED: &[(&str, &str)] = &[
     ("logs", dhpanel_mod_logs::MANIFEST),
     ("usage", dhpanel_mod_usage::MANIFEST),
     ("services", dhpanel_mod_services::MANIFEST),
+    ("security", dhpanel_mod_security::MANIFEST),
 ];
 
 /// Days the data of a deleted user is kept before it is purged.
@@ -446,6 +447,22 @@ pub fn mount(
                         }
                     })
                 }
+                "security" => {
+                    let (db, sessions) = (db.clone(), sessions.clone());
+                    Box::new(move || {
+                        let state = dhpanel_mod_security::SecurityState {
+                            db: db.clone(),
+                            sessions: sessions.clone(),
+                        };
+                        ModuleRoutes {
+                            admin: Some(
+                                dhpanel_mod_security::admin_router().with_state(state.clone()),
+                            ),
+                            client: Some(dhpanel_mod_security::client_router().with_state(state)),
+                            ..ModuleRoutes::none()
+                        }
+                    })
+                }
                 // A manifest without code behind it has no routes.
                 _ => Box::new(ModuleRoutes::none),
             };
@@ -677,7 +694,8 @@ mod tests {
                 "cron",
                 "logs",
                 "usage",
-                "services"
+                "services",
+                "security"
             ]
         );
         // And they fit together: dependencies first.
@@ -699,7 +717,8 @@ mod tests {
                 "files",
                 "logs",
                 "services",
-                "usage"
+                "usage",
+                "security"
             ]
         );
         assert_eq!(
@@ -717,7 +736,8 @@ mod tests {
                 "files",
                 "logs",
                 "services",
-                "usage"
+                "usage",
+                "security"
             ]
         );
         // Every dependency names a module that exists.
@@ -766,12 +786,14 @@ mod tests {
             p::LogsRead::KEY,
             p::ServerRead::KEY,
             p::ServerManage::KEY,
+            p::SecurityRead::KEY,
+            p::SecurityManage::KEY,
         ] {
             assert!(declared.iter().any(|d| d == key), "{key} is in no manifest");
         }
         assert_eq!(
             declared.len(),
-            25,
+            27,
             "a manifest declares a key the code does not know: {declared:?}"
         );
     }

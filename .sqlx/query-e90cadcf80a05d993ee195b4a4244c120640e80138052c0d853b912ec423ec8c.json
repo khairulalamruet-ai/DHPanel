@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM waf_policies WHERE scope = 'tenant' AND tenant_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e90cadcf80a05d993ee195b4a4244c120640e80138052c0d853b912ec423ec8c"
+}

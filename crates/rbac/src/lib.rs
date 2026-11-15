@@ -141,6 +141,14 @@ pub mod permissions {
         pub ServerManage = "admin.server.manage"
     );
     crate::permission!(
+        /// See the firewall's policies.
+        pub SecurityRead = "admin.security.read"
+    );
+    crate::permission!(
+        /// Change the firewall's policies, for the panel, an account or a domain.
+        pub SecurityManage = "admin.security.manage"
+    );
+    crate::permission!(
         /// See the panel's settings.
         pub SettingsRead = "admin.settings.read"
     );

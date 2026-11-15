@@ -48,6 +48,7 @@ members = [
     "crates/modules/logs",
     "crates/modules/usage",
     "crates/modules/services",
+    "crates/modules/security",
     "crates/dns",
 ]
 
@@ -95,6 +96,7 @@ dhpanel-mod-cron = { path = "crates/modules/cron" }
 dhpanel-mod-logs = { path = "crates/modules/logs" }
 dhpanel-mod-usage = { path = "crates/modules/usage" }
 dhpanel-mod-services = { path = "crates/modules/services" }
+dhpanel-mod-security = { path = "crates/modules/security" }
 dhpanel-dns = { path = "crates/dns" }
 dhpanel-node-gateway = { path = "crates/node-gateway" }
 dhpanel-operations = { path = "crates/operations" }

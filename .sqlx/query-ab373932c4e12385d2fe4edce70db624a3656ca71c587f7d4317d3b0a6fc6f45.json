@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO waf_policies (scope, tenant_id, mode, disabled_rules, updated_by)\n                 VALUES ('tenant', $1, $2, $3, $4)\n                 ON CONFLICT (tenant_id) WHERE scope = 'tenant'\n                 DO UPDATE SET mode = $2, disabled_rules = $3, updated_by = $4, updated_at = now()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Int4Array",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ab373932c4e12385d2fe4edce70db624a3656ca71c587f7d4317d3b0a6fc6f45"
+}

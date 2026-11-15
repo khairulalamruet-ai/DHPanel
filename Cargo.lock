@@ -1019,6 +1019,7 @@ dependencies = [
  "dhpanel-mod-logs",
  "dhpanel-mod-nodes",
  "dhpanel-mod-plans",
+ "dhpanel-mod-security",
  "dhpanel-mod-services",
  "dhpanel-mod-system",
  "dhpanel-mod-usage",
@@ -1493,6 +1494,31 @@ dependencies = [
  "dhpanel-kernel",
  "dhpanel-rbac",
  "dhpanel-session",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tokio",
+ "tower",
+ "utoipa",
+ "uuid",
+]
+
+[[package]]
+name = "dhpanel-mod-security"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "dhpanel-audit",
+ "dhpanel-cache",
+ "dhpanel-database",
+ "dhpanel-http-kit",
+ "dhpanel-kernel",
+ "dhpanel-mod-auth",
+ "dhpanel-node-protocol",
+ "dhpanel-rbac",
+ "dhpanel-session",
+ "dhpanel-settings",
  "secrecy",
  "serde",
  "serde_json",
