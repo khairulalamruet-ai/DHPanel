@@ -6155,6 +6155,161 @@
         ]
       }
     },
+    "/api/v1/admin/usage/nodes/{id}": {
+      "get": {
+        "tags": [
+          "usage"
+        ],
+        "summary": "A node's CPU, memory, load and disk over time (the last 30 days at most).",
+        "operationId": "adminNodeUsage",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Node id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "range",
+            "in": "path",
+            "description": "`1h`, `24h` (default), `7d` or `30d`.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The usage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeUsageView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied` (needs admin.nodes.read)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A range that is not one of the four",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/usage/top": {
+      "get": {
+        "tags": [
+          "usage"
+        ],
+        "summary": "The accounts that used most.",
+        "operationId": "adminUsageTop",
+        "parameters": [
+          {
+            "name": "by",
+            "in": "path",
+            "description": "`cpu` (default), `memory`, `network` or `io`.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "range",
+            "in": "path",
+            "description": "`1h`, `24h` (default), `7d` or `30d`.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "path",
+            "description": "How many (1-100, default 10).",
+            "required": true,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The ranking",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TopList"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied` (needs admin.users.read)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A ranking, range or count that is not usable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/users": {
       "get": {
         "tags": [
@@ -14806,6 +14961,66 @@
         ]
       }
     },
+    "/api/v1/client/usage": {
+      "get": {
+        "tags": [
+          "usage"
+        ],
+        "summary": "The account's CPU, memory, network and disk use over time.",
+        "operationId": "clientUsage",
+        "parameters": [
+          {
+            "name": "range",
+            "in": "path",
+            "description": "`1h`, `24h` (default), `7d` or `30d`.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The usage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A range that is not one of the four",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/public/auth/impersonate": {
       "post": {
         "tags": [
@@ -18551,6 +18766,84 @@
           }
         }
       },
+      "NodePointView": {
+        "type": "object",
+        "description": "One point of a node's usage.",
+        "required": [
+          "at",
+          "cpu_busy_millis",
+          "memory_used_bytes",
+          "memory_total_bytes",
+          "load1_x100",
+          "disk_used_bytes",
+          "disk_total_bytes",
+          "containers"
+        ],
+        "properties": {
+          "at": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Start of the point (Unix seconds)."
+          },
+          "containers": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Running containers."
+          },
+          "cpu_busy_millis": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Average thousandths of the node's CPU that were busy."
+          },
+          "disk_total_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Disk bytes in all."
+          },
+          "disk_used_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Disk bytes in use."
+          },
+          "load1_x100": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Average one-minute load times 100."
+          },
+          "memory_total_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Memory of the node, in bytes."
+          },
+          "memory_used_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Average memory in use, in bytes."
+          }
+        }
+      },
+      "NodeUsageView": {
+        "type": "object",
+        "description": "A node's usage.",
+        "required": [
+          "step_seconds",
+          "points"
+        ],
+        "properties": {
+          "points": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NodePointView"
+            },
+            "description": "Oldest first."
+          },
+          "step_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds per point."
+          }
+        }
+      },
       "NodeView": {
         "type": "object",
         "description": "A node as listed.",
@@ -20657,6 +20950,65 @@
           }
         }
       },
+      "TopItem": {
+        "type": "object",
+        "description": "One ranked account.",
+        "required": [
+          "tenant_id",
+          "username",
+          "cpu_millis",
+          "memory_bytes",
+          "net_bytes",
+          "io_bytes"
+        ],
+        "properties": {
+          "cpu_millis": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Average thousandths of a CPU over the range."
+          },
+          "io_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Disk bytes (read and written) over the range."
+          },
+          "memory_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Average memory in bytes over the range."
+          },
+          "net_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Network bytes (in and out) over the range."
+          },
+          "tenant_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The account."
+          },
+          "username": {
+            "type": "string",
+            "description": "Its system name."
+          }
+        }
+      },
+      "TopList": {
+        "type": "object",
+        "description": "The ranking.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TopItem"
+            },
+            "description": "Most first."
+          }
+        }
+      },
       "TotpEnrollment": {
         "type": "object",
         "description": "A new, not yet confirmed TOTP secret.",
@@ -20978,6 +21330,124 @@
         },
         "additionalProperties": false
       },
+      "UsageLimits": {
+        "type": "object",
+        "description": "What the plan allows (to draw the limit line).",
+        "properties": {
+          "cpu_millis": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Thousandths of a CPU (`null`: no limit)."
+          },
+          "memory_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Memory in bytes (`null`: no limit)."
+          },
+          "pids": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Processes (`null`: no limit)."
+          }
+        }
+      },
+      "UsagePoint": {
+        "type": "object",
+        "description": "One point of an account's usage.",
+        "required": [
+          "at",
+          "cpu_millis",
+          "memory_bytes",
+          "pids",
+          "net_rx_bytes",
+          "net_tx_bytes",
+          "io_read_bytes",
+          "io_write_bytes"
+        ],
+        "properties": {
+          "at": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Start of the point (Unix seconds)."
+          },
+          "cpu_millis": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Average thousandths of a CPU."
+          },
+          "io_read_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Bytes read from disk in the point."
+          },
+          "io_write_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Bytes written to disk in the point."
+          },
+          "memory_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Average memory in use, in bytes."
+          },
+          "net_rx_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Bytes received in the point."
+          },
+          "net_tx_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Bytes sent in the point."
+          },
+          "pids": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Most processes."
+          }
+        }
+      },
+      "UsageView": {
+        "type": "object",
+        "description": "An account's usage.",
+        "required": [
+          "range",
+          "step_seconds",
+          "points",
+          "limits"
+        ],
+        "properties": {
+          "limits": {
+            "$ref": "#/components/schemas/UsageLimits",
+            "description": "The plan's limits."
+          },
+          "points": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UsagePoint"
+            },
+            "description": "Oldest first (points with no reading are left out)."
+          },
+          "range": {
+            "type": "string",
+            "description": "The range asked for."
+          },
+          "step_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds per point."
+          }
+        }
+      },
       "UserChange": {
         "type": "object",
         "description": "What a change answers: the user as it is now and, when the node has work to\ndo, the operation to follow.",
@@ -21271,6 +21741,10 @@
     {
       "name": "logs",
       "description": "Logs"
+    },
+    {
+      "name": "usage",
+      "description": "Usage"
     }
   ]
 }

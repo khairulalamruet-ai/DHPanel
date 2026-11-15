@@ -1,0 +1,75 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT extract(epoch FROM date_bin(make_interval(secs => $4::int), at, 'epoch'))::bigint AS \"at!\",\n                  avg(cpu_busy_millis)::int AS \"cpu!\", avg(memory_used_bytes)::bigint AS \"mem!\",\n                  max(memory_total_bytes) AS \"mem_total!\", avg(load1_x100)::int AS \"load!\",\n                  max(disk_used_bytes) AS \"disk!\", max(disk_total_bytes) AS \"disk_total!\",\n                  max(containers) AS \"containers!\"\n           FROM node_usage_minute\n           WHERE node_id = $1 AND at >= to_timestamp($2::bigint) AND at < to_timestamp($3::bigint)\n           GROUP BY 1 ORDER BY 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "at!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "cpu!",
+        "type_info": "Int4",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "mem!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "mem_total!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "load!",
+        "type_info": "Int4",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "disk!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 6,
+        "name": "disk_total!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 7,
+        "name": "containers!",
+        "type_info": "Int4",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8",
+        "Int8",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "4748141faf2246feb0cf619f925c475dde7fe6ef6e908a99635f4660f17da505"
+}

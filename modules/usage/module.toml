@@ -1,0 +1,15 @@
+# Usage: CPU, memory, network and disk over time (crates/modules/usage).
+[module]
+name       = "usage"
+version    = "0.1.0"
+title      = { en = "Usage", bn = "ব্যবহার" }
+category   = "system"
+core       = false
+depends_on = ["auth", "rbac", "audit", "system", "plans", "users", "nodes"]
+
+[permissions]
+keys = []
+
+[ui]
+admin_nav  = { group = "System", order = 40, icon = "activity" }
+client_nav = { group = "Advanced", order = 30, icon = "activity" }

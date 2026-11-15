@@ -27,6 +27,7 @@ const EMBEDDED: &[(&str, &str)] = &[
     ("backups", dhpanel_mod_backups::MANIFEST),
     ("cron", dhpanel_mod_cron::MANIFEST),
     ("logs", dhpanel_mod_logs::MANIFEST),
+    ("usage", dhpanel_mod_usage::MANIFEST),
 ];
 
 /// Days the data of a deleted user is kept before it is purged.
@@ -411,6 +412,22 @@ pub fn mount(
                         ..ModuleRoutes::none()
                     })
                 }
+                "usage" => {
+                    let (db, sessions) = (db.clone(), sessions.clone());
+                    Box::new(move || {
+                        let state = dhpanel_mod_usage::UsageState {
+                            db: db.clone(),
+                            sessions: sessions.clone(),
+                        };
+                        ModuleRoutes {
+                            admin: Some(
+                                dhpanel_mod_usage::admin_router().with_state(state.clone()),
+                            ),
+                            client: Some(dhpanel_mod_usage::client_router().with_state(state)),
+                            ..ModuleRoutes::none()
+                        }
+                    })
+                }
                 // A manifest without code behind it has no routes.
                 _ => Box::new(ModuleRoutes::none),
             };
@@ -640,7 +657,8 @@ mod tests {
                 "files",
                 "backups",
                 "cron",
-                "logs"
+                "logs",
+                "usage"
             ]
         );
         // And they fit together: dependencies first.
@@ -660,7 +678,8 @@ mod tests {
                 "databases",
                 "domains",
                 "files",
-                "logs"
+                "logs",
+                "usage"
             ]
         );
         assert_eq!(
@@ -676,7 +695,8 @@ mod tests {
                 "databases",
                 "domains",
                 "files",
-                "logs"
+                "logs",
+                "usage"
             ]
         );
         // Every dependency names a module that exists.

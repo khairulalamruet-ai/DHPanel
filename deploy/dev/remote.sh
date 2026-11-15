@@ -56,6 +56,29 @@ cd "$HOME/$1"; what="$2"; rc=0
 S="$HOME/.dhpanel-dev/secrets"
 export DATABASE_URL="$(cat "$S/database_url")" REDIS_URL="$(cat "$S/redis_test_url")"
 export SQLX_OFFLINE=true CARGO_TERM_COLOR=never CARGO_TARGET_DIR="$HOME/target-rust"
+# The box has a small disk, and a full one stops PostgreSQL in the middle of a run. Before
+# every run (and after it) what nobody needs is removed: incremental build data, unused Docker
+# images and build cache, builds of our crates that are hours old. When space is short it goes
+# further (every unused image; builds older than an hour), and when it is still short the run
+# stops with a clear message instead of failing in strange ways.
+free_gb() { df -BG --output=avail "$HOME" | tail -1 | tr -dc '0-9'; }
+clean_disk() {
+    rm -rf "$HOME/target-rust/debug/incremental"
+    docker image prune -f > /dev/null 2>&1 || true
+    docker builder prune -f > /dev/null 2>&1 || true
+    find "$HOME/target-rust/debug/build" -mindepth 2 -maxdepth 2 -type d -mmin +360 -exec rm -rf {} + 2> /dev/null || true
+    if [ "$(free_gb)" -lt 6 ]; then
+        docker image prune -a -f > /dev/null 2>&1 || true
+        docker volume prune -f > /dev/null 2>&1 || true
+        find "$HOME/target-rust/debug/build" -mindepth 2 -maxdepth 2 -type d -mmin +60 -exec rm -rf {} + 2> /dev/null || true
+    fi
+    echo "disk: $(free_gb) GB free after cleaning"
+}
+clean_disk
+if [ "$(free_gb)" -lt 3 ]; then
+    echo "disk: less than 3 GB free even after cleaning; stopping (a full disk stops PostgreSQL)"
+    exit 75
+fi
 step() { # name, command...
     local name="$1"; shift
     local log="$HOME/$name.log" start=$SECONDS
@@ -103,6 +126,7 @@ for items in groups.values():
         os.remove(path)
 print(f"build cache: removed stale copies of our own crates, freed {freed / 1e9:.2f} GB")
 PRUNE
+clean_disk
 df -h "$HOME" | awk 'NR==2 {print "disk: " $4 " free (" $5 " used)"}'
 exit $rc
 REMOTE

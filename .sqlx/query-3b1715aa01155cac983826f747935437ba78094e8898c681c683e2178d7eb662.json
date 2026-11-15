@@ -1,0 +1,71 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT u.tenant_id AS \"tenant_id!\", t.username AS \"username!\",\n                      avg(u.cpu_millis)::bigint AS \"cpu!\", avg(u.memory_bytes)::bigint AS \"mem!\",\n                      (sum(u.net_rx_bytes) + sum(u.net_tx_bytes))::bigint AS \"net!\",\n                      (sum(u.io_read_bytes) + sum(u.io_write_bytes))::bigint AS \"io!\"\n               FROM usage_hour u JOIN tenants t ON t.id = u.tenant_id\n               WHERE u.at >= to_timestamp($1::bigint) AND u.at < to_timestamp($2::bigint)\n               GROUP BY u.tenant_id, t.username\n               ORDER BY CASE $3::int WHEN 1 THEN avg(u.cpu_millis)::bigint\n                                     WHEN 2 THEN avg(u.memory_bytes)::bigint\n                                     WHEN 3 THEN (sum(u.net_rx_bytes) + sum(u.net_tx_bytes))::bigint\n                                     ELSE (sum(u.io_read_bytes) + sum(u.io_write_bytes))::bigint END DESC,\n                        t.username\n               LIMIT $4",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "tenant_id!",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "usage_hour",
+            "name": "tenant_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "username!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "tenants",
+            "name": "username"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "cpu!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "mem!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "net!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "io!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int4",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "3b1715aa01155cac983826f747935437ba78094e8898c681c683e2178d7eb662"
+}

@@ -445,6 +445,185 @@ pub async fn series(
         .collect())
 }
 
+/// What the accounts are ranked by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Rank {
+    /// Average CPU.
+    Cpu,
+    /// Average memory.
+    Memory,
+    /// Network bytes in and out.
+    Network,
+    /// Disk bytes read and written.
+    Io,
+}
+
+/// One ranked account.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Ranked {
+    /// The account.
+    pub tenant_id: Uuid,
+    /// Its system name.
+    pub username: String,
+    /// Average thousandths of a CPU over the range.
+    pub cpu_millis: i64,
+    /// Average memory over the range.
+    pub memory_bytes: i64,
+    /// Network bytes (in and out) over the range.
+    pub net_bytes: i64,
+    /// Disk bytes (read and written) over the range.
+    pub io_bytes: i64,
+}
+
+/// The `limit` accounts that used most over `from`..`to` (Unix seconds), most first; from the
+/// minutes when the range is within [`KEEP_MINUTES_HOURS`], from the hours otherwise.
+///
+/// # Errors
+/// Database errors.
+pub async fn top(
+    pool: &PgPool,
+    from: i64,
+    to: i64,
+    by: Rank,
+    limit: i64,
+) -> Result<Vec<Ranked>, sqlx::Error> {
+    let recent = to - from <= i64::from(KEEP_MINUTES_HOURS) * 3600;
+    let order = match by {
+        Rank::Cpu => 1,
+        Rank::Memory => 2,
+        Rank::Network => 3,
+        Rank::Io => 4,
+    };
+    let rows: Vec<(Uuid, String, i64, i64, i64, i64)> = if recent {
+        sqlx::query!(
+            r#"SELECT u.tenant_id AS "tenant_id!", t.username AS "username!",
+                      avg(u.cpu_millis)::bigint AS "cpu!", avg(u.memory_bytes)::bigint AS "mem!",
+                      (sum(u.net_rx_bytes) + sum(u.net_tx_bytes))::bigint AS "net!",
+                      (sum(u.io_read_bytes) + sum(u.io_write_bytes))::bigint AS "io!"
+               FROM usage_minute u JOIN tenants t ON t.id = u.tenant_id
+               WHERE u.at >= to_timestamp($1::bigint) AND u.at < to_timestamp($2::bigint)
+               GROUP BY u.tenant_id, t.username
+               ORDER BY CASE $3::int WHEN 1 THEN avg(u.cpu_millis)::bigint
+                                     WHEN 2 THEN avg(u.memory_bytes)::bigint
+                                     WHEN 3 THEN (sum(u.net_rx_bytes) + sum(u.net_tx_bytes))::bigint
+                                     ELSE (sum(u.io_read_bytes) + sum(u.io_write_bytes))::bigint END DESC,
+                        t.username
+               LIMIT $4"#,
+            from,
+            to,
+            order,
+            limit,
+        )
+        .fetch_all(pool)
+        .await?
+        .into_iter()
+        .map(|r| (r.tenant_id, r.username, r.cpu, r.mem, r.net, r.io))
+        .collect()
+    } else {
+        sqlx::query!(
+            r#"SELECT u.tenant_id AS "tenant_id!", t.username AS "username!",
+                      avg(u.cpu_millis)::bigint AS "cpu!", avg(u.memory_bytes)::bigint AS "mem!",
+                      (sum(u.net_rx_bytes) + sum(u.net_tx_bytes))::bigint AS "net!",
+                      (sum(u.io_read_bytes) + sum(u.io_write_bytes))::bigint AS "io!"
+               FROM usage_hour u JOIN tenants t ON t.id = u.tenant_id
+               WHERE u.at >= to_timestamp($1::bigint) AND u.at < to_timestamp($2::bigint)
+               GROUP BY u.tenant_id, t.username
+               ORDER BY CASE $3::int WHEN 1 THEN avg(u.cpu_millis)::bigint
+                                     WHEN 2 THEN avg(u.memory_bytes)::bigint
+                                     WHEN 3 THEN (sum(u.net_rx_bytes) + sum(u.net_tx_bytes))::bigint
+                                     ELSE (sum(u.io_read_bytes) + sum(u.io_write_bytes))::bigint END DESC,
+                        t.username
+               LIMIT $4"#,
+            from,
+            to,
+            order,
+            limit,
+        )
+        .fetch_all(pool)
+        .await?
+        .into_iter()
+        .map(|r| (r.tenant_id, r.username, r.cpu, r.mem, r.net, r.io))
+        .collect()
+    };
+    Ok(rows
+        .into_iter()
+        .map(
+            |(tenant_id, username, cpu_millis, memory_bytes, net_bytes, io_bytes)| Ranked {
+                tenant_id,
+                username,
+                cpu_millis,
+                memory_bytes,
+                net_bytes,
+                io_bytes,
+            },
+        )
+        .collect())
+}
+
+/// One bucket of a node's series.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NodePoint {
+    /// Start of the bucket (Unix seconds).
+    pub at: i64,
+    /// Average thousandths of the node's CPU that were busy.
+    pub cpu_busy_millis: i32,
+    /// Average memory in use.
+    pub memory_used_bytes: i64,
+    /// Memory in all (latest in the bucket).
+    pub memory_total_bytes: i64,
+    /// Average one-minute load times 100.
+    pub load1_x100: i32,
+    /// Disk bytes in use (latest in the bucket).
+    pub disk_used_bytes: i64,
+    /// Disk bytes in all.
+    pub disk_total_bytes: i64,
+    /// Running containers (latest).
+    pub containers: i32,
+}
+
+/// A node's usage from `from` to `to` (Unix seconds) in buckets of `bucket_seconds` (at
+/// least a minute); at most 30 days are kept.
+///
+/// # Errors
+/// Database errors.
+pub async fn node_series(
+    pool: &PgPool,
+    node_id: Uuid,
+    from: i64,
+    to: i64,
+    bucket_seconds: i64,
+) -> Result<Vec<NodePoint>, sqlx::Error> {
+    let rows = sqlx::query!(
+        r#"SELECT extract(epoch FROM date_bin(make_interval(secs => $4::int), at, 'epoch'))::bigint AS "at!",
+                  avg(cpu_busy_millis)::int AS "cpu!", avg(memory_used_bytes)::bigint AS "mem!",
+                  max(memory_total_bytes) AS "mem_total!", avg(load1_x100)::int AS "load!",
+                  max(disk_used_bytes) AS "disk!", max(disk_total_bytes) AS "disk_total!",
+                  max(containers) AS "containers!"
+           FROM node_usage_minute
+           WHERE node_id = $1 AND at >= to_timestamp($2::bigint) AND at < to_timestamp($3::bigint)
+           GROUP BY 1 ORDER BY 1"#,
+        node_id,
+        from,
+        to,
+        i32::try_from(bucket_seconds.max(60)).unwrap_or(3600),
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| NodePoint {
+            at: r.at,
+            cpu_busy_millis: r.cpu,
+            memory_used_bytes: r.mem,
+            memory_total_bytes: r.mem_total,
+            load1_x100: r.load,
+            disk_used_bytes: r.disk,
+            disk_total_bytes: r.disk_total,
+            containers: r.containers,
+        })
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
