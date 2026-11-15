@@ -56,6 +56,8 @@ pub struct Config {
     pub db_port: u16,
     /// The agent's folder for files on their way (see [`crate::files`]).
     pub transfers: PathBuf,
+    /// The commands and paths of the server tools.
+    pub server: crate::servertools::Env,
 }
 
 /// Creates the socket: owned by the agent, mode 0600. A stale socket file from
@@ -249,6 +251,10 @@ fn execute_one(action: &Action, config: &Config) -> Result<(), (ErrorCode, &'sta
             inodes,
         } => tenant::set_storage_quota(&config.tenants, tenant_id, *uid, *disk_bytes, *inodes),
         Action::SetDbFirewall { cidrs } => crate::firewall::set(config.db_port, cidrs),
+        Action::SetTimezone { zone } => crate::servertools::set_timezone(&config.server, zone),
+        Action::SetSwap { megabytes } => crate::servertools::set_swap(&config.server, *megabytes),
+        Action::DropCaches => crate::servertools::drop_caches(&config.server),
+        Action::Reboot => crate::servertools::reboot(&config.server),
         Action::RemoveTenant { tenant_id, uid } => tenant::remove(&config.tenants, tenant_id, *uid),
         Action::PlaceFile {
             tenant_id,
@@ -408,6 +414,7 @@ mod tests {
                 tenants: test_tenants(gid),
                 db_port: 13306,
                 transfers: std::env::temp_dir(),
+                server: crate::servertools::Env::default(),
             };
             let listener = bind(&bind_config).unwrap();
             let config = Config {
@@ -589,6 +596,7 @@ mod tests {
             tenants: test_tenants(gid),
             db_port: 13306,
             transfers: std::env::temp_dir(),
+            server: crate::servertools::Env::default(),
         };
         drop(bind(&config).unwrap()); // leaves the socket file behind
         assert!(path.exists());

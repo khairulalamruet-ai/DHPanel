@@ -6,6 +6,8 @@
 //! | POST | `/api/v1/client/services/{name}/restart` | the owner |
 //! | GET | `/api/v1/client/processes` | the owner |
 //! | POST | `/api/v1/client/processes/{container}/{pid}/signal` | the owner |
+//! | GET | `/api/v1/admin/nodes/{id}/server` | `admin.server.read` |
+//! | POST | `/api/v1/admin/nodes/{id}/server/{timezone,swap,drop-caches,reboot}` | `admin.server.manage`, sudo mode |
 //! | GET | `/api/v1/admin/nodes/{id}/services` | `admin.nodes.read` |
 //! | POST | `/api/v1/admin/nodes/{id}/services/{name}/restart` | `admin.nodes.manage` |
 //! | GET | `/api/v1/admin/nodes/{id}/services/{name}/log` | `admin.nodes.read` |
@@ -38,8 +40,8 @@ use dhpanel_database::{
 use dhpanel_http_kit::{AppError, ProblemDetails};
 use dhpanel_node_protocol::{Operation, Output};
 use dhpanel_rbac::{
-    Principal, Require,
-    permissions::{NodesManage, NodesRead},
+    Principal, Require, RequireRecent,
+    permissions::{NodesManage, NodesRead, ServerManage, ServerRead},
 };
 use dhpanel_session::SessionStore;
 use serde::Serialize;
@@ -78,6 +80,17 @@ impl FromRef<ServicesState> for SessionStore {
 /// Routes for administrators.
 pub fn admin_router() -> Router<ServicesState> {
     Router::new()
+        .route("/api/v1/admin/nodes/{id}/server", get(server_info))
+        .route(
+            "/api/v1/admin/nodes/{id}/server/timezone",
+            post(set_timezone),
+        )
+        .route("/api/v1/admin/nodes/{id}/server/swap", post(set_swap))
+        .route(
+            "/api/v1/admin/nodes/{id}/server/drop-caches",
+            post(drop_caches),
+        )
+        .route("/api/v1/admin/nodes/{id}/server/reboot", post(reboot_node))
         .route("/api/v1/admin/nodes/{id}/services", get(node_services))
         .route(
             "/api/v1/admin/nodes/{id}/services/{name}/restart",
@@ -539,6 +552,299 @@ pub async fn signal_process(
     }
 }
 
+/// What a node says about itself.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ServerInfoView {
+    /// The machine's name.
+    pub hostname: String,
+    /// The distribution.
+    pub os: String,
+    /// The kernel release.
+    pub kernel: String,
+    /// The time zone (`Area/City`).
+    pub timezone: String,
+    /// Seconds since boot.
+    pub uptime_seconds: u64,
+    /// Memory of the machine, in bytes.
+    pub memory_total_bytes: u64,
+    /// Memory programs could still use, in bytes.
+    pub memory_available_bytes: u64,
+    /// Swap in all, in bytes.
+    pub swap_total_bytes: u64,
+    /// Swap in use, in bytes.
+    pub swap_used_bytes: u64,
+    /// The SSH server's safety settings as it will use them (name, value); read-only.
+    pub ssh: Vec<SshSetting>,
+}
+
+/// One SSH server setting.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct SshSetting {
+    /// The setting (lower case).
+    pub name: String,
+    /// Its value.
+    pub value: String,
+}
+
+/// The node's system, time zone, memory, swap and SSH settings.
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/nodes/{id}/server",
+    tag = "services",
+    operation_id = "adminServerInfo",
+    security(("session" = [])),
+    params(("id" = Uuid, Path, description = "Node id")),
+    responses(
+        (status = 200, description = "The node", body = ServerInfoView),
+        (status = 202, description = "The node is slow; ask again", body = Pending),
+        (status = 403, description = "`permission_denied` (needs admin.server.read)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 404, description = "No such node", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+pub async fn server_info(
+    State(state): State<ServicesState>,
+    who: Require<ServerRead>,
+    Path(id): Path<Uuid>,
+) -> Result<Response, AppError> {
+    match ask_node(&state, id, &who.0, &Operation::ReportServerInfo).await? {
+        Ok(Output::ServerInfo { info }) => Ok(Json(ServerInfoView {
+            hostname: info.hostname,
+            os: info.os,
+            kernel: info.kernel,
+            timezone: info.timezone,
+            uptime_seconds: info.uptime_seconds,
+            memory_total_bytes: info.memory_total_bytes,
+            memory_available_bytes: info.memory_available_bytes,
+            swap_total_bytes: info.swap_total_bytes,
+            swap_used_bytes: info.swap_used_bytes,
+            ssh: info
+                .ssh
+                .into_iter()
+                .map(|(name, value)| SshSetting { name, value })
+                .collect(),
+        })
+        .into_response()),
+        Ok(_) => Err(internal(std::io::Error::other("an unexpected answer"))),
+        Err(operation_id) => {
+            Ok((StatusCode::ACCEPTED, Json(Pending { operation_id })).into_response())
+        }
+    }
+}
+
+/// Which time zone.
+#[derive(Debug, serde::Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TimezoneRequest {
+    /// `Area/City`, such as `Asia/Dhaka` or `UTC`.
+    pub zone: String,
+}
+
+/// How big the swap file is to be.
+#[derive(Debug, serde::Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SwapRequest {
+    /// MiB, 0 to 32768; 0 takes the swap file away.
+    pub megabytes: u32,
+}
+
+/// A reboot has to be confirmed with the node's name.
+#[derive(Debug, serde::Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RebootRequest {
+    /// The node's name, typed as it is.
+    pub confirm: String,
+}
+
+/// Done.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ServerActionView {
+    /// Which action.
+    pub action: String,
+}
+
+async fn server_action(
+    state: &ServicesState,
+    who: &Principal,
+    id: Uuid,
+    op: Operation,
+    audit_action: &'static str,
+    detail: serde_json::Value,
+) -> Result<Response, AppError> {
+    match ask_node(state, id, who, &op).await? {
+        Ok(Output::ServerActionDone { action }) => {
+            dhpanel_audit::insert(
+                &state.db,
+                &dhpanel_audit::AuditEntry::new(audit_action, dhpanel_audit::Outcome::Success)
+                    .actor(who.account_id())
+                    .target("node", id)
+                    .metadata(detail),
+            )
+            .await
+            .map_err(internal)?;
+            Ok(Json(ServerActionView { action }).into_response())
+        }
+        Ok(_) => Err(internal(std::io::Error::other("an unexpected answer"))),
+        Err(operation_id) => {
+            Ok((StatusCode::ACCEPTED, Json(Pending { operation_id })).into_response())
+        }
+    }
+}
+
+/// Set the node's time zone.
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/nodes/{id}/server/timezone",
+    tag = "services",
+    operation_id = "adminSetTimezone",
+    security(("session" = [])),
+    params(("id" = Uuid, Path, description = "Node id"), ("X-CSRF-Token" = String, Header, description = "The session's csrf_token")),
+    request_body = TimezoneRequest,
+    responses(
+        (status = 200, description = "Done", body = ServerActionView),
+        (status = 202, description = "The node is slow; it goes on", body = Pending),
+        (status = 403, description = "`reauth_required` (sudo mode), `permission_denied` (needs admin.server.manage) or `csrf_failed`", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 404, description = "No such node", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 422, description = "Not a time zone of the node", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+pub async fn set_timezone(
+    State(state): State<ServicesState>,
+    who: RequireRecent<ServerManage>,
+    Path(id): Path<Uuid>,
+    Json(req): Json<TimezoneRequest>,
+) -> Result<Response, AppError> {
+    let zone = req.zone.trim().to_owned();
+    server_action(
+        &state,
+        &who.0,
+        id,
+        Operation::SetTimezone { zone: zone.clone() },
+        "node_server.timezone_set",
+        serde_json::json!({ "zone": zone }),
+    )
+    .await
+}
+
+/// Make the node's swap file (or take it away with 0).
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/nodes/{id}/server/swap",
+    tag = "services",
+    operation_id = "adminSetSwap",
+    security(("session" = [])),
+    params(("id" = Uuid, Path, description = "Node id"), ("X-CSRF-Token" = String, Header, description = "The session's csrf_token")),
+    request_body = SwapRequest,
+    responses(
+        (status = 200, description = "Done", body = ServerActionView),
+        (status = 202, description = "The node is slow; it goes on", body = Pending),
+        (status = 403, description = "`reauth_required` (sudo mode), `permission_denied` (needs admin.server.manage) or `csrf_failed`", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 422, description = "A size out of range", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+pub async fn set_swap(
+    State(state): State<ServicesState>,
+    who: RequireRecent<ServerManage>,
+    Path(id): Path<Uuid>,
+    Json(req): Json<SwapRequest>,
+) -> Result<Response, AppError> {
+    if req.megabytes > 32_768 {
+        return Err(AppError::validation(vec![
+            dhpanel_http_kit::FieldError::new("megabytes", "out_of_range", "Between 0 and 32768."),
+        ]));
+    }
+    server_action(
+        &state,
+        &who.0,
+        id,
+        Operation::SetSwap {
+            megabytes: req.megabytes,
+        },
+        "node_server.swap_set",
+        serde_json::json!({ "megabytes": req.megabytes }),
+    )
+    .await
+}
+
+/// Drop the node's page cache.
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/nodes/{id}/server/drop-caches",
+    tag = "services",
+    operation_id = "adminDropCaches",
+    security(("session" = [])),
+    params(("id" = Uuid, Path, description = "Node id"), ("X-CSRF-Token" = String, Header, description = "The session's csrf_token")),
+    responses(
+        (status = 200, description = "Done", body = ServerActionView),
+        (status = 202, description = "The node is slow; it goes on", body = Pending),
+        (status = 403, description = "`reauth_required` (sudo mode), `permission_denied` (needs admin.server.manage) or `csrf_failed`", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+pub async fn drop_caches(
+    State(state): State<ServicesState>,
+    who: RequireRecent<ServerManage>,
+    Path(id): Path<Uuid>,
+) -> Result<Response, AppError> {
+    server_action(
+        &state,
+        &who.0,
+        id,
+        Operation::DropCaches,
+        "node_server.caches_dropped",
+        serde_json::json!({}),
+    )
+    .await
+}
+
+/// Reboot the node. The body must carry the node's name as it is.
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/nodes/{id}/server/reboot",
+    tag = "services",
+    operation_id = "adminRebootNode",
+    security(("session" = [])),
+    params(("id" = Uuid, Path, description = "Node id"), ("X-CSRF-Token" = String, Header, description = "The session's csrf_token")),
+    request_body = RebootRequest,
+    responses(
+        (status = 200, description = "The reboot starts in a few seconds", body = ServerActionView),
+        (status = 202, description = "The node is slow; it goes on", body = Pending),
+        (status = 403, description = "`reauth_required` (sudo mode), `permission_denied` (needs admin.server.manage) or `csrf_failed`", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 404, description = "No such node", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 422, description = "`confirm` is not the node's name", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+pub async fn reboot_node(
+    State(state): State<ServicesState>,
+    who: RequireRecent<ServerManage>,
+    Path(id): Path<Uuid>,
+    Json(req): Json<RebootRequest>,
+) -> Result<Response, AppError> {
+    let name: Option<String> =
+        dhpanel_database::sqlx::query_scalar("SELECT name FROM nodes WHERE id = $1")
+            .bind(id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(internal)?;
+    let name = name.ok_or_else(|| AppError::not_found("node"))?;
+    if req.confirm != name {
+        return Err(AppError::validation(vec![
+            dhpanel_http_kit::FieldError::new(
+                "confirm",
+                "mismatch",
+                "Type the node's name to confirm the reboot.",
+            ),
+        ]));
+    }
+    server_action(
+        &state,
+        &who.0,
+        id,
+        Operation::RebootNode,
+        "node_server.reboot",
+        serde_json::json!({ "node": name }),
+    )
+    .await
+}
+
 /// A core service of a node.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct NodeServiceView {
@@ -643,9 +949,22 @@ async fn ask_node(
                     .and_then(serde_json::Value::as_str)
                     .unwrap_or_default()
                     .to_owned();
+                let refused = row
+                    .error
+                    .as_ref()
+                    .and_then(|e| e.get("code"))
+                    .and_then(serde_json::Value::as_str)
+                    == Some("invalid_arguments");
                 return Err(
                     if message.contains("not a core service") || message.contains("not installed") {
                         AppError::not_found("service")
+                    } else if refused {
+                        // The node refused what was asked: its words say what is wrong.
+                        AppError::validation(vec![dhpanel_http_kit::FieldError::new(
+                            "value",
+                            "refused_by_node",
+                            &message,
+                        )])
                     } else {
                         AppError::unavailable(
                             "node_unavailable",
@@ -791,11 +1110,13 @@ pub async fn node_service_log(
 #[derive(OpenApi)]
 #[openapi(
     paths(
-        list_services, restart_service, list_processes, signal_process, node_services, restart_node_service, node_service_log
+        list_services, restart_service, list_processes, signal_process, server_info,
+        set_timezone, set_swap, drop_caches, reboot_node, node_services, restart_node_service, node_service_log
     ),
     components(schemas(
         ServiceView, ServiceList, Restarted, Pending, ProcessView, ProcessList, SignalRequest,
-        Signalled, NodeServiceView, NodeServiceList,
+        Signalled, ServerInfoView, SshSetting, TimezoneRequest, SwapRequest, RebootRequest,
+        ServerActionView, NodeServiceView, NodeServiceList,
         ServiceLogLine, ServiceLog
     )),
     tags((name = "services", description = "An account's own services"))

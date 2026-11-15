@@ -408,6 +408,33 @@ pub enum SignalOutcome {
     StillRunning,
 }
 
+/// What a node says about itself (T10.15).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ServerInfo {
+    /// The machine's name.
+    pub hostname: String,
+    /// The distribution (`PRETTY_NAME` of os-release).
+    pub os: String,
+    /// The kernel release.
+    pub kernel: String,
+    /// The time zone (`Area/City`, or empty when it is not known).
+    pub timezone: String,
+    /// Seconds since boot.
+    pub uptime_seconds: u64,
+    /// Memory of the machine, in bytes.
+    pub memory_total_bytes: u64,
+    /// Memory programs could still use, in bytes.
+    pub memory_available_bytes: u64,
+    /// Swap in all, in bytes.
+    pub swap_total_bytes: u64,
+    /// Swap in use, in bytes.
+    pub swap_used_bytes: u64,
+    /// The settings of the SSH server that matter for safety, as it will use them
+    /// (`name value`), read-only.
+    pub ssh: Vec<(String, String)>,
+}
+
 /// Most runs in one report.
 pub const MAX_CRON_RUNS_PER_REPORT: usize = 500;
 
@@ -1009,6 +1036,26 @@ pub enum Operation {
         /// After SIGTERM, wait up to ten seconds and then SIGKILL.
         escalate: bool,
     },
+    /// The machine's name, system, time zone, memory, swap, uptime and the SSH server's
+    /// safety settings. Answered with [`Output::ServerInfo`].
+    ReportServerInfo,
+    /// Sets the machine's time zone (a zone file of the machine). Answered with
+    /// [`Output::ServerActionDone`].
+    SetTimezone {
+        /// `Area/City`.
+        zone: String,
+    },
+    /// Makes the swap file this many MiB big (0 takes it away). Answered with
+    /// [`Output::ServerActionDone`].
+    SetSwap {
+        /// MiB, 0 to 32768.
+        megabytes: u32,
+    },
+    /// Drops the page cache. Answered with [`Output::ServerActionDone`].
+    DropCaches,
+    /// Reboots the machine: the answer comes just before it goes down. Answered with
+    /// [`Output::ServerActionDone`].
+    RebootNode,
     /// Lists the containers of one account (and only those: the ones that carry its id).
     /// Answered with [`Output::Containers`].
     ListContainers {
@@ -1308,6 +1355,11 @@ impl Operation {
         "restore_backup",
         "delete_backup",
         "sync_cron_jobs",
+        "report_server_info",
+        "set_timezone",
+        "set_swap",
+        "drop_caches",
+        "reboot_node",
         "list_processes",
         "signal_process",
         "report_services",
@@ -1373,6 +1425,11 @@ impl Operation {
             Self::RestoreBackup { .. } => "restore_backup",
             Self::DeleteBackup { .. } => "delete_backup",
             Self::SyncCronJobs { .. } => "sync_cron_jobs",
+            Self::ReportServerInfo => "report_server_info",
+            Self::SetTimezone { .. } => "set_timezone",
+            Self::SetSwap { .. } => "set_swap",
+            Self::DropCaches => "drop_caches",
+            Self::RebootNode => "reboot_node",
             Self::ListProcesses { .. } => "list_processes",
             Self::SignalProcess { .. } => "signal_process",
             Self::ReportServices => "report_services",
@@ -1658,6 +1715,17 @@ pub enum Output {
     Services {
         /// One entry per service.
         items: Vec<ServiceStatus>,
+    },
+    /// Answer to [`Operation::ReportServerInfo`].
+    ServerInfo {
+        /// What the node says.
+        info: ServerInfo,
+    },
+    /// Answer to the server tools ([`Operation::SetTimezone`], [`Operation::SetSwap`],
+    /// [`Operation::DropCaches`], [`Operation::RebootNode`]).
+    ServerActionDone {
+        /// Which one.
+        action: String,
     },
     /// Answer to [`Operation::ListProcesses`].
     Processes {
@@ -2770,7 +2838,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            59,
+            64,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }

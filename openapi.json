@@ -4830,6 +4830,422 @@
         ]
       }
     },
+    "/api/v1/admin/nodes/{id}/server": {
+      "get": {
+        "tags": [
+          "services"
+        ],
+        "summary": "The node's system, time zone, memory, swap and SSH settings.",
+        "operationId": "adminServerInfo",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Node id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The node",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerInfoView"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The node is slow; ask again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Pending"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied` (needs admin.server.read)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such node",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/nodes/{id}/server/drop-caches": {
+      "post": {
+        "tags": [
+          "services"
+        ],
+        "summary": "Drop the node's page cache.",
+        "operationId": "adminDropCaches",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Node id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Done",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerActionView"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The node is slow; it goes on",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Pending"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`reauth_required` (sudo mode), `permission_denied` (needs admin.server.manage) or `csrf_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/nodes/{id}/server/reboot": {
+      "post": {
+        "tags": [
+          "services"
+        ],
+        "summary": "Reboot the node. The body must carry the node's name as it is.",
+        "operationId": "adminRebootNode",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Node id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RebootRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The reboot starts in a few seconds",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerActionView"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The node is slow; it goes on",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Pending"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`reauth_required` (sudo mode), `permission_denied` (needs admin.server.manage) or `csrf_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such node",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`confirm` is not the node's name",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/nodes/{id}/server/swap": {
+      "post": {
+        "tags": [
+          "services"
+        ],
+        "summary": "Make the node's swap file (or take it away with 0).",
+        "operationId": "adminSetSwap",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Node id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SwapRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Done",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerActionView"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The node is slow; it goes on",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Pending"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`reauth_required` (sudo mode), `permission_denied` (needs admin.server.manage) or `csrf_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A size out of range",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/nodes/{id}/server/timezone": {
+      "post": {
+        "tags": [
+          "services"
+        ],
+        "summary": "Set the node's time zone.",
+        "operationId": "adminSetTimezone",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Node id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TimezoneRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Done",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerActionView"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The node is slow; it goes on",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Pending"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`reauth_required` (sudo mode), `permission_denied` (needs admin.server.manage) or `csrf_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such node",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Not a time zone of the node",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/nodes/{id}/services": {
       "get": {
         "tags": [
@@ -20323,6 +20739,20 @@
           }
         }
       },
+      "RebootRequest": {
+        "type": "object",
+        "description": "A reboot has to be confirmed with the node's name.",
+        "required": [
+          "confirm"
+        ],
+        "properties": {
+          "confirm": {
+            "type": "string",
+            "description": "The node's name, typed as it is."
+          }
+        },
+        "additionalProperties": false
+      },
       "RecordList": {
         "type": "object",
         "description": "A zone with its records.",
@@ -20766,6 +21196,90 @@
         },
         "additionalProperties": false
       },
+      "ServerActionView": {
+        "type": "object",
+        "description": "Done.",
+        "required": [
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "Which action."
+          }
+        }
+      },
+      "ServerInfoView": {
+        "type": "object",
+        "description": "What a node says about itself.",
+        "required": [
+          "hostname",
+          "os",
+          "kernel",
+          "timezone",
+          "uptime_seconds",
+          "memory_total_bytes",
+          "memory_available_bytes",
+          "swap_total_bytes",
+          "swap_used_bytes",
+          "ssh"
+        ],
+        "properties": {
+          "hostname": {
+            "type": "string",
+            "description": "The machine's name."
+          },
+          "kernel": {
+            "type": "string",
+            "description": "The kernel release."
+          },
+          "memory_available_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Memory programs could still use, in bytes.",
+            "minimum": 0
+          },
+          "memory_total_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Memory of the machine, in bytes.",
+            "minimum": 0
+          },
+          "os": {
+            "type": "string",
+            "description": "The distribution."
+          },
+          "ssh": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SshSetting"
+            },
+            "description": "The SSH server's safety settings as it will use them (name, value); read-only."
+          },
+          "swap_total_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Swap in all, in bytes.",
+            "minimum": 0
+          },
+          "swap_used_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Swap in use, in bytes.",
+            "minimum": 0
+          },
+          "timezone": {
+            "type": "string",
+            "description": "The time zone (`Area/City`)."
+          },
+          "uptime_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds since boot.",
+            "minimum": 0
+          }
+        }
+      },
       "ServiceList": {
         "type": "object",
         "description": "The services.",
@@ -21192,6 +21706,24 @@
           }
         }
       },
+      "SshSetting": {
+        "type": "object",
+        "description": "One SSH server setting.",
+        "required": [
+          "name",
+          "value"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The setting (lower case)."
+          },
+          "value": {
+            "type": "string",
+            "description": "Its value."
+          }
+        }
+      },
       "SslView": {
         "type": "object",
         "description": "A domain's certificate.",
@@ -21419,6 +21951,22 @@
             "minimum": 0
           }
         }
+      },
+      "SwapRequest": {
+        "type": "object",
+        "description": "How big the swap file is to be.",
+        "required": [
+          "megabytes"
+        ],
+        "properties": {
+          "megabytes": {
+            "type": "integer",
+            "format": "int32",
+            "description": "MiB, 0 to 32768; 0 takes the swap file away.",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
       },
       "SystemLogLine": {
         "type": "object",
@@ -21703,6 +22251,20 @@
             "example": "alice"
           }
         }
+      },
+      "TimezoneRequest": {
+        "type": "object",
+        "description": "Which time zone.",
+        "required": [
+          "zone"
+        ],
+        "properties": {
+          "zone": {
+            "type": "string",
+            "description": "`Area/City`, such as `Asia/Dhaka` or `UTC`."
+          }
+        },
+        "additionalProperties": false
       },
       "TopItem": {
         "type": "object",

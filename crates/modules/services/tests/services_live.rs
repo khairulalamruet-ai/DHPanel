@@ -179,7 +179,7 @@ fn node(pool: PgPool) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         loop {
             let rows: Vec<(Uuid, Value)> = sqlx::query_as(
-                "SELECT id, payload FROM operations WHERE kind IN ('list_containers', 'restart_container', 'restart_node_service', 'read_service_log', 'list_processes', 'signal_process') AND status = 'pending'",
+                "SELECT id, payload FROM operations WHERE kind IN ('list_containers', 'restart_container', 'restart_node_service', 'read_service_log', 'list_processes', 'signal_process', 'report_server_info', 'set_timezone', 'set_swap', 'drop_caches', 'reboot_node') AND status = 'pending'",
             )
             .fetch_all(&pool)
             .await
@@ -204,6 +204,32 @@ fn node(pool: PgPool) -> tokio::task::JoinHandle<()> {
                             {"name": "dh-alice-php", "role": "php", "image": "php:8.4", "state": "running", "status": "Up 2 hours", "created": 1_700_000_000},
                             {"name": "dh-alice-web", "role": "web", "image": "nginx", "state": "exited", "status": "Exited (0) 1 hour ago", "created": 1_700_000_100}
                         ]})),
+                        None,
+                    )
+                } else if kind == "report_server_info" {
+                    (
+                        "succeeded",
+                        Some(json!({"type": "server_info", "info": {
+                            "hostname": "dhpanel", "os": "Ubuntu 24.04", "kernel": "6.8.0", "timezone": "Etc/UTC",
+                            "uptime_seconds": 1000, "memory_total_bytes": 2000, "memory_available_bytes": 1000,
+                            "swap_total_bytes": 500, "swap_used_bytes": 100, "ssh": [["permitrootlogin", "yes"]]
+                        }})),
+                        None,
+                    )
+                } else if kind == "set_timezone" && payload["zone"] != "Asia/Dhaka" {
+                    (
+                        "failed",
+                        None,
+                        Some(
+                            json!({"code": "invalid_arguments", "message": "not a time zone of this machine", "retryable": false}),
+                        ),
+                    )
+                } else if ["set_timezone", "set_swap", "drop_caches", "reboot_node"]
+                    .contains(&kind.as_str())
+                {
+                    (
+                        "succeeded",
+                        Some(json!({"type": "server_action_done", "action": kind})),
                         None,
                     )
                 } else if kind == "list_processes" {
@@ -536,5 +562,142 @@ async fn an_account_lists_and_restarts_its_services_and_nobody_elses(pool: PgPoo
     // The operations are the node's, not an account's.
     let tenant_ops: i64 = sqlx::query_scalar("SELECT count(*) FROM operations WHERE kind IN ('restart_node_service', 'read_service_log') AND tenant_id IS NOT NULL").fetch_one(&pool).await.unwrap();
     assert_eq!(tenant_ops, 0);
+    // ---- The server tools.
+    let node_name: String = sqlx::query_scalar("SELECT name FROM nodes WHERE id = $1")
+        .bind(node)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let server = format!("/api/v1/admin/nodes/{node}/server");
+    let (status, info) = e.call(&root, "GET", &server).await;
+    assert_eq!(status, StatusCode::OK, "{info}");
+    assert_eq!(
+        (info["hostname"].as_str(), info["ssh"][0]["name"].as_str()),
+        (Some("dhpanel"), Some("permitrootlogin"))
+    );
+    for who in [&alice, &plain] {
+        assert_eq!(e.call(who, "GET", &server).await.0, StatusCode::FORBIDDEN);
+    }
+    let post_json = |who: &Browser, path: String, body: Value| {
+        let app = e.app.clone();
+        let (cookie, csrf) = (who.cookie.clone(), who.csrf.clone());
+        async move {
+            let req = Request::builder()
+                .method("POST")
+                .uri(path)
+                .header(header::COOKIE, cookie)
+                .header(CSRF_HEADER, csrf)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap();
+            let res = app.oneshot(req).await.unwrap();
+            let status = res.status();
+            let bytes = axum::body::to_bytes(res.into_body(), 1 << 20)
+                .await
+                .unwrap();
+            (
+                status,
+                serde_json::from_slice::<Value>(&bytes).unwrap_or(Value::Null),
+            )
+        }
+    };
+    assert_eq!(
+        post_json(&plain, format!("{server}/drop-caches"), json!({}))
+            .await
+            .0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        post_json(&alice, format!("{server}/swap"), json!({"megabytes": 1}))
+            .await
+            .0,
+        StatusCode::FORBIDDEN
+    );
+    let (status, done) = post_json(
+        &root,
+        format!("{server}/timezone"),
+        json!({"zone": "Asia/Dhaka"}),
+    )
+    .await;
+    assert_eq!(
+        (status, done["action"].as_str()),
+        (StatusCode::OK, Some("set_timezone")),
+        "{done}"
+    );
+    assert_eq!(
+        post_json(
+            &root,
+            format!("{server}/timezone"),
+            json!({"zone": "Nowhere/Land"})
+        )
+        .await
+        .0,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(
+        post_json(&root, format!("{server}/swap"), json!({"megabytes": 512}))
+            .await
+            .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        post_json(
+            &root,
+            format!("{server}/swap"),
+            json!({"megabytes": 99_999})
+        )
+        .await
+        .0,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(
+        post_json(&root, format!("{server}/drop-caches"), json!({}))
+            .await
+            .0,
+        StatusCode::OK
+    );
+    // A reboot needs the node's name, as typed.
+    let before: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM operations WHERE kind = 'reboot_node'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    for wrong in ["", "other", &node_name.to_uppercase()] {
+        let (status, _) =
+            post_json(&root, format!("{server}/reboot"), json!({"confirm": wrong})).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{wrong:?}");
+    }
+    let same: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM operations WHERE kind = 'reboot_node'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(before, same, "nothing was asked of the node");
+    let (status, done) = post_json(
+        &root,
+        format!("{server}/reboot"),
+        json!({"confirm": node_name}),
+    )
+    .await;
+    assert_eq!(
+        (status, done["action"].as_str()),
+        (StatusCode::OK, Some("reboot_node")),
+        "{done}"
+    );
+    let audited: Vec<String> = sqlx::query_scalar(
+        "SELECT action FROM audit_logs WHERE action LIKE 'node_server.%' ORDER BY at, id",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        audited,
+        [
+            "node_server.timezone_set",
+            "node_server.swap_set",
+            "node_server.caches_dropped",
+            "node_server.reboot"
+        ]
+    );
     played.abort();
 }

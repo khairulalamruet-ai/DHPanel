@@ -133,6 +133,14 @@ pub mod permissions {
         pub LogsRead = "admin.logs.read"
     );
     crate::permission!(
+        /// See a node's system, time zone, memory, swap and SSH settings.
+        pub ServerRead = "admin.server.read"
+    );
+    crate::permission!(
+        /// Change a node's time zone and swap, drop its cache and reboot it (sudo mode).
+        pub ServerManage = "admin.server.manage"
+    );
+    crate::permission!(
         /// See the panel's settings.
         pub SettingsRead = "admin.settings.read"
     );

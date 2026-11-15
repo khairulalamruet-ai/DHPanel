@@ -122,6 +122,20 @@ pub enum Action {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         folder: Option<String>,
     },
+    /// Sets the machine's time zone (a zone file of this machine; see [`crate::servertools`]).
+    SetTimezone {
+        /// `Area/City`.
+        zone: String,
+    },
+    /// Makes the swap file this many MiB big, replacing the old one; 0 takes it away.
+    SetSwap {
+        /// MiB, 0 to 32768.
+        megabytes: u32,
+    },
+    /// Writes dirty pages to disk and drops the page cache.
+    DropCaches,
+    /// Reboots the machine.
+    Reboot,
     /// Removes a tenant's two (empty) directories after its files were
     /// deleted. Never deletes any file: a non-empty directory is a failure.
     RemoveTenant {
@@ -146,6 +160,10 @@ impl Action {
             Self::TakeFile { .. } => "take_file",
             Self::BackupFiles { .. } => "backup_files",
             Self::RestoreFiles { .. } => "restore_files",
+            Self::SetTimezone { .. } => "set_timezone",
+            Self::SetSwap { .. } => "set_swap",
+            Self::DropCaches => "drop_caches",
+            Self::Reboot => "reboot",
             Self::RemoveTenant { .. } => "remove_tenant",
         }
     }

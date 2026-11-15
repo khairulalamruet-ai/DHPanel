@@ -23,6 +23,7 @@ pub mod firewall;
 pub mod protocol;
 pub mod quota;
 pub mod server;
+pub mod servertools;
 pub mod skeleton;
 pub mod tenant;
 

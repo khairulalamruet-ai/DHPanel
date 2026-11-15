@@ -31,6 +31,7 @@ pub mod logs;
 pub mod metrics;
 pub mod nodeservices;
 pub mod pma;
+pub mod server;
 pub mod services;
 pub mod sqlexport;
 pub mod sqlimport;
@@ -197,6 +198,23 @@ impl Registry {
             registry.register("read_service_log", {
                 let context = context.clone();
                 move |op| nodeservices::read_service_log(context.clone(), op)
+            });
+            registry.register("report_server_info", server::report_server_info);
+            registry.register("set_timezone", {
+                let context = context.clone();
+                move |op| server::set_timezone(context.clone(), op)
+            });
+            registry.register("set_swap", {
+                let context = context.clone();
+                move |op| server::set_swap(context.clone(), op)
+            });
+            registry.register("drop_caches", {
+                let context = context.clone();
+                move |op| server::drop_caches(context.clone(), op)
+            });
+            registry.register("reboot_node", {
+                let context = context.clone();
+                move |op| server::reboot_node(context.clone(), op)
             });
             registry.register("list_processes", {
                 let context = context.clone();
