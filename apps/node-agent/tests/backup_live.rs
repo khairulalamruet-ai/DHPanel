@@ -9,7 +9,7 @@ use dhpanel_backup::{KEY_LEN, Manifest, StreamReader};
 use dhpanel_backup_dest::{Destination as _, local::Local};
 use dhpanel_docker_manager::{DockerManager, Name};
 use dhpanel_node_agent::ops::{
-    backup::{create_backup, delete_backup, restore_backup},
+    backup::{create_backup, delete_backup, export_backup, import_export, restore_backup},
     db::{CONTAINER, create_database, ensure_db_server, port},
     files::file_op,
     tenant::{TenantContext, create_tenant},
@@ -519,6 +519,129 @@ async fn an_account_is_backed_up_encrypted_and_every_part_checks_out() {
             "staged restore files are removed"
         );
     }
+
+    // ---- Export (T09.11): one file, taken to another destination, restored from there.
+    let header = dhpanel_backup::export::Header::new(
+        &id,
+        &username,
+        1_700_000_000,
+        &key,
+        "a long enough passphrase",
+    )
+    .unwrap();
+    let export_id = Uuid::now_v7();
+    let exported = export_backup(
+        context.clone(),
+        Operation::ExportBackup {
+            backup_id,
+            export_id,
+            target: target.clone(),
+            credentials: None,
+            header: String::from_utf8(header.to_json().unwrap()).unwrap(),
+        },
+    )
+    .await
+    .unwrap();
+    let Output::BackupExported { object, size_bytes } = exported else {
+        panic!("{exported:?}")
+    };
+    assert!(object.starts_with("exports/") && size_bytes > 0);
+    // The file is a tar: the header, the manifest and every part, nothing readable.
+    let mut file = Vec::new();
+    dest.get(&object).unwrap().read_to_end(&mut file).unwrap();
+    assert!(!file.windows(5).any(|w| w == b"hello"));
+    let names: Vec<String> = tar::Archive::new(&file[..])
+        .entries()
+        .unwrap()
+        .map(|e| e.unwrap().path().unwrap().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(names[0], "export.json");
+    assert!(
+        names.contains(&"manifest.json.enc".to_owned())
+            && names.contains(&"files.tar.zst.enc".to_owned()),
+        "{names:?}"
+    );
+    // Another destination (another node's disk): copy the file there and import it.
+    let other_dir = base.join("other-destination");
+    std::fs::create_dir_all(other_dir.join("exports")).unwrap();
+    std::fs::write(other_dir.join(&object), &file).unwrap();
+    let other = BackupTarget {
+        kind: "local".into(),
+        settings: serde_json::json!({"path": other_dir.to_str().unwrap()}),
+    };
+    for bad in ["../x.tar", "exports/a b.tar", "exports/x.zip"] {
+        let e = import_export(Operation::ImportExport {
+            object: bad.into(),
+            backup_id,
+            target: other.clone(),
+            credentials: None,
+        })
+        .await
+        .unwrap_err();
+        assert_eq!(e.code, ErrorCode::InvalidArguments, "{bad}: {e:?}");
+    }
+    let imported = import_export(Operation::ImportExport {
+        object: object.clone(),
+        backup_id,
+        target: other.clone(),
+        credentials: None,
+    })
+    .await
+    .unwrap();
+    let Output::ExportImported {
+        parts: imported_parts,
+        ..
+    } = imported
+    else {
+        panic!("{imported:?}")
+    };
+    assert_eq!(imported_parts.len(), 4, "{imported_parts:?}");
+    // The key comes out of the header with the passphrase, and the imported backup restores.
+    let unwrapped = dhpanel_backup::export::Header::from_reader(&header.to_json().unwrap()[..])
+        .unwrap()
+        .unwrap_key("a long enough passphrase")
+        .unwrap();
+    assert_eq!(unwrapped, key);
+    let verified = restore_backup(
+        context.clone(),
+        Operation::RestoreBackup {
+            tenant_id,
+            uid,
+            backup_id,
+            restore_id: Uuid::now_v7(),
+            account: username.clone(),
+            target: other.clone(),
+            credentials: None,
+            key: Some(DbPassword(key_text.clone())),
+            files: false,
+            folder: None,
+            databases: vec![],
+            snapshot: false,
+            verify_only: true,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(
+        matches!(
+            verified,
+            Output::BackupRestored {
+                verified_parts: 4,
+                ..
+            }
+        ),
+        "{verified:?}"
+    );
+    // Importing over a backup that is there is refused.
+    let e = import_export(Operation::ImportExport {
+        object,
+        backup_id,
+        target: other,
+        credentials: None,
+    })
+    .await
+    .unwrap_err();
+    assert_eq!(e.code, ErrorCode::InvalidArguments, "{e:?}");
 
     // Removing a backup takes away what it stored (and only that); doing it again is fine.
     for _ in 0..2 {

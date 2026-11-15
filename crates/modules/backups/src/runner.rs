@@ -86,6 +86,8 @@ pub async fn tick(db: &PgPool, master_key: &MasterKey, now: i64) -> Result<(), T
     start_due(db, master_key, now).await?;
     send_queued(db).await?;
     send_restores(db).await?;
+    send_exports(db).await?;
+    send_imports(db).await?;
     apply_retention(db).await?;
     send_removals(db).await?;
     Ok(())
@@ -229,6 +231,66 @@ async fn send_restores(db: &PgPool) -> Result<(), TickError> {
             &op,
             &format!("restore:{}", restore.id),
             RESTORE_TTL_SECS,
+        )
+        .await?;
+    }
+    Ok(())
+}
+
+/// Exports that were asked for get their operation.
+async fn send_exports(db: &PgPool) -> Result<(), TickError> {
+    for export in store::queued_exports(db, BATCH).await? {
+        let Some(tenant) = tenants::get(db, export.tenant_id).await? else {
+            continue;
+        };
+        let Some(destination_id) = store::destination_of(db, export.backup_id).await? else {
+            continue;
+        };
+        let Some(destination) = store::destination(db, destination_id).await? else {
+            continue;
+        };
+        let op = Operation::ExportBackup {
+            backup_id: export.backup_id,
+            export_id: export.id,
+            target: target(&destination),
+            credentials: None,
+            header: export.header.clone(),
+        };
+        queue(
+            db,
+            tenant.node_id,
+            Some(tenant.id),
+            &op,
+            &format!("export:{}", export.id),
+            DELETE_TTL_SECS,
+        )
+        .await?;
+    }
+    Ok(())
+}
+
+/// Backups that come from an export file get their operation.
+async fn send_imports(db: &PgPool) -> Result<(), TickError> {
+    for import in store::queued_imports(db, BATCH).await? {
+        let Some(tenant) = tenants::get(db, import.tenant_id).await? else {
+            continue;
+        };
+        let Some(destination) = store::destination(db, import.destination_id).await? else {
+            continue;
+        };
+        let op = Operation::ImportExport {
+            object: import.object.clone(),
+            backup_id: import.id,
+            target: target(&destination),
+            credentials: None,
+        };
+        queue(
+            db,
+            tenant.node_id,
+            Some(tenant.id),
+            &op,
+            &format!("import:{}", import.id),
+            DELETE_TTL_SECS,
         )
         .await?;
     }
@@ -389,6 +451,30 @@ pub async fn fill(db: &PgPool, master_key: &MasterKey, op: Operation) -> Result<
             databases,
             snapshot,
             verify_only,
+        }),
+        Operation::ExportBackup {
+            backup_id,
+            export_id,
+            target,
+            header,
+            ..
+        } => Ok(Operation::ExportBackup {
+            backup_id,
+            export_id,
+            target,
+            credentials: open_credentials(destination_of(backup_id).await?).await?,
+            header,
+        }),
+        Operation::ImportExport {
+            object,
+            backup_id,
+            target,
+            ..
+        } => Ok(Operation::ImportExport {
+            object,
+            backup_id,
+            target,
+            credentials: open_credentials(destination_of(backup_id).await?).await?,
         }),
         Operation::DeleteBackup {
             backup_id, target, ..

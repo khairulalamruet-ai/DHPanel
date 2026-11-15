@@ -696,3 +696,294 @@ async fn administrators_make_list_and_remove_system_backups_and_set_their_schedu
     let (status, _) = e.call(&root, "DELETE", sched, None).await;
     assert_eq!(status, StatusCode::NO_CONTENT);
 }
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn an_account_export_is_asked_for_and_turned_into_a_backup_of_the_same_account(pool: PgPool) {
+    use dhpanel_backup::export::Header;
+    let e = env(&pool).await;
+    let (alice_account, alice_tenant) = client(&pool, "alice", 10_000).await;
+    let (_, bob_tenant) = client(&pool, "bob", 10_001).await;
+    let alice = e.sign_in(alice_account).await;
+    let root = e
+        .sign_in(admin(&pool, "rootuser", &["super_admin"]).await)
+        .await;
+    let dir = std::env::temp_dir().join(format!("dh-export-api-{}", std::process::id()));
+    std::fs::create_dir_all(dir.join("exports")).unwrap();
+    let (_, dest) = e
+        .call(&root, "POST", "/api/v1/admin/backup-destinations", Some(json!({"name": "Disk", "kind": "local", "settings": {"path": dir.to_str().unwrap()}})))
+        .await;
+    let dest_id: Uuid = dest["id"].as_str().unwrap().parse().unwrap();
+    // A finished backup of alice, with its key sealed as the runner does.
+    let key = [4u8; 32];
+    let backup: Uuid = sqlx::query_scalar(
+        "INSERT INTO backups (tenant_id, account_name, kind, trigger, destination_id, status, size_bytes)
+         VALUES ($1, 'alice', 'tenant', 'manual', $2, 'ready', 10) RETURNING id",
+    )
+    .bind(alice_tenant)
+    .bind(dest_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let sealed = MasterKey::from_bytes(&KEY)
+        .seal(&dhpanel_database::backups::key_context(backup), &key)
+        .unwrap();
+    dhpanel_database::backups::keep_key(&pool, backup, &sealed)
+        .await
+        .unwrap();
+
+    let export = format!("/api/v1/client/backups/{backup}/export");
+    let (status, body) = e
+        .call(
+            &alice,
+            "POST",
+            &export,
+            Some(json!({"passphrase": "short"})),
+        )
+        .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "validation_failed"),
+        "{body}"
+    );
+    let (status, made) = e
+        .call(
+            &alice,
+            "POST",
+            &export,
+            Some(json!({"passphrase": "a long enough passphrase"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{made}");
+    assert_eq!(made["status"], "queued");
+    let (status, body) = e
+        .call(
+            &alice,
+            "POST",
+            &export,
+            Some(json!({"passphrase": "a long enough passphrase"})),
+        )
+        .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "export_active")
+    );
+    // The passphrase is nowhere, and the key is only in the wrapped header.
+    let header: String = sqlx::query_scalar("SELECT header FROM backup_exports")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!(!header.contains("a long enough"));
+    let read = Header::from_reader(header.as_bytes()).unwrap();
+    assert_eq!(read.unwrap_key("a long enough passphrase").unwrap(), key);
+    let (_, list) = e
+        .call(&alice, "GET", "/api/v1/client/backup-exports", None)
+        .await;
+    assert_eq!(list["items"].as_array().unwrap().len(), 1);
+    // The runner gives it to the node, without the credentials in the ledger.
+    let master = MasterKey::from_bytes(&KEY);
+    dhpanel_mod_backups::runner::tick(&pool, &master, 1_710_000_000)
+        .await
+        .unwrap();
+    let op: (String, String) =
+        sqlx::query_as("SELECT kind, idempotency_key FROM operations WHERE kind = 'export_backup'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(op.1.starts_with("export:"));
+    let id: Uuid = sqlx::query_scalar("SELECT id FROM operations WHERE kind = 'export_backup'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE operations SET status = 'dispatched', attempts = 1, dispatched_at = now() WHERE id = $1").bind(id).execute(&pool).await.unwrap();
+    sqlx::query("UPDATE operations SET status = 'succeeded', output = $2, finished_at = now() WHERE id = $1")
+        .bind(id)
+        .bind(json!({"type": "backup_exported", "object": "exports/abc.tar", "size_bytes": 77}))
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, object, size): (String, Option<String>, Option<i64>) =
+        sqlx::query_as("SELECT status, object, size_bytes FROM backup_exports")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        (status.as_str(), object.as_deref(), size),
+        ("ready", Some("exports/abc.tar"), Some(77))
+    );
+
+    // The other side: a file at the destination, made by another panel, imported.
+    let other_backup = Uuid::new_v4();
+    let h = Header::new(
+        &other_backup.simple().to_string(),
+        "alice",
+        1_700_000_000,
+        &[8u8; 32],
+        "another long passphrase",
+    )
+    .unwrap();
+    let mut tar = tar::Builder::new(Vec::new());
+    for (name, body) in [
+        ("export.json", h.to_json().unwrap()),
+        ("manifest.json.enc", b"sealed".to_vec()),
+    ] {
+        let mut header = tar::Header::new_gnu();
+        header.set_size(body.len() as u64);
+        header.set_mode(0o600);
+        tar.append_data(&mut header, name, &body[..]).unwrap();
+    }
+    std::fs::write(dir.join("exports/fromother.tar"), tar.into_inner().unwrap()).unwrap();
+    let imports = "/api/v1/admin/backup-imports";
+    let ok = |tenant: Uuid, object: &str, pass: &str| json!({"tenant_id": tenant, "destination_id": dest_id, "object": object, "passphrase": pass});
+    for (body, want) in [
+        (
+            ok(alice_tenant, "../etc/passwd", "another long passphrase"),
+            "invalid",
+        ),
+        (
+            ok(
+                alice_tenant,
+                "exports/fromother.tar",
+                "the wrong passphrase!",
+            ),
+            "wrong_passphrase",
+        ),
+        (
+            ok(
+                bob_tenant,
+                "exports/fromother.tar",
+                "another long passphrase",
+            ),
+            "account_mismatch",
+        ),
+    ] {
+        let (status, got) = e.call(&root, "POST", imports, Some(body.clone())).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}: {got}");
+        assert!(got.to_string().contains(want), "{body}: {got}");
+    }
+    let (status, _) = e
+        .call(
+            &root,
+            "POST",
+            imports,
+            Some(ok(alice_tenant, "exports/missing.tar", "x")),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    std::fs::write(dir.join("exports/notatar.tar"), b"plain text, not a tar").unwrap();
+    let (status, got) = e
+        .call(
+            &root,
+            "POST",
+            imports,
+            Some(ok(alice_tenant, "exports/notatar.tar", "x")),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{got}");
+    let (status, started) = e
+        .call(
+            &root,
+            "POST",
+            imports,
+            Some(ok(
+                alice_tenant,
+                "exports/fromother.tar",
+                "another long passphrase",
+            )),
+        )
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{started}");
+    assert_eq!(started["status"], "import_queued");
+    assert_eq!(started["id"].as_str().unwrap(), other_backup.to_string());
+    let (status, body) = e
+        .call(
+            &root,
+            "POST",
+            imports,
+            Some(ok(
+                alice_tenant,
+                "exports/fromother.tar",
+                "another long passphrase",
+            )),
+        )
+        .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "backup_exists")
+    );
+    // Its key is the other panel's, sealed with this one's master key.
+    let opened = dhpanel_mod_backups::runner::fill(
+        &pool,
+        &master,
+        dhpanel_node_protocol::Operation::ImportExport {
+            object: "exports/fromother.tar".into(),
+            backup_id: other_backup,
+            target: dhpanel_node_protocol::BackupTarget {
+                kind: "local".into(),
+                settings: json!({}),
+            },
+            credentials: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(matches!(
+        opened,
+        dhpanel_node_protocol::Operation::ImportExport { .. }
+    ));
+    let sealed: Vec<u8> = sqlx::query_scalar("SELECT sealed_key FROM backups WHERE id = $1")
+        .bind(other_backup)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        master
+            .open(
+                &dhpanel_database::backups::key_context(other_backup),
+                &sealed
+            )
+            .unwrap(),
+        [8u8; 32]
+    );
+    // The runner queues the unpacking; the answer makes the backup ready.
+    dhpanel_mod_backups::runner::tick(&pool, &master, 1_710_000_000)
+        .await
+        .unwrap();
+    let id: Uuid = sqlx::query_scalar("SELECT id FROM operations WHERE kind = 'import_export'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE operations SET status = 'dispatched', attempts = 1, dispatched_at = now() WHERE id = $1").bind(id).execute(&pool).await.unwrap();
+    let s: String = sqlx::query_scalar("SELECT status FROM backups WHERE id = $1")
+        .bind(other_backup)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(s, "importing");
+    sqlx::query("UPDATE operations SET status = 'succeeded', output = $2, finished_at = now() WHERE id = $1")
+        .bind(id)
+        .bind(json!({"type": "export_imported", "size_bytes": 55,
+                     "parts": [{"name": "files.tar.zst.enc", "kind": "files", "stored_bytes": 55, "sha256": "c".repeat(64), "database": null}]}))
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, parts): (String, Value) =
+        sqlx::query_as("SELECT status, parts FROM backups WHERE id = $1")
+            .bind(other_backup)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        (status.as_str(), parts.as_array().unwrap().len()),
+        ("ready", 1)
+    );
+    let (_, mine) = e.call(&alice, "GET", "/api/v1/client/backups", None).await;
+    assert!(
+        mine["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|b| b["id"] == other_backup.to_string() && b["status"] == "ready")
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

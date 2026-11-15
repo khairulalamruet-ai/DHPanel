@@ -721,6 +721,37 @@ pub enum Operation {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         credentials: Option<DbPassword>,
     },
+    /// Packs a backup into **one file** at the destination (`exports/<export_id>.tar`): the
+    /// `header` (made by the control plane: who, what, and the key wrapped with a passphrase),
+    /// the manifest and every part, as stored. The node never sees the key. Answered with
+    /// [`Output::BackupExported`].
+    ExportBackup {
+        /// The backup.
+        backup_id: Uuid,
+        /// This export's id (names the file).
+        export_id: Uuid,
+        /// Where the backup is, and where the file goes.
+        target: BackupTarget,
+        /// The destination's secret part, as JSON text; absent in the ledger.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        credentials: Option<DbPassword>,
+        /// The header text (`export.json`).
+        header: String,
+    },
+    /// Unpacks an export file into a backup folder (`<backup_id>/`) at a destination, so that
+    /// the backup can be restored as any other. Refuses to replace a backup that is there.
+    /// Answered with [`Output::ExportImported`].
+    ImportExport {
+        /// The export file's name at the destination (`exports/<id>.tar`).
+        object: String,
+        /// The backup id the export carries (the folder it is unpacked into).
+        backup_id: Uuid,
+        /// Where the file is and where the backup goes.
+        target: BackupTarget,
+        /// The destination's secret part, as JSON text; absent in the ledger.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        credentials: Option<DbPassword>,
+    },
     /// One file manager request on a tenant's files, done as the tenant's own user
     /// id. Answered with [`Output::File`].
     FileOp {
@@ -975,6 +1006,8 @@ impl Operation {
         "create_backup",
         "restore_backup",
         "delete_backup",
+        "export_backup",
+        "import_export",
         "upsert_ftp_account",
         "drop_ftp_account",
         "fetch_file",
@@ -1025,6 +1058,8 @@ impl Operation {
             Self::CreateBackup { .. } => "create_backup",
             Self::RestoreBackup { .. } => "restore_backup",
             Self::DeleteBackup { .. } => "delete_backup",
+            Self::ExportBackup { .. } => "export_backup",
+            Self::ImportExport { .. } => "import_export",
             Self::UpsertFtpAccount { .. } => "upsert_ftp_account",
             Self::DropFtpAccount { .. } => "drop_ftp_account",
             Self::FetchFile { .. } => "fetch_file",
@@ -1270,6 +1305,20 @@ pub enum Output {
         databases: Vec<String>,
         /// The parts of the snapshot taken before (its folder is `pre-<restore_id>`).
         snapshot: Vec<BackupPartInfo>,
+    },
+    /// Answer to [`Operation::ExportBackup`].
+    BackupExported {
+        /// The file's name at the destination.
+        object: String,
+        /// Its size in bytes.
+        size_bytes: u64,
+    },
+    /// Answer to [`Operation::ImportExport`].
+    ExportImported {
+        /// The parts that were put in place.
+        parts: Vec<BackupPartInfo>,
+        /// Everything put in place, in bytes.
+        size_bytes: u64,
     },
     /// Answer to [`Operation::DeleteBackup`].
     BackupDeleted {
@@ -2334,7 +2383,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            44,
+            46,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }

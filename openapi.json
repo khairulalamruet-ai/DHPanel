@@ -1106,6 +1106,83 @@
         ]
       }
     },
+    "/api/v1/admin/backup-imports": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Turn an export file into a backup of an account.",
+        "operationId": "adminStartBackupImport",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartImport"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Queued; the backup is `ready` when the node has unpacked it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such account, destination or file",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`backup_exists`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`not_an_export`, `wrong_passphrase` or `account_mismatch`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/bootstrap": {
       "get": {
         "tags": [
@@ -7981,6 +8058,32 @@
         ]
       }
     },
+    "/api/v1/client/backup-exports": {
+      "get": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "The exports of the account.",
+        "operationId": "clientListExports",
+        "responses": {
+          "200": {
+            "description": "The exports",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExportList"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/client/backup-restores": {
       "get": {
         "tags": [
@@ -8271,6 +8374,93 @@
           },
           "409": {
             "description": "`backup_busy`: it is not ready or failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/backups/{id}/export": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Packs a backup into one file (an account export) that another panel can import.",
+        "operationId": "clientStartExport",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Backup id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartExport"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Queued; follow the export until `ready`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExportView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such backup",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`backup_not_ready` or `export_active`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The passphrase is too short",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -19287,6 +19477,20 @@
             "type": "string",
             "description": "The file in the account's files.",
             "example": "www/backup.zip"
+          }
+        },
+        "additionalProperties": false
+      },
+      "StartExport": {
+        "type": "object",
+        "description": "How to wrap the key of an export.",
+        "required": [
+          "passphrase"
+        ],
+        "properties": {
+          "passphrase": {
+            "type": "string",
+            "description": "A passphrase of at least 12 characters. The file's key is wrapped with it; it is not\nstored, and without it the file cannot be opened."
           }
         },
         "additionalProperties": false

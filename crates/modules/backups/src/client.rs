@@ -684,3 +684,176 @@ pub async fn delete_schedule(
     .await?;
     Ok(StatusCode::NO_CONTENT)
 }
+
+/// How to wrap the key of an export.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct StartExport {
+    /// A passphrase of at least 12 characters. The file's key is wrapped with it; it is not
+    /// stored, and without it the file cannot be opened.
+    pub passphrase: String,
+}
+
+/// An export.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ExportView {
+    /// Id.
+    pub id: Uuid,
+    /// The backup it packs.
+    pub backup_id: Uuid,
+    /// `queued`, `running`, `ready` or `failed`.
+    pub status: String,
+    /// The file's name at the destination (once ready).
+    pub object: Option<String>,
+    /// Its size in bytes (once ready).
+    pub size_bytes: Option<i64>,
+    /// What went wrong.
+    pub error: Option<String>,
+    /// When it was asked for.
+    pub created_at: String,
+    /// When it ended.
+    pub finished_at: Option<String>,
+}
+
+fn export_view(e: store::Export) -> ExportView {
+    ExportView {
+        id: e.id,
+        backup_id: e.backup_id,
+        status: e.status,
+        object: e.object,
+        size_bytes: e.size_bytes,
+        error: e.error,
+        created_at: rfc3339(e.created_at),
+        finished_at: e.finished_at.map(rfc3339),
+    }
+}
+
+/// The exports.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ExportList {
+    /// Newest first.
+    pub items: Vec<ExportView>,
+}
+
+/// Packs a backup into one file (an account export) that another panel can import.
+#[utoipa::path(
+    post,
+    path = "/api/v1/client/backups/{id}/export",
+    tag = "backups",
+    operation_id = "clientStartExport",
+    security(("session" = [])),
+    params(
+        ("id" = Uuid, Path, description = "Backup id"),
+        ("X-CSRF-Token" = String, Header, description = "The session's csrf_token")
+    ),
+    request_body = StartExport,
+    responses(
+        (status = 202, description = "Queued; follow the export until `ready`", body = ExportView),
+        (status = 404, description = "No such backup", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "`backup_not_ready` or `export_active`", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 422, description = "The passphrase is too short", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+pub async fn start_export(
+    State(state): State<BackupsState>,
+    who: Principal,
+    Path(id): Path<Uuid>,
+    Json(req): Json<StartExport>,
+) -> Result<(StatusCode, Json<ExportView>), AppError> {
+    let h = hosting(&state, &who).await?;
+    running(&h)?;
+    if req.passphrase.chars().count() < dhpanel_backup::export::MIN_PASSPHRASE {
+        return Err(bad(
+            "passphrase",
+            "too_short",
+            "Use at least 12 characters.",
+        ));
+    }
+    let backup = store::backup_of(&state.db, h.tenant.id, id)
+        .await
+        .map_err(internal)?
+        .ok_or_else(|| AppError::not_found("backup"))?;
+    if backup.status != "ready" {
+        return Err(AppError::conflict(
+            "backup_not_ready",
+            "Only a finished backup can be exported.",
+        ));
+    }
+    let sealed = store::sealed_key_of(&state.db, id)
+        .await
+        .map_err(internal)?
+        .ok_or_else(|| internal(std::io::Error::other("a backup has no key")))?;
+    let key: [u8; dhpanel_backup::KEY_LEN] = state
+        .master_key
+        .open(&store::key_context(id), &sealed)
+        .map_err(internal)?
+        .try_into()
+        .map_err(|_| internal(std::io::Error::other("a backup key is not the right size")))?;
+    let (passphrase, account, created_at) = (
+        req.passphrase.clone(),
+        h.tenant.username.clone(),
+        backup.created_at,
+    );
+    let header = tokio::task::spawn_blocking(move || {
+        dhpanel_backup::export::Header::new(
+            &id.simple().to_string(),
+            &account,
+            created_at,
+            &key,
+            &passphrase,
+        )
+        .and_then(|h| h.to_json())
+    })
+    .await
+    .map_err(internal)?
+    .map_err(internal)?;
+    let header = String::from_utf8(header).map_err(internal)?;
+    let export = store::new_export(&state.db, id, h.tenant.id, &header, Some(who.account_id()))
+        .await
+        .map_err(|e| match e {
+            RestoreError::Active => AppError::conflict(
+                "export_active",
+                "Another export of this account is not finished.",
+            ),
+            RestoreError::Database(db) => internal(db),
+        })?;
+    audit(
+        &state,
+        "backup.export_started",
+        &who,
+        &h,
+        "backup_export",
+        export,
+    )
+    .await?;
+    let made = store::exports_of(&state.db, h.tenant.id)
+        .await
+        .map_err(internal)?
+        .into_iter()
+        .find(|e| e.id == export)
+        .ok_or_else(|| AppError::not_found("export"))?;
+    Ok((StatusCode::ACCEPTED, Json(export_view(made))))
+}
+
+/// The exports of the account.
+#[utoipa::path(
+    get,
+    path = "/api/v1/client/backup-exports",
+    tag = "backups",
+    operation_id = "clientListExports",
+    security(("session" = [])),
+    responses((status = 200, description = "The exports", body = ExportList))
+)]
+pub async fn list_exports(
+    State(state): State<BackupsState>,
+    who: Principal,
+) -> Result<Json<ExportList>, AppError> {
+    let h = hosting(&state, &who).await?;
+    let items = store::exports_of(&state.db, h.tenant.id)
+        .await
+        .map_err(internal)?
+        .into_iter()
+        .map(export_view)
+        .collect();
+    Ok(Json(ExportList { items }))
+}

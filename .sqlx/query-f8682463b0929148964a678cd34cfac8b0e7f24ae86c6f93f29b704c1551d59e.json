@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO backups\n             (id, tenant_id, account_name, kind, trigger, destination_id, status, sealed_key,\n              import_object, created_by)\n         VALUES ($1, $2, $3, 'tenant', 'import', $4, 'import_queued', $5, $6, $7)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Uuid",
+        "Bytea",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f8682463b0929148964a678cd34cfac8b0e7f24ae86c6f93f29b704c1551d59e"
+}

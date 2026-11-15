@@ -1238,3 +1238,218 @@ pub async fn drop_system_schedule(pool: &PgPool) -> Result<bool, sqlx::Error> {
             == 1,
     )
 }
+
+// ------------------------------------------------------------ exports and imports (T09.11)
+
+/// An account export: a backup packed into one file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Export {
+    /// Id.
+    pub id: Uuid,
+    /// The backup it packs.
+    pub backup_id: Uuid,
+    /// Its account.
+    pub tenant_id: Uuid,
+    /// The file's header text (kept for the node operation).
+    pub header: String,
+    /// `queued`, `running`, `ready` or `failed`.
+    pub status: String,
+    /// The file at the destination.
+    pub object: Option<String>,
+    /// Its size.
+    pub size_bytes: Option<i64>,
+    /// What went wrong.
+    pub error: Option<String>,
+    /// When it was asked for (Unix seconds).
+    pub created_at: i64,
+    /// When it ended (Unix seconds).
+    pub finished_at: Option<i64>,
+}
+
+struct ExportRow {
+    id: Uuid,
+    backup_id: Uuid,
+    tenant_id: Uuid,
+    header: String,
+    status: String,
+    object: Option<String>,
+    size_bytes: Option<i64>,
+    error: Option<String>,
+    created_at: i64,
+    finished_at: Option<i64>,
+}
+
+fn export_of(r: ExportRow) -> Export {
+    Export {
+        id: r.id,
+        backup_id: r.backup_id,
+        tenant_id: r.tenant_id,
+        header: r.header,
+        status: r.status,
+        object: r.object,
+        size_bytes: r.size_bytes,
+        error: r.error,
+        created_at: r.created_at,
+        finished_at: r.finished_at,
+    }
+}
+
+/// Asks for an export of a ready backup; one unfinished export per account.
+///
+/// # Errors
+/// [`RestoreError::Active`] when another export of the account is not finished.
+pub async fn new_export(
+    pool: &PgPool,
+    backup_id: Uuid,
+    tenant_id: Uuid,
+    header: &str,
+    created_by: Option<Uuid>,
+) -> Result<Uuid, RestoreError> {
+    let mut tx = pool.begin().await?;
+    sqlx::query!("SELECT id FROM tenants WHERE id = $1 FOR UPDATE", tenant_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+    let open = sqlx::query_scalar!(
+        r#"SELECT EXISTS (SELECT 1 FROM backup_exports WHERE tenant_id = $1
+                          AND status IN ('queued', 'running')) AS "x!""#,
+        tenant_id
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+    if open {
+        return Err(RestoreError::Active);
+    }
+    let id = sqlx::query_scalar!(
+        "INSERT INTO backup_exports (backup_id, tenant_id, header, created_by)
+         VALUES ($1, $2, $3, $4) RETURNING id",
+        backup_id,
+        tenant_id,
+        header,
+        created_by,
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(id)
+}
+
+/// The exports of an account, newest first.
+///
+/// # Errors
+/// Database errors.
+pub async fn exports_of(pool: &PgPool, tenant_id: Uuid) -> Result<Vec<Export>, sqlx::Error> {
+    let rows = sqlx::query_as!(
+        ExportRow,
+        r#"SELECT id, backup_id, tenant_id, header, status, object, size_bytes, error,
+                  extract(epoch FROM created_at)::bigint AS "created_at!",
+                  extract(epoch FROM finished_at)::bigint AS finished_at
+           FROM backup_exports WHERE tenant_id = $1 ORDER BY created_at DESC LIMIT 100"#,
+        tenant_id
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.into_iter().map(export_of).collect())
+}
+
+/// Exports that wait for their operation.
+///
+/// # Errors
+/// Database errors.
+pub async fn queued_exports(pool: &PgPool, limit: i64) -> Result<Vec<Export>, sqlx::Error> {
+    let rows = sqlx::query_as!(
+        ExportRow,
+        r#"SELECT id, backup_id, tenant_id, header, status, object, size_bytes, error,
+                  extract(epoch FROM created_at)::bigint AS "created_at!",
+                  extract(epoch FROM finished_at)::bigint AS finished_at
+           FROM backup_exports WHERE status = 'queued' ORDER BY created_at LIMIT $1"#,
+        limit
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.into_iter().map(export_of).collect())
+}
+
+/// A backup that is to be made from an export file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Import {
+    /// The backup's id (the one in the export).
+    pub id: Uuid,
+    /// The account it is for.
+    pub tenant_id: Uuid,
+    /// Where the file is and the backup goes.
+    pub destination_id: Uuid,
+    /// The file's name at the destination.
+    pub object: String,
+}
+
+/// Why an import could not be asked for.
+#[derive(Debug, thiserror::Error)]
+pub enum ImportError {
+    /// A backup with this id is there already.
+    #[error("a backup with this id exists")]
+    Exists,
+    /// Any other database error.
+    #[error(transparent)]
+    Database(#[from] sqlx::Error),
+}
+
+/// Makes the backup row of an import (its id is the export's) with its sealed key.
+///
+/// # Errors
+/// [`ImportError::Exists`].
+pub async fn new_import(
+    pool: &PgPool,
+    import: &Import,
+    account_name: &str,
+    sealed_key: &[u8],
+    created_by: Option<Uuid>,
+) -> Result<(), ImportError> {
+    sqlx::query!(
+        "INSERT INTO backups
+             (id, tenant_id, account_name, kind, trigger, destination_id, status, sealed_key,
+              import_object, created_by)
+         VALUES ($1, $2, $3, 'tenant', 'import', $4, 'import_queued', $5, $6, $7)",
+        import.id,
+        import.tenant_id,
+        account_name,
+        import.destination_id,
+        sealed_key,
+        import.object,
+        created_by,
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| {
+        if e.as_database_error().and_then(|d| d.constraint()) == Some("backups_pkey") {
+            ImportError::Exists
+        } else {
+            ImportError::Database(e)
+        }
+    })?;
+    Ok(())
+}
+
+/// Imports that wait for their operation.
+///
+/// # Errors
+/// Database errors.
+pub async fn queued_imports(pool: &PgPool, limit: i64) -> Result<Vec<Import>, sqlx::Error> {
+    let rows = sqlx::query!(
+        r#"SELECT id, tenant_id AS "tenant_id!", destination_id, import_object AS "object!"
+           FROM backups
+           WHERE status = 'import_queued' AND tenant_id IS NOT NULL AND import_object IS NOT NULL
+           ORDER BY created_at LIMIT $1"#,
+        limit
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| Import {
+            id: r.id,
+            tenant_id: r.tenant_id,
+            destination_id: r.destination_id,
+            object: r.object,
+        })
+        .collect())
+}

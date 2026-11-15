@@ -945,6 +945,7 @@ version = "0.1.0"
 dependencies = [
  "chacha20poly1305",
  "getrandom 0.4.3",
+ "hmac",
  "serde",
  "serde_json",
  "sha2 0.11.1",
@@ -1277,6 +1278,7 @@ dependencies = [
  "dhpanel-audit",
  "dhpanel-auth-core",
  "dhpanel-backup",
+ "dhpanel-backup-dest",
  "dhpanel-cache",
  "dhpanel-database",
  "dhpanel-domain",
@@ -1291,6 +1293,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sqlx",
+ "tar",
  "thiserror",
  "tokio",
  "tower",

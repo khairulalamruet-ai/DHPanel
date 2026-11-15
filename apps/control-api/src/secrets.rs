@@ -210,7 +210,9 @@ pub fn operation_secrets(
                 // The key and the destination's credentials of a backup.
                 op @ (Operation::CreateBackup { .. }
                 | Operation::DeleteBackup { .. }
-                | Operation::RestoreBackup { .. }) => {
+                | Operation::RestoreBackup { .. }
+                | Operation::ExportBackup { .. }
+                | Operation::ImportExport { .. }) => {
                     return dhpanel_mod_backups::runner::fill(&db, &master_key, op).await;
                 }
                 other => return Ok(other),

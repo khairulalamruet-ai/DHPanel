@@ -845,3 +845,209 @@ pub async fn delete_backup(op: Operation) -> Result<Output, AgentError> {
     .await
     .map_err(|_| failed("the removal was cancelled"))?
 }
+
+/// `export_backup`: the backup's objects in one tar file at the destination.
+///
+/// # Errors
+/// [`AgentError`]: bad arguments or a backup that is not whole (not retryable); the
+/// destination or the disk failing (retryable). The staged file is removed either way, and a
+/// half-written export is removed from the destination.
+pub async fn export_backup(
+    context: Arc<TenantContext>,
+    op: Operation,
+) -> Result<Output, AgentError> {
+    let Operation::ExportBackup {
+        backup_id,
+        export_id,
+        target,
+        credentials,
+        header,
+    } = op
+    else {
+        return Err(super::wrong_operation());
+    };
+    if header.len() > 16 * 1024
+        || dhpanel_backup::export::Header::from_reader(header.as_bytes()).is_err()
+    {
+        return Err(invalid("the export header is not usable"));
+    }
+    let dir = transfers_dir(&context);
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| failed(&format!("cannot make the folder: {}", e.kind())).retryable())?;
+    let id = backup_id.simple().to_string();
+    let object = format!("exports/{}.tar", export_id.simple());
+    let staged = dir.join(format!("{}.ex", export_id.simple()));
+    let (staged2, object2) = (staged.clone(), object.clone());
+    let result = tokio::task::spawn_blocking(move || -> Result<u64, AgentError> {
+        let dest = open_destination(&target, credentials.as_ref())?;
+        let dest_error = |e: dhpanel_backup_dest::DestError| failed(&e.to_string()).retryable();
+        let names = dest.list(&format!("{id}/")).map_err(dest_error)?;
+        let mut parts: Vec<String> = Vec::new();
+        for name in names {
+            let Some(plain) = name.strip_prefix(&format!("{id}/")) else {
+                continue;
+            };
+            if plain == "manifest.json.enc" || dhpanel_backup::manifest::valid_part_name(plain) {
+                parts.push(plain.to_owned());
+            }
+        }
+        if !parts.iter().any(|p| p == "manifest.json.enc") {
+            return Err(invalid("the backup has no manifest"));
+        }
+        parts.sort();
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&staged2)
+            .map_err(|e| failed(&format!("cannot stage the export: {}", e.kind())).retryable())?;
+        let io = |e: std::io::Error| {
+            failed(&format!("cannot pack the export: {}", e.kind())).retryable()
+        };
+        let mut tar = tar::Builder::new(file);
+        let add = |tar: &mut tar::Builder<std::fs::File>,
+                   name: &str,
+                   size: u64,
+                   data: &mut dyn Read|
+         -> Result<(), AgentError> {
+            let mut h = tar::Header::new_gnu();
+            h.set_size(size);
+            h.set_mode(0o600);
+            h.set_mtime(0);
+            h.set_entry_type(tar::EntryType::Regular);
+            tar.append_data(&mut h, name, data.take(size)).map_err(io)
+        };
+        add(
+            &mut tar,
+            dhpanel_backup::export::HEADER,
+            header.len() as u64,
+            &mut header.as_bytes(),
+        )?;
+        for plain in &parts {
+            let object_name = format!("{id}/{plain}");
+            // The size first (the tar header needs it), then the bytes.
+            let (size, _) =
+                dhpanel_backup::manifest::hash_of(dest.get(&object_name).map_err(dest_error)?)
+                    .map_err(io)?;
+            let mut data = dest.get(&object_name).map_err(dest_error)?;
+            add(&mut tar, plain, size, &mut data)?;
+        }
+        let file = tar.into_inner().map_err(io)?;
+        let size = file.metadata().map_err(io)?.len();
+        drop(file);
+        let mut reader = std::fs::File::open(&staged2).map_err(io)?;
+        dest.put(&object2, &mut reader).map_err(dest_error)?;
+        Ok(size)
+    })
+    .await
+    .map_err(|_| failed("the export was cancelled"))?;
+    let _ = std::fs::remove_file(&staged);
+    result.map(|size_bytes| Output::BackupExported { object, size_bytes })
+}
+
+/// `import_export`: an export file unpacked into a backup folder at the destination.
+///
+/// # Errors
+/// [`AgentError`]: bad arguments, a file that is not an export, or a backup that is there
+/// already (not retryable); the destination failing (retryable). What was put in place is
+/// removed again on a failure.
+pub async fn import_export(op: Operation) -> Result<Output, AgentError> {
+    let Operation::ImportExport {
+        object,
+        backup_id,
+        target,
+        credentials,
+    } = op
+    else {
+        return Err(super::wrong_operation());
+    };
+    let plain_object = object
+        .strip_prefix("exports/")
+        .and_then(|n| n.strip_suffix(".tar"))
+        .is_some_and(|n| {
+            !n.is_empty() && n.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        });
+    if !plain_object {
+        return Err(invalid("the export's name is not usable"));
+    }
+    let id = backup_id.simple().to_string();
+    tokio::task::spawn_blocking(move || -> Result<Output, AgentError> {
+        let dest = open_destination(&target, credentials.as_ref())?;
+        let dest_error = |e: dhpanel_backup_dest::DestError| failed(&e.to_string()).retryable();
+        if !dest.list(&format!("{id}/")).map_err(dest_error)?.is_empty() {
+            return Err(invalid("a backup with this id is there already"));
+        }
+        let input = dest.get(&object).map_err(dest_error)?;
+        let mut archive = tar::Archive::new(input);
+        let mut parts: Vec<BackupPartInfo> = Vec::new();
+        let mut total = 0u64;
+        let mut put_all = || -> Result<(), AgentError> {
+            let mut seen_header = false;
+            for entry in archive
+                .entries()
+                .map_err(|_| invalid("this is not an export file"))?
+            {
+                let mut entry = entry.map_err(|_| invalid("this is not an export file"))?;
+                let name = entry
+                    .path()
+                    .map_err(|_| invalid("this is not an export file"))?
+                    .to_string_lossy()
+                    .into_owned();
+                if name == dhpanel_backup::export::HEADER {
+                    seen_header = true;
+                    continue;
+                }
+                if !seen_header
+                    || !(name == "manifest.json.enc"
+                        || dhpanel_backup::manifest::valid_part_name(&name))
+                {
+                    return Err(invalid("this is not an export file"));
+                }
+                let mut counted = HashRead {
+                    inner: &mut entry,
+                    hasher: Sha256::new(),
+                    size: 0,
+                };
+                dest.put(&format!("{id}/{name}"), &mut counted)
+                    .map_err(dest_error)?;
+                let (size, sha) = (counted.size, hex(&counted.hasher.finalize()));
+                total += size;
+                let kind = match name.as_str() {
+                    "files.tar.zst.enc" => "files",
+                    "dns.json.enc" => "dns",
+                    "meta.json.enc" => "meta",
+                    "manifest.json.enc" => continue,
+                    _ => "database",
+                };
+                parts.push(BackupPartInfo {
+                    database: name
+                        .strip_prefix("db-")
+                        .and_then(|r| r.strip_suffix(".sql.zst.enc"))
+                        .map(str::to_owned),
+                    name,
+                    kind: kind.to_owned(),
+                    stored_bytes: size,
+                    sha256: sha,
+                });
+            }
+            if !seen_header || parts.is_empty() {
+                return Err(invalid("this is not an export file"));
+            }
+            Ok(())
+        };
+        match put_all() {
+            Ok(()) => Ok(Output::ExportImported {
+                parts,
+                size_bytes: total,
+            }),
+            Err(e) => {
+                for n in dest.list(&format!("{id}/")).unwrap_or_default() {
+                    let _ = dest.delete(&n);
+                }
+                Err(e)
+            }
+        }
+    })
+    .await
+    .map_err(|_| failed("the import was cancelled"))?
+}

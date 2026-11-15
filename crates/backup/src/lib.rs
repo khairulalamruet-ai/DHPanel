@@ -38,6 +38,7 @@
 //! comes as a new format version, not as an addition to this one.
 
 pub mod crypto;
+pub mod export;
 pub mod manifest;
 pub mod schedule;
 

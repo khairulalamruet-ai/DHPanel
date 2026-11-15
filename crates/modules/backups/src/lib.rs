@@ -36,6 +36,7 @@ use utoipa::{OpenApi, ToSchema};
 use uuid::Uuid;
 
 pub mod client;
+pub mod import;
 pub mod runner;
 pub mod system;
 
@@ -82,6 +83,7 @@ pub fn admin_router() -> Router<BackupsState> {
             "/api/v1/admin/backup-destinations/{id}/default",
             post(make_default),
         )
+        .route("/api/v1/admin/backup-imports", post(import::start_import))
         .route(
             "/api/v1/admin/system-backups",
             get(system::list_system_backups).post(system::start_system_backup),
@@ -114,6 +116,11 @@ pub fn client_router() -> Router<BackupsState> {
             post(client::start_restore),
         )
         .route("/api/v1/client/backup-restores", get(client::list_restores))
+        .route(
+            "/api/v1/client/backups/{id}/export",
+            post(client::start_export),
+        )
+        .route("/api/v1/client/backup-exports", get(client::list_exports))
         .route(
             "/api/v1/client/backup-schedule",
             get(client::get_schedule)
@@ -672,14 +679,15 @@ pub async fn remove_destination(
     paths(
         list_destinations, add_destination, change_destination, make_default, remove_destination,
         client::list_backups, client::start_backup, client::delete_backup, client::start_restore,
-        client::list_restores, client::get_schedule, client::put_schedule, client::delete_schedule,
+        client::list_restores, client::start_export, client::list_exports, import::start_import, client::get_schedule, client::put_schedule, client::delete_schedule,
         system::list_system_backups, system::start_system_backup, system::delete_system_backup,
         system::get_system_schedule, system::put_system_schedule, system::delete_system_schedule
     ),
     components(schemas(
         DestinationView, DestinationList, AddDestination, ChangeDestination,
         client::BackupView, client::BackupList, client::PartView, client::StartRestore,
-        client::RestoreView, client::RestoreList, client::ScheduleView
+        client::RestoreView, client::RestoreList, client::ScheduleView, client::StartExport,
+        client::ExportView, client::ExportList, import::StartImport
     )),
     tags((name = "backups", description = "Backups"))
 )]
