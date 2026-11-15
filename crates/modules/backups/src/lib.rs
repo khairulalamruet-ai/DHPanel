@@ -35,6 +35,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::{OpenApi, ToSchema};
 use uuid::Uuid;
 
+pub mod client;
 pub mod runner;
 
 /// The module's manifest.
@@ -85,6 +86,25 @@ pub fn admin_router() -> Router<BackupsState> {
 /// Routes for clients (none yet).
 pub fn client_router() -> Router<BackupsState> {
     Router::new()
+        .route(
+            "/api/v1/client/backups",
+            get(client::list_backups).post(client::start_backup),
+        )
+        .route(
+            "/api/v1/client/backups/{id}",
+            axum::routing::delete(client::delete_backup),
+        )
+        .route(
+            "/api/v1/client/backups/{id}/restore",
+            post(client::start_restore),
+        )
+        .route("/api/v1/client/backup-restores", get(client::list_restores))
+        .route(
+            "/api/v1/client/backup-schedule",
+            get(client::get_schedule)
+                .put(client::put_schedule)
+                .delete(client::delete_schedule),
+        )
 }
 
 fn internal(err: impl Into<Box<dyn std::error::Error + Send + Sync + 'static>>) -> AppError {
@@ -634,8 +654,16 @@ pub async fn remove_destination(
 /// The module's OpenAPI document.
 #[derive(OpenApi)]
 #[openapi(
-    paths(list_destinations, add_destination, change_destination, make_default, remove_destination),
-    components(schemas(DestinationView, DestinationList, AddDestination, ChangeDestination)),
+    paths(
+        list_destinations, add_destination, change_destination, make_default, remove_destination,
+        client::list_backups, client::start_backup, client::delete_backup, client::start_restore,
+        client::list_restores, client::get_schedule, client::put_schedule, client::delete_schedule
+    ),
+    components(schemas(
+        DestinationView, DestinationList, AddDestination, ChangeDestination,
+        client::BackupView, client::BackupList, client::PartView, client::StartRestore,
+        client::RestoreView, client::RestoreList, client::ScheduleView
+    )),
     tags((name = "backups", description = "Backups"))
 )]
 pub struct BackupsApi;

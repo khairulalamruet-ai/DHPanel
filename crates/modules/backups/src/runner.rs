@@ -26,6 +26,7 @@ pub const PER_NODE: i64 = 2;
 /// How long a queued backup waits for its node before it is given up on (seconds).
 const BACKUP_TTL_SECS: i32 = 24 * 3600;
 const DELETE_TTL_SECS: i32 = 6 * 3600;
+const RESTORE_TTL_SECS: i32 = 12 * 3600;
 /// Most things done for one kind of work in one tick.
 const BATCH: i64 = 50;
 
@@ -84,6 +85,7 @@ async fn queue(
 pub async fn tick(db: &PgPool, master_key: &MasterKey, now: i64) -> Result<(), TickError> {
     start_due(db, master_key, now).await?;
     send_queued(db).await?;
+    send_restores(db).await?;
     apply_retention(db).await?;
     send_removals(db).await?;
     Ok(())
@@ -178,6 +180,46 @@ async fn send_queued(db: &PgPool) -> Result<(), TickError> {
             &op,
             &format!("backup:{}", backup.id),
             BACKUP_TTL_SECS,
+        )
+        .await?;
+    }
+    Ok(())
+}
+
+/// Restores that were asked for get their operation.
+async fn send_restores(db: &PgPool) -> Result<(), TickError> {
+    for restore in store::queued_restores(db, BATCH).await? {
+        let Some(tenant) = tenants::get(db, restore.tenant_id).await? else {
+            continue;
+        };
+        let Some(destination_id) = store::destination_of(db, restore.backup_id).await? else {
+            continue;
+        };
+        let Some(destination) = store::destination(db, destination_id).await? else {
+            continue;
+        };
+        let op = Operation::RestoreBackup {
+            tenant_id: tenant.id,
+            uid: u32::try_from(tenant.uid).unwrap_or(0),
+            backup_id: restore.backup_id,
+            restore_id: restore.id,
+            account: tenant.username.clone(),
+            target: target(&destination),
+            credentials: None,
+            key: None,
+            files: restore.files,
+            folder: restore.folder.clone(),
+            databases: restore.databases.clone(),
+            snapshot: restore.snapshot,
+            verify_only: restore.verify_only,
+        };
+        queue(
+            db,
+            tenant.node_id,
+            Some(tenant.id),
+            &op,
+            &format!("restore:{}", restore.id),
+            RESTORE_TTL_SECS,
         )
         .await?;
     }
@@ -299,6 +341,35 @@ pub async fn fill(db: &PgPool, master_key: &MasterKey, op: Operation) -> Result<
             dns,
             meta,
             created_at,
+        }),
+        Operation::RestoreBackup {
+            tenant_id,
+            uid,
+            backup_id,
+            restore_id,
+            account,
+            target,
+            key: None,
+            files,
+            folder,
+            databases,
+            snapshot,
+            verify_only,
+            ..
+        } => Ok(Operation::RestoreBackup {
+            tenant_id,
+            uid,
+            backup_id,
+            restore_id,
+            account,
+            target,
+            credentials: open_credentials(destination_of(backup_id).await?).await?,
+            key: Some(open_key(backup_id).await?),
+            files,
+            folder,
+            databases,
+            snapshot,
+            verify_only,
         }),
         Operation::DeleteBackup {
             backup_id, target, ..

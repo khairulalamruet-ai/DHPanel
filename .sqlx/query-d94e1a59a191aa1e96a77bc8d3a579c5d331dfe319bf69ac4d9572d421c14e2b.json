@@ -1,0 +1,78 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT cron, keep_daily, keep_weekly, enabled,\n                  extract(epoch FROM next_run_at)::bigint AS next_run_at,\n                  extract(epoch FROM last_run_at)::bigint AS last_run_at\n           FROM backup_schedules WHERE tenant_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "cron",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "backup_schedules",
+            "name": "cron"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "keep_daily",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "backup_schedules",
+            "name": "keep_daily"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "keep_weekly",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "backup_schedules",
+            "name": "keep_weekly"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "enabled",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "backup_schedules",
+            "name": "enabled"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "next_run_at",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "last_run_at",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "d94e1a59a191aa1e96a77bc8d3a579c5d331dfe319bf69ac4d9572d421c14e2b"
+}

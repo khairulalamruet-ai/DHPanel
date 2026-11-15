@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS (SELECT 1 FROM backups WHERE tenant_id = $1\n                          AND status IN ('queued', 'running')) AS \"x!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "x!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "7415a4345a5a618fa9696fab63c41c46487cc39612930de421eaba2d73f3e9ca"
+}

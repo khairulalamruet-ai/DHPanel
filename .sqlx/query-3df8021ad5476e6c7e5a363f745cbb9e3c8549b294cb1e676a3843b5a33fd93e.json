@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO backup_restores\n             (backup_id, tenant_id, files, folder, databases, snapshot, verify_only, created_by)\n         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "backup_restores",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Bool",
+        "Text",
+        "TextArray",
+        "Bool",
+        "Bool",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "3df8021ad5476e6c7e5a363f745cbb9e3c8549b294cb1e676a3843b5a33fd93e"
+}

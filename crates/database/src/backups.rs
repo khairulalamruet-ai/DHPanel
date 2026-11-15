@@ -491,13 +491,13 @@ pub async fn default_destination(pool: &PgPool) -> Result<Option<Uuid>, sqlx::Er
 /// # Errors
 /// Database errors.
 pub async fn active_on_node(pool: &PgPool, node_id: Uuid) -> Result<i64, sqlx::Error> {
-    Ok(sqlx::query_scalar!(
+    sqlx::query_scalar!(
         r#"SELECT count(*) AS "n!" FROM backups b JOIN tenants t ON t.id = b.tenant_id
            WHERE t.node_id = $1 AND b.status IN ('queued', 'running')"#,
         node_id
     )
     .fetch_one(pool)
-    .await?)
+    .await
 }
 
 /// Scheduled backups of an account that are ready: `(id, created_at)` in Unix seconds.
@@ -600,4 +600,345 @@ pub async fn queued(pool: &PgPool, limit: i64) -> Result<Vec<Stored>, sqlx::Erro
             stamp: r.stamp,
         })
         .collect())
+}
+
+// ------------------------------------------------------------ what clients see (T09.09)
+
+/// A backup, as listed.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Backup {
+    /// Id.
+    pub id: Uuid,
+    /// Its account.
+    pub tenant_id: Option<Uuid>,
+    /// `manual`, `schedule` or `before_restore`.
+    pub trigger: String,
+    /// `queued`, `running`, `ready`, `failed`, `deleting` or `deleted`.
+    pub status: String,
+    /// What it holds, as stored.
+    pub size_bytes: Option<i64>,
+    /// `[{"name", "kind", "stored_bytes", "sha256", "database"}]`.
+    pub parts: serde_json::Value,
+    /// What went wrong.
+    pub error: Option<String>,
+    /// Where it is stored.
+    pub destination_id: Uuid,
+    /// When it was asked for (Unix seconds).
+    pub created_at: i64,
+    /// When it ended (Unix seconds).
+    pub finished_at: Option<i64>,
+}
+
+/// The backups of an account that still exist, newest first.
+///
+/// # Errors
+/// Database errors.
+pub async fn backups_of(pool: &PgPool, tenant_id: Uuid) -> Result<Vec<Backup>, sqlx::Error> {
+    let rows = sqlx::query!(
+        r#"SELECT id, tenant_id, trigger, status, size_bytes, parts, error, destination_id,
+                  extract(epoch FROM created_at)::bigint AS "created_at!",
+                  extract(epoch FROM finished_at)::bigint AS finished_at
+           FROM backups WHERE tenant_id = $1 AND status <> 'deleted'
+           ORDER BY created_at DESC LIMIT 500"#,
+        tenant_id
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| Backup {
+            id: r.id,
+            tenant_id: r.tenant_id,
+            trigger: r.trigger,
+            status: r.status,
+            size_bytes: r.size_bytes,
+            parts: r.parts,
+            error: r.error,
+            destination_id: r.destination_id,
+            created_at: r.created_at,
+            finished_at: r.finished_at,
+        })
+        .collect())
+}
+
+/// One backup of an account.
+///
+/// # Errors
+/// Database errors.
+pub async fn backup_of(
+    pool: &PgPool,
+    tenant_id: Uuid,
+    id: Uuid,
+) -> Result<Option<Backup>, sqlx::Error> {
+    Ok(backups_of(pool, tenant_id)
+        .await?
+        .into_iter()
+        .find(|b| b.id == id))
+}
+
+/// Whether an account has a backup that is queued or running.
+///
+/// # Errors
+/// Database errors.
+pub async fn has_active_backup(pool: &PgPool, tenant_id: Uuid) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar!(
+        r#"SELECT EXISTS (SELECT 1 FROM backups WHERE tenant_id = $1
+                          AND status IN ('queued', 'running')) AS "x!""#,
+        tenant_id
+    )
+    .fetch_one(pool)
+    .await
+}
+
+/// Starts removing a backup that is ready; a failed one has nothing stored (the node
+/// cleans up) and is just marked gone. `false` when it is neither.
+///
+/// # Errors
+/// Database errors.
+pub async fn discard(pool: &PgPool, tenant_id: Uuid, id: Uuid) -> Result<bool, sqlx::Error> {
+    Ok(sqlx::query!(
+        "UPDATE backups
+         SET status = CASE WHEN status = 'ready' THEN 'deleting' ELSE 'deleted' END,
+             updated_at = now()
+         WHERE id = $1 AND tenant_id = $2 AND status IN ('ready', 'failed')",
+        id,
+        tenant_id
+    )
+    .execute(pool)
+    .await?
+    .rows_affected()
+        == 1)
+}
+
+/// A restore.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Restore {
+    /// Id.
+    pub id: Uuid,
+    /// The backup it reads.
+    pub backup_id: Uuid,
+    /// The account it is for.
+    pub tenant_id: Uuid,
+    /// Put the files back.
+    pub files: bool,
+    /// Only this folder.
+    pub folder: Option<String>,
+    /// The databases to put back.
+    pub databases: Vec<String>,
+    /// Keep the present state first.
+    pub snapshot: bool,
+    /// Only check.
+    pub verify_only: bool,
+    /// `queued`, `running`, `done` or `failed`.
+    pub status: String,
+    /// The node's answer.
+    pub result: Option<serde_json::Value>,
+    /// What went wrong.
+    pub error: Option<String>,
+    /// When it was asked for (Unix seconds).
+    pub created_at: i64,
+    /// When it ended (Unix seconds).
+    pub finished_at: Option<i64>,
+}
+
+/// What a restore asks for.
+#[derive(Debug, Clone)]
+pub struct NewRestore<'a> {
+    /// The backup.
+    pub backup_id: Uuid,
+    /// The account.
+    pub tenant_id: Uuid,
+    /// Put the files back.
+    pub files: bool,
+    /// Only this folder.
+    pub folder: Option<&'a str>,
+    /// The databases.
+    pub databases: &'a [String],
+    /// Keep the present state first.
+    pub snapshot: bool,
+    /// Only check.
+    pub verify_only: bool,
+    /// Who asked.
+    pub created_by: Option<Uuid>,
+}
+
+/// Why a restore could not be asked for.
+#[derive(Debug, thiserror::Error)]
+pub enum RestoreError {
+    /// The account has one that is not finished.
+    #[error("another restore is not finished")]
+    Active,
+    /// Any other database error.
+    #[error(transparent)]
+    Database(#[from] sqlx::Error),
+}
+
+/// Asks for a restore; one unfinished restore per account at a time.
+///
+/// # Errors
+/// [`RestoreError::Active`].
+pub async fn new_restore(pool: &PgPool, new: &NewRestore<'_>) -> Result<Uuid, RestoreError> {
+    let mut tx = pool.begin().await?;
+    // Serialises the check per account.
+    sqlx::query!(
+        "SELECT id FROM tenants WHERE id = $1 FOR UPDATE",
+        new.tenant_id
+    )
+    .fetch_optional(&mut *tx)
+    .await?;
+    let open = sqlx::query_scalar!(
+        r#"SELECT EXISTS (SELECT 1 FROM backup_restores WHERE tenant_id = $1
+                          AND status IN ('queued', 'running')) AS "x!""#,
+        new.tenant_id
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+    if open {
+        return Err(RestoreError::Active);
+    }
+    let id = sqlx::query_scalar!(
+        "INSERT INTO backup_restores
+             (backup_id, tenant_id, files, folder, databases, snapshot, verify_only, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id",
+        new.backup_id,
+        new.tenant_id,
+        new.files,
+        new.folder,
+        new.databases,
+        new.snapshot,
+        new.verify_only,
+        new.created_by,
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(id)
+}
+
+fn restore_of(r: RestoreRow) -> Restore {
+    Restore {
+        id: r.id,
+        backup_id: r.backup_id,
+        tenant_id: r.tenant_id,
+        files: r.files,
+        folder: r.folder,
+        databases: r.databases,
+        snapshot: r.snapshot,
+        verify_only: r.verify_only,
+        status: r.status,
+        result: r.result,
+        error: r.error,
+        created_at: r.created_at,
+        finished_at: r.finished_at,
+    }
+}
+
+struct RestoreRow {
+    id: Uuid,
+    backup_id: Uuid,
+    tenant_id: Uuid,
+    files: bool,
+    folder: Option<String>,
+    databases: Vec<String>,
+    snapshot: bool,
+    verify_only: bool,
+    status: String,
+    result: Option<serde_json::Value>,
+    error: Option<String>,
+    created_at: i64,
+    finished_at: Option<i64>,
+}
+
+/// The restores of an account, newest first.
+///
+/// # Errors
+/// Database errors.
+pub async fn restores_of(pool: &PgPool, tenant_id: Uuid) -> Result<Vec<Restore>, sqlx::Error> {
+    let rows = sqlx::query_as!(
+        RestoreRow,
+        r#"SELECT id, backup_id, tenant_id, files, folder, databases, snapshot, verify_only,
+                  status, result, error,
+                  extract(epoch FROM created_at)::bigint AS "created_at!",
+                  extract(epoch FROM finished_at)::bigint AS finished_at
+           FROM backup_restores WHERE tenant_id = $1 ORDER BY created_at DESC LIMIT 100"#,
+        tenant_id
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.into_iter().map(restore_of).collect())
+}
+
+/// Restores that wait for their operation.
+///
+/// # Errors
+/// Database errors.
+pub async fn queued_restores(pool: &PgPool, limit: i64) -> Result<Vec<Restore>, sqlx::Error> {
+    let rows = sqlx::query_as!(
+        RestoreRow,
+        r#"SELECT id, backup_id, tenant_id, files, folder, databases, snapshot, verify_only,
+                  status, result, error,
+                  extract(epoch FROM created_at)::bigint AS "created_at!",
+                  extract(epoch FROM finished_at)::bigint AS finished_at
+           FROM backup_restores WHERE status = 'queued' ORDER BY created_at LIMIT $1"#,
+        limit
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.into_iter().map(restore_of).collect())
+}
+
+/// An account's schedule, as the client sees it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Schedule {
+    /// The cron expression (UTC).
+    pub cron: String,
+    /// Days kept.
+    pub keep_daily: i32,
+    /// Weeks kept.
+    pub keep_weekly: i32,
+    /// Whether it runs.
+    pub enabled: bool,
+    /// The next run (Unix seconds).
+    pub next_run_at: Option<i64>,
+    /// The last run (Unix seconds).
+    pub last_run_at: Option<i64>,
+}
+
+/// The schedule of an account.
+///
+/// # Errors
+/// Database errors.
+pub async fn schedule_of(pool: &PgPool, tenant_id: Uuid) -> Result<Option<Schedule>, sqlx::Error> {
+    let row = sqlx::query!(
+        r#"SELECT cron, keep_daily, keep_weekly, enabled,
+                  extract(epoch FROM next_run_at)::bigint AS next_run_at,
+                  extract(epoch FROM last_run_at)::bigint AS last_run_at
+           FROM backup_schedules WHERE tenant_id = $1"#,
+        tenant_id
+    )
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(|r| Schedule {
+        cron: r.cron,
+        keep_daily: r.keep_daily,
+        keep_weekly: r.keep_weekly,
+        enabled: r.enabled,
+        next_run_at: r.next_run_at,
+        last_run_at: r.last_run_at,
+    }))
+}
+
+/// Removes an account's schedule.
+///
+/// # Errors
+/// Database errors.
+pub async fn drop_schedule(pool: &PgPool, tenant_id: Uuid) -> Result<bool, sqlx::Error> {
+    Ok(sqlx::query!(
+        "DELETE FROM backup_schedules WHERE tenant_id = $1",
+        tenant_id
+    )
+    .execute(pool)
+    .await?
+    .rows_affected()
+        == 1)
 }

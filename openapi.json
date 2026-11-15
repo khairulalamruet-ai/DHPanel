@@ -7711,6 +7711,399 @@
         ]
       }
     },
+    "/api/v1/client/backup-restores": {
+      "get": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "The restores of the account and how they went.",
+        "operationId": "clientListRestores",
+        "responses": {
+          "200": {
+            "description": "The restores",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestoreList"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/backup-schedule": {
+      "get": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "The account's schedule.",
+        "operationId": "clientGetBackupSchedule",
+        "responses": {
+          "200": {
+            "description": "The schedule",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "There is none",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Makes or changes the account's schedule.",
+        "operationId": "clientPutBackupSchedule",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScheduleView"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The schedule",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A cron expression that is not usable or runs more than hourly, or counts out of range",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Removes the account's schedule (backups already made stay).",
+        "operationId": "clientDeleteBackupSchedule",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed"
+          },
+          "404": {
+            "description": "There is none",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/backups": {
+      "get": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "The backups of the account, newest first.",
+        "operationId": "clientListBackups",
+        "responses": {
+          "200": {
+            "description": "The backups",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupList"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only` or `feature_disabled`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Makes a backup now (it is queued; follow `status` until `ready`).",
+        "operationId": "clientStartBackup",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only`, `csrf_failed` or `feature_disabled`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`backup_active`, `no_destination` or `tenant_not_running`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/backups/{id}": {
+      "delete": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Removes a backup (its files at the destination follow shortly).",
+        "operationId": "clientDeleteBackup",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Backup id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Being removed"
+          },
+          "404": {
+            "description": "No such backup",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`backup_busy`: it is not ready or failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/backups/{id}/restore": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Puts back a backup, or a part of it.",
+        "operationId": "clientStartRestore",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Backup id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartRestore"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Queued; follow the restore until `done`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestoreView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such backup",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`backup_not_ready`, `restore_active` or `tenant_not_running`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Nothing to restore, a folder that is not usable, or something the backup does not have",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/client/databases": {
       "get": {
         "tags": [
@@ -14324,6 +14717,81 @@
           }
         }
       },
+      "BackupList": {
+        "type": "object",
+        "description": "The backups.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BackupView"
+            },
+            "description": "Newest first."
+          }
+        }
+      },
+      "BackupView": {
+        "type": "object",
+        "description": "A backup.",
+        "required": [
+          "id",
+          "trigger",
+          "status",
+          "parts",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "description": "When it was asked for."
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What went wrong, for a failed one."
+          },
+          "finished_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When it ended."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Id."
+          },
+          "parts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PartView"
+            },
+            "description": "What it holds (once ready)."
+          },
+          "size_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Everything stored, in bytes (once ready)."
+          },
+          "status": {
+            "type": "string",
+            "description": "`queued`, `running`, `ready`, `failed` or `deleting`."
+          },
+          "trigger": {
+            "type": "string",
+            "description": "`manual` or `schedule`."
+          }
+        }
+      },
       "BigDatabase": {
         "type": "object",
         "description": "A database, with whose it is.",
@@ -17217,6 +17685,38 @@
           }
         }
       },
+      "PartView": {
+        "type": "object",
+        "description": "One stored part of a backup.",
+        "required": [
+          "name",
+          "kind",
+          "stored_bytes"
+        ],
+        "properties": {
+          "database": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The database, for a `database` part."
+          },
+          "kind": {
+            "type": "string",
+            "description": "`files`, `database`, `dns` or `meta`."
+          },
+          "name": {
+            "type": "string",
+            "description": "The part's name at the destination."
+          },
+          "stored_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Its size as stored (encrypted), in bytes.",
+            "minimum": 0
+          }
+        }
+      },
       "Pending": {
         "type": "object",
         "description": "Work that is still going on.",
@@ -17950,6 +18450,100 @@
           }
         }
       },
+      "RestoreList": {
+        "type": "object",
+        "description": "The restores.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RestoreView"
+            },
+            "description": "Newest first."
+          }
+        }
+      },
+      "RestoreView": {
+        "type": "object",
+        "description": "A restore.",
+        "required": [
+          "id",
+          "backup_id",
+          "status",
+          "files",
+          "databases",
+          "verify_only",
+          "created_at"
+        ],
+        "properties": {
+          "backup_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The backup it reads."
+          },
+          "created_at": {
+            "type": "string",
+            "description": "When it was asked for."
+          },
+          "databases": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Databases put back."
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What went wrong."
+          },
+          "files": {
+            "type": "boolean",
+            "description": "Files put back."
+          },
+          "finished_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When it ended."
+          },
+          "folder": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Only this folder."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Id."
+          },
+          "status": {
+            "type": "string",
+            "description": "`queued`, `running`, `done` or `failed`."
+          },
+          "verified_parts": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "How many parts were read and found whole (once done).",
+            "minimum": 0
+          },
+          "verify_only": {
+            "type": "boolean",
+            "description": "Whether it was only a check."
+          }
+        }
+      },
       "RevokedCount": {
         "type": "object",
         "description": "Result of a bulk revocation.",
@@ -18019,6 +18613,38 @@
             "type": "string",
             "description": "The file.",
             "example": "www/index.php"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ScheduleView": {
+        "type": "object",
+        "description": "When backups are made and how many are kept.",
+        "required": [
+          "cron",
+          "keep_daily",
+          "keep_weekly",
+          "enabled"
+        ],
+        "properties": {
+          "cron": {
+            "type": "string",
+            "description": "Five fields (minute hour day-of-month month day-of-week), UTC. At most once an hour.",
+            "example": "30 2 * * *"
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether it runs."
+          },
+          "keep_daily": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many recent days keep their newest backup (0-14)."
+          },
+          "keep_weekly": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many recent weeks keep their newest backup (0-8)."
           }
         },
         "additionalProperties": false
@@ -18416,6 +19042,39 @@
             "format": "int64",
             "description": "Size of the file in bytes (as uploaded: compressed, if it is).",
             "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "StartRestore": {
+        "type": "object",
+        "description": "What to put back.",
+        "properties": {
+          "databases": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The databases to put back (their whole names)."
+          },
+          "files": {
+            "type": "boolean",
+            "description": "Put the files back."
+          },
+          "folder": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Only this folder of the files (relative, such as `www/blog`)."
+          },
+          "snapshot": {
+            "type": "boolean",
+            "description": "Keep the present state first, so that the restore can be undone. Default: true."
+          },
+          "verify_only": {
+            "type": "boolean",
+            "description": "Only check that the backup is whole; change nothing."
           }
         },
         "additionalProperties": false
