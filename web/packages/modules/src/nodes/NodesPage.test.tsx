@@ -649,7 +649,7 @@ describe("NodesPage", () => {
     });
 
     // node-master-01 is online, so it has a Drain button
-    const drainBtn = screen.getByRole("button", { name: /^Drain$/i });
+    const drainBtn = screen.getAllByRole("button", { name: /^Drain$/i })[0];
     expect(drainBtn).toBeInTheDocument();
     fireEvent.click(drainBtn);
 
@@ -661,7 +661,7 @@ describe("NodesPage", () => {
     });
 
     // node-worker-02 is draining, so it has an Undrain button
-    const undrainBtn = screen.getByRole("button", { name: /^Undrain$/i });
+    const undrainBtn = screen.getAllByRole("button", { name: /^Undrain$/i })[0];
     expect(undrainBtn).toBeInTheDocument();
     fireEvent.click(undrainBtn);
 

@@ -554,7 +554,7 @@ export function NodesPage() {
                                 <span className="hidden xl:inline">{t("nodes.table.editCapacity")}</span>
                               </Button>
                             )}
-                            {hasPermission("admin.nodes.write") && node.status !== "revoked" && (
+                            {hasPermission("admin.nodes.write") && (node.status === "online" || node.status === "draining") && (
                               <Button
                                 variant="outline"
                                 size="sm"
