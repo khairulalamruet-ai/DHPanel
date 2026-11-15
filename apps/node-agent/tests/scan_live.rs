@@ -99,3 +99,68 @@ async fn a_planted_test_file_is_found_and_clean_files_and_folders_are_not() {
     );
     let _ = std::fs::remove_dir_all(&tenants);
 }
+
+#[tokio::test]
+#[ignore = "needs rootless Docker and the network"]
+async fn a_wordpress_install_is_listed_with_its_plugins_and_themes() {
+    let base = std::env::temp_dir().join("dh-scan-live-wp");
+    let tenants = base.join("tenants");
+    let _ = std::fs::remove_dir_all(&base);
+    std::fs::create_dir_all(base.join("state").join("vhosts")).unwrap();
+    let id = Uuid::now_v7();
+    let wp = tenants.join(id.to_string()).join("www").join("blog");
+    std::fs::create_dir_all(wp.join("wp-includes")).unwrap();
+    std::fs::write(
+        wp.join("wp-includes").join("version.php"),
+        "<?php\n$wp_version = '6.4.3';\n$wp_db_version = 57155;\n",
+    )
+    .unwrap();
+    let plugin = wp.join("wp-content").join("plugins").join("old-forms");
+    std::fs::create_dir_all(&plugin).unwrap();
+    std::fs::write(
+        plugin.join("old-forms.php"),
+        "<?php\n/**\n * Plugin Name: Old Forms\n * Version: 1.2.3\n */\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(wp.join("wp-content").join("plugins").join("not-a-plugin")).unwrap();
+    let theme = wp.join("wp-content").join("themes").join("mytheme");
+    std::fs::create_dir_all(&theme).unwrap();
+    std::fs::write(
+        theme.join("style.css"),
+        "/*\nTheme Name: My Theme\nVersion: 2.0\n*/\n",
+    )
+    .unwrap();
+    let context = Arc::new(TenantContext {
+        helper_socket: base.join("no-helper.sock"),
+        tenants_root: tenants,
+        docker: DockerManager::connect(&docker_socket()).unwrap(),
+        vhosts_root: base.join("state").join("vhosts"),
+    });
+    let out = dhpanel_node_agent::ops::scan::inventory_wordpress(
+        context.clone(),
+        Operation::InventoryWordPress {
+            tenant_id: id,
+            uid: 10_000,
+        },
+    )
+    .await
+    .unwrap();
+    let Output::WordPressInventory { installs } = out else {
+        panic!("{out:?}")
+    };
+    assert_eq!(installs.len(), 1, "{installs:?}");
+    assert_eq!(installs[0].path, "www/blog");
+    assert_eq!(installs[0].core, "6.4.3");
+    assert_eq!(installs[0].plugins.len(), 1, "{installs:?}");
+    assert_eq!(
+        (
+            installs[0].plugins[0].slug.as_str(),
+            installs[0].plugins[0].version.as_str()
+        ),
+        ("old-forms", "1.2.3")
+    );
+    assert_eq!(installs[0].themes[0].version, "2.0");
+    let left = context.docker.list().await.unwrap();
+    assert!(left.iter().all(|n| !n.starts_with("dh-wpinv-")), "{left:?}");
+    let _ = std::fs::remove_dir_all(&base);
+}

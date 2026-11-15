@@ -11,7 +11,7 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use dhpanel_docker_manager::{Capability, ContainerSpec, Network, Tmpfs, VolumeMount};
 use dhpanel_node_protocol::{
-    AgentError, ErrorCode, Infection, Operation, Output,
+    AgentError, ErrorCode, Infection, Operation, Output, WpComponent, WpInstall,
     files::{FileRequest, FileResult},
 };
 use dhpanel_priv_helper::protocol::Action;
@@ -329,10 +329,155 @@ pub async fn scan_tenant(context: Arc<TenantContext>, op: Operation) -> Result<O
     })
 }
 
+/// Looks for WordPress installations and prints what it finds, one fact a line:
+/// `WP|<dir>|<core version>`, `PLUGIN|<dir>|<slug>|<version>`, `THEME|<dir>|<slug>|<version>`.
+/// Plain `sh`, `find`, `grep` and `sed` of the image; it only reads.
+const INVENTORY_SCRIPT: &str = r#"
+cd /scan || exit 0
+find www -maxdepth 5 -type f -path '*/wp-includes/version.php' 2>/dev/null | head -20 | while IFS= read -r v; do
+  root=${v%/wp-includes/version.php}
+  case "$root" in *'|'*) continue ;; esac
+  core=$(sed -n "s/^\$wp_version *= *'\([^']*\)'.*/\1/p" "$v" | head -1)
+  echo "WP|$root|$core"
+  for d in "$root"/wp-content/plugins/*/; do
+    [ -d "$d" ] || continue
+    slug=$(basename "$d")
+    f=$(grep -l -m1 '^[ */#]*Plugin Name:' "$d"*.php 2>/dev/null | head -1)
+    [ -n "$f" ] || continue
+    ver=$(sed -n 's/^[ */#]*Version: *\([^[:space:]]*\).*/\1/p' "$f" | head -1)
+    echo "PLUGIN|$root|$slug|$ver"
+  done
+  for d in "$root"/wp-content/themes/*/; do
+    [ -f "${d}style.css" ] || continue
+    slug=$(basename "$d")
+    ver=$(sed -n 's/^[ */#]*Version: *\([^[:space:]]*\).*/\1/p' "${d}style.css" | head -1)
+    echo "THEME|$root|$slug|$ver"
+  done
+done
+"#;
+
+/// Reads the inventory script's lines. Anything that does not fit is dropped.
+#[must_use]
+pub fn parse_inventory(output: &str) -> Vec<WpInstall> {
+    let clean = |s: &str, max: usize| s.len() <= max && s.chars().all(|c| !c.is_control());
+    let version_ok = |v: &str| {
+        v.len() <= 40
+            && v.chars()
+                .all(|c| c.is_ascii_alphanumeric() || ".+_-".contains(c))
+    };
+    let slug_ok = |s: &str| {
+        !s.is_empty()
+            && s.len() <= 100
+            && s.chars()
+                .all(|c| c.is_ascii_alphanumeric() || "._-".contains(c))
+    };
+    let mut installs: Vec<WpInstall> = Vec::new();
+    for line in output.lines() {
+        let parts: Vec<&str> = line.split('|').collect();
+        match parts.as_slice() {
+            ["WP", path, core] if clean(path, 512) && version_ok(core) => {
+                if installs.len() < 20 {
+                    installs.push(WpInstall {
+                        path: (*path).to_owned(),
+                        core: (*core).to_owned(),
+                        plugins: Vec::new(),
+                        themes: Vec::new(),
+                    });
+                }
+            }
+            [kind @ ("PLUGIN" | "THEME"), path, slug, version]
+                if slug_ok(slug) && version_ok(version) =>
+            {
+                if let Some(install) = installs.iter_mut().find(|i| i.path == *path) {
+                    let list = if *kind == "PLUGIN" {
+                        &mut install.plugins
+                    } else {
+                        &mut install.themes
+                    };
+                    if list.len() < 500 {
+                        list.push(WpComponent {
+                            slug: (*slug).to_owned(),
+                            version: (*version).to_owned(),
+                        });
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    installs
+}
+
+/// `inventory_wordpress`.
+///
+/// # Errors
+/// [`AgentError`]: Docker or the image failing, or the script not ending well.
+pub async fn inventory_wordpress(
+    context: Arc<TenantContext>,
+    op: Operation,
+) -> Result<Output, AgentError> {
+    let Operation::InventoryWordPress { tenant_id, .. } = op else {
+        return Err(super::wrong_operation());
+    };
+    let tenant_dir = context.tenants_root.join(tenant_id.to_string());
+    if !tenant_dir.is_dir() {
+        return Err(AgentError::new(
+            ErrorCode::InvalidArguments,
+            "the tenant has no files on this node",
+        ));
+    }
+    let image = image(&context).await?;
+    let short = tenant_id.simple().to_string();
+    let volume = db::name(&format!("dh-wpinv-{}", &short[..12]))?;
+    context
+        .docker
+        .create_bind_volume(&volume, &tenant_dir, &context.tenants_root)
+        .await
+        .map_err(|e| docker_error(&e))?;
+    let mut spec = base_spec(volume.clone(), image, &["sh", "-c", INVENTORY_SCRIPT]);
+    spec.memory_bytes = 256 * 1024 * 1024;
+    spec.network = Network::None;
+    spec.volumes = vec![VolumeMount {
+        volume: volume.clone(),
+        target: "/scan".into(),
+        read_only: true,
+    }];
+    let _ = context.docker.remove(&spec.name, true).await;
+    let ran = context
+        .docker
+        .run_to_end(&spec, Duration::from_secs(300))
+        .await;
+    let _ = context.docker.remove_volume(&volume).await;
+    let done = ran.map_err(|e| docker_error(&e))?;
+    if done.exit_code != 0 {
+        return Err(AgentError::new(
+            ErrorCode::Internal,
+            format!("the inventory ended with {}", done.exit_code),
+        ));
+    }
+    Ok(Output::WordPressInventory {
+        installs: parse_inventory(&done.output),
+    })
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_inventory_lines_are_read_and_odd_ones_dropped() {
+        let text = "WP|www|6.5.2\nPLUGIN|www|akismet|5.3\nTHEME|www|twentytwentyfour|1.1\nPLUGIN|www|odd slug|1\nPLUGIN|elsewhere|x|1\nWP|www/blog|\nPLUGIN|www/blog|hello|1.7.2\nnoise\n";
+        let installs = parse_inventory(text);
+        assert_eq!(installs.len(), 2);
+        assert_eq!(installs[0].core, "6.5.2");
+        assert_eq!(installs[0].plugins.len(), 1);
+        assert_eq!(installs[0].plugins[0].slug, "akismet");
+        assert_eq!(installs[0].themes[0].version, "1.1");
+        assert_eq!(installs[1].path, "www/blog");
+        assert_eq!(installs[1].core, "");
+        assert_eq!(installs[1].plugins[0].version, "1.7.2");
+    }
 
     #[test]
     fn what_clamscan_says_is_read_and_a_folder_must_stay_inside() {

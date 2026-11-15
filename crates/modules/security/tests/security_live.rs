@@ -727,7 +727,7 @@ async fn malware_scans_are_asked_for_listed_and_only_one_runs_at_a_time(pool: Pg
     let (_, list) = e.call(&root, "GET", &path, None).await;
     assert_eq!(list["items"].as_array().unwrap().len(), 2);
     // A tenant just scanned is not due for the scheduled scan; one never scanned would be.
-    let due = dhpanel_database::malware::due(&pool, 7 * 24 * 3600, 10)
+    let due = dhpanel_database::malware::due(&pool, "malware", 7 * 24 * 3600, 10)
         .await
         .unwrap();
     assert!(!due.contains(&tenant));
@@ -736,5 +736,135 @@ async fn malware_scans_are_asked_for_listed_and_only_one_runs_at_a_time(pool: Pg
     assert_eq!(
         e.call(&root, "GET", &other, None).await.0,
         StatusCode::NOT_FOUND
+    );
+}
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn an_old_plugin_is_reported_against_the_advisories(pool: PgPool) {
+    let e = env(&pool).await;
+    let (alice_account, tenant) = client(&pool, "alice", 10_000).await;
+    let a = e.sign_in(alice_account).await;
+    let admin_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO accounts (kind, username, email, password_hash)
+         VALUES ('admin', 'rootuser', 'root@example.com', $1) RETURNING id",
+    )
+    .bind(HASH)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    dhpanel_database::rbac::assign_role(&pool, admin_id, "super_admin", None)
+        .await
+        .unwrap();
+    let root = e.sign_in(admin_id).await;
+    let adv = "/api/v1/admin/security/wp-advisories";
+    // Advisories are for administrators.
+    assert_eq!(e.call(&a, "GET", adv, None).await.0, StatusCode::FORBIDDEN);
+    let (status, made) = e
+        .call(
+            &root,
+            "POST",
+            adv,
+            Some(
+                json!({"component": "plugin", "slug": "Old-Forms", "fixed_in": "1.3.0",
+                        "severity": "high", "title": "Unauthenticated file upload",
+                        "reference": "https://example.com/advisory/1"}),
+            ),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{made}");
+    let adv_id = made["id"].as_str().unwrap().to_owned();
+    e.call(
+        &root,
+        "POST",
+        adv,
+        Some(json!({"component": "core", "slug": "wordpress", "fixed_in": "6.5", "severity": "medium", "title": "Core issue"})),
+    )
+    .await;
+    let (status, dup) = e
+        .call(
+            &root,
+            "POST",
+            adv,
+            Some(json!({"component": "plugin", "slug": "old-forms", "fixed_in": "1.3.0", "severity": "high", "title": "Unauthenticated file upload"})),
+        )
+        .await;
+    assert_eq!(
+        (status, dup["code"].as_str()),
+        (StatusCode::CONFLICT, Some("already_listed"))
+    );
+    for bad in [
+        json!({"component": "x", "slug": "a", "fixed_in": "1", "severity": "low", "title": "t"}),
+        json!({"component": "plugin", "slug": "a b", "fixed_in": "1", "severity": "low", "title": "t"}),
+        json!({"component": "plugin", "slug": "a", "fixed_in": "v1", "severity": "low", "title": "t"}),
+        json!({"component": "plugin", "slug": "a", "fixed_in": "1", "severity": "bad", "title": "t"}),
+        json!({"component": "plugin", "slug": "a", "fixed_in": "1", "severity": "low", "title": ""}),
+        json!({"component": "plugin", "slug": "a", "fixed_in": "1", "severity": "low", "title": "t", "reference": "ftp://x"}),
+    ] {
+        let (status, _) = e.call(&root, "POST", adv, Some(bad.clone())).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{bad}");
+    }
+    // The client asks for a scan; the node's answer (as the dispatcher writes it) is listed with
+    // what is out of date.
+    let own = "/api/v1/client/vulnerability-scans";
+    let (status, made) = e.call(&a, "POST", own, None).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{made}");
+    let (status, again) = e.call(&a, "POST", own, None).await;
+    assert_eq!(
+        (status, again["code"].as_str()),
+        (StatusCode::CONFLICT, Some("scan_under_way"))
+    );
+    let id: Uuid = made["id"].as_str().unwrap().parse().unwrap();
+    dhpanel_database::malware::sent(&pool, id, Uuid::new_v4())
+        .await
+        .unwrap();
+    let installs = json!([{
+        "path": "www/blog", "core": "6.4.3",
+        "plugins": [{"slug": "old-forms", "version": "1.2.3"}, {"slug": "fine", "version": "9.9"}, {"slug": "unknown-version", "version": ""}],
+        "themes": []
+    }]);
+    dhpanel_database::malware::finish(&pool, id, 1, &installs, false)
+        .await
+        .unwrap();
+    let (status, list) = e.call(&a, "GET", own, None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    let scan = &list["items"][0];
+    assert_eq!(scan["state"], "done");
+    assert_eq!(scan["installs"][0]["plugins"].as_array().unwrap().len(), 3);
+    let issues = scan["issues"].as_array().unwrap();
+    assert_eq!(issues.len(), 2, "{scan}");
+    // Worst first.
+    assert_eq!(
+        (issues[0]["slug"].as_str(), issues[0]["severity"].as_str()),
+        (Some("old-forms"), Some("high"))
+    );
+    assert_eq!(issues[0]["fixed_in"], "1.3.0");
+    assert_eq!(
+        (issues[1]["component"].as_str(), issues[1]["slug"].as_str()),
+        (Some("core"), Some("wordpress"))
+    );
+    // The malware scans' list does not mix them in.
+    let (_, malware) = e
+        .call(&a, "GET", "/api/v1/client/malware-scans", None)
+        .await;
+    assert_eq!(malware["items"].as_array().unwrap().len(), 0);
+    // Removing the advisory clears the issue (judged by what is in force now).
+    assert_eq!(
+        e.call(&root, "DELETE", &format!("{adv}/{adv_id}"), None)
+            .await
+            .0,
+        StatusCode::NO_CONTENT
+    );
+    let (_, list) = e.call(&a, "GET", own, None).await;
+    assert_eq!(list["items"][0]["issues"].as_array().unwrap().len(), 1);
+    let path = format!("/api/v1/admin/tenants/{tenant}/vulnerability-scans");
+    assert_eq!(
+        e.call(&a, "GET", &path, None).await.0,
+        StatusCode::FORBIDDEN
+    );
+    let (status, admin_list) = e.call(&root, "GET", &path, None).await;
+    assert_eq!(
+        (status, admin_list["items"].as_array().unwrap().len()),
+        (StatusCode::OK, 1)
     );
 }

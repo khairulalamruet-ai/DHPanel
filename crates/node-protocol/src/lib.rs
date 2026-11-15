@@ -167,6 +167,32 @@ pub struct WafSetting {
     pub disabled_rules: Vec<u32>,
 }
 
+/// A WordPress plugin or theme and the version it says it is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(deny_unknown_fields)]
+pub struct WpComponent {
+    /// Its folder name (`woocommerce`).
+    pub slug: String,
+    /// Its version (empty when it does not say).
+    pub version: String,
+}
+
+/// One WordPress installation in a tenant's files.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(deny_unknown_fields)]
+pub struct WpInstall {
+    /// Its folder, relative to the tenant's files (`www`, `www/blog`).
+    pub path: String,
+    /// The core's version (empty when unreadable).
+    pub core: String,
+    /// The plugins.
+    pub plugins: Vec<WpComponent>,
+    /// The themes.
+    pub themes: Vec<WpComponent>,
+}
+
 /// One infected file a scan found.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -1440,6 +1466,15 @@ pub enum Operation {
         #[serde(default)]
         quarantine: bool,
     },
+    /// Lists the WordPress installations in a tenant's files with the version of the core, of
+    /// every plugin and of every theme (read only; nothing is run). Answered with
+    /// [`Output::WordPressInventory`].
+    InventoryWordPress {
+        /// The tenant.
+        tenant_id: Uuid,
+        /// The tenant's numeric user id.
+        uid: u32,
+    },
     /// Brings the node's malware signatures up to date (freshclam, in a container of its own).
     /// Answered with [`Output::SignaturesUpdated`].
     UpdateMalwareSignatures,
@@ -1587,6 +1622,7 @@ impl Operation {
         "sync_cron_jobs",
         "set_firewall_rules",
         "scan_tenant",
+        "inventory_wordpress",
         "update_malware_signatures",
         "set_user_agent_blocklist",
         "report_server_info",
@@ -1661,6 +1697,7 @@ impl Operation {
             Self::SyncCronJobs { .. } => "sync_cron_jobs",
             Self::SetFirewallRules { .. } => "set_firewall_rules",
             Self::ScanTenant { .. } => "scan_tenant",
+            Self::InventoryWordPress { .. } => "inventory_wordpress",
             Self::UpdateMalwareSignatures => "update_malware_signatures",
             Self::SetUserAgentBlocklist { .. } => "set_user_agent_blocklist",
             Self::ReportServerInfo => "report_server_info",
@@ -1854,6 +1891,11 @@ pub enum Output {
         infected: Vec<Infection>,
         /// More was found than listed.
         more: bool,
+    },
+    /// Answer to [`Operation::InventoryWordPress`].
+    WordPressInventory {
+        /// The installations found (at most 20).
+        installs: Vec<WpInstall>,
     },
     /// Answer to [`Operation::UpdateMalwareSignatures`].
     SignaturesUpdated {
@@ -3103,7 +3145,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            68,
+            69,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }

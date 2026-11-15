@@ -48,6 +48,7 @@ pub mod user_agents;
 pub mod users;
 pub mod vhost_templates;
 pub mod waf;
+pub mod wp_advisories;
 
 use std::{future::Future, pin::Pin, time::Duration};
 

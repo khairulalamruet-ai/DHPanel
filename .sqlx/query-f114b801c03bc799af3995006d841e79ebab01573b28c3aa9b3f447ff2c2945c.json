@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT t.id FROM tenants t\n           WHERE t.status = 'active'\n             AND NOT EXISTS (\n                 SELECT 1 FROM malware_scans s\n                 WHERE s.tenant_id = t.id\n                   AND (s.state IN ('queued', 'running')\n                        OR (s.kind = $3 AND s.requested_at > now() - make_interval(secs => $1::int)))\n             )\n           ORDER BY t.created_at LIMIT $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "tenants",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "f114b801c03bc799af3995006d841e79ebab01573b28c3aa9b3f447ff2c2945c"
+}

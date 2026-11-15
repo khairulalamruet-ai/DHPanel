@@ -205,6 +205,10 @@ impl Registry {
                 let context = context.clone();
                 move |op| scan::scan_tenant(context.clone(), op)
             });
+            registry.register("inventory_wordpress", {
+                let context = context.clone();
+                move |op| scan::inventory_wordpress(context.clone(), op)
+            });
             registry.register("update_malware_signatures", {
                 let context = context.clone();
                 move |op| scan::update_malware_signatures(context.clone(), op)

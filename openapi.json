@@ -6424,6 +6424,147 @@
         ]
       }
     },
+    "/api/v1/admin/security/wp-advisories": {
+      "get": {
+        "tags": [
+          "security"
+        ],
+        "summary": "The advisories the vulnerability scans compare with.",
+        "operationId": "adminListWpAdvisories",
+        "responses": {
+          "200": {
+            "description": "The advisories",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdvisoryList"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "security"
+        ],
+        "summary": "Add an advisory: every version of the component below `fixed_in` is reported.",
+        "operationId": "adminAddWpAdvisory",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddAdvisory"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Added",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdvisoryView"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`already_listed` or `list_full`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A field that is not valid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/security/wp-advisories/{id}": {
+      "delete": {
+        "tags": [
+          "security"
+        ],
+        "summary": "Take an advisory away.",
+        "operationId": "adminRemoveWpAdvisory",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed"
+          },
+          "404": {
+            "description": "Not listed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/settings": {
       "get": {
         "tags": [
@@ -7242,6 +7383,119 @@
           },
           "422": {
             "description": "A folder that is not inside the files",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/tenants/{id}/vulnerability-scans": {
+      "get": {
+        "tags": [
+          "security"
+        ],
+        "summary": "A hosting account's WordPress vulnerability scans.",
+        "operationId": "adminListVulnerabilityScans",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Hosting account id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The scans",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VulnScanList"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such hosting account",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "security"
+        ],
+        "summary": "Look up the versions of the WordPress installations in a hosting account's files.",
+        "operationId": "adminStartVulnerabilityScan",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Hosting account id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VulnScanView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such hosting account",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`scan_under_way`",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -17001,6 +17255,97 @@
         ]
       }
     },
+    "/api/v1/client/vulnerability-scans": {
+      "get": {
+        "tags": [
+          "security"
+        ],
+        "summary": "The account's own WordPress vulnerability scans.",
+        "operationId": "clientListVulnerabilityScans",
+        "responses": {
+          "200": {
+            "description": "The scans",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VulnScanList"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "security"
+        ],
+        "summary": "Look up the versions of the WordPress installations in the account's own files.",
+        "operationId": "clientStartVulnerabilityScan",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VulnScanView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`scan_under_way`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/client/waf/domains": {
       "get": {
         "tags": [
@@ -17595,6 +17940,47 @@
   },
   "components": {
     "schemas": {
+      "AddAdvisory": {
+        "type": "object",
+        "description": "An advisory to add.",
+        "required": [
+          "component",
+          "slug",
+          "fixed_in",
+          "severity",
+          "title"
+        ],
+        "properties": {
+          "component": {
+            "type": "string",
+            "description": "`core`, `plugin` or `theme`."
+          },
+          "fixed_in": {
+            "type": "string",
+            "description": "Versions below this are affected."
+          },
+          "reference": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where to read more (`https://…`)."
+          },
+          "severity": {
+            "type": "string",
+            "description": "`low`, `medium`, `high` or `critical`."
+          },
+          "slug": {
+            "type": "string",
+            "description": "The folder name (`wordpress` for the core)."
+          },
+          "title": {
+            "type": "string",
+            "description": "What it is (1 to 200 characters)."
+          }
+        },
+        "additionalProperties": false
+      },
       "AddDatabase": {
         "type": "object",
         "description": "A database to make.",
@@ -17979,6 +18365,68 @@
           "username": {
             "type": "string",
             "description": "Login name."
+          }
+        }
+      },
+      "AdvisoryList": {
+        "type": "object",
+        "description": "The advisories.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdvisoryView"
+            },
+            "description": "By component and slug."
+          }
+        }
+      },
+      "AdvisoryView": {
+        "type": "object",
+        "description": "A WordPress version known to be vulnerable.",
+        "required": [
+          "id",
+          "component",
+          "slug",
+          "fixed_in",
+          "severity",
+          "title"
+        ],
+        "properties": {
+          "component": {
+            "type": "string",
+            "description": "`core`, `plugin` or `theme`."
+          },
+          "fixed_in": {
+            "type": "string",
+            "description": "Versions below this are affected."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Id."
+          },
+          "reference": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where to read more."
+          },
+          "severity": {
+            "type": "string",
+            "description": "`low`, `medium`, `high` or `critical`."
+          },
+          "slug": {
+            "type": "string",
+            "description": "The folder name (`wordpress` for the core)."
+          },
+          "title": {
+            "type": "string",
+            "description": "What it is."
           }
         }
       },
@@ -24626,6 +25074,187 @@
             "minimum": 0
           }
         }
+      },
+      "VulnIssue": {
+        "type": "object",
+        "description": "One problem a vulnerability scan found: a version below the one an advisory says is safe.",
+        "required": [
+          "path",
+          "component",
+          "slug",
+          "version",
+          "fixed_in",
+          "severity",
+          "title"
+        ],
+        "properties": {
+          "component": {
+            "type": "string",
+            "description": "`core`, `plugin` or `theme`."
+          },
+          "fixed_in": {
+            "type": "string",
+            "description": "The first safe version."
+          },
+          "path": {
+            "type": "string",
+            "description": "The installation's folder."
+          },
+          "reference": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where to read more."
+          },
+          "severity": {
+            "type": "string",
+            "description": "`low`, `medium`, `high` or `critical`."
+          },
+          "slug": {
+            "type": "string",
+            "description": "The folder name (`wordpress` for the core)."
+          },
+          "title": {
+            "type": "string",
+            "description": "What it is."
+          },
+          "version": {
+            "type": "string",
+            "description": "The version found."
+          }
+        }
+      },
+      "VulnScanList": {
+        "type": "object",
+        "description": "A tenant's vulnerability scans, newest first.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VulnScanView"
+            },
+            "description": "The scans."
+          }
+        }
+      },
+      "VulnScanView": {
+        "type": "object",
+        "description": "A WordPress vulnerability scan.",
+        "required": [
+          "id",
+          "source",
+          "state",
+          "requested_at",
+          "installs",
+          "issues"
+        ],
+        "properties": {
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it failed."
+          },
+          "finished_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "When it ended (Unix seconds)."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Id."
+          },
+          "installs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WpInstall"
+            },
+            "description": "The installations found, with their versions."
+          },
+          "issues": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VulnIssue"
+            },
+            "description": "What is out of date or known vulnerable, worst first (judged by the advisories now in\nforce, not those of the day of the scan)."
+          },
+          "requested_at": {
+            "type": "integer",
+            "format": "int64",
+            "description": "When it was asked for (Unix seconds)."
+          },
+          "source": {
+            "type": "string",
+            "description": "`admin`, `client` or `schedule`."
+          },
+          "state": {
+            "type": "string",
+            "description": "`queued`, `running`, `done` or `failed`."
+          }
+        }
+      },
+      "WpComponent": {
+        "type": "object",
+        "description": "A WordPress plugin or theme and the version it says it is.",
+        "required": [
+          "slug",
+          "version"
+        ],
+        "properties": {
+          "slug": {
+            "type": "string",
+            "description": "Its folder name (`woocommerce`)."
+          },
+          "version": {
+            "type": "string",
+            "description": "Its version (empty when it does not say)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "WpInstall": {
+        "type": "object",
+        "description": "One WordPress installation in a tenant's files.",
+        "required": [
+          "path",
+          "core",
+          "plugins",
+          "themes"
+        ],
+        "properties": {
+          "core": {
+            "type": "string",
+            "description": "The core's version (empty when unreadable)."
+          },
+          "path": {
+            "type": "string",
+            "description": "Its folder, relative to the tenant's files (`www`, `www/blog`)."
+          },
+          "plugins": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WpComponent"
+            },
+            "description": "The plugins."
+          },
+          "themes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WpComponent"
+            },
+            "description": "The themes."
+          }
+        },
+        "additionalProperties": false
       },
       "ZoneView": {
         "type": "object",

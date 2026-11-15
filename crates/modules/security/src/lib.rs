@@ -10,6 +10,9 @@
 //! | GET, PUT, DELETE | `/api/v1/admin/nodes/{id}/firewall` | `admin.security.read`, `.manage` |
 //! | GET, POST | `/api/v1/admin/tenants/{id}/malware-scans` | `admin.security.read`, `.manage` |
 //! | GET, POST | `/api/v1/client/malware-scans` | a client |
+//! | GET, POST | `/api/v1/admin/tenants/{id}/vulnerability-scans` | `admin.security.read`, `.manage` |
+//! | GET, POST | `/api/v1/client/vulnerability-scans` | a client |
+//! | GET, POST, DELETE | `/api/v1/admin/security/wp-advisories[/{id}]` | `admin.security.read`, `.manage` |
 //! | GET | `/api/v1/client/waf/domains` | a client |
 //! | PUT, DELETE | `/api/v1/client/waf/domains/{id}` | the domain's owner |
 //!
@@ -102,6 +105,18 @@ pub fn admin_router() -> Router<SecurityState> {
             get(admin_list_scans).post(admin_start_scan),
         )
         .route(
+            "/api/v1/admin/tenants/{id}/vulnerability-scans",
+            get(admin_list_vuln).post(admin_start_vuln),
+        )
+        .route(
+            "/api/v1/admin/security/wp-advisories",
+            get(list_advisories).post(add_advisory),
+        )
+        .route(
+            "/api/v1/admin/security/wp-advisories/{id}",
+            axum::routing::delete(remove_advisory),
+        )
+        .route(
             "/api/v1/admin/waf/domains/{id}",
             get(admin_get_domain)
                 .put(admin_put_domain)
@@ -113,6 +128,10 @@ pub fn admin_router() -> Router<SecurityState> {
 pub fn client_router() -> Router<SecurityState> {
     Router::new()
         .route("/api/v1/client/waf/domains", get(client_list))
+        .route(
+            "/api/v1/client/vulnerability-scans",
+            get(client_list_vuln).post(client_start_vuln),
+        )
         .route(
             "/api/v1/client/malware-scans",
             get(client_list_scans).post(client_start_scan),
@@ -874,7 +893,7 @@ fn scan_view(s: dhpanel_database::malware::Scan) -> ScanView {
 }
 
 async fn list_scans(state: &SecurityState, tenant: Uuid) -> Result<Json<ScanList>, AppError> {
-    let items = dhpanel_database::malware::list(&state.db, tenant, 50)
+    let items = dhpanel_database::malware::list(&state.db, tenant, "malware", 50)
         .await
         .map_err(internal)?
         .into_iter()
@@ -910,6 +929,7 @@ async fn start_scan(
     let Some(id) = dhpanel_database::malware::request(
         &state.db,
         tenant,
+        "malware",
         folder,
         req.quarantine,
         source,
@@ -931,7 +951,7 @@ async fn start_scan(
     dhpanel_audit::insert(&state.db, &entry)
         .await
         .map_err(internal)?;
-    let made = dhpanel_database::malware::list(&state.db, tenant, 1)
+    let made = dhpanel_database::malware::list(&state.db, tenant, "malware", 1)
         .await
         .map_err(internal)?
         .into_iter()
@@ -1006,6 +1026,472 @@ pub async fn client_start_scan(
 ) -> Result<(StatusCode, Json<ScanView>), AppError> {
     let tenant = client_tenant(&state, &who).await?;
     start_scan(&state, &who, tenant.id, "client", req).await
+}
+
+/// A WordPress version known to be vulnerable.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct AdvisoryView {
+    /// Id.
+    pub id: Uuid,
+    /// `core`, `plugin` or `theme`.
+    pub component: String,
+    /// The folder name (`wordpress` for the core).
+    pub slug: String,
+    /// Versions below this are affected.
+    pub fixed_in: String,
+    /// `low`, `medium`, `high` or `critical`.
+    pub severity: String,
+    /// What it is.
+    pub title: String,
+    /// Where to read more.
+    pub reference: Option<String>,
+}
+
+/// The advisories.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct AdvisoryList {
+    /// By component and slug.
+    pub items: Vec<AdvisoryView>,
+}
+
+/// An advisory to add.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AddAdvisory {
+    /// `core`, `plugin` or `theme`.
+    pub component: String,
+    /// The folder name (`wordpress` for the core).
+    pub slug: String,
+    /// Versions below this are affected.
+    pub fixed_in: String,
+    /// `low`, `medium`, `high` or `critical`.
+    pub severity: String,
+    /// What it is (1 to 200 characters).
+    pub title: String,
+    /// Where to read more (`https://…`).
+    #[serde(default)]
+    pub reference: Option<String>,
+}
+
+fn advisory_view(a: dhpanel_database::wp_advisories::Advisory) -> AdvisoryView {
+    AdvisoryView {
+        id: a.id,
+        component: a.component,
+        slug: a.slug,
+        fixed_in: a.fixed_in,
+        severity: a.severity,
+        title: a.title,
+        reference: a.reference,
+    }
+}
+
+/// The advisories the vulnerability scans compare with.
+#[utoipa::path(get, path = "/api/v1/admin/security/wp-advisories", tag = "security", operation_id = "adminListWpAdvisories",
+    security(("session" = [])),
+    responses((status = 200, description = "The advisories", body = AdvisoryList)))]
+pub async fn list_advisories(
+    State(state): State<SecurityState>,
+    _who: Require<SecurityRead>,
+) -> Result<Json<AdvisoryList>, AppError> {
+    let items = dhpanel_database::wp_advisories::list(&state.db)
+        .await
+        .map_err(internal)?
+        .into_iter()
+        .map(advisory_view)
+        .collect();
+    Ok(Json(AdvisoryList { items }))
+}
+
+/// Add an advisory: every version of the component below `fixed_in` is reported.
+#[utoipa::path(post, path = "/api/v1/admin/security/wp-advisories", tag = "security", operation_id = "adminAddWpAdvisory",
+    security(("session" = [])), params(("X-CSRF-Token" = String, Header, description = "The session's csrf_token")),
+    request_body = AddAdvisory,
+    responses((status = 201, description = "Added", body = AdvisoryView),
+              (status = 409, description = "`already_listed` or `list_full`", body = ProblemDetails, content_type = "application/problem+json"),
+              (status = 422, description = "A field that is not valid", body = ProblemDetails, content_type = "application/problem+json")))]
+pub async fn add_advisory(
+    State(state): State<SecurityState>,
+    who: Require<SecurityManage>,
+    Json(req): Json<AddAdvisory>,
+) -> Result<(StatusCode, Json<AdvisoryView>), AppError> {
+    let bad = |name: &'static str, message: &str| {
+        AppError::validation(vec![FieldError::new(name, "invalid", message)])
+    };
+    let slug = req.slug.trim().to_owned();
+    let fixed_in = req.fixed_in.trim().to_owned();
+    let title = req.title.trim().to_owned();
+    if !["core", "plugin", "theme"].contains(&req.component.as_str()) {
+        return Err(bad("component", "core, plugin or theme."));
+    }
+    if slug.is_empty()
+        || slug.len() > 100
+        || !slug
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "._-".contains(c))
+    {
+        return Err(bad("slug", "The folder name: letters, digits, . _ -"));
+    }
+    if fixed_in.len() > 40
+        || !fixed_in.starts_with(|c: char| c.is_ascii_digit())
+        || !fixed_in
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || ".+_-".contains(c))
+    {
+        return Err(bad("fixed_in", "A version such as 6.4.3."));
+    }
+    if !["low", "medium", "high", "critical"].contains(&req.severity.as_str()) {
+        return Err(bad("severity", "low, medium, high or critical."));
+    }
+    if title.is_empty() || title.chars().count() > 200 || title.chars().any(char::is_control) {
+        return Err(bad("title", "1 to 200 characters, no control characters."));
+    }
+    let reference = req
+        .reference
+        .as_deref()
+        .map(str::trim)
+        .filter(|r| !r.is_empty());
+    if reference.is_some_and(|r| {
+        r.len() > 300
+            || !(r.starts_with("https://") || r.starts_with("http://"))
+            || r.chars().any(char::is_control)
+    }) {
+        return Err(bad(
+            "reference",
+            "An http(s) address of at most 300 characters.",
+        ));
+    }
+    let a = dhpanel_database::wp_advisories::Advisory {
+        id: Uuid::nil(),
+        component: req.component,
+        slug,
+        fixed_in,
+        severity: req.severity,
+        title,
+        reference: reference.map(str::to_owned),
+    };
+    let id = dhpanel_database::wp_advisories::add(&state.db, &a, who.0.account_id())
+        .await
+        .map_err(|e| match e {
+            dhpanel_database::wp_advisories::AddError::Exists => {
+                AppError::conflict("already_listed", "This advisory is listed already.")
+            }
+            dhpanel_database::wp_advisories::AddError::Full => {
+                AppError::conflict("list_full", "The list is full.")
+            }
+            dhpanel_database::wp_advisories::AddError::Database(db) => internal(db),
+        })?;
+    let entry = AuditEntry::new("wp_advisory.added", Outcome::Success)
+        .actor(who.0.account_id())
+        .target("wp_advisory", id)
+        .metadata(
+            serde_json::json!({ "component": a.component, "slug": a.slug, "fixed_in": a.fixed_in }),
+        );
+    dhpanel_audit::insert(&state.db, &entry)
+        .await
+        .map_err(internal)?;
+    Ok((
+        StatusCode::CREATED,
+        Json(advisory_view(dhpanel_database::wp_advisories::Advisory {
+            id,
+            ..a
+        })),
+    ))
+}
+
+/// Take an advisory away.
+#[utoipa::path(delete, path = "/api/v1/admin/security/wp-advisories/{id}", tag = "security", operation_id = "adminRemoveWpAdvisory",
+    security(("session" = [])), params(("id" = Uuid, Path, description = "Id"), ("X-CSRF-Token" = String, Header, description = "The session's csrf_token")),
+    responses((status = 204, description = "Removed"),
+              (status = 404, description = "Not listed", body = ProblemDetails, content_type = "application/problem+json")))]
+pub async fn remove_advisory(
+    State(state): State<SecurityState>,
+    who: Require<SecurityManage>,
+    Path(id): Path<Uuid>,
+) -> Result<StatusCode, AppError> {
+    if !dhpanel_database::wp_advisories::remove(&state.db, id)
+        .await
+        .map_err(internal)?
+    {
+        return Err(AppError::not_found("wp_advisory"));
+    }
+    let entry = AuditEntry::new("wp_advisory.removed", Outcome::Success)
+        .actor(who.0.account_id())
+        .target("wp_advisory", id);
+    dhpanel_audit::insert(&state.db, &entry)
+        .await
+        .map_err(internal)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// One problem a vulnerability scan found: a version below the one an advisory says is safe.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct VulnIssue {
+    /// The installation's folder.
+    pub path: String,
+    /// `core`, `plugin` or `theme`.
+    pub component: String,
+    /// The folder name (`wordpress` for the core).
+    pub slug: String,
+    /// The version found.
+    pub version: String,
+    /// The first safe version.
+    pub fixed_in: String,
+    /// `low`, `medium`, `high` or `critical`.
+    pub severity: String,
+    /// What it is.
+    pub title: String,
+    /// Where to read more.
+    pub reference: Option<String>,
+}
+
+/// A WordPress vulnerability scan.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct VulnScanView {
+    /// Id.
+    pub id: Uuid,
+    /// `admin`, `client` or `schedule`.
+    pub source: String,
+    /// `queued`, `running`, `done` or `failed`.
+    pub state: String,
+    /// When it was asked for (Unix seconds).
+    pub requested_at: i64,
+    /// When it ended (Unix seconds).
+    pub finished_at: Option<i64>,
+    /// The installations found, with their versions.
+    pub installs: Vec<dhpanel_node_protocol::WpInstall>,
+    /// What is out of date or known vulnerable, worst first (judged by the advisories now in
+    /// force, not those of the day of the scan).
+    pub issues: Vec<VulnIssue>,
+    /// Why it failed.
+    pub error: Option<String>,
+}
+
+/// A tenant's vulnerability scans, newest first.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct VulnScanList {
+    /// The scans.
+    pub items: Vec<VulnScanView>,
+}
+
+/// Whether version `found` is older than `fixed`: dotted numbers compared one by one, and a
+/// pre-release (`6.5-beta2`, `1.0rc1`) before its release.
+#[must_use]
+pub fn is_older(found: &str, fixed: &str) -> bool {
+    fn parts(v: &str) -> (Vec<u64>, bool) {
+        let lower = v.to_ascii_lowercase();
+        let pre = ["alpha", "beta", "rc", "dev"]
+            .iter()
+            .any(|w| lower.contains(w));
+        let mut nums = Vec::new();
+        for piece in lower.split(['.', '-', '_', '+']) {
+            let digits: String = piece.chars().take_while(char::is_ascii_digit).collect();
+            if digits.is_empty() {
+                break;
+            }
+            nums.push(digits.parse().unwrap_or(0));
+            if digits.len() != piece.len() {
+                break;
+            }
+        }
+        (nums, pre)
+    }
+    let (mut a, a_pre) = parts(found);
+    let (mut b, _) = parts(fixed);
+    let n = a.len().max(b.len());
+    a.resize(n, 0);
+    b.resize(n, 0);
+    match a.cmp(&b) {
+        std::cmp::Ordering::Less => true,
+        std::cmp::Ordering::Greater => false,
+        std::cmp::Ordering::Equal => a_pre,
+    }
+}
+
+fn severity_rank(s: &str) -> u8 {
+    match s {
+        "critical" => 0,
+        "high" => 1,
+        "medium" => 2,
+        _ => 3,
+    }
+}
+
+fn issues_of(
+    installs: &[dhpanel_node_protocol::WpInstall],
+    advisories: &[dhpanel_database::wp_advisories::Advisory],
+) -> Vec<VulnIssue> {
+    let mut out = Vec::new();
+    for install in installs {
+        let mut check = |component: &str, slug: &str, version: &str| {
+            if version.is_empty() {
+                return;
+            }
+            for a in advisories {
+                if a.component == component
+                    && a.slug.eq_ignore_ascii_case(slug)
+                    && is_older(version, &a.fixed_in)
+                {
+                    out.push(VulnIssue {
+                        path: install.path.clone(),
+                        component: component.to_owned(),
+                        slug: slug.to_owned(),
+                        version: version.to_owned(),
+                        fixed_in: a.fixed_in.clone(),
+                        severity: a.severity.clone(),
+                        title: a.title.clone(),
+                        reference: a.reference.clone(),
+                    });
+                }
+            }
+        };
+        check("core", "wordpress", &install.core);
+        for p in &install.plugins {
+            check("plugin", &p.slug, &p.version);
+        }
+        for t in &install.themes {
+            check("theme", &t.slug, &t.version);
+        }
+    }
+    out.sort_by(|a, b| {
+        severity_rank(&a.severity)
+            .cmp(&severity_rank(&b.severity))
+            .then_with(|| a.path.cmp(&b.path))
+            .then_with(|| a.slug.cmp(&b.slug))
+    });
+    out
+}
+
+async fn list_vuln(state: &SecurityState, tenant: Uuid) -> Result<Json<VulnScanList>, AppError> {
+    let advisories = dhpanel_database::wp_advisories::list(&state.db)
+        .await
+        .map_err(internal)?;
+    let items = dhpanel_database::malware::list(&state.db, tenant, "wordpress", 20)
+        .await
+        .map_err(internal)?
+        .into_iter()
+        .map(|s| vuln_view(s, &advisories))
+        .collect();
+    Ok(Json(VulnScanList { items }))
+}
+
+fn vuln_view(
+    s: dhpanel_database::malware::Scan,
+    advisories: &[dhpanel_database::wp_advisories::Advisory],
+) -> VulnScanView {
+    let installs: Vec<dhpanel_node_protocol::WpInstall> =
+        serde_json::from_value(s.findings).unwrap_or_default();
+    let issues = issues_of(&installs, advisories);
+    VulnScanView {
+        id: s.id,
+        source: s.source,
+        state: s.state,
+        requested_at: s.requested_at,
+        finished_at: s.finished_at,
+        installs,
+        issues,
+        error: s.error,
+    }
+}
+
+async fn start_vuln(
+    state: &SecurityState,
+    who: &Principal,
+    tenant: Uuid,
+    source: &str,
+) -> Result<(StatusCode, Json<VulnScanView>), AppError> {
+    let Some(id) = dhpanel_database::malware::request(
+        &state.db,
+        tenant,
+        "wordpress",
+        None,
+        false,
+        source,
+        Some(who.account_id()),
+    )
+    .await
+    .map_err(internal)?
+    else {
+        return Err(AppError::conflict(
+            "scan_under_way",
+            "A scan of these files is queued or running already.",
+        ));
+    };
+    let entry = AuditEntry::new("vulnerability_scan.requested", Outcome::Success)
+        .actor(who.account_id())
+        .tenant(tenant)
+        .target("malware_scan", id);
+    dhpanel_audit::insert(&state.db, &entry)
+        .await
+        .map_err(internal)?;
+    let made = dhpanel_database::malware::list(&state.db, tenant, "wordpress", 1)
+        .await
+        .map_err(internal)?
+        .into_iter()
+        .find(|s| s.id == id)
+        .ok_or_else(|| AppError::not_found("vulnerability_scan"))?;
+    Ok((StatusCode::ACCEPTED, Json(vuln_view(made, &[]))))
+}
+
+/// A hosting account's WordPress vulnerability scans.
+#[utoipa::path(get, path = "/api/v1/admin/tenants/{id}/vulnerability-scans", tag = "security", operation_id = "adminListVulnerabilityScans",
+    security(("session" = [])), params(("id" = Uuid, Path, description = "Hosting account id")),
+    responses((status = 200, description = "The scans", body = VulnScanList),
+              (status = 404, description = "No such hosting account", body = ProblemDetails, content_type = "application/problem+json")))]
+pub async fn admin_list_vuln(
+    State(state): State<SecurityState>,
+    _who: Require<SecurityRead>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<VulnScanList>, AppError> {
+    tenants::get(&state.db, id)
+        .await
+        .map_err(internal)?
+        .ok_or_else(|| AppError::not_found("tenant"))?;
+    list_vuln(&state, id).await
+}
+
+/// Look up the versions of the WordPress installations in a hosting account's files.
+#[utoipa::path(post, path = "/api/v1/admin/tenants/{id}/vulnerability-scans", tag = "security", operation_id = "adminStartVulnerabilityScan",
+    security(("session" = [])), params(("id" = Uuid, Path, description = "Hosting account id"), ("X-CSRF-Token" = String, Header, description = "The session's csrf_token")),
+    responses((status = 202, description = "Queued", body = VulnScanView),
+              (status = 404, description = "No such hosting account", body = ProblemDetails, content_type = "application/problem+json"),
+              (status = 409, description = "`scan_under_way`", body = ProblemDetails, content_type = "application/problem+json")))]
+pub async fn admin_start_vuln(
+    State(state): State<SecurityState>,
+    who: Require<SecurityManage>,
+    Path(id): Path<Uuid>,
+) -> Result<(StatusCode, Json<VulnScanView>), AppError> {
+    tenants::get(&state.db, id)
+        .await
+        .map_err(internal)?
+        .ok_or_else(|| AppError::not_found("tenant"))?;
+    start_vuln(&state, &who.0, id, "admin").await
+}
+
+/// The account's own WordPress vulnerability scans.
+#[utoipa::path(get, path = "/api/v1/client/vulnerability-scans", tag = "security", operation_id = "clientListVulnerabilityScans",
+    security(("session" = [])),
+    responses((status = 200, description = "The scans", body = VulnScanList),
+              (status = 403, description = "`client_only`", body = ProblemDetails, content_type = "application/problem+json")))]
+pub async fn client_list_vuln(
+    State(state): State<SecurityState>,
+    who: Principal,
+) -> Result<Json<VulnScanList>, AppError> {
+    let tenant = client_tenant(&state, &who).await?;
+    list_vuln(&state, tenant.id).await
+}
+
+/// Look up the versions of the WordPress installations in the account's own files.
+#[utoipa::path(post, path = "/api/v1/client/vulnerability-scans", tag = "security", operation_id = "clientStartVulnerabilityScan",
+    security(("session" = [])), params(("X-CSRF-Token" = String, Header, description = "The session's csrf_token")),
+    responses((status = 202, description = "Queued", body = VulnScanView),
+              (status = 403, description = "`client_only`", body = ProblemDetails, content_type = "application/problem+json"),
+              (status = 409, description = "`scan_under_way`", body = ProblemDetails, content_type = "application/problem+json")))]
+pub async fn client_start_vuln(
+    State(state): State<SecurityState>,
+    who: Principal,
+) -> Result<(StatusCode, Json<VulnScanView>), AppError> {
+    let tenant = client_tenant(&state, &who).await?;
+    start_vuln(&state, &who, tenant.id, "client").await
 }
 
 /// A node's firewall policy.
@@ -1124,9 +1610,42 @@ async fn store_firewall(
         admin_delete_tenant, admin_get_domain, admin_put_domain, admin_delete_domain, client_list,
         client_put, client_delete, list_user_agents, add_user_agent, remove_user_agent,
         get_node_firewall, put_node_firewall, reset_node_firewall,
-        admin_list_scans, admin_start_scan, client_list_scans, client_start_scan
+        admin_list_scans, admin_start_scan, client_list_scans, client_start_scan,
+        admin_list_vuln, admin_start_vuln, client_list_vuln, client_start_vuln,
+        list_advisories, add_advisory, remove_advisory
     ),
-    components(schemas(ScanRequest, ScanView, ScanList, dhpanel_node_protocol::Infection, NodeFirewall, dhpanel_node_protocol::FirewallPolicy, dhpanel_node_protocol::PortRule, dhpanel_node_protocol::RateLimit, UserAgentView, UserAgentList, AddUserAgent, PolicyRequest, PolicyView, EffectiveView, PolicyState, DomainWaf, DomainWafList)),
+    components(schemas(VulnScanView, VulnScanList, VulnIssue, AdvisoryView, AdvisoryList, AddAdvisory, dhpanel_node_protocol::WpInstall, dhpanel_node_protocol::WpComponent, ScanRequest, ScanView, ScanList, dhpanel_node_protocol::Infection, NodeFirewall, dhpanel_node_protocol::FirewallPolicy, dhpanel_node_protocol::PortRule, dhpanel_node_protocol::RateLimit, UserAgentView, UserAgentList, AddUserAgent, PolicyRequest, PolicyView, EffectiveView, PolicyState, DomainWaf, DomainWafList)),
     tags((name = "security", description = "The web application firewall"))
 )]
 pub struct SecurityApi;
+
+#[cfg(test)]
+mod tests {
+    use super::is_older;
+
+    #[test]
+    fn versions_are_compared_number_by_number_and_a_pre_release_comes_first() {
+        for (found, fixed) in [
+            ("1.2.3", "1.2.4"),
+            ("1.9", "1.10"),
+            ("6.4.3", "6.5"),
+            ("2.0", "2.0.1"),
+            ("6.5-beta2", "6.5"),
+            ("1.0rc1", "1.0"),
+        ] {
+            assert!(is_older(found, fixed), "{found} < {fixed}");
+            assert!(!is_older(fixed, found), "{fixed} !< {found}");
+        }
+        for (found, fixed) in [
+            ("1.2.3", "1.2.3"),
+            ("2.0", "2.0.0"),
+            ("10.0", "9.9.9"),
+            ("", "1.0"),
+        ] {
+            assert!(
+                !is_older(found, fixed) || found.is_empty(),
+                "{found} vs {fixed}"
+            );
+        }
+    }
+}

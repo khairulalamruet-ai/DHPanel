@@ -669,19 +669,21 @@ impl Dispatcher {
             .await
             .is_ok_and(|n| n < 2)
         {
-            match dhpanel_database::malware::due(db, SCAN_EVERY_SECS, 1).await {
-                Ok(due) => {
-                    for tenant_id in due {
-                        if let Err(err) = dhpanel_database::malware::request(
-                            db, tenant_id, None, false, "schedule", None,
-                        )
-                        .await
-                        {
-                            tracing::warn!(%tenant_id, error = %err, "could not queue a scheduled scan");
+            for kind in ["malware", "wordpress"] {
+                match dhpanel_database::malware::due(db, kind, SCAN_EVERY_SECS, 1).await {
+                    Ok(due) => {
+                        for tenant_id in due {
+                            if let Err(err) = dhpanel_database::malware::request(
+                                db, tenant_id, kind, None, false, "schedule", None,
+                            )
+                            .await
+                            {
+                                tracing::warn!(%tenant_id, error = %err, "could not queue a scheduled scan");
+                            }
                         }
                     }
+                    Err(err) => tracing::warn!(error = %err, "could not look for tenants to scan"),
                 }
-                Err(err) => tracing::warn!(error = %err, "could not look for tenants to scan"),
             }
         }
         let queued = match dhpanel_database::malware::queued(db, 20).await {
@@ -697,14 +699,23 @@ impl Dispatcher {
             if !connected.contains(&scan.node_id) {
                 continue;
             }
-            let mut request = dhpanel_operations::Request::new(
-                scan.node_id,
+            let uid = u32::try_from(scan.uid).unwrap_or_default();
+            let op = if scan.kind == "wordpress" {
+                dhpanel_node_protocol::Operation::InventoryWordPress {
+                    tenant_id: scan.tenant_id,
+                    uid,
+                }
+            } else {
                 dhpanel_node_protocol::Operation::ScanTenant {
                     tenant_id: scan.tenant_id,
-                    uid: u32::try_from(scan.uid).unwrap_or_default(),
+                    uid,
                     folder: scan.folder.clone(),
                     quarantine: scan.quarantine,
-                },
+                }
+            };
+            let mut request = dhpanel_operations::Request::new(
+                scan.node_id,
+                op,
                 format!("scan:{}", scan.id.simple()),
             );
             request.tenant_id = Some(scan.tenant_id);
