@@ -378,3 +378,33 @@ async fn a_cron_command_runs_inside_the_container_with_its_exit_code_output_and_
     ));
     m.remove(&name, true).await.unwrap();
 }
+
+#[tokio::test]
+#[ignore = "needs Docker"]
+async fn every_container_rotates_its_log_so_it_stays_within_30_mib() {
+    let m = manager();
+    m.pull_image(&busybox()).await.unwrap();
+    let name = unique("rot");
+    let mut spec = ContainerSpec::new(name.clone(), busybox());
+    spec.command = vec!["sleep".into(), "30".into()];
+    m.create_container(&spec).await.unwrap();
+    let docker = bollard::Docker::connect_with_unix(
+        socket().to_str().unwrap(),
+        30,
+        bollard::API_DEFAULT_VERSION,
+    )
+    .unwrap();
+    let info = docker
+        .inspect_container(
+            name.as_str(),
+            None::<bollard::query_parameters::InspectContainerOptions>,
+        )
+        .await
+        .unwrap();
+    let log = info.host_config.unwrap().log_config.unwrap();
+    assert_eq!(log.typ.as_deref(), Some("json-file"));
+    let config = log.config.unwrap();
+    assert_eq!(config.get("max-size").map(String::as_str), Some("10m"));
+    assert_eq!(config.get("max-file").map(String::as_str), Some("3"));
+    m.remove(&name, true).await.unwrap();
+}
