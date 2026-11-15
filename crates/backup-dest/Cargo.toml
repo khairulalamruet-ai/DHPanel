@@ -1,0 +1,26 @@
+[package]
+name = "dhpanel-backup-dest"
+description = "Where backups are stored: a folder, an S3-compatible bucket, an SFTP folder (T09.03)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+dhpanel-safe-fs.workspace = true
+hmac = "0.13"
+sha2 = "0.11"
+thiserror = "2.0.21"
+rustix = { version = "1", default-features = false, features = ["std", "fs"] }
+ureq = { version = "3", default-features = false, features = ["rustls"] }
+# libssh2 with its own OpenSSL, linked in (the node needs no OpenSSL of its own). russh was
+# tried first: its current versions give a handler no way to name the server-key type, so a
+# pinned host key cannot be checked, and the older ones have open advisories.
+ssh2 = { version = "0.9", features = ["vendored-openssl"] }
+
+[dev-dependencies]
+sha2 = "0.11"
