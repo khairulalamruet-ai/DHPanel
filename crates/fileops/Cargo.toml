@@ -18,4 +18,7 @@ serde_json = "1"
 # Archives (T08.05): zip, and tar.gz.
 zip = { version = "9.5.1", default-features = false, features = ["deflate"] }
 tar = { version = "0.4.46", default-features = false }
+# Backups (T09.04): the files of an account as an encrypted tar.zst.
+dhpanel-backup.workspace = true
+zstd = { version = "0.14", default-features = false }
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }

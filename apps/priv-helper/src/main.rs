@@ -24,6 +24,23 @@ fn main() -> ExitCode {
     if let Some(mode @ ("fileput" | "fileget")) = std::env::args().nth(1).as_deref() {
         return transfer_worker(mode);
     }
+    if std::env::args().nth(1).as_deref() == Some("filebackup") {
+        let root = std::env::args().nth(3).map(PathBuf::from);
+        return match root {
+            Some(root) => match dhpanel_priv_helper::files::backup_worker(
+                &root,
+                std::io::stdin(),
+                &mut std::io::stdout(),
+            ) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(answer) => {
+                    eprintln!("{}", serde_json::to_string(&answer).unwrap_or_default());
+                    ExitCode::from(3)
+                }
+            },
+            None => ExitCode::from(64),
+        };
+    }
     // The file worker: started by the helper itself, as the tenant's user id.
     if std::env::args().nth(1).as_deref() == Some("fileop") {
         let root = std::env::args().nth(3).map(PathBuf::from);

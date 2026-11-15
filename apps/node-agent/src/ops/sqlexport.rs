@@ -30,7 +30,7 @@ const CHUNK_BYTES: usize = 8 << 20;
 /// Largest compressed dump kept.
 const MAX_EXPORT_BYTES: u64 = 8 << 30;
 /// Longest the whole thing may take.
-const MAX_DURATION: Duration = Duration::from_secs(4 * 3600);
+pub(super) const MAX_DURATION: Duration = Duration::from_secs(4 * 3600);
 
 fn exports_dir(context: &TenantContext) -> PathBuf {
     context.vhosts_root.with_file_name("exports")
@@ -90,59 +90,70 @@ async fn run(
     token: &str,
     path: &Path,
 ) -> Result<u64, AgentError> {
+    let (account, password) =
+        reader_account(context, database, &export_id.simple().to_string()[..12]).await?;
+    let dumped = dump(context, database, &account, &password, path).await;
+    drop_account(context, &account).await;
+    dumped?;
+    let (url, token, path) = (url.to_owned(), token.to_owned(), path.to_owned());
+    tokio::task::spawn_blocking(move || upload(&url, &token, &path))
+        .await
+        .map_err(|_| failed("the upload was cancelled"))?
+}
+
+/// Makes a temporary account that can only read `database` (and see how its routines are
+/// made), and returns its name and password. [`drop_account`] removes it.
+///
+/// # Errors
+/// The database server failing.
+pub(super) async fn reader_account(
+    context: &TenantContext,
+    database: &str,
+    tag: &str,
+) -> Result<(String, String), AgentError> {
     db::ensure_server(context).await?;
     let password =
         random_password().map_err(|e| failed(&format!("cannot make a password: {}", e.kind())))?;
-    let account = format!("dhexport_{}", &export_id.simple().to_string()[..12]);
-    {
-        let mut admin = db::root_connection(context).await?;
-        let hash: Option<String> = admin
-            .exec_first("SELECT PASSWORD(?)", (&password,))
-            .await
-            .map_err(|e| failed(&server_words(&e)))?;
-        let hash = hash
-            .filter(|h| {
-                h.len() == 41 && h.starts_with('*') && h[1..].bytes().all(|b| b.is_ascii_hexdigit())
-            })
-            .ok_or_else(|| failed("the database server gave no password hash"))?;
+    let account = format!("dhexport_{tag}");
+    let mut admin = db::root_connection(context).await?;
+    let hash: Option<String> = admin
+        .exec_first("SELECT PASSWORD(?)", (&password,))
+        .await
+        .map_err(|e| failed(&server_words(&e)))?;
+    let hash = hash
+        .filter(|h| {
+            h.len() == 41 && h.starts_with('*') && h[1..].bytes().all(|b| b.is_ascii_hexdigit())
+        })
+        .ok_or_else(|| failed("the database server gave no password hash"))?;
+    for sql in [
+        format!("DROP USER IF EXISTS '{account}'@'%'"),
+        format!(
+            "CREATE USER '{account}'@'%' IDENTIFIED BY PASSWORD '{hash}' WITH MAX_USER_CONNECTIONS 2"
+        ),
+        format!(
+            "GRANT SELECT, SHOW VIEW, TRIGGER, EVENT, EXECUTE ON `{database}`.* TO '{account}'@'%'"
+        ),
+        // Reading a routine's definition is a global right (MariaDB 11.3+); the account
+        // has no other right outside this database and lives for the dump only.
+        format!("GRANT SHOW CREATE ROUTINE ON *.* TO '{account}'@'%'"),
+    ] {
         admin
-            .query_drop(format!("DROP USER IF EXISTS '{account}'@'%'"))
+            .query_drop(sql)
             .await
             .map_err(|e| failed(&server_words(&e)))?;
-        admin
-            .query_drop(format!(
-                "CREATE USER '{account}'@'%' IDENTIFIED BY PASSWORD '{hash}' WITH MAX_USER_CONNECTIONS 2"
-            ))
-            .await
-            .map_err(|e| failed(&server_words(&e)))?;
-        admin
-            .query_drop(format!(
-                "GRANT SELECT, SHOW VIEW, TRIGGER, EVENT, EXECUTE ON `{database}`.* TO '{account}'@'%'"
-            ))
-            .await
-            .map_err(|e| failed(&server_words(&e)))?;
-        // Reading a routine's definition is a global right (MariaDB 11.3+); the
-        // account has no other right outside this database and lives for the dump only.
-        admin
-            .query_drop(format!(
-                "GRANT SHOW CREATE ROUTINE ON *.* TO '{account}'@'%'"
-            ))
-            .await
-            .map_err(|e| failed(&server_words(&e)))?;
-        let _ = admin.disconnect().await;
     }
-    let dumped = dump(context, database, &account, &password, path).await;
+    let _ = admin.disconnect().await;
+    Ok((account, password))
+}
+
+/// Removes an account made by [`reader_account`].
+pub(super) async fn drop_account(context: &TenantContext, account: &str) {
     if let Ok(mut admin) = db::root_connection(context).await {
         let _ = admin
             .query_drop(format!("DROP USER IF EXISTS '{account}'@'%'"))
             .await;
         let _ = admin.disconnect().await;
     }
-    dumped?;
-    let (url, token, path) = (url.to_owned(), token.to_owned(), path.to_owned());
-    tokio::task::spawn_blocking(move || upload(&url, &token, &path))
-        .await
-        .map_err(|_| failed("the upload was cancelled"))?
 }
 
 /// Runs the dump into the gzip file at `path`.

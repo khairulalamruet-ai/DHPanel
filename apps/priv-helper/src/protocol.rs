@@ -93,6 +93,19 @@ pub enum Action {
         /// Refuse a file bigger than this.
         max_bytes: u64,
     },
+    /// Packs a tenant's files, as the tenant's own user, into an encrypted stream in a new
+    /// staged file of the agent's transfer folder (see `dhpanel_fileops::backup`). The key
+    /// (64 hex digits) goes to the worker through its input, never through a command line.
+    BackupFiles {
+        /// The tenant's id (a lower-case UUID).
+        tenant_id: String,
+        /// The tenant's numeric id (10000..59999).
+        uid: u32,
+        /// The staged file to make: a plain name in the agent's transfer folder.
+        staged: String,
+        /// The key.
+        key: String,
+    },
     /// Removes a tenant's two (empty) directories after its files were
     /// deleted. Never deletes any file: a non-empty directory is a failure.
     RemoveTenant {
@@ -115,6 +128,7 @@ impl Action {
             Self::FileOp { .. } => "file_op",
             Self::PlaceFile { .. } => "place_file",
             Self::TakeFile { .. } => "take_file",
+            Self::BackupFiles { .. } => "backup_files",
             Self::RemoveTenant { .. } => "remove_tenant",
         }
     }
@@ -235,6 +249,7 @@ fn allowed_fields(action: &str) -> Option<&'static [&'static str]> {
             "max_bytes",
         ]),
         "take_file" => Some(&["type", "tenant_id", "uid", "path", "staged", "max_bytes"]),
+        "backup_files" => Some(&["type", "tenant_id", "uid", "staged", "key"]),
         "remove_tenant" => Some(&["type", "tenant_id", "uid"]),
         _ => None,
     }

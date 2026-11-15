@@ -304,3 +304,64 @@ fn links_are_skipped_modes_are_cut_and_limits_hold() {
         FileErrorCode::NotFound
     );
 }
+
+#[test]
+fn the_files_of_an_account_are_packed_into_an_encrypted_stream_that_unpacks_the_same() {
+    use dhpanel_backup::{KEY_LEN, StreamReader};
+    use dhpanel_fileops::backup::pack_files;
+    use std::io::Read as _;
+    let s = Scratch::new("pack");
+    let root = s.root();
+    std::fs::create_dir_all(s.path("www/sub")).unwrap();
+    std::fs::create_dir_all(s.path(".trash/x")).unwrap();
+    std::fs::write(s.path(".trash/x/old"), "deleted").unwrap();
+    std::fs::write(s.path("www/index.php"), "<?php echo 1;").unwrap();
+    std::fs::write(
+        s.path("www/sub/big.bin"),
+        (0..400_000u32)
+            .flat_map(|i| i.to_le_bytes())
+            .collect::<Vec<u8>>(),
+    )
+    .unwrap();
+    std::fs::write(s.path("empty"), "").unwrap();
+    symlink("/etc/passwd", s.path("www/link")).unwrap();
+    let key = [3u8; KEY_LEN];
+    let mut stored = Vec::new();
+    let packed = pack_files(&root, &key, &mut stored).unwrap();
+    assert_eq!((packed.entries, packed.skipped), (5, 1), "{packed:?}");
+    assert!(
+        !stored.windows(5).any(|w| w == b"<?php"),
+        "nothing readable is stored"
+    );
+    // Back: decrypt, decompress, list and read.
+    let plain = StreamReader::new(&stored[..], &key);
+    let mut archive = tar::Archive::new(zstd::stream::Decoder::new(plain).unwrap());
+    let mut seen = std::collections::BTreeMap::new();
+    for entry in archive.entries().unwrap() {
+        let mut entry = entry.unwrap();
+        let name = entry.path().unwrap().to_string_lossy().into_owned();
+        let mut body = Vec::new();
+        entry.read_to_end(&mut body).unwrap();
+        seen.insert(name, body);
+    }
+    assert_eq!(
+        seen.keys().map(String::as_str).collect::<Vec<_>>(),
+        [
+            "empty",
+            "www/",
+            "www/index.php",
+            "www/sub/",
+            "www/sub/big.bin"
+        ]
+    );
+    assert_eq!(seen["www/index.php"], b"<?php echo 1;");
+    assert_eq!(seen["www/sub/big.bin"].len(), 1_600_000);
+    assert!(!seen.contains_key("www/link") && !seen.keys().any(|k| k.contains("trash")));
+    // The wrong key, or a changed stream, does not open.
+    let mut wrong = Vec::new();
+    assert!(
+        StreamReader::new(&stored[..], &[4u8; KEY_LEN])
+            .read_to_end(&mut wrong)
+            .is_err()
+    );
+}

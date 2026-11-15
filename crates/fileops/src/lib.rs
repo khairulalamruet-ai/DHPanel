@@ -11,6 +11,7 @@
 //! file for good except emptying the trash.
 
 mod archive;
+pub mod backup;
 mod usage;
 
 use std::{

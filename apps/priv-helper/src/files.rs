@@ -215,6 +215,20 @@ fn run_worker(
     stdin: Stdio,
     stdout: Stdio,
 ) -> Result<(bool, Vec<u8>, String), Failure> {
+    run_worker_with(uid, mode, root, args, stdin, stdout, None)
+}
+
+/// [`run_worker`], giving the worker `input` on its standard input (when `Some`; the
+/// `stdin` given is then ignored).
+fn run_worker_with(
+    uid: u32,
+    mode: &str,
+    root: &Path,
+    args: &[String],
+    stdin: Stdio,
+    stdout: Stdio,
+    input: Option<Vec<u8>>,
+) -> Result<(bool, Vec<u8>, String), Failure> {
     let program = std::env::current_exe()
         .map_err(|_| (ErrorCode::Failed, "cannot find the helper itself"))?;
     let setpriv = ["/usr/bin/setpriv", "/bin/setpriv"]
@@ -233,11 +247,20 @@ fn run_worker(
         .arg(root)
         .args(args)
         .env_clear()
-        .stdin(stdin)
+        .stdin(if input.is_some() {
+            Stdio::piped()
+        } else {
+            stdin
+        })
         .stdout(stdout)
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|_| (ErrorCode::Failed, "cannot start the file worker"))?;
+    let feeder = input.zip(child.stdin.take()).map(|(data, mut pipe)| {
+        std::thread::spawn(move || {
+            let _ = pipe.write_all(&data);
+        })
+    });
     let out = child.stdout.take();
     let err = child.stderr.take();
     let out_reader = std::thread::spawn(move || {
@@ -267,6 +290,9 @@ fn run_worker(
             Err(_) => break false,
         }
     };
+    if let Some(feeder) = feeder {
+        let _ = feeder.join();
+    }
     Ok((
         ok,
         out_reader.join().unwrap_or_default(),
@@ -404,6 +430,95 @@ pub fn take_file(
         let _ = dhpanel_safe_fs::remove(folder.fd(), staged, false);
     }
     result
+}
+
+/// `backup_files`: the tenant's files, packed and encrypted, into a new staged file.
+///
+/// # Errors
+/// As [`place_file`].
+pub fn backup_files(
+    env: &TenantEnv,
+    transfers: &Path,
+    agent: (u32, u32),
+    tenant_id: &str,
+    uid: u32,
+    staged: &str,
+    key: &str,
+) -> Result<(), Failure> {
+    if key.len() != 64 || !key.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err((ErrorCode::InvalidArguments, "the key is 64 hex digits"));
+    }
+    let (host, root) = host_ids(env, tenant_id, uid)?;
+    dhpanel_safe_fs::check_name(staged)
+        .map_err(|_| (ErrorCode::InvalidArguments, "bad staged name"))?;
+    let folder = staged_root(transfers)?;
+    let out: OwnedFd = rustix::fs::openat(
+        folder.fd(),
+        staged,
+        rustix::fs::OFlags::WRONLY
+            | rustix::fs::OFlags::CREATE
+            | rustix::fs::OFlags::EXCL
+            | rustix::fs::OFlags::NOFOLLOW
+            | rustix::fs::OFlags::CLOEXEC,
+        rustix::fs::Mode::from_raw_mode(0o600),
+    )
+    .map_err(|_| (ErrorCode::Failed, "cannot make the staged file"))?;
+    rustix::fs::fchown(
+        &out,
+        Some(rustix::fs::Uid::from_raw(agent.0)),
+        Some(rustix::fs::Gid::from_raw(agent.1)),
+    )
+    .map_err(|_| (ErrorCode::Failed, "cannot hand the staged file over"))?;
+    // Packing everything is slow work: lowest priority, like the disk usage walk.
+    let result = run_worker_with(
+        host,
+        "filebackup",
+        &root,
+        &[],
+        Stdio::null(),
+        Stdio::from(File::from(out)),
+        Some(format!("{key}\n").into_bytes()),
+    )
+    .and_then(|(ok, out, err)| said(ok, &out, &err));
+    if result.is_err() {
+        let _ = dhpanel_safe_fs::remove(folder.fd(), staged, false);
+    }
+    result
+}
+
+/// The worker of `filebackup`: the key arrives on stdin, the encrypted stream goes to stdout.
+///
+/// # Errors
+/// The refusal, as the answer to print on stderr.
+pub fn backup_worker(
+    root: &Path,
+    mut input: impl std::io::Read,
+    out: &mut dyn std::io::Write,
+) -> Result<(), FileResult> {
+    let mut text = String::new();
+    input
+        .by_ref()
+        .take(256)
+        .read_to_string(&mut text)
+        .map_err(|_| FileResult::error(FileErrorCode::InvalidArguments, "no key"))?;
+    let hex = text.trim();
+    let mut key = [0u8; dhpanel_backup::KEY_LEN];
+    if hex.len() != key.len() * 2 {
+        return Err(FileResult::error(
+            FileErrorCode::InvalidArguments,
+            "the key is not 64 hex digits",
+        ));
+    }
+    for (i, b) in key.iter_mut().enumerate() {
+        *b = u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).map_err(|_| {
+            FileResult::error(FileErrorCode::InvalidArguments, "the key is not hex")
+        })?;
+    }
+    let root = Root::open(root)
+        .map_err(|_| FileResult::error(FileErrorCode::NotFound, "the files are not there"))?;
+    dhpanel_fileops::backup::pack_files(&root, &key, out)
+        .map(|_| ())
+        .map_err(|(code, message)| FileResult::error(code, message))
 }
 
 /// The worker of `fileput`: the staged file arrives on stdin.

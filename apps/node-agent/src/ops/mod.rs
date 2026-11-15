@@ -20,6 +20,7 @@
 //! handler that runs a command line, and the registry cannot be extended at
 //! run time.
 
+pub mod backup;
 pub mod cache;
 pub mod capabilities;
 pub mod db;
@@ -165,6 +166,10 @@ impl Registry {
             registry.register("send_file", {
                 let context = context.clone();
                 move |op| transfer::send_file(context.clone(), op)
+            });
+            registry.register("create_backup", {
+                let context = context.clone();
+                move |op| backup::create_backup(context.clone(), op)
             });
             registry.register("file_op", {
                 let context = context.clone();

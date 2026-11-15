@@ -24,6 +24,8 @@ dhpanel-domain.workspace = true
 # Checks an uploaded certificate and its key before the web server gets them.
 dhpanel-pki.workspace = true
 dhpanel-priv-helper = { path = "../priv-helper" }
+dhpanel-backup.workspace = true
+dhpanel-backup-dest.workspace = true
 dhpanel-tenant-stack.workspace = true
 rustls.workspace = true
 tokio-rustls.workspace = true
@@ -34,6 +36,7 @@ clap = { version = "4", features = ["derive", "env"] }
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "ring", "x509-parser"] }
 # Checks what the control plane sends back before anything is stored.
 # Reads SQL dumps that were compressed with gzip (T07.07).
+zstd = { version = "0.14", default-features = false }
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 # Talks to the shared MariaDB server of the node (loopback only) to make databases and
 # users (T07.03). No TLS: the connection never leaves the host.
@@ -61,6 +64,7 @@ redb = "4"
 rustix = { version = "1", default-features = false, features = ["std", "fs"] }
 
 [dev-dependencies]
+tar = { version = "0.4", default-features = false }
 dhpanel-node-gateway.workspace = true
 dhpanel-operations.workspace = true
 # Tests play the control plane: they make a real CA, and the enrolment test runs

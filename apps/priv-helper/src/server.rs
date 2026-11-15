@@ -267,6 +267,20 @@ fn execute_one(action: &Action, config: &Config) -> Result<(), (ErrorCode, &'sta
             *overwrite,
             *max_bytes,
         ),
+        Action::BackupFiles {
+            tenant_id,
+            uid,
+            staged,
+            key,
+        } => crate::files::backup_files(
+            &config.tenants,
+            &config.transfers,
+            (config.agent_uid, config.agent_gid),
+            tenant_id,
+            *uid,
+            staged,
+            key,
+        ),
         Action::TakeFile {
             tenant_id,
             uid,

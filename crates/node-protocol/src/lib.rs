@@ -637,6 +637,37 @@ pub enum Operation {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         token: Option<DbPassword>,
     },
+    /// Makes a backup of a hosting account: its files (a tar, compressed, encrypted, read
+    /// as the tenant's own user), one consistent dump per database, the DNS records and
+    /// the setup data, then the manifest; every part goes to the destination as it is
+    /// made. The key and the destination's credentials are not in the ledger. Answered
+    /// with [`Output::BackupCreated`].
+    CreateBackup {
+        /// The tenant.
+        tenant_id: Uuid,
+        /// The tenant's numeric user id.
+        uid: u32,
+        /// This backup's id (the folder it is stored in at the destination).
+        backup_id: Uuid,
+        /// The hosting account's system name.
+        account: String,
+        /// Where it goes.
+        target: BackupTarget,
+        /// The destination's secret part, as JSON text; absent in the ledger.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        credentials: Option<DbPassword>,
+        /// The key the parts are encrypted with (64 hex digits); absent in the ledger.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        key: Option<DbPassword>,
+        /// The whole names of the databases to dump.
+        databases: Vec<String>,
+        /// The DNS records of the account's domains (stored as `dns.json`).
+        dns: serde_json::Value,
+        /// What is needed to set the account up again (stored as `meta.json`).
+        meta: serde_json::Value,
+        /// When it was asked for (Unix seconds).
+        created_at: i64,
+    },
     /// One file manager request on a tenant's files, done as the tenant's own user
     /// id. Answered with [`Output::File`].
     FileOp {
@@ -843,6 +874,32 @@ pub enum Operation {
     },
 }
 
+/// Where backups are stored: the kind and what is not secret about it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BackupTarget {
+    /// `local`, `s3` or `sftp`.
+    pub kind: String,
+    /// The settings as the panel keeps them (a folder; endpoint, bucket, region, prefix;
+    /// host, port, user, path, host key).
+    pub settings: serde_json::Value,
+}
+
+/// One stored part of a backup.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BackupPartInfo {
+    /// Its name at the destination.
+    pub name: String,
+    /// `files`, `database`, `dns` or `meta`.
+    pub kind: String,
+    /// Size as stored (encrypted), in bytes.
+    pub stored_bytes: u64,
+    /// SHA-256 of the part as stored (hex).
+    pub sha256: String,
+    /// For a database: its name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub database: Option<String>,
+}
+
 impl Operation {
     /// Wire names of every operation this build knows, in declaration order.
     pub const TYPE_NAMES: &'static [&'static str] = &[
@@ -862,6 +919,7 @@ impl Operation {
         "import_sql",
         "export_sql",
         "file_op",
+        "create_backup",
         "upsert_ftp_account",
         "drop_ftp_account",
         "fetch_file",
@@ -909,6 +967,7 @@ impl Operation {
             Self::ImportSql { .. } => "import_sql",
             Self::ExportSql { .. } => "export_sql",
             Self::FileOp { .. } => "file_op",
+            Self::CreateBackup { .. } => "create_backup",
             Self::UpsertFtpAccount { .. } => "upsert_ftp_account",
             Self::DropFtpAccount { .. } => "drop_ftp_account",
             Self::FetchFile { .. } => "fetch_file",
@@ -1134,6 +1193,15 @@ pub enum Output {
     FtpAccountDropped {
         /// Whether there was one to remove.
         existed: bool,
+    },
+    /// Answer to [`Operation::CreateBackup`].
+    BackupCreated {
+        /// SHA-256 of the stored manifest (hex).
+        manifest_sha256: String,
+        /// Everything stored, in bytes.
+        size_bytes: u64,
+        /// The parts, as stored.
+        parts: Vec<BackupPartInfo>,
     },
     /// Answer to [`Operation::FileOp`].
     File {
@@ -1531,6 +1599,8 @@ impl EnvelopeHeader {
 }
 
 /// The result of reading an operation frame on the agent.
+// A parsed frame is handled once and dropped; boxing the envelope would only add churn.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Parsed {
     /// A known, well-formed operation.
@@ -2079,6 +2149,22 @@ mod tests {
                 uid: 10_000,
                 request: files::FileRequest::TrashList,
             },
+            Operation::CreateBackup {
+                tenant_id: id(),
+                uid: 10_000,
+                backup_id: id(),
+                account: "alice".into(),
+                target: BackupTarget {
+                    kind: "local".into(),
+                    settings: serde_json::json!({"path": "/var/backups/dhpanel"}),
+                },
+                credentials: None,
+                key: None,
+                databases: vec!["alice_shop".into()],
+                dns: serde_json::json!([]),
+                meta: serde_json::json!({}),
+                created_at: 1,
+            },
             Operation::UpsertFtpAccount {
                 tenant_id: id(),
                 uid: 10_000,
@@ -2175,7 +2261,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            41,
+            42,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }

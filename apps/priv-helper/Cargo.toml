@@ -19,6 +19,7 @@ path = "src/main.rs"
 # network stack, no argument-parsing framework.
 [dependencies]
 dhpanel-common.workspace = true
+dhpanel-backup.workspace = true
 dhpanel-fileops.workspace = true
 dhpanel-node-protocol.workspace = true
 dhpanel-safe-fs.workspace = true
