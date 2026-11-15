@@ -10014,7 +10014,8 @@ export const handlers = [
                                               })(),
 
                                               // ===================================                                              // T18.12 — Support Report Diagnostic Bundle (TODO(api:T18.12))
-                                              // ===================================                                              http.get(/\/api(?:\/v1\/admin)?\/support\/report$/, () => {
+                                              // ===================================
+                                              http.get(/\/api(?:\/v1\/admin)?\/support\/report$/, () => {
                                                 return HttpResponse.json({
                                                   metadata: {
                                                     bundle_id: "diag-20261114-8841",

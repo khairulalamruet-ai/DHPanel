@@ -738,6 +738,8 @@ describe("NodesPage", () => {
         "/api/v1/admin/cluster/scheduler",
         expect.objectContaining({ method: "PUT" })
       );
+    });
+  });
 
   it("displays node offline alert banner and triggers emergency failover (DoD T16.07)", async () => {
     render(
