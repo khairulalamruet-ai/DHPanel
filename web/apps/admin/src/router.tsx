@@ -62,6 +62,14 @@ import {
   ApiTokensPage,
   SupportReportPage,
   AdminDnsClusterPage,
+  AppsPage,
+  ClientEmailPage,
+  AdminMailQueuePage,
+  ClientFirewallPage,
+  AdminFirewallPage,
+  ResellerPortalPage,
+  AdminResellersPage,
+  AdminSecurityCenterPage,
   filterNavItems,
   registeredFrontendModules,
 } from "@dhpanel/modules";
@@ -582,6 +590,96 @@ const supportReportRoute = createRoute({
   component: SupportReportPage,
 });
 
+// 51. Firewall routes (T11.08)
+const clientFirewallRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/firewall",
+  component: ClientFirewallPage,
+});
+
+const adminFirewallRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/firewall",
+  component: AdminFirewallPage,
+});
+
+// 52. Security Center routes (T11.11)
+const adminSecurityRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/security",
+  component: AdminSecurityCenterPage,
+});
+
+const adminSecurityCenterRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/security-center",
+  component: AdminSecurityCenterPage,
+});
+
+const securityCenterRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/security-center",
+  component: AdminSecurityCenterPage,
+});
+
+// 53. Apps routes (T12.06 & T12.03)
+const appsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/apps",
+  component: AppsPage,
+});
+
+const adminAppsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/apps",
+  component: AppsPage,
+});
+
+// 54. Email & Mail Queue routes (T13.12, T13.10, T13.11)
+const emailRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/email",
+  component: ClientEmailPage,
+});
+
+const adminMailRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/mail",
+  component: AdminMailQueuePage,
+});
+
+const adminEmailRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/email",
+  component: AdminMailQueuePage,
+});
+
+// 55. Reseller routes (T14.05, T14.02, T14.07)
+const resellerRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/reseller",
+  component: ResellerPortalPage,
+});
+
+const adminResellersRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/resellers",
+  component: AdminResellersPage,
+});
+
+const adminResellerRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/reseller",
+  component: AdminResellersPage,
+});
+
+// 56. License Authority Admin alias
+const adminLaRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/la",
+  component: LaAdminPage,
+});
+
 // 18. Login route
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -651,6 +749,25 @@ const routeTree = rootRoute.addChildren([
   adminServerToolsRoute,
   clientWafRoute,
   adminWafRoute,
+  clientFirewallRoute,
+  adminFirewallRoute,
+  adminSecurityRoute,
+  adminSecurityCenterRoute,
+  securityCenterRoute,
+  appsRoute,
+  adminAppsRoute,
+  emailRoute,
+  adminMailRoute,
+  adminEmailRoute,
+  resellerRoute,
+  adminResellersRoute,
+  adminResellerRoute,
+  adminMigrationRoute,
+  clientMigrationRoute,
+  adminLicenseRoute,
+  licenseRoute,
+  laRoute,
+  adminLaRoute,
   adminNotificationsRoute,
   settingsNotificationsRoute,
   adminBrandingRoute,

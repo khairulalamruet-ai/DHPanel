@@ -141,7 +141,7 @@ export function NodesPage() {
         }
       );
       toast({
-        title: action === "drain" ? t("nodes.capacity.drainSuccess") : t("nodes.capacity.undrainSuccess"),
+        title: action === "drain" ? t("nodes.scheduler.drainSuccess") : t("nodes.scheduler.undrainSuccess"),
         variant: "default",
       });
       fetchNodes();
