@@ -270,6 +270,42 @@ pub async fn effective(
     Ok(combine(global.as_ref(), tenant.as_ref(), domain.as_ref()))
 }
 
+/// What each of an account's domains gets (three queries, whatever the number of domains).
+///
+/// # Errors
+/// Database errors.
+pub async fn for_domains(
+    pool: &PgPool,
+    tenant_id: Uuid,
+    domain_ids: &[Uuid],
+) -> Result<std::collections::BTreeMap<Uuid, Effective>, sqlx::Error> {
+    let global = get(pool, Scope::Global).await?;
+    let tenant = get(pool, Scope::Tenant(tenant_id)).await?;
+    let rows = sqlx::query!(
+        r#"SELECT domain_id AS "domain_id!", mode, disabled_rules
+           FROM waf_policies WHERE scope = 'domain' AND tenant_id = $1"#,
+        tenant_id
+    )
+    .fetch_all(pool)
+    .await?;
+    let own: std::collections::BTreeMap<Uuid, Policy> = rows
+        .into_iter()
+        .filter_map(|r| {
+            Some((
+                r.domain_id,
+                Policy {
+                    mode: Mode::parse(&r.mode)?,
+                    disabled_rules: r.disabled_rules,
+                },
+            ))
+        })
+        .collect();
+    Ok(domain_ids
+        .iter()
+        .map(|id| (*id, combine(global.as_ref(), tenant.as_ref(), own.get(id))))
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

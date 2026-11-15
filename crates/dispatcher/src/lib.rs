@@ -384,7 +384,33 @@ impl Dispatcher {
         let redirects = dhpanel_database::routes::redirects(db, tenant.id)
             .await
             .map_err(|e| e.to_string())?;
-        let routes = routes::build(&tenant.status, &upstream, &domains, &redirects);
+        let mut routes = routes::build(&tenant.status, &upstream, &domains, &redirects);
+        // The firewall's policy of each site: what the most specific policy says.
+        let ids: Vec<Uuid> = domains.iter().map(|d| d.id).collect();
+        let policies = dhpanel_database::waf::for_domains(db, tenant.id, &ids)
+            .await
+            .map_err(|e| e.to_string())?;
+        let by_host: std::collections::BTreeMap<String, dhpanel_node_protocol::WafSetting> =
+            domains
+                .iter()
+                .filter_map(|d| {
+                    let p = policies.get(&d.id)?;
+                    (p.mode != dhpanel_database::waf::Mode::Off).then(|| {
+                        (
+                            d.fqdn.clone(),
+                            dhpanel_node_protocol::WafSetting {
+                                mode: p.mode.as_str().to_owned(),
+                                disabled_rules: p
+                                    .disabled_rules
+                                    .iter()
+                                    .filter_map(|r| u32::try_from(*r).ok())
+                                    .collect(),
+                            },
+                        )
+                    })
+                })
+                .collect();
+        routes::apply_waf(&mut routes, &by_host);
         // The uploaded certificates go first, so a site never answers without the
         // certificate it should have. Their keys are not in the ledger.
         let certificates = dhpanel_database::certificates::custom_of_tenant(db, tenant.id)

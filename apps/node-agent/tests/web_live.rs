@@ -53,6 +53,7 @@ async fn get(url: &str, host: &str, path: &str) -> (u16, Option<String>, String)
 
 fn site(hosts: &[&str], upstream: Option<&str>, redirects: Vec<RouteRedirect>) -> SiteRoute {
     SiteRoute {
+        waf: None,
         hosts: hosts.iter().map(|h| (*h).to_owned()).collect(),
         upstream: upstream.map(str::to_owned),
         redirects,
@@ -88,6 +89,7 @@ async fn sites_are_served_suspended_redirected_and_put_back_after_caddy_forgets_
             listen: vec![":18080".into()],
             automatic_https: false,
             data_dir: None,
+            waf_dir: None,
         },
         &dir,
     );
@@ -277,6 +279,7 @@ async fn routes_are_kept_when_caddy_cannot_be_reached_and_applied_later() {
             listen: vec![":18080".into()],
             automatic_https: false,
             data_dir: None,
+            waf_dir: None,
         },
         &dir,
     );
@@ -349,6 +352,7 @@ async fn force_https_redirects_plain_requests_and_hsts_is_sent_over_https_only()
             listen: vec![":18080".into(), ":18443".into()],
             automatic_https: true,
             data_dir: None,
+            waf_dir: None,
         },
         &dir,
     );
@@ -485,6 +489,7 @@ async fn an_uploaded_certificate_is_served_until_it_is_removed() {
             listen: vec![":18080".into(), ":18443".into()],
             automatic_https: true,
             data_dir: None,
+            waf_dir: None,
         },
         &dir,
     );
@@ -646,6 +651,7 @@ async fn error_pages_are_the_installations_until_an_administrator_replaces_them(
             listen: vec![":18080".into(), ":18443".into()],
             automatic_https: false,
             data_dir: None,
+            waf_dir: None,
         },
         &dir,
     );
@@ -738,4 +744,85 @@ async fn error_pages_are_the_installations_until_an_administrator_replaces_them(
     let (_, _, text) = get(&url, "nobody.example.com", "/").await;
     assert!(text.contains("Nothing here"), "{text}");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+#[ignore = "needs the Caddy with the firewall (CADDY_IMAGE=dh-caddy-waf:test deploy/dev/web-live.sh; see the file header)"]
+async fn a_policy_change_reaches_a_running_caddy_without_a_restart() {
+    let (Some(admin), Some(url), Some(waf_dir)) = (
+        env("DHPANEL_TEST_CADDY_ADMIN"),
+        env("DHPANEL_TEST_CADDY_URL"),
+        env("DHPANEL_TEST_WAF_DIR").filter(|d| !d.is_empty()),
+    ) else {
+        eprintln!("skipped: no Caddy with the firewall");
+        return;
+    };
+    let dir = std::env::temp_dir().join(format!("dh-waf-live-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let web = WebContext::new(
+        Settings {
+            admin: admin.clone(),
+            listen: vec![":18080".into()],
+            automatic_https: false,
+            data_dir: None,
+            waf_dir: Some(waf_dir.into()),
+        },
+        &dir,
+    );
+    let with = |waf: Option<dhpanel_node_protocol::WafSetting>| {
+        let mut route = site(&["example.com"], Some("dh-alice-web:8080"), Vec::new());
+        route.waf = waf;
+        set_site_routes(web.clone(), set("alice", vec![route]))
+    };
+    let setting = |mode: &str, rules: &[u32]| {
+        Some(dhpanel_node_protocol::WafSetting {
+            mode: mode.into(),
+            disabled_rules: rules.to_vec(),
+        })
+    };
+    let attack = "/?id=1%27%20OR%20%271%27%3D%271";
+    // No policy: everything passes, the attack too.
+    with(None).await.unwrap();
+    assert_eq!(get(&url, "example.com", attack).await.0, 200);
+    // Block: the attack is refused, an ordinary request is not. Caddy was not restarted.
+    with(setting("block", &[])).await.unwrap();
+    assert_eq!(get(&url, "example.com", attack).await.0, 403);
+    assert_eq!(get(&url, "example.com", "/?page=2").await.0, 200);
+    // Detect: it passes (and is logged).
+    with(setting("detect", &[])).await.unwrap();
+    assert_eq!(get(&url, "example.com", attack).await.0, 200);
+    // Rules switched off reach the loaded configuration.
+    with(setting("block", &[942100, 942130])).await.unwrap();
+    let config = web_config(&admin).await;
+    assert!(
+        config.contains("SecRuleRemoveById 942100") && config.contains("SecRuleRemoveById 942130"),
+        "{config}"
+    );
+    // Back to none: nothing of the firewall is left in the configuration.
+    with(None).await.unwrap();
+    assert!(!web_config(&admin).await.contains("SecRule"));
+    assert_eq!(get(&url, "example.com", attack).await.0, 200);
+    // A setting that is not valid is refused and changes nothing.
+    for bad in [
+        setting("maybe", &[]),
+        setting("block", &[0]),
+        setting("block", &[1_000_000]),
+    ] {
+        let e = with(bad).await.unwrap_err();
+        assert_eq!(e.code, ErrorCode::InvalidArguments);
+    }
+}
+
+async fn web_config(admin: &str) -> String {
+    let url = format!("{admin}/config/");
+    tokio::task::spawn_blocking(move || {
+        ureq::get(&url)
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_to_string()
+            .unwrap()
+    })
+    .await
+    .unwrap()
 }

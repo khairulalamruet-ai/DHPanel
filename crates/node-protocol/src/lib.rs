@@ -150,7 +150,25 @@ pub struct SiteRoute {
     /// `account`, which picks the page visitors see. Empty means `domain`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub suspended_by: Option<String>,
+    /// The web application firewall for this site: `None` is off. Only a node whose web
+    /// server has the firewall (`DHPANEL_AGENT_WAF_DIR`) applies it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waf: Option<WafSetting>,
 }
+
+/// How the firewall acts for one site.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WafSetting {
+    /// `detect` (log what it would block) or `block`.
+    pub mode: String,
+    /// Rule ids that do not apply (1 to 999999, at most [`MAX_WAF_RULES`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub disabled_rules: Vec<u32>,
+}
+
+/// Most rules one site may switch off.
+pub const MAX_WAF_RULES: usize = 200;
 
 /// One page for the web server to show when a site cannot answer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -2659,6 +2677,7 @@ mod tests {
             Operation::SetSiteRoutes {
                 username: "alice".into(),
                 routes: vec![SiteRoute {
+                    waf: None,
                     hosts: vec!["example.com".into()],
                     upstream: Some("dh-alice-web:8080".into()),
                     redirects: vec![],

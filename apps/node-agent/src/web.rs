@@ -55,6 +55,10 @@ pub struct Settings {
     /// Caddy's data directory (where it keeps its certificates), so they can be
     /// listed. `DHPANEL_AGENT_CADDY_DATA`; without it no certificates are reported.
     pub data_dir: Option<PathBuf>,
+    /// Where the web application firewall's rules are on the web server's machine
+    /// (`coraza.conf` and `crs/`; `DHPANEL_AGENT_WAF_DIR`). Without it no site gets the
+    /// firewall, whatever the policy says: Caddy would not know the module.
+    pub waf_dir: Option<PathBuf>,
 }
 
 impl Settings {
@@ -77,6 +81,7 @@ impl Settings {
             listen,
             automatic_https,
             data_dir: std::env::var_os("DHPANEL_AGENT_CADDY_DATA").map(PathBuf::from),
+            waf_dir: std::env::var_os("DHPANEL_AGENT_WAF_DIR").map(PathBuf::from),
         })
     }
 }
@@ -147,6 +152,18 @@ fn invalid(message: impl Into<String>) -> AgentError {
 fn validate(username: &TenantUsername, routes: &[SiteRoute]) -> Result<(), AgentError> {
     if routes.len() > MAX_SITES_PER_TENANT {
         return Err(invalid("too many sites for one tenant"));
+    }
+    for site in routes {
+        if let Some(waf) = &site.waf
+            && (!matches!(waf.mode.as_str(), "detect" | "block")
+                || waf.disabled_rules.len() > dhpanel_node_protocol::MAX_WAF_RULES
+                || waf
+                    .disabled_rules
+                    .iter()
+                    .any(|r| !(1..=999_999).contains(r)))
+        {
+            return Err(invalid("the firewall setting of a site is not valid"));
+        }
     }
     let mut hosts = BTreeSet::new();
     let mut redirects = 0usize;
@@ -279,8 +296,32 @@ fn pma_route(host: &str) -> Value {
 }
 
 /// One site as a Caddy route.
-fn site_route(site: &SiteRoute, pages: &Pages) -> Value {
+/// The directives of the firewall for one site: the base settings and the rule set, the mode,
+/// and the rules that do not apply. Only numbers and the agent's own directory go in.
+fn waf_directives(setting: &dhpanel_node_protocol::WafSetting, dir: &Path) -> String {
+    let dir = dir.display();
+    let mut text = format!(
+        "Include {dir}/coraza.conf\nInclude {dir}/crs/crs-setup.conf\nInclude {dir}/crs/rules/*.conf\nSecRuleEngine {}\n",
+        if setting.mode == "block" {
+            "On"
+        } else {
+            "DetectionOnly"
+        }
+    );
+    for rule in &setting.disabled_rules {
+        text.push_str(&format!("SecRuleRemoveById {rule}\n"));
+    }
+    text
+}
+
+fn site_route(site: &SiteRoute, pages: &Pages, waf_dir: Option<&Path>) -> Value {
     let mut inner: Vec<Value> = Vec::new();
+    // The firewall looks at the request before anything answers it.
+    if let (Some(setting), Some(dir), Some(_)) = (&site.waf, waf_dir, &site.upstream) {
+        inner.push(json!({
+            "handle": [{"handler": "waf", "directives": waf_directives(setting, dir)}]
+        }));
+    }
     if site.force_https {
         // Visitors on plain HTTP go to the same address over HTTPS. The
         // placeholders are Caddy's own and fixed here: nothing the control plane
@@ -348,7 +389,11 @@ fn compile(
 ) -> Value {
     // phpMyAdmin's name first: no tenant's site can take it over.
     let mut routes: Vec<Value> = pma_host.map(pma_route).into_iter().collect();
-    routes.extend(all.values().flatten().map(|site| site_route(site, pages)));
+    routes.extend(
+        all.values()
+            .flatten()
+            .map(|site| site_route(site, pages, settings.waf_dir.as_deref())),
+    );
     // Anything else: a plain "no such site", never another tenant's page.
     routes.push(json!({"handle": [page(404, &pages.get(ErrorKind::NotFound), &[])]}));
     let mut server = json!({"listen": settings.listen, "routes": routes});
@@ -1028,6 +1073,7 @@ mod tests {
 
     fn site(hosts: &[&str], upstream: Option<&str>) -> SiteRoute {
         SiteRoute {
+            waf: None,
             hosts: hosts.iter().map(|h| (*h).to_owned()).collect(),
             upstream: upstream.map(str::to_owned),
             redirects: vec![],
@@ -1047,6 +1093,7 @@ mod tests {
             listen: vec![":80".into(), ":443".into()],
             automatic_https: true,
             data_dir: None,
+            waf_dir: None,
         }
     }
 

@@ -3,6 +3,7 @@
 # real Caddy and a real site, all in throw-away containers (T05.14).
 #
 #   deploy/dev/web-live.sh [path-to-the-test-binary]
+#   CADDY_IMAGE=dh-caddy-waf:test WAF_DIR=/etc/caddy deploy/dev/web-live.sh   (with the firewall, T11.03)
 #
 # Needs Docker and the test binary built with
 #   cargo test -p dhpanel-node-agent --test web_live --no-run
@@ -54,5 +55,6 @@ DHPANEL_TEST_CADDY_ADMIN=http://127.0.0.1:12019 \
 DHPANEL_TEST_CADDY_URL=http://127.0.0.1:18080 \
 DHPANEL_TEST_CADDY_TLS_PORT=18443 \
 DHPANEL_TEST_CADDY_CONTAINER="$CADDY" \
+DHPANEL_TEST_WAF_DIR="${WAF_DIR:-}" \
   "$TEST_BIN" --include-ignored --nocapture --test-threads=1 2>&1 | grep -E "^test |test result|panicked|left|right|skipped|Caddy" -A3
 exit "${PIPESTATUS[0]}"

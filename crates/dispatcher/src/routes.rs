@@ -8,6 +8,17 @@ use dhpanel_node_protocol::{
 };
 use uuid::Uuid;
 
+/// Puts the firewall policy into the sites: `by_host` is what applies to each domain
+/// (the primary name of a site is the key; a mode of `off` is simply not in it).
+pub fn apply_waf(
+    routes: &mut [SiteRoute],
+    by_host: &BTreeMap<String, dhpanel_node_protocol::WafSetting>,
+) {
+    for site in routes {
+        site.waf = site.hosts.first().and_then(|h| by_host.get(h)).cloned();
+    }
+}
+
 /// The sites a tenant has on its node.
 ///
 /// * only an `active` or `suspended` tenant has any (its containers exist);
@@ -35,6 +46,7 @@ pub fn build(
     let mut sites: Vec<(Uuid, SiteRoute)> = Vec::new();
     for d in domains.iter().filter(|d| d.kind != "alias") {
         let route = SiteRoute {
+            waf: None,
             hosts: vec![d.fqdn.clone()],
             upstream: (!suspended[&d.id]).then(|| upstream.to_owned()),
             redirects: redirects
@@ -258,5 +270,33 @@ mod tests {
                 .iter()
                 .all(|s| s.suspended_by.as_deref() == Some("account"))
         );
+    }
+
+    #[test]
+    fn the_firewall_setting_goes_to_the_site_of_its_primary_name_only() {
+        use dhpanel_node_protocol::WafSetting;
+        let domains = [
+            dom(1, "a.com", "primary", None, "active"),
+            dom(2, "b.com", "primary", None, "active"),
+        ];
+        let mut routes = build("active", UP, &domains, &[]);
+        let mut by_host = BTreeMap::new();
+        by_host.insert(
+            "a.com".to_owned(),
+            WafSetting {
+                mode: "block".into(),
+                disabled_rules: vec![942100],
+            },
+        );
+        apply_waf(&mut routes, &by_host);
+        assert_eq!(
+            routes[0].waf.as_ref().map(|w| w.mode.as_str()),
+            Some("block")
+        );
+        assert_eq!(
+            routes[0].waf.as_ref().map(|w| w.disabled_rules.clone()),
+            Some(vec![942100])
+        );
+        assert!(routes[1].waf.is_none());
     }
 }
