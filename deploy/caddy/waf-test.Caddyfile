@@ -1,0 +1,17 @@
+# A site behind the WAF, for deploy/dev/waf-live.sh: every request that passes answers "ok".
+{
+	admin off
+	order coraza_waf first
+}
+:8080 {
+	coraza_waf {
+		directives `
+			Include /etc/caddy/coraza.conf
+			Include /etc/caddy/crs/crs-setup.conf
+			Include /etc/caddy/crs/rules/*.conf
+			SecRuleEngine {$WAF_MODE:On}
+			SecRequestBodyAccess On
+		`
+	}
+	respond "ok" 200
+}
