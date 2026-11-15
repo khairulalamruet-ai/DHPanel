@@ -94,6 +94,8 @@ pub struct WebContext {
     certs_dir: PathBuf,
     /// The error pages an administrator set.
     pages_file: PathBuf,
+    /// The User-Agent texts the web server refuses (a JSON list).
+    agents_file: PathBuf,
     /// The name phpMyAdmin is served under (one line), if any.
     pma_file: PathBuf,
     agent: ureq::Agent,
@@ -116,6 +118,7 @@ impl WebContext {
             dir: state_dir.join("routes"),
             certs_dir: state_dir.join("certs"),
             pages_file: state_dir.join("error-pages.json"),
+            agents_file: state_dir.join("user-agent-blocklist.json"),
             pma_file: state_dir.join("phpmyadmin-host"),
             agent,
             busy: Mutex::new(()),
@@ -126,6 +129,31 @@ impl WebContext {
 // ------------------------------------------------------------- error pages
 
 /// The pages an administrator set (none if there is no file or it is unusable).
+/// The User-Agent texts kept for the web server (only usable ones).
+fn load_agents(file: &Path) -> Vec<String> {
+    std::fs::read(file)
+        .ok()
+        .and_then(|b| serde_json::from_slice::<Vec<String>>(&b).ok())
+        .map(|v| v.into_iter().filter(|p| agent_pattern_ok(p)).collect())
+        .unwrap_or_default()
+}
+
+fn agent_pattern_ok(p: &str) -> bool {
+    (1..=100).contains(&p.chars().count()) && !p.chars().any(char::is_control)
+}
+
+/// A text as a regular expression that matches it literally.
+fn regex_escape(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        if "\\.+*?()|[]{}^$".contains(c) {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
+}
+
 fn load_pages(file: &Path) -> Pages {
     let Ok(bytes) = std::fs::read(file) else {
         return Pages::default();
@@ -139,6 +167,7 @@ fn load_pages(file: &Path) -> Pages {
         map.into_iter()
             .filter(|(k, v)| ErrorKind::parse(k).is_some() && error_pages::check(v).is_ok())
             .collect(),
+        Vec::new(),
     )
 }
 
@@ -226,7 +255,7 @@ fn validate(username: &TenantUsername, routes: &[SiteRoute]) -> Result<(), Agent
 /// The pages the web server shows when a site cannot answer: what an
 /// administrator set, and the installation's own for the rest.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Pages(BTreeMap<String, String>);
+pub struct Pages(BTreeMap<String, String>, Vec<String>);
 
 impl Pages {
     fn get(&self, kind: ErrorKind) -> String {
@@ -388,7 +417,30 @@ fn compile(
     pma_host: Option<&str>,
 ) -> Value {
     // phpMyAdmin's name first: no tenant's site can take it over.
-    let mut routes: Vec<Value> = pma_host.map(pma_route).into_iter().collect();
+    // The User-Agents that are refused come before everything, the phpMyAdmin name included.
+    let mut routes: Vec<Value> = Vec::new();
+    if !pages.1.is_empty() {
+        let pattern = format!(
+            "(?i)(?:{})",
+            pages
+                .1
+                .iter()
+                .map(|p| regex_escape(p))
+                .collect::<Vec<_>>()
+                .join("|")
+        );
+        routes.push(json!({
+            "match": [{"header_regexp": {"User-Agent": {"name": "dhua", "pattern": pattern}}}],
+            "handle": [{
+                "handler": "static_response",
+                "status_code": 403,
+                "headers": {"Content-Type": ["text/plain; charset=utf-8"]},
+                "body": "Forbidden\n"
+            }],
+            "terminal": true
+        }));
+    }
+    routes.extend(pma_host.map(pma_route));
     routes.extend(
         all.values()
             .flatten()
@@ -678,7 +730,11 @@ impl WebContext {
             &load_all(&self.dir),
             &uploaded,
             &self.settings,
-            &load_pages(&self.pages_file),
+            &{
+                let mut pages = load_pages(&self.pages_file);
+                pages.1 = load_agents(&self.agents_file);
+                pages
+            },
             load_pma_host(&self.pma_file).as_deref(),
         );
         let wanted = config
@@ -1038,6 +1094,59 @@ pub async fn report_certificates(
         .await
         .map_err(|_| AgentError::new(ErrorCode::Internal, "the scan was cancelled").retryable())?;
     Ok(Output::Certificates { items })
+}
+
+/// `set_user_agent_blocklist`.
+///
+/// # Errors
+/// [`AgentError`]: a text that is empty, too long or has a control character, a list that is too
+/// long, or a text twice (not retryable); kept for the next pass when Caddy cannot be reached.
+pub async fn set_user_agent_blocklist(
+    context: Arc<WebContext>,
+    op: Operation,
+) -> Result<Output, AgentError> {
+    let Operation::SetUserAgentBlocklist { patterns } = op else {
+        return Err(crate::ops::wrong_operation());
+    };
+    if patterns.len() > dhpanel_node_protocol::MAX_USER_AGENT_PATTERNS
+        || patterns.iter().any(|p| !agent_pattern_ok(p))
+    {
+        return Err(invalid("the list of User-Agent texts is not valid"));
+    }
+    let distinct: BTreeSet<String> = patterns.iter().map(|p| p.to_lowercase()).collect();
+    if distinct.len() != patterns.len() {
+        return Err(invalid("a User-Agent text is listed twice"));
+    }
+    let _guard = context.busy.lock().await;
+    let count = patterns.len();
+    let tmp = context.agents_file.with_extension("json.tmp");
+    let write = || -> std::io::Result<()> {
+        std::fs::write(
+            &tmp,
+            serde_json::to_vec(&patterns).map_err(std::io::Error::other)?,
+        )?;
+        std::fs::rename(&tmp, &context.agents_file)
+    };
+    write().map_err(|e| {
+        AgentError::new(
+            ErrorCode::Internal,
+            format!("cannot keep the list: {}", e.kind()),
+        )
+        .retryable()
+    })?;
+    match context.reconcile_locked().await {
+        Ok(_) => Ok(Output::UserAgentBlocklistSet {
+            count,
+            applied: true,
+        }),
+        Err(message) if message.starts_with("Caddy refused") => {
+            Err(AgentError::new(ErrorCode::Internal, message))
+        }
+        Err(_) => Ok(Output::UserAgentBlocklistSet {
+            count,
+            applied: false,
+        }),
+    }
 }
 
 /// `report_web_service`: whether Caddy answers on its admin address.

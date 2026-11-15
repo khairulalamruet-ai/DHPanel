@@ -167,6 +167,9 @@ pub struct WafSetting {
     pub disabled_rules: Vec<u32>,
 }
 
+/// Most User-Agent texts one node's list may hold.
+pub const MAX_USER_AGENT_PATTERNS: usize = 500;
+
 /// Most rules one site may switch off.
 pub const MAX_WAF_RULES: usize = 200;
 
@@ -1240,6 +1243,15 @@ pub enum Operation {
         /// At most one page of each kind.
         pages: Vec<ErrorPage>,
     },
+    /// Replaces the node's list of User-Agent texts the web server refuses: a request whose
+    /// User-Agent contains one of them (any case) is answered `403` before any site sees it.
+    /// The agent keeps the list and puts it back whenever the web server loses it. Answered
+    /// with [`Output::UserAgentBlocklistSet`].
+    SetUserAgentBlocklist {
+        /// Plain texts (1 to 100 characters, no control characters), at most
+        /// [`MAX_USER_AGENT_PATTERNS`].
+        patterns: Vec<String>,
+    },
     /// Put one domain's web server configuration (rendered by the control plane)
     /// into the tenant's web container and have it reloaded. The file is checked
     /// by the web server itself before it is used; when it is refused the
@@ -1373,6 +1385,7 @@ impl Operation {
         "restore_backup",
         "delete_backup",
         "sync_cron_jobs",
+        "set_user_agent_blocklist",
         "report_server_info",
         "set_timezone",
         "set_swap",
@@ -1443,6 +1456,7 @@ impl Operation {
             Self::RestoreBackup { .. } => "restore_backup",
             Self::DeleteBackup { .. } => "delete_backup",
             Self::SyncCronJobs { .. } => "sync_cron_jobs",
+            Self::SetUserAgentBlocklist { .. } => "set_user_agent_blocklist",
             Self::ReportServerInfo => "report_server_info",
             Self::SetTimezone { .. } => "set_timezone",
             Self::SetSwap { .. } => "set_swap",
@@ -1625,6 +1639,13 @@ pub enum Output {
         containers: Vec<String>,
         /// How storage limits are enforced (`xfs`), or `None` when they are not.
         storage_quota: Option<String>,
+    },
+    /// Answer to [`Operation::SetUserAgentBlocklist`].
+    UserAgentBlocklistSet {
+        /// How many texts the node has now.
+        count: usize,
+        /// Whether the web server has them (they are kept either way).
+        applied: bool,
     },
     /// Answer to [`Operation::SetErrorPages`].
     ErrorPagesSet {
@@ -2857,7 +2878,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            64,
+            65,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }

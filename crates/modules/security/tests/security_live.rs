@@ -467,3 +467,94 @@ async fn the_most_specific_policy_decides_and_clients_are_kept_to_their_own_doma
     assert_eq!(audited, 7);
     let _ = b;
 }
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn administrators_keep_the_list_of_refused_user_agents(pool: PgPool) {
+    let e = env(&pool).await;
+    let (alice_account, _) = client(&pool, "alice", 10_000).await;
+    let a = e.sign_in(alice_account).await;
+    let admin_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO accounts (kind, username, email, password_hash)
+         VALUES ('admin', 'rootuser', 'root@example.com', $1) RETURNING id",
+    )
+    .bind(HASH)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    dhpanel_database::rbac::assign_role(&pool, admin_id, "super_admin", None)
+        .await
+        .unwrap();
+    let root = e.sign_in(admin_id).await;
+    let path = "/api/v1/admin/security/user-agents";
+    assert_eq!(e.call(&a, "GET", path, None).await.0, StatusCode::FORBIDDEN);
+    let (status, made) = e
+        .call(
+            &root,
+            "POST",
+            path,
+            Some(json!({"pattern": "  BadBot ", "note": "scrapes"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{made}");
+    assert_eq!(
+        (made["pattern"].as_str(), made["note"].as_str()),
+        (Some("BadBot"), Some("scrapes"))
+    );
+    let id = made["id"].as_str().unwrap().to_owned();
+    // The same text in another case is the same text.
+    let (status, got) = e
+        .call(&root, "POST", path, Some(json!({"pattern": "badbot"})))
+        .await;
+    assert_eq!(
+        (status, got["code"].as_str()),
+        (StatusCode::CONFLICT, Some("already_listed"))
+    );
+    for bad in [
+        json!({"pattern": ""}),
+        json!({"pattern": "x".repeat(101)}),
+        json!({"pattern": "a\tb"}),
+        json!({"pattern": "ok", "note": "n".repeat(201)}),
+    ] {
+        let (status, _) = e.call(&root, "POST", path, Some(bad.clone())).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{bad}");
+    }
+    let (_, list) = e.call(&root, "GET", path, None).await;
+    assert_eq!(list["items"].as_array().unwrap().len(), 1);
+    // The list is full at 500.
+    sqlx::query("INSERT INTO blocked_user_agents (pattern) SELECT 'filler-' || g FROM generate_series(1, 499) g")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, got) = e
+        .call(
+            &root,
+            "POST",
+            path,
+            Some(json!({"pattern": "one-too-many"})),
+        )
+        .await;
+    assert_eq!(
+        (status, got["code"].as_str()),
+        (StatusCode::CONFLICT, Some("list_full"))
+    );
+    assert_eq!(
+        e.call(&root, "DELETE", &format!("{path}/{id}"), None)
+            .await
+            .0,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        e.call(&root, "DELETE", &format!("{path}/{id}"), None)
+            .await
+            .0,
+        StatusCode::NOT_FOUND
+    );
+    let audited: Vec<String> = sqlx::query_scalar(
+        "SELECT action FROM audit_logs WHERE action LIKE 'user_agent.%' ORDER BY at, id",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(audited, ["user_agent.blocked", "user_agent.unblocked"]);
+}

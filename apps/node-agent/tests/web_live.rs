@@ -11,6 +11,7 @@ use std::{process::Command, time::Duration};
 
 use dhpanel_node_agent::web::{
     Settings, WebContext, set_custom_certificates, set_error_pages, set_site_routes,
+    set_user_agent_blocklist,
 };
 use dhpanel_node_protocol::{
     CustomCertificate, ErrorCode, ErrorPage, Operation, Output, RouteRedirect, SiteRoute,
@@ -825,4 +826,122 @@ async fn web_config(admin: &str) -> String {
     })
     .await
     .unwrap()
+}
+
+/// A request with a chosen `User-Agent`: the status.
+async fn get_agent(url: &str, host: &str, agent: &str) -> u16 {
+    let (url, host, agent) = (url.to_owned(), host.to_owned(), agent.to_owned());
+    tokio::task::spawn_blocking(move || {
+        let client: ureq::Agent = ureq::Agent::config_builder()
+            .http_status_as_error(false)
+            .max_redirects(0)
+            .timeout_global(Some(Duration::from_secs(10)))
+            .user_agent(agent)
+            .build()
+            .into();
+        client
+            .get(&format!("{url}/"))
+            .header("Host", &host)
+            .call()
+            .unwrap()
+            .status()
+            .as_u16()
+    })
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+#[ignore = "needs a Caddy and a site behind it (see the file header)"]
+async fn a_listed_user_agent_is_refused_before_any_site_and_the_list_is_kept() {
+    let (Some(admin), Some(url)) = (
+        env("DHPANEL_TEST_CADDY_ADMIN"),
+        env("DHPANEL_TEST_CADDY_URL"),
+    ) else {
+        eprintln!("skipped: no Caddy (see the script)");
+        return;
+    };
+    let dir = std::env::temp_dir().join(format!("dh-ua-live-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let settings = || Settings {
+        admin: admin.clone(),
+        listen: vec![":18080".into()],
+        automatic_https: false,
+        data_dir: None,
+        waf_dir: None,
+    };
+    let web = WebContext::new(settings(), &dir);
+    set_site_routes(
+        web.clone(),
+        set(
+            "alice",
+            vec![site(
+                &["example.com"],
+                Some("dh-alice-web:8080"),
+                Vec::new(),
+            )],
+        ),
+    )
+    .await
+    .unwrap();
+    let list = |patterns: &[&str]| Operation::SetUserAgentBlocklist {
+        patterns: patterns.iter().map(|p| (*p).to_owned()).collect(),
+    };
+    assert_eq!(get_agent(&url, "example.com", "SomeBadBot/2.0").await, 200);
+    let out = set_user_agent_blocklist(web.clone(), list(&["badbot", "evil.scanner"]))
+        .await
+        .unwrap();
+    assert_eq!(
+        out,
+        Output::UserAgentBlocklistSet {
+            count: 2,
+            applied: true
+        }
+    );
+    // Refused, whatever the case; ordinary browsers and tools are not; a dot is a dot.
+    assert_eq!(get_agent(&url, "example.com", "SomeBadBot/2.0").await, 403);
+    assert_eq!(
+        get_agent(&url, "example.com", "Mozilla evil.scanner v1").await,
+        403
+    );
+    assert_eq!(
+        get_agent(&url, "example.com", "Mozilla evilXscanner").await,
+        200
+    );
+    assert_eq!(get_agent(&url, "example.com", "curl/8.5.0").await, 200);
+    // For every name Caddy serves, not only one site; the 403 is plain.
+    assert_eq!(get_agent(&url, "unknown.example.org", "badbot").await, 403);
+    // Kept: a new context (an agent that restarted) puts it back on a Caddy that forgot it.
+    let again = WebContext::new(settings(), &dir);
+    again.reconcile().await.unwrap();
+    assert_eq!(get_agent(&url, "example.com", "badbot").await, 403);
+    // Taken off the list: it passes again.
+    set_user_agent_blocklist(web.clone(), list(&["evil.scanner"]))
+        .await
+        .unwrap();
+    assert_eq!(get_agent(&url, "example.com", "badbot").await, 200);
+    set_user_agent_blocklist(web.clone(), list(&[]))
+        .await
+        .unwrap();
+    assert_eq!(get_agent(&url, "example.com", "evil.scanner").await, 200);
+    // Bad lists are refused and change nothing.
+    set_user_agent_blocklist(web.clone(), list(&["badbot"]))
+        .await
+        .unwrap();
+    let too_long = "x".repeat(101);
+    for bad in [
+        list(&[""]),
+        list(&["tab\there"]),
+        list(&[too_long.as_str()]),
+        list(&["a", "A"]),
+    ] {
+        let e = set_user_agent_blocklist(web.clone(), bad)
+            .await
+            .unwrap_err();
+        assert_eq!(e.code, ErrorCode::InvalidArguments);
+    }
+    assert_eq!(get_agent(&url, "example.com", "badbot").await, 403);
+    set_user_agent_blocklist(web.clone(), list(&[]))
+        .await
+        .unwrap();
 }

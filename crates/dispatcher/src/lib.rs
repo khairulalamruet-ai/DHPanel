@@ -181,7 +181,7 @@ impl Dispatcher {
                 _ = tick.tick() => { self.tick().await; }
                 _ = capabilities.tick() => { self.request_capabilities().await; }
                 _ = purges.tick() => { self.request_purges().await; }
-                _ = routes.tick() => { self.expire_previews().await; self.request_route_syncs().await; self.request_error_pages().await; self.request_import_progress().await; self.request_cron_runs().await; self.request_metrics().await; self.request_services().await; }
+                _ = routes.tick() => { self.expire_previews().await; self.request_route_syncs().await; self.request_error_pages().await; self.request_user_agents().await; self.request_import_progress().await; self.request_cron_runs().await; self.request_metrics().await; self.request_services().await; }
                 _ = certificates.tick() => { self.request_certificates().await; self.request_db_sizes().await; }
                 _ = expiry.tick() => { self.announce_expiring().await; }
                 Some(report) = results.recv() => self.handle_result(report).await,
@@ -572,6 +572,37 @@ impl Dispatcher {
                 Ok(dhpanel_operations::Enqueued::Created(_)) => told += 1,
                 Ok(dhpanel_operations::Enqueued::Existing(_)) => {}
                 Err(error) => tracing::warn!(%node, %error, "could not queue the error pages"),
+            }
+        }
+        told
+    }
+
+    /// Sends the blocked User-Agent texts to every connected node whenever they changed (the key
+    /// is made from the list, so each node is told once per version, and a node that connects
+    /// later is told too). Returns how many nodes were told.
+    pub async fn request_user_agents(&self) -> usize {
+        let list = match dhpanel_database::user_agents::list(self.ops.db()).await {
+            Ok(l) => l,
+            Err(err) => {
+                tracing::warn!(error = %err, "could not read the blocked User-Agents");
+                return 0;
+            }
+        };
+        let patterns: Vec<String> = list.into_iter().map(|b| b.pattern).collect();
+        let version = short_hash(&format!("{patterns:?}"));
+        let mut told = 0;
+        for node in self.gateway.connected_nodes() {
+            let request = dhpanel_operations::Request::new(
+                node,
+                dhpanel_node_protocol::Operation::SetUserAgentBlocklist {
+                    patterns: patterns.clone(),
+                },
+                format!("useragents:{version:016x}"),
+            );
+            match self.ops.enqueue(&request).await {
+                Ok(dhpanel_operations::Enqueued::Created(_)) => told += 1,
+                Ok(dhpanel_operations::Enqueued::Existing(_)) => {}
+                Err(error) => tracing::warn!(%node, %error, "could not queue the User-Agent list"),
             }
         }
         told

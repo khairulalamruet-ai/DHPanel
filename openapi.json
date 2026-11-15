@@ -6095,6 +6095,157 @@
         ]
       }
     },
+    "/api/v1/admin/security/user-agents": {
+      "get": {
+        "tags": [
+          "security"
+        ],
+        "summary": "The User-Agent texts the web servers refuse.",
+        "operationId": "adminListUserAgents",
+        "responses": {
+          "200": {
+            "description": "The list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserAgentList"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied` (needs admin.security.read)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "security"
+        ],
+        "summary": "Refuse a User-Agent text on every node (they are told within seconds).",
+        "operationId": "adminAddUserAgent",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddUserAgent"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Listed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserAgentView"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`already_listed` or `list_full`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A text that is empty, too long or has a control character",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/security/user-agents/{id}": {
+      "delete": {
+        "tags": [
+          "security"
+        ],
+        "summary": "Stop refusing a User-Agent text.",
+        "operationId": "adminRemoveUserAgent",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed"
+          },
+          "404": {
+            "description": "Not listed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/settings": {
       "get": {
         "tags": [
@@ -17257,6 +17408,28 @@
         },
         "additionalProperties": false
       },
+      "AddUserAgent": {
+        "type": "object",
+        "description": "A text to refuse.",
+        "required": [
+          "pattern"
+        ],
+        "properties": {
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why (at most 200 characters)."
+          },
+          "pattern": {
+            "type": "string",
+            "description": "The text (1-100 characters, no control characters): a request whose User-Agent\ncontains it, in any case, is answered `403`.",
+            "example": "badbot"
+          }
+        },
+        "additionalProperties": false
+      },
       "AdminAddDomain": {
         "type": "object",
         "description": "A domain to add for a user.",
@@ -23517,6 +23690,54 @@
             "type": "integer",
             "format": "int64",
             "description": "Seconds per point."
+          }
+        }
+      },
+      "UserAgentList": {
+        "type": "object",
+        "description": "The list.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UserAgentView"
+            },
+            "description": "Oldest first."
+          }
+        }
+      },
+      "UserAgentView": {
+        "type": "object",
+        "description": "A User-Agent text that is refused.",
+        "required": [
+          "id",
+          "pattern",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "integer",
+            "format": "int64",
+            "description": "When it was added (Unix seconds)."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Id."
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it is listed."
+          },
+          "pattern": {
+            "type": "string",
+            "description": "The text a User-Agent contains (any case)."
           }
         }
       },

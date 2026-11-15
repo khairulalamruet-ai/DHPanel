@@ -5,6 +5,8 @@
 //! | GET, PUT, DELETE | `/api/v1/admin/waf/policy` | `admin.security.read`, `.manage` |
 //! | GET, PUT, DELETE | `/api/v1/admin/waf/tenants/{id}` | the same |
 //! | GET, PUT, DELETE | `/api/v1/admin/waf/domains/{id}` | the same |
+//! | GET, POST | `/api/v1/admin/security/user-agents` | `admin.security.read`, `.manage` |
+//! | DELETE | `/api/v1/admin/security/user-agents/{id}` | `admin.security.manage` |
 //! | GET | `/api/v1/client/waf/domains` | a client |
 //! | PUT, DELETE | `/api/v1/client/waf/domains/{id}` | the domain's owner |
 //!
@@ -77,6 +79,14 @@ pub fn admin_router() -> Router<SecurityState> {
             get(admin_get_tenant)
                 .put(admin_put_tenant)
                 .delete(admin_delete_tenant),
+        )
+        .route(
+            "/api/v1/admin/security/user-agents",
+            get(list_user_agents).post(add_user_agent),
+        )
+        .route(
+            "/api/v1/admin/security/user-agents/{id}",
+            axum::routing::delete(remove_user_agent),
         )
         .route(
             "/api/v1/admin/waf/domains/{id}",
@@ -637,15 +647,162 @@ pub async fn client_delete(
     delete_policy(&state, &who, &target).await
 }
 
+/// A User-Agent text that is refused.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct UserAgentView {
+    /// Id.
+    pub id: Uuid,
+    /// The text a User-Agent contains (any case).
+    pub pattern: String,
+    /// Why it is listed.
+    pub note: Option<String>,
+    /// When it was added (Unix seconds).
+    pub created_at: i64,
+}
+
+/// The list.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct UserAgentList {
+    /// Oldest first.
+    pub items: Vec<UserAgentView>,
+}
+
+/// A text to refuse.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AddUserAgent {
+    /// The text (1-100 characters, no control characters): a request whose User-Agent
+    /// contains it, in any case, is answered `403`.
+    #[schema(example = "badbot")]
+    pub pattern: String,
+    /// Why (at most 200 characters).
+    pub note: Option<String>,
+}
+
+/// The User-Agent texts the web servers refuse.
+#[utoipa::path(get, path = "/api/v1/admin/security/user-agents", tag = "security", operation_id = "adminListUserAgents",
+    security(("session" = [])),
+    responses((status = 200, description = "The list", body = UserAgentList),
+              (status = 403, description = "`permission_denied` (needs admin.security.read)", body = ProblemDetails, content_type = "application/problem+json")))]
+pub async fn list_user_agents(
+    State(state): State<SecurityState>,
+    _who: Require<SecurityRead>,
+) -> Result<Json<UserAgentList>, AppError> {
+    let items = dhpanel_database::user_agents::list(&state.db)
+        .await
+        .map_err(internal)?
+        .into_iter()
+        .map(|b| UserAgentView {
+            id: b.id,
+            pattern: b.pattern,
+            note: b.note,
+            created_at: b.created_at,
+        })
+        .collect();
+    Ok(Json(UserAgentList { items }))
+}
+
+/// Refuse a User-Agent text on every node (they are told within seconds).
+#[utoipa::path(post, path = "/api/v1/admin/security/user-agents", tag = "security", operation_id = "adminAddUserAgent",
+    security(("session" = [])), params(("X-CSRF-Token" = String, Header, description = "The session's csrf_token")),
+    request_body = AddUserAgent,
+    responses((status = 201, description = "Listed", body = UserAgentView),
+              (status = 409, description = "`already_listed` or `list_full`", body = ProblemDetails, content_type = "application/problem+json"),
+              (status = 422, description = "A text that is empty, too long or has a control character", body = ProblemDetails, content_type = "application/problem+json")))]
+pub async fn add_user_agent(
+    State(state): State<SecurityState>,
+    who: Require<SecurityManage>,
+    Json(req): Json<AddUserAgent>,
+) -> Result<(StatusCode, Json<UserAgentView>), AppError> {
+    let pattern = req.pattern.trim().to_owned();
+    let bad = |name: &'static str, message: &str| {
+        AppError::validation(vec![FieldError::new(name, "invalid", message)])
+    };
+    if pattern.is_empty() || pattern.chars().count() > 100 || pattern.chars().any(char::is_control)
+    {
+        return Err(bad(
+            "pattern",
+            "1 to 100 characters, no control characters.",
+        ));
+    }
+    let note = req.note.as_deref().map(str::trim).filter(|n| !n.is_empty());
+    if note.is_some_and(|n| n.chars().count() > 200) {
+        return Err(bad("note", "At most 200 characters."));
+    }
+    let id = dhpanel_database::user_agents::add(&state.db, &pattern, note, who.0.account_id())
+        .await
+        .map_err(|e| match e {
+            dhpanel_database::user_agents::AddError::Exists => {
+                AppError::conflict("already_listed", "This text is listed already.")
+            }
+            dhpanel_database::user_agents::AddError::Full => {
+                AppError::conflict("list_full", "The list holds at most 500 texts.")
+            }
+            dhpanel_database::user_agents::AddError::Database(db) => internal(db),
+        })?;
+    record(
+        &state,
+        "user_agent.blocked",
+        &who.0,
+        None,
+        id,
+        serde_json::json!({ "pattern": pattern }),
+    )
+    .await?;
+    let made = dhpanel_database::user_agents::list(&state.db)
+        .await
+        .map_err(internal)?
+        .into_iter()
+        .find(|b| b.id == id)
+        .ok_or_else(|| AppError::not_found("user_agent"))?;
+    Ok((
+        StatusCode::CREATED,
+        Json(UserAgentView {
+            id: made.id,
+            pattern: made.pattern,
+            note: made.note,
+            created_at: made.created_at,
+        }),
+    ))
+}
+
+/// Stop refusing a User-Agent text.
+#[utoipa::path(delete, path = "/api/v1/admin/security/user-agents/{id}", tag = "security", operation_id = "adminRemoveUserAgent",
+    security(("session" = [])), params(("id" = Uuid, Path, description = "Id"), ("X-CSRF-Token" = String, Header, description = "The session's csrf_token")),
+    responses((status = 204, description = "Removed"),
+              (status = 404, description = "Not listed", body = ProblemDetails, content_type = "application/problem+json")))]
+pub async fn remove_user_agent(
+    State(state): State<SecurityState>,
+    who: Require<SecurityManage>,
+    Path(id): Path<Uuid>,
+) -> Result<StatusCode, AppError> {
+    if !dhpanel_database::user_agents::remove(&state.db, id)
+        .await
+        .map_err(internal)?
+    {
+        return Err(AppError::not_found("user_agent"));
+    }
+    record(
+        &state,
+        "user_agent.unblocked",
+        &who.0,
+        None,
+        id,
+        serde_json::json!({}),
+    )
+    .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 /// The module's OpenAPI document.
 #[derive(OpenApi)]
 #[openapi(
     paths(
         admin_get_global, admin_put_global, admin_delete_global, admin_get_tenant, admin_put_tenant,
         admin_delete_tenant, admin_get_domain, admin_put_domain, admin_delete_domain, client_list,
-        client_put, client_delete
+        client_put, client_delete, list_user_agents, add_user_agent, remove_user_agent
     ),
-    components(schemas(PolicyRequest, PolicyView, EffectiveView, PolicyState, DomainWaf, DomainWafList)),
+    components(schemas(UserAgentView, UserAgentList, AddUserAgent, PolicyRequest, PolicyView, EffectiveView, PolicyState, DomainWaf, DomainWafList)),
     tags((name = "security", description = "The web application firewall"))
 )]
 pub struct SecurityApi;

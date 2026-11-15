@@ -42,6 +42,7 @@ pub mod settings;
 pub mod skeleton;
 pub mod tenants;
 pub mod usage;
+pub mod user_agents;
 pub mod users;
 pub mod vhost_templates;
 pub mod waf;
