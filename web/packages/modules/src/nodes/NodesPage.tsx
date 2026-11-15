@@ -66,7 +66,6 @@ export function NodesPage() {
   const [cancellingEnrollmentId, setCancellingEnrollmentId] = useState<string | null>(null);
   const [updatingAgentNode, setUpdatingAgentNode] = useState<NodeItem | null>(null);
   const [configuringOversellNode, setConfiguringOversellNode] = useState<NodeItem | null>(null);
-  const [drainingNodeId, setDrainingNodeId] = useState<string | null>(null);
   const [failoverSourceNode, setFailoverSourceNode] = useState<NodeItem | null>(null);
 
   // List nodes - TODO(api:T02.08): replace mocked nodes with backend endpoint when implemented
