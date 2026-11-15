@@ -21,6 +21,7 @@
 [[image]]
 role      = "web"
 reference = "nginxinc/nginx-unprivileged@sha256:f5116ed4606f3eb015dd4a8e28cb9b351476dc0ad4bc6e9f93b19cec130cdf03"
+tag       = "stable-alpine"
 note      = "nginx 1.30.6, unprivileged build (listens on 8080, runs as any user), Alpine"
 
 [[image]]
@@ -32,42 +33,56 @@ note      = "nginx 1.28.2 (what stacks created before T06.02 run)"
 role      = "php"
 version   = "8.4"
 reference = "php@sha256:511af6fa3ef55c4ea0c68bb47096ba4b81771ab4949bde7813807bf177efda11"
+tag       = "8.4-fpm-alpine"
 note      = "PHP 8.4.27 FPM (listens on 9000), Alpine"
 
 [[image]]
 role      = "php"
 version   = "8.5"
 reference = "php@sha256:951fb5b1780219b81d5daffa4cebef8e0077c537f3893d9790a5dfcd66ca334d"
+tag       = "8.5-fpm-alpine"
 note      = "PHP 8.5.12 FPM, Alpine"
 
 [[image]]
 role      = "php"
 version   = "8.3"
 reference = "php@sha256:f9804e0c991b5b339d6fa4fab9edf3c9c9ae68048fb1017cb6dea6265ccef054"
+tag       = "8.3-fpm-alpine"
 note      = "PHP 8.3.36 FPM, Alpine"
 
 [[image]]
 role      = "php"
 version   = "8.2"
 reference = "php@sha256:d17bc39b8ef90e12d598f19cb466f1906c3c214f4bce661dfee49404b42fea09"
+tag       = "8.2-fpm-alpine"
 note      = "PHP 8.2.35 FPM, Alpine (security fixes only until the end of 2026)"
 
 [[image]]
 role      = "db"
 reference = "mariadb@sha256:4ebbcf100a3ba320766dfa0e1af008df12261301db6ef72798c7650f70794aed"
+tag       = "lts"
 note      = "MariaDB 12.3.3 (long-term support): the node's shared database server (T07.01)"
 
 [[image]]
 role      = "pma"
 reference = "phpmyadmin@sha256:e4b3eb5305cd42d21512bb55def2bab52625d56df927ad4ee1864a9354c84d40"
+tag       = "5.2-apache"
 note      = "phpMyAdmin 5.2.3 (Apache), the node's one database browser; clients reach it through single sign-on only"
 
 [[image]]
 role      = "sftp"
 reference = "drakkan/sftpgo@sha256:1edd28d80de2a008863fbfc58c8ff7db47b1b410bae48d4e6076192337809b11"
+tag       = "v2.7-alpine"
 note      = "SFTPGo 2.7.6, the node's SFTP and FTPS server (virtual users, one per account, confined to a folder of the tenant's files)"
 
 [[image]]
 role      = "clamav"
 reference = "clamav/clamav@sha256:64ca916618842ba469ef38a501e6c2f42a68281c064c03749b0126c0fb085ce5"
+tag       = "stable_base"
 note      = "ClamAV 1.5.4 (stable_base, no signatures inside): run once per scan (clamscan) and once per signature update (freshclam), never as a service"
+
+[[image]]
+role      = "trivy"
+reference = "aquasec/trivy@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb"
+tag       = "latest"
+note      = "Trivy 0.76.2: run once per image scan, reads images straight from their registry (no Docker socket), never as a service"

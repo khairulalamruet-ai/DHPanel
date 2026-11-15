@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE image_scans SET latest_digest = $3, checked_at = now()\n         WHERE tag = $2 AND split_part(reference, '@', 1) = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c43852026119d039ff0310969907f79a51cac4fb86f83c1702b263341d386fa8"
+}

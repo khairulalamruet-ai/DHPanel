@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT reference FROM image_scans\n           WHERE (scan_started_at IS NULL OR scan_started_at < now() - interval '40 minutes')\n             AND (scan_requested OR scanned_at IS NULL\n                  OR scanned_at < now() - make_interval(secs => $1::int))\n           ORDER BY scan_requested DESC, scanned_at NULLS FIRST, reference\n           LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "reference",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "image_scans",
+            "name": "reference"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "c06c4d1790b943f30ce93cd4b36a78dc1f193cb36038a2d61d89cec4ed0ca974"
+}

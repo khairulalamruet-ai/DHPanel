@@ -184,7 +184,7 @@ impl Dispatcher {
                 _ = tick.tick() => { self.tick().await; }
                 _ = capabilities.tick() => { self.request_capabilities().await; }
                 _ = purges.tick() => { self.request_purges().await; }
-                _ = routes.tick() => { self.expire_previews().await; self.request_route_syncs().await; self.request_error_pages().await; self.request_user_agents().await; self.request_firewalls().await; self.request_scans().await; self.request_signature_updates().await; self.request_import_progress().await; self.request_cron_runs().await; self.request_metrics().await; self.request_services().await; }
+                _ = routes.tick() => { self.expire_previews().await; self.request_route_syncs().await; self.request_error_pages().await; self.request_user_agents().await; self.request_firewalls().await; self.request_scans().await; self.request_signature_updates().await; self.request_image_checks().await; self.request_import_progress().await; self.request_cron_runs().await; self.request_metrics().await; self.request_services().await; }
                 _ = certificates.tick() => { self.request_certificates().await; self.request_db_sizes().await; }
                 _ = expiry.tick() => { self.announce_expiring().await; }
                 Some(report) = results.recv() => self.handle_result(report).await,
@@ -800,6 +800,140 @@ impl Dispatcher {
         }
     }
 
+    /// Image checks (T11.12), on one connected node: what the registries say the allow-list's
+    /// tags are now (every six hours) and the vulnerability scan of the image that is due
+    /// (one at a time; each image once a day, or when an administrator asked). Returns how many
+    /// operations were queued.
+    pub async fn request_image_checks(&self) -> usize {
+        static SYNCED_SLOT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let db = self.ops.db();
+        let now = u64::try_from(unix_now()).unwrap_or(0);
+        let Some(node) = self.gateway.connected_nodes().into_iter().min() else {
+            return 0;
+        };
+        let allowlist = match dhpanel_tenant_stack::Allowlist::embedded() {
+            Ok(a) => a,
+            Err(err) => {
+                tracing::warn!(error = %err, "the image list is broken");
+                return 0;
+            }
+        };
+        // The rows follow the list shipped with this build (checked every ten minutes).
+        let slot = now / 600 + 1;
+        if SYNCED_SLOT.swap(slot, std::sync::atomic::Ordering::AcqRel) != slot {
+            let entries: Vec<(String, String, Option<String>, String)> = allowlist
+                .entries()
+                .iter()
+                .map(|e| {
+                    (
+                        e.reference.as_str().to_owned(),
+                        e.role.as_str().to_owned(),
+                        e.tag.clone(),
+                        e.note.clone(),
+                    )
+                })
+                .collect();
+            if let Err(err) = dhpanel_database::images::sync(db, &entries).await {
+                tracing::warn!(error = %err, "could not keep the image list");
+                return 0;
+            }
+        }
+        let mut queued = 0;
+        let names: Vec<String> = allowlist
+            .entries()
+            .iter()
+            .filter_map(|e| {
+                let (name, _) = e.reference.as_str().split_once('@')?;
+                Some(format!("{name}:{}", e.tag.as_deref()?))
+            })
+            .collect();
+        if !names.is_empty() {
+            let request = dhpanel_operations::Request::new(
+                node,
+                dhpanel_node_protocol::Operation::CheckImageUpdates { images: names },
+                format!("imgcheck:{}", now / (6 * 3600)),
+            );
+            if let Ok(dhpanel_operations::Enqueued::Created(_)) = self.ops.enqueue(&request).await {
+                queued += 1;
+            }
+        }
+        match dhpanel_database::images::next_to_scan(db, 24 * 3600).await {
+            Ok(Some(reference)) => {
+                let mut request = dhpanel_operations::Request::new(
+                    node,
+                    dhpanel_node_protocol::Operation::ScanImage {
+                        reference: reference.clone(),
+                    },
+                    format!("imgscan:{:016x}:{}", short_hash(&reference), now / 3600),
+                );
+                request.ttl = std::time::Duration::from_secs(3600);
+                request.max_attempts = 2;
+                match self.ops.enqueue(&request).await {
+                    Ok(dhpanel_operations::Enqueued::Created(_)) => {
+                        queued += 1;
+                        let _ = dhpanel_database::images::scan_started(db, &reference).await;
+                    }
+                    Ok(dhpanel_operations::Enqueued::Existing(_)) => {
+                        let _ = dhpanel_database::images::scan_started(db, &reference).await;
+                    }
+                    Err(error) => tracing::warn!(%error, "could not queue an image scan"),
+                }
+            }
+            Ok(None) => {}
+            Err(err) => tracing::warn!(error = %err, "could not look for an image to scan"),
+        }
+        queued
+    }
+
+    async fn store_image_results(
+        &self,
+        row: &dhpanel_database::operations::Operation,
+        output: &dhpanel_node_protocol::Output,
+    ) {
+        let db = self.ops.db();
+        match output {
+            dhpanel_node_protocol::Output::ImageScanned {
+                critical,
+                high,
+                medium,
+                low,
+                top,
+            } => {
+                let Some(reference) = row
+                    .payload
+                    .get("reference")
+                    .and_then(serde_json::Value::as_str)
+                else {
+                    return;
+                };
+                let count = |n: &u32| i32::try_from(*n).unwrap_or(i32::MAX);
+                let top = serde_json::to_value(top).unwrap_or_default();
+                if let Err(err) = dhpanel_database::images::store_scan(
+                    db,
+                    reference,
+                    [count(critical), count(high), count(medium), count(low)],
+                    &top,
+                )
+                .await
+                {
+                    tracing::warn!(error = %err, "could not keep an image scan");
+                }
+            }
+            dhpanel_node_protocol::Output::ImageDigests { items } => {
+                for item in items {
+                    if let Some((name, tag)) = item.image.rsplit_once(':')
+                        && let Err(err) =
+                            dhpanel_database::images::store_digest(db, name, tag, &item.digest)
+                                .await
+                    {
+                        tracing::warn!(error = %err, "could not keep an image digest");
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
     /// Tells every connected node to bring its malware signatures up to date, once per six
     /// hours (the key carries the time slot). Returns how many nodes were told.
     pub async fn request_signature_updates(&self) -> usize {
@@ -1350,6 +1484,13 @@ impl Dispatcher {
                     {
                         tracing::warn!(%tenant_id, error = %err, "could not keep a disk usage measurement");
                     }
+                }
+                if let Some(
+                    result @ (dhpanel_node_protocol::Output::ImageScanned { .. }
+                    | dhpanel_node_protocol::Output::ImageDigests { .. }),
+                ) = &output
+                {
+                    self.store_image_results(&row, result).await;
                 }
                 if let Some(report @ dhpanel_node_protocol::Output::ImportProgress { .. }) = &output
                     && let Some(import_id) = row

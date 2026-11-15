@@ -12,6 +12,8 @@
 //! | GET, POST | `/api/v1/client/malware-scans` | a client |
 //! | GET, POST | `/api/v1/admin/tenants/{id}/vulnerability-scans` | `admin.security.read`, `.manage` |
 //! | GET, POST | `/api/v1/client/vulnerability-scans` | a client |
+//! | GET | `/api/v1/admin/security/images`, `/images/vulnerabilities?reference=` | `admin.security.read` |
+//! | POST | `/api/v1/admin/security/images/scan` | `admin.security.manage` |
 //! | GET, POST, DELETE | `/api/v1/admin/security/wp-advisories[/{id}]` | `admin.security.read`, `.manage` |
 //! | GET | `/api/v1/client/waf/domains` | a client |
 //! | PUT, DELETE | `/api/v1/client/waf/domains/{id}` | the domain's owner |
@@ -107,6 +109,15 @@ pub fn admin_router() -> Router<SecurityState> {
         .route(
             "/api/v1/admin/tenants/{id}/vulnerability-scans",
             get(admin_list_vuln).post(admin_start_vuln),
+        )
+        .route("/api/v1/admin/security/images", get(list_images))
+        .route(
+            "/api/v1/admin/security/images/vulnerabilities",
+            get(image_vulnerabilities),
+        )
+        .route(
+            "/api/v1/admin/security/images/scan",
+            axum::routing::post(scan_image_now),
         )
         .route(
             "/api/v1/admin/security/wp-advisories",
@@ -1494,6 +1505,145 @@ pub async fn client_start_vuln(
     start_vuln(&state, &who, tenant.id, "client").await
 }
 
+/// An image of the allow-list and what is known about it.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ImageView {
+    /// The pinned reference (`name@sha256:…`).
+    pub reference: String,
+    /// The role it plays (`web`, `php`, `db`, …).
+    pub role: String,
+    /// The moving tag it was pinned from.
+    pub tag: Option<String>,
+    /// What it is.
+    pub note: String,
+    /// What the registry says the tag is now.
+    pub latest_digest: Option<String>,
+    /// A newer image exists: the tag now has another digest than the pin.
+    pub update_available: bool,
+    /// When the registry was asked (Unix seconds).
+    pub checked_at: Option<i64>,
+    /// When it was scanned (Unix seconds); `null`: not yet.
+    pub scanned_at: Option<i64>,
+    /// Findings by severity (`null`: not scanned).
+    pub critical: Option<i32>,
+    /// Findings by severity.
+    pub high: Option<i32>,
+    /// Findings by severity.
+    pub medium: Option<i32>,
+    /// Findings by severity.
+    pub low: Option<i32>,
+}
+
+/// The images of the allow-list.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ImageList {
+    /// By role.
+    pub items: Vec<ImageView>,
+}
+
+/// The worst findings of one image.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ImageVulns {
+    /// The image.
+    pub reference: String,
+    /// Worst first.
+    pub items: Vec<dhpanel_node_protocol::ImageVulnerability>,
+}
+
+/// Which image to scan.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ScanImageRequest {
+    /// The pinned reference, as the list shows it.
+    pub reference: String,
+}
+
+fn image_view(i: dhpanel_database::images::Image) -> ImageView {
+    let pinned = i.reference.split_once('@').map(|(_, d)| d.to_owned());
+    let update_available = match (&i.latest_digest, &pinned) {
+        (Some(latest), Some(pinned)) => latest != pinned,
+        _ => false,
+    };
+    ImageView {
+        reference: i.reference,
+        role: i.role,
+        tag: i.tag,
+        note: i.note,
+        latest_digest: i.latest_digest,
+        update_available,
+        checked_at: i.checked_at,
+        scanned_at: i.scanned_at,
+        critical: i.critical,
+        high: i.high,
+        medium: i.medium,
+        low: i.low,
+    }
+}
+
+/// The images of the allow-list: what a registry says is newer and what the last scan found.
+#[utoipa::path(get, path = "/api/v1/admin/security/images", tag = "security", operation_id = "adminListImages",
+    security(("session" = [])),
+    responses((status = 200, description = "The images", body = ImageList)))]
+pub async fn list_images(
+    State(state): State<SecurityState>,
+    _who: Require<SecurityRead>,
+) -> Result<Json<ImageList>, AppError> {
+    let items = dhpanel_database::images::list(&state.db)
+        .await
+        .map_err(internal)?
+        .into_iter()
+        .map(image_view)
+        .collect();
+    Ok(Json(ImageList { items }))
+}
+
+/// The worst findings of one image.
+#[utoipa::path(get, path = "/api/v1/admin/security/images/vulnerabilities", tag = "security", operation_id = "adminImageVulnerabilities",
+    security(("session" = [])), params(("reference" = String, Query, description = "The pinned reference")),
+    responses((status = 200, description = "The findings", body = ImageVulns),
+              (status = 404, description = "Not on the list", body = ProblemDetails, content_type = "application/problem+json")))]
+pub async fn image_vulnerabilities(
+    State(state): State<SecurityState>,
+    _who: Require<SecurityRead>,
+    axum::extract::Query(q): axum::extract::Query<ScanImageRequest>,
+) -> Result<Json<ImageVulns>, AppError> {
+    let image = dhpanel_database::images::get(&state.db, &q.reference)
+        .await
+        .map_err(internal)?
+        .ok_or_else(|| AppError::not_found("image"))?;
+    Ok(Json(ImageVulns {
+        reference: image.reference,
+        items: serde_json::from_value(image.top).unwrap_or_default(),
+    }))
+}
+
+/// Scan an image now (a node does it in the next minutes; the first scan fetches the
+/// vulnerability database, which takes longer).
+#[utoipa::path(post, path = "/api/v1/admin/security/images/scan", tag = "security", operation_id = "adminScanImage",
+    security(("session" = [])), params(("X-CSRF-Token" = String, Header, description = "The session's csrf_token")),
+    request_body = ScanImageRequest,
+    responses((status = 202, description = "Asked for"),
+              (status = 404, description = "Not on the list", body = ProblemDetails, content_type = "application/problem+json")))]
+pub async fn scan_image_now(
+    State(state): State<SecurityState>,
+    who: Require<SecurityManage>,
+    Json(req): Json<ScanImageRequest>,
+) -> Result<StatusCode, AppError> {
+    if !dhpanel_database::images::request_scan(&state.db, &req.reference)
+        .await
+        .map_err(internal)?
+    {
+        return Err(AppError::not_found("image"));
+    }
+    let entry = AuditEntry::new("image_scan.requested", Outcome::Success)
+        .actor(who.0.account_id())
+        .metadata(serde_json::json!({ "reference": req.reference }));
+    dhpanel_audit::insert(&state.db, &entry)
+        .await
+        .map_err(internal)?;
+    Ok(StatusCode::ACCEPTED)
+}
+
 /// A node's firewall policy.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct NodeFirewall {
@@ -1612,9 +1762,10 @@ async fn store_firewall(
         get_node_firewall, put_node_firewall, reset_node_firewall,
         admin_list_scans, admin_start_scan, client_list_scans, client_start_scan,
         admin_list_vuln, admin_start_vuln, client_list_vuln, client_start_vuln,
-        list_advisories, add_advisory, remove_advisory
+        list_advisories, add_advisory, remove_advisory,
+        list_images, image_vulnerabilities, scan_image_now
     ),
-    components(schemas(VulnScanView, VulnScanList, VulnIssue, AdvisoryView, AdvisoryList, AddAdvisory, dhpanel_node_protocol::WpInstall, dhpanel_node_protocol::WpComponent, ScanRequest, ScanView, ScanList, dhpanel_node_protocol::Infection, NodeFirewall, dhpanel_node_protocol::FirewallPolicy, dhpanel_node_protocol::PortRule, dhpanel_node_protocol::RateLimit, UserAgentView, UserAgentList, AddUserAgent, PolicyRequest, PolicyView, EffectiveView, PolicyState, DomainWaf, DomainWafList)),
+    components(schemas(ImageView, ImageList, ImageVulns, ScanImageRequest, dhpanel_node_protocol::ImageVulnerability, VulnScanView, VulnScanList, VulnIssue, AdvisoryView, AdvisoryList, AddAdvisory, dhpanel_node_protocol::WpInstall, dhpanel_node_protocol::WpComponent, ScanRequest, ScanView, ScanList, dhpanel_node_protocol::Infection, NodeFirewall, dhpanel_node_protocol::FirewallPolicy, dhpanel_node_protocol::PortRule, dhpanel_node_protocol::RateLimit, UserAgentView, UserAgentList, AddUserAgent, PolicyRequest, PolicyView, EffectiveView, PolicyState, DomainWaf, DomainWafList)),
     tags((name = "security", description = "The web application firewall"))
 )]
 pub struct SecurityApi;

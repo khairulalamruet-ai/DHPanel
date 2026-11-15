@@ -164,3 +164,75 @@ async fn a_wordpress_install_is_listed_with_its_plugins_and_themes() {
     assert!(left.iter().all(|n| !n.starts_with("dh-wpinv-")), "{left:?}");
     let _ = std::fs::remove_dir_all(&base);
 }
+
+#[tokio::test]
+#[ignore = "needs rootless Docker and the network"]
+async fn an_old_image_has_findings_a_registry_answers_and_unlisted_images_are_refused() {
+    let base = std::env::temp_dir().join("dh-scan-live-img");
+    std::fs::create_dir_all(base.join("state").join("vhosts")).unwrap();
+    let context = Arc::new(TenantContext {
+        helper_socket: base.join("no-helper.sock"),
+        tenants_root: base.join("tenants"),
+        docker: DockerManager::connect(&docker_socket()).unwrap(),
+        vhosts_root: base.join("state").join("vhosts"),
+    });
+    // An image that is not on the allow-list is refused before anything runs.
+    let e = dhpanel_node_agent::ops::imagescan::scan_image(
+        context.clone(),
+        Operation::ScanImage {
+            reference: format!("alpine@sha256:{}", "c".repeat(64)),
+        },
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(e.code, ErrorCode::InvalidArguments);
+    // A registry answers for a tag (the digest of the index, as a pull would fetch it).
+    let out = dhpanel_node_agent::ops::imagescan::check_image_updates(
+        context.clone(),
+        Operation::CheckImageUpdates {
+            images: vec![
+                "clamav/clamav:stable_base".into(),
+                "no/such-image-x:nope".into(),
+            ],
+        },
+    )
+    .await
+    .unwrap();
+    let Output::ImageDigests { items } = out else {
+        panic!("{out:?}")
+    };
+    assert_eq!(items.len(), 1, "{items:?}");
+    assert!(items[0].digest.starts_with("sha256:") && items[0].digest.len() == 71);
+    // An older image of the list is scanned for real (the first run fetches Trivy's database).
+    let out = dhpanel_node_agent::ops::imagescan::scan_image(
+        context.clone(),
+        Operation::ScanImage {
+            reference: "nginxinc/nginx-unprivileged@sha256:7377697a821c131a924a7105fafbe7414db4e9fcc77a6f08f776f33f141ec3f8".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let Output::ImageScanned {
+        critical,
+        high,
+        medium,
+        low,
+        top,
+    } = out
+    else {
+        panic!("{out:?}")
+    };
+    eprintln!(
+        "findings: {critical} critical, {high} high, {medium} medium, {low} low; top {}",
+        top.len()
+    );
+    assert!(
+        critical + high + medium + low > 0,
+        "an old image should have findings"
+    );
+    assert!(!top.is_empty() && top.len() <= 50);
+    assert!(top[0].id.contains('-'), "{:?}", top[0]);
+    let left = context.docker.list().await.unwrap();
+    assert!(left.iter().all(|n| n != "dh-trivy-scan"), "{left:?}");
+    let _ = std::fs::remove_dir_all(&base);
+}

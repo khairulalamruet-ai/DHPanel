@@ -23,6 +23,7 @@ pub mod exports;
 pub mod feature_sets;
 pub mod file_transfers;
 pub mod ftp_accounts;
+pub mod images;
 pub mod imports;
 pub mod malware;
 pub mod mfa;

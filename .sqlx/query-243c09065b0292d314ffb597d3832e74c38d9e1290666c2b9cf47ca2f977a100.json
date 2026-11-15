@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE image_scans SET scan_requested = true, scan_started_at = NULL WHERE reference = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "243c09065b0292d314ffb597d3832e74c38d9e1290666c2b9cf47ca2f977a100"
+}

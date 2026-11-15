@@ -868,3 +868,132 @@ async fn an_old_plugin_is_reported_against_the_advisories(pool: PgPool) {
         (StatusCode::OK, 1)
     );
 }
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn the_images_of_the_list_show_their_findings_and_whether_a_newer_one_exists(pool: PgPool) {
+    let e = env(&pool).await;
+    let (alice_account, _) = client(&pool, "alice", 10_000).await;
+    let a = e.sign_in(alice_account).await;
+    let admin_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO accounts (kind, username, email, password_hash)
+         VALUES ('admin', 'rootuser', 'root@example.com', $1) RETURNING id",
+    )
+    .bind(HASH)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    dhpanel_database::rbac::assign_role(&pool, admin_id, "super_admin", None)
+        .await
+        .unwrap();
+    let root = e.sign_in(admin_id).await;
+    let digest = format!("sha256:{}", "a".repeat(64));
+    let newer = format!("sha256:{}", "b".repeat(64));
+    let image = format!("php@{digest}");
+    dhpanel_database::images::sync(
+        &pool,
+        &[
+            (
+                image.clone(),
+                "php".into(),
+                Some("8.4-fpm-alpine".into()),
+                "PHP".into(),
+            ),
+            (
+                format!("mariadb@{digest}"),
+                "db".into(),
+                Some("lts".into()),
+                "DB".into(),
+            ),
+        ],
+    )
+    .await
+    .unwrap();
+    let path = "/api/v1/admin/security/images";
+    assert_eq!(e.call(&a, "GET", path, None).await.0, StatusCode::FORBIDDEN);
+    // Not scanned, not checked yet.
+    let (status, list) = e.call(&root, "GET", path, None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(list["items"].as_array().unwrap().len(), 2);
+    assert!(list["items"][0]["scanned_at"].is_null());
+    assert_eq!(list["items"][0]["update_available"], false);
+    // The dispatcher's findings and the registry's answer arrive.
+    let next = dhpanel_database::images::next_to_scan(&pool, 86_400)
+        .await
+        .unwrap();
+    assert!(next.is_some());
+    let top = json!([{"id": "CVE-2025-1", "package": "openssl", "installed": "1", "fixed": "2", "severity": "CRITICAL", "title": "bad"}]);
+    dhpanel_database::images::store_scan(&pool, &image, [1, 2, 3, 4], &top)
+        .await
+        .unwrap();
+    dhpanel_database::images::store_digest(&pool, "php", "8.4-fpm-alpine", &newer)
+        .await
+        .unwrap();
+    let (_, list) = e.call(&root, "GET", path, None).await;
+    let php = list["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["role"] == "php")
+        .unwrap();
+    assert_eq!(
+        (
+            php["critical"].as_i64(),
+            php["high"].as_i64(),
+            php["low"].as_i64()
+        ),
+        (Some(1), Some(2), Some(4))
+    );
+    assert_eq!(php["update_available"], true);
+    assert_eq!(php["latest_digest"], newer);
+    // A scan just done is not due again for a day; the other image (never scanned) is.
+    let due = dhpanel_database::images::next_to_scan(&pool, 86_400)
+        .await
+        .unwrap();
+    assert_eq!(due.as_deref(), Some(format!("mariadb@{digest}").as_str()));
+    // The worst findings of one image.
+    let (status, vulns) = e
+        .call(
+            &root,
+            "GET",
+            &format!("{path}/vulnerabilities?reference={image}"),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{vulns}");
+    assert_eq!(vulns["items"][0]["id"], "CVE-2025-1");
+    assert_eq!(
+        e.call(
+            &root,
+            "GET",
+            &format!("{path}/vulnerabilities?reference=nope@x"),
+            None
+        )
+        .await
+        .0,
+        StatusCode::NOT_FOUND
+    );
+    // Asking for a scan puts the image first again.
+    let (status, _) = e
+        .call(
+            &root,
+            "POST",
+            &format!("{path}/scan"),
+            Some(json!({"reference": image})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    let due = dhpanel_database::images::next_to_scan(&pool, 86_400)
+        .await
+        .unwrap();
+    assert_eq!(due.as_deref(), Some(image.as_str()));
+    let (status, _) = e
+        .call(
+            &root,
+            "POST",
+            &format!("{path}/scan"),
+            Some(json!({"reference": "x@y"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}

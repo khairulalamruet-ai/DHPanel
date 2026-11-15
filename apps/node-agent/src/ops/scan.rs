@@ -31,7 +31,7 @@ const UPDATE_LIMIT: Duration = Duration::from_secs(10 * 60);
 /// Most infected files listed (and moved) by one scan.
 const MAX_LISTED: usize = 500;
 
-fn state(context: &TenantContext) -> Result<PathBuf, AgentError> {
+pub(super) fn state(context: &TenantContext) -> Result<PathBuf, AgentError> {
     context
         .vhosts_root
         .parent()
@@ -66,7 +66,7 @@ async fn image(context: &TenantContext) -> Result<dhpanel_docker_manager::ImageR
     Ok(image)
 }
 
-fn base_spec(
+pub(super) fn base_spec(
     name: dhpanel_docker_manager::Name,
     image: dhpanel_docker_manager::ImageRef,
     command: &[&str],

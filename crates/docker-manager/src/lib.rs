@@ -378,6 +378,29 @@ impl DockerManager {
             .map_err(map_error)
     }
 
+    /// The digest a registry gives `image` (`name:tag`) now: what a pull of it would fetch.
+    /// Asks through the daemon; nothing is downloaded.
+    ///
+    /// # Errors
+    /// [`DockerError::Conflict`] for a name that is not plain, [`DockerError::NotFound`] when
+    /// the registry has no such image, an API error.
+    pub async fn registry_digest(&self, image: &str) -> Result<String, DockerError> {
+        let plain = !image.is_empty()
+            && image.len() <= 300
+            && image
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || "./_-:".contains(c));
+        if !plain || image.contains("..") {
+            return Err(DockerError::Conflict("not a plain image name".into()));
+        }
+        let found = self
+            .docker
+            .inspect_registry_image(image, None)
+            .await
+            .map_err(map_error)?;
+        Ok(found.descriptor.digest.unwrap_or_default())
+    }
+
     /// Creates a container (not started). Returns Docker's id.
     ///
     /// # Errors

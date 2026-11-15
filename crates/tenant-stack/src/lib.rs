@@ -53,6 +53,9 @@ pub enum Role {
     Sftp,
     /// The node's malware scanner, run for one scan at a time (not part of a tenant's stack).
     Clamav,
+    /// The node's image vulnerability scanner, run for one image at a time (not part of a
+    /// tenant's stack).
+    Trivy,
 }
 
 impl Role {
@@ -66,6 +69,7 @@ impl Role {
             Self::Pma => "pma",
             Self::Sftp => "sftp",
             Self::Clamav => "clamav",
+            Self::Trivy => "trivy",
         }
     }
 }
@@ -112,6 +116,9 @@ struct RawImage {
     /// The PHP version a `php` image runs (`8.4`).
     version: Option<String>,
     reference: String,
+    /// The moving tag the pin was taken from (`8.4-fpm-alpine`): what to ask a registry about
+    /// to learn whether a newer image exists.
+    tag: Option<String>,
     /// Our own image for the same version (`php` only), tried first; `reference`
     /// is what is used when it cannot be pulled.
     preferred: Option<String>,
@@ -127,6 +134,22 @@ pub struct Allowlist {
     php: Vec<(String, ImageRef)>,
     /// For a PHP version with an image of our own: the official one to fall back to.
     fallbacks: Vec<(ImageRef, ImageRef)>,
+    /// Every image listed, as written.
+    entries: Vec<ImageEntry>,
+}
+
+/// One image of the list, as written.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImageEntry {
+    /// The role it plays.
+    pub role: Role,
+    /// The pinned reference (`name@sha256:…`).
+    pub reference: ImageRef,
+    /// The moving tag it was pinned from, when one is known (`name:tag` is then the thing to
+    /// ask a registry about).
+    pub tag: Option<String>,
+    /// What it is.
+    pub note: String,
 }
 
 /// Whether `text` is a PHP version as the panel writes it: `8.4`.
@@ -151,6 +174,7 @@ impl Allowlist {
         let mut by_role: BTreeMap<Role, Vec<ImageRef>> = BTreeMap::new();
         let mut php: Vec<(String, ImageRef)> = Vec::new();
         let mut fallbacks: Vec<(ImageRef, ImageRef)> = Vec::new();
+        let mut entries: Vec<ImageEntry> = Vec::new();
         for image in raw.image {
             let reference = ImageRef::parse(&image.reference).map_err(|e| {
                 StackError::Allowlist(format!(
@@ -159,6 +183,24 @@ impl Allowlist {
                     image.note.chars().take(40).collect::<String>()
                 ))
             })?;
+            if let Some(tag) = &image.tag
+                && (tag.is_empty()
+                    || tag.len() > 128
+                    || !tag
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || "._-".contains(c)))
+            {
+                return Err(StackError::Allowlist(format!(
+                    "{}: a tag that is not valid",
+                    image.role
+                )));
+            }
+            entries.push(ImageEntry {
+                role: image.role,
+                reference: reference.clone(),
+                tag: image.tag.clone(),
+                note: image.note.clone(),
+            });
             let preferred = image
                 .preferred
                 .as_deref()
@@ -223,6 +265,7 @@ impl Allowlist {
             by_role,
             php,
             fallbacks,
+            entries,
         })
     }
 
@@ -232,6 +275,12 @@ impl Allowlist {
     /// [`StackError::Allowlist`] (a build mistake; tested).
     pub fn embedded() -> Result<Self, StackError> {
         Self::parse(EMBEDDED_ALLOWLIST)
+    }
+
+    /// Every image listed, in the order written.
+    #[must_use]
+    pub fn entries(&self) -> &[ImageEntry] {
+        &self.entries
     }
 
     /// The image new stacks use for a role.
@@ -619,7 +668,7 @@ pub fn render(tenant: &Tenant<'_>, allowlist: &Allowlist) -> Result<Stack, Stack
                 }
             }
             // The database server is the node's, not a tenant's.
-            Role::Db | Role::Pma | Role::Sftp | Role::Clamav => continue,
+            Role::Db | Role::Pma | Role::Sftp | Role::Clamav | Role::Trivy => continue,
         }
         let copies = if template.role == Role::Php {
             php_copies

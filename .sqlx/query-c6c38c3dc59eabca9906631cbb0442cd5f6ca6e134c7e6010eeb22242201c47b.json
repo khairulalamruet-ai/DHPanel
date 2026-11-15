@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO image_scans (reference, role, tag, note) VALUES ($1, $2, $3, $4)\n             ON CONFLICT (reference) DO UPDATE SET role = $2, tag = $3, note = $4",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c6c38c3dc59eabca9906631cbb0442cd5f6ca6e134c7e6010eeb22242201c47b"
+}

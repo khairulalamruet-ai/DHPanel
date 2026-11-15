@@ -167,6 +167,35 @@ pub struct WafSetting {
     pub disabled_rules: Vec<u32>,
 }
 
+/// One vulnerability Trivy found in an image.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(deny_unknown_fields)]
+pub struct ImageVulnerability {
+    /// `CVE-2025-1234`.
+    pub id: String,
+    /// The package.
+    pub package: String,
+    /// The version in the image.
+    pub installed: String,
+    /// The first version that fixes it (empty when none does yet).
+    pub fixed: String,
+    /// `CRITICAL`, `HIGH`, `MEDIUM` or `LOW`.
+    pub severity: String,
+    /// A short title (clipped).
+    pub title: String,
+}
+
+/// What a registry says a tag is now.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ImageDigest {
+    /// The `name:tag` asked about.
+    pub image: String,
+    /// Its digest now (`sha256:…`).
+    pub digest: String,
+}
+
 /// A WordPress plugin or theme and the version it says it is.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -1475,6 +1504,18 @@ pub enum Operation {
         /// The tenant's numeric user id.
         uid: u32,
     },
+    /// Looks for known vulnerabilities in an image with Trivy (it reads the image from its
+    /// registry; no Docker socket is involved). Answered with [`Output::ImageScanned`].
+    ScanImage {
+        /// The image, pinned (`name@sha256:…`).
+        reference: String,
+    },
+    /// Asks the registries what digest each tag has now. Answered with
+    /// [`Output::ImageDigests`].
+    CheckImageUpdates {
+        /// `name:tag` of each image to ask about (at most 50).
+        images: Vec<String>,
+    },
     /// Brings the node's malware signatures up to date (freshclam, in a container of its own).
     /// Answered with [`Output::SignaturesUpdated`].
     UpdateMalwareSignatures,
@@ -1622,6 +1663,8 @@ impl Operation {
         "sync_cron_jobs",
         "set_firewall_rules",
         "scan_tenant",
+        "scan_image",
+        "check_image_updates",
         "inventory_wordpress",
         "update_malware_signatures",
         "set_user_agent_blocklist",
@@ -1697,6 +1740,8 @@ impl Operation {
             Self::SyncCronJobs { .. } => "sync_cron_jobs",
             Self::SetFirewallRules { .. } => "set_firewall_rules",
             Self::ScanTenant { .. } => "scan_tenant",
+            Self::ScanImage { .. } => "scan_image",
+            Self::CheckImageUpdates { .. } => "check_image_updates",
             Self::InventoryWordPress { .. } => "inventory_wordpress",
             Self::UpdateMalwareSignatures => "update_malware_signatures",
             Self::SetUserAgentBlocklist { .. } => "set_user_agent_blocklist",
@@ -1896,6 +1941,24 @@ pub enum Output {
     WordPressInventory {
         /// The installations found (at most 20).
         installs: Vec<WpInstall>,
+    },
+    /// Answer to [`Operation::ScanImage`].
+    ImageScanned {
+        /// Findings by severity.
+        critical: u32,
+        /// Findings by severity.
+        high: u32,
+        /// Findings by severity.
+        medium: u32,
+        /// Findings by severity.
+        low: u32,
+        /// The worst findings (at most 50, worst first, fixable first).
+        top: Vec<ImageVulnerability>,
+    },
+    /// Answer to [`Operation::CheckImageUpdates`].
+    ImageDigests {
+        /// What the registry said for each (an image it could not be asked about is left out).
+        items: Vec<ImageDigest>,
     },
     /// Answer to [`Operation::UpdateMalwareSignatures`].
     SignaturesUpdated {
@@ -3145,7 +3208,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            69,
+            71,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }

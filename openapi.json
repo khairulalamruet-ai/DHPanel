@@ -6273,6 +6273,129 @@
         ]
       }
     },
+    "/api/v1/admin/security/images": {
+      "get": {
+        "tags": [
+          "security"
+        ],
+        "summary": "The images of the allow-list: what a registry says is newer and what the last scan found.",
+        "operationId": "adminListImages",
+        "responses": {
+          "200": {
+            "description": "The images",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageList"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/security/images/scan": {
+      "post": {
+        "tags": [
+          "security"
+        ],
+        "summary": "Scan an image now (a node does it in the next minutes; the first scan fetches the\nvulnerability database, which takes longer).",
+        "operationId": "adminScanImage",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScanImageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Asked for"
+          },
+          "404": {
+            "description": "Not on the list",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/security/images/vulnerabilities": {
+      "get": {
+        "tags": [
+          "security"
+        ],
+        "summary": "The worst findings of one image.",
+        "operationId": "adminImageVulnerabilities",
+        "parameters": [
+          {
+            "name": "reference",
+            "in": "query",
+            "description": "The pinned reference",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The findings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageVulns"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not on the list",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/security/user-agents": {
       "get": {
         "tags": [
@@ -20712,6 +20835,172 @@
         },
         "additionalProperties": false
       },
+      "ImageList": {
+        "type": "object",
+        "description": "The images of the allow-list.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ImageView"
+            },
+            "description": "By role."
+          }
+        }
+      },
+      "ImageView": {
+        "type": "object",
+        "description": "An image of the allow-list and what is known about it.",
+        "required": [
+          "reference",
+          "role",
+          "note",
+          "update_available"
+        ],
+        "properties": {
+          "checked_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "When the registry was asked (Unix seconds)."
+          },
+          "critical": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Findings by severity (`null`: not scanned)."
+          },
+          "high": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Findings by severity."
+          },
+          "latest_digest": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the registry says the tag is now."
+          },
+          "low": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Findings by severity."
+          },
+          "medium": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Findings by severity."
+          },
+          "note": {
+            "type": "string",
+            "description": "What it is."
+          },
+          "reference": {
+            "type": "string",
+            "description": "The pinned reference (`name@sha256:…`)."
+          },
+          "role": {
+            "type": "string",
+            "description": "The role it plays (`web`, `php`, `db`, …)."
+          },
+          "scanned_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "When it was scanned (Unix seconds); `null`: not yet."
+          },
+          "tag": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The moving tag it was pinned from."
+          },
+          "update_available": {
+            "type": "boolean",
+            "description": "A newer image exists: the tag now has another digest than the pin."
+          }
+        }
+      },
+      "ImageVulnerability": {
+        "type": "object",
+        "description": "One vulnerability Trivy found in an image.",
+        "required": [
+          "id",
+          "package",
+          "installed",
+          "fixed",
+          "severity",
+          "title"
+        ],
+        "properties": {
+          "fixed": {
+            "type": "string",
+            "description": "The first version that fixes it (empty when none does yet)."
+          },
+          "id": {
+            "type": "string",
+            "description": "`CVE-2025-1234`."
+          },
+          "installed": {
+            "type": "string",
+            "description": "The version in the image."
+          },
+          "package": {
+            "type": "string",
+            "description": "The package."
+          },
+          "severity": {
+            "type": "string",
+            "description": "`CRITICAL`, `HIGH`, `MEDIUM` or `LOW`."
+          },
+          "title": {
+            "type": "string",
+            "description": "A short title (clipped)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ImageVulns": {
+        "type": "object",
+        "description": "The worst findings of one image.",
+        "required": [
+          "reference",
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ImageVulnerability"
+            },
+            "description": "Worst first."
+          },
+          "reference": {
+            "type": "string",
+            "description": "The image."
+          }
+        }
+      },
       "ImpersonationToken": {
         "type": "object",
         "description": "A one-time sign-in token for the client app.",
@@ -23111,6 +23400,20 @@
             "type": "string",
             "description": "The file.",
             "example": "www/index.php"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ScanImageRequest": {
+        "type": "object",
+        "description": "Which image to scan.",
+        "required": [
+          "reference"
+        ],
+        "properties": {
+          "reference": {
+            "type": "string",
+            "description": "The pinned reference, as the list shows it."
           }
         },
         "additionalProperties": false

@@ -1,0 +1,148 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT reference, role, tag, note, latest_digest,\n                  extract(epoch FROM checked_at)::bigint AS checked_at,\n                  extract(epoch FROM scanned_at)::bigint AS scanned_at,\n                  critical, high, medium, low, top\n           FROM image_scans ORDER BY role, reference",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "reference",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "image_scans",
+            "name": "reference"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "role",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "image_scans",
+            "name": "role"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "tag",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "image_scans",
+            "name": "tag"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "note",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "image_scans",
+            "name": "note"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "latest_digest",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "image_scans",
+            "name": "latest_digest"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "checked_at",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 6,
+        "name": "scanned_at",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 7,
+        "name": "critical",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "image_scans",
+            "name": "critical"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "high",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "image_scans",
+            "name": "high"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "medium",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "image_scans",
+            "name": "medium"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "low",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "image_scans",
+            "name": "low"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "top",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "image_scans",
+            "name": "top"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      true,
+      null,
+      null,
+      true,
+      true,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "a97b99aa4101514ecad07ff501f585543b6be5c7af98de2d611597404e86074e"
+}
