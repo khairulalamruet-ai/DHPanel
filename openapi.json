@@ -8856,6 +8856,66 @@
         ]
       }
     },
+    "/api/v1/client/cron-jobs/{id}/run": {
+      "post": {
+        "tags": [
+          "cron"
+        ],
+        "summary": "Run a job now, apart from its schedule. The result shows as the job's last run within\nabout a minute.",
+        "operationId": "clientRunCronJob",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Job id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Asked for"
+          },
+          "404": {
+            "description": "No such job",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`tenant_not_running`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/client/databases": {
       "get": {
         "tags": [

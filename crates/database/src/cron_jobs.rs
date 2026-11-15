@@ -214,3 +214,16 @@ pub async fn delete(pool: &PgPool, tenant_id: Uuid, id: Uuid) -> Result<bool, sq
     .rows_affected()
         == 1)
 }
+
+/// The nodes that have accounts with enabled cron jobs (the ones worth asking for runs).
+///
+/// # Errors
+/// Database errors.
+pub async fn nodes_with_jobs(pool: &PgPool) -> Result<Vec<Uuid>, sqlx::Error> {
+    sqlx::query_scalar!(
+        r#"SELECT DISTINCT t.node_id AS "node_id!" FROM cron_jobs j JOIN tenants t ON t.id = j.tenant_id
+           WHERE j.enabled"#
+    )
+    .fetch_all(pool)
+    .await
+}

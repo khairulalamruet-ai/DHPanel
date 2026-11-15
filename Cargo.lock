@@ -1314,6 +1314,7 @@ dependencies = [
  "dhpanel-http-kit",
  "dhpanel-kernel",
  "dhpanel-mod-auth",
+ "dhpanel-node-protocol",
  "dhpanel-rbac",
  "dhpanel-session",
  "dhpanel-settings",

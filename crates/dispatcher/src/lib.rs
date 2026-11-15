@@ -181,7 +181,7 @@ impl Dispatcher {
                 _ = tick.tick() => { self.tick().await; }
                 _ = capabilities.tick() => { self.request_capabilities().await; }
                 _ = purges.tick() => { self.request_purges().await; }
-                _ = routes.tick() => { self.expire_previews().await; self.request_route_syncs().await; self.request_error_pages().await; self.request_import_progress().await; }
+                _ = routes.tick() => { self.expire_previews().await; self.request_route_syncs().await; self.request_error_pages().await; self.request_import_progress().await; self.request_cron_runs().await; }
                 _ = certificates.tick() => { self.request_certificates().await; self.request_db_sizes().await; }
                 _ = expiry.tick() => { self.announce_expiring().await; }
                 Some(report) = results.recv() => self.handle_result(report).await,
@@ -602,6 +602,36 @@ impl Dispatcher {
                 Ok(dhpanel_operations::Enqueued::Created(_)) => asked += 1,
                 Ok(dhpanel_operations::Enqueued::Existing(_)) => {}
                 Err(error) => tracing::warn!(%node, %error, "could not queue the size report"),
+            }
+        }
+        asked
+    }
+
+    /// Asks the nodes that have accounts with cron jobs for the runs of the last half hour
+    /// (the key has a thirty-second slot). The answers become the jobs' last results (a
+    /// trigger of the ledger). Returns how many were asked.
+    pub async fn request_cron_runs(&self) -> usize {
+        let nodes = match dhpanel_database::cron_jobs::nodes_with_jobs(self.ops.db()).await {
+            Ok(n) => n,
+            Err(err) => {
+                tracing::warn!(error = %err, "could not look for cron jobs");
+                return 0;
+            }
+        };
+        let now = unix_now();
+        let slot = u64::try_from(now).unwrap_or(0) / 30;
+        let connected = self.gateway.connected_nodes();
+        let mut asked = 0;
+        for node in nodes.into_iter().filter(|n| connected.contains(n)) {
+            let request = dhpanel_operations::Request::new(
+                node,
+                dhpanel_node_protocol::Operation::ReportCronRuns { since: now - 1800 },
+                format!("cronruns:{slot}"),
+            );
+            match self.ops.enqueue(&request).await {
+                Ok(dhpanel_operations::Enqueued::Created(_)) => asked += 1,
+                Ok(dhpanel_operations::Enqueued::Existing(_)) => {}
+                Err(error) => tracing::warn!(%node, %error, "could not queue the cron report"),
             }
         }
         asked

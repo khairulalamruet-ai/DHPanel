@@ -23,11 +23,13 @@ use dhpanel_backup::schedule::Cron;
 use dhpanel_database::{
     accounts::DbAccountKind,
     cron_jobs::{self as store, CronJob, Fields, SaveError},
+    operations::{self, NewOperation},
     plans::{self, Plan},
     sqlx::PgPool,
     tenants, users,
 };
 use dhpanel_http_kit::{AppError, FieldError, ProblemDetails};
+use dhpanel_node_protocol::{CronJobSpec, Operation};
 use dhpanel_rbac::Principal;
 use dhpanel_session::{SessionStore, rfc3339};
 use dhpanel_settings::{Scope, SettingsRegistry};
@@ -70,6 +72,10 @@ pub fn client_router() -> Router<CronState> {
         .route(
             "/api/v1/client/cron-jobs/{id}",
             get(get_job).put(change_job).delete(delete_job),
+        )
+        .route(
+            "/api/v1/client/cron-jobs/{id}/run",
+            axum::routing::post(run_job),
         )
 }
 
@@ -147,6 +153,61 @@ async fn rules(state: &CronState) -> Result<Rules, AppError> {
         max_command_length: usize::try_from(int("max_command_length", 1000)).unwrap_or(1000),
         max_timeout_seconds: int("max_timeout_seconds", 3600),
     })
+}
+
+fn spec(j: &CronJob) -> CronJobSpec {
+    CronJobSpec {
+        id: j.id,
+        schedule: j.schedule.clone(),
+        command: j.command.clone(),
+        enabled: j.enabled,
+        timeout_seconds: u32::try_from(j.timeout_seconds).unwrap_or(300),
+    }
+}
+
+/// Puts the work for the node in the ledger.
+async fn queue(state: &CronState, h: &Hosting, op: &Operation, key: &str) -> Result<(), AppError> {
+    let payload = serde_json::to_value(op).map_err(internal)?;
+    operations::enqueue(
+        &state.db,
+        &NewOperation {
+            node_id: h.tenant.node_id,
+            kind: op.type_name(),
+            tenant_id: Some(h.tenant.id),
+            payload: &payload,
+            idempotency_key: key,
+            created_by: None,
+            ttl_secs: 6 * 3600,
+            max_attempts: 5,
+        },
+    )
+    .await
+    .map_err(internal)?;
+    Ok(())
+}
+
+/// Tells the node the account's jobs as they are now (the whole list: it replaces the old).
+async fn sync(state: &CronState, h: &Hosting) -> Result<(), AppError> {
+    let jobs = store::list(&state.db, h.tenant.id)
+        .await
+        .map_err(internal)?
+        .iter()
+        .map(spec)
+        .collect();
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_micros());
+    queue(
+        state,
+        h,
+        &Operation::SyncCronJobs {
+            tenant_id: h.tenant.id,
+            username: h.tenant.username.clone(),
+            jobs,
+        },
+        &format!("cronsync:{}:{stamp}", h.tenant.id),
+    )
+    .await
 }
 
 fn field(name: &'static str, code: &'static str, message: &str) -> AppError {
@@ -440,6 +501,7 @@ pub async fn create_job(
     )
     .await
     .map_err(save_error)?;
+    sync(&state, &h).await?;
     audit(&state, "cron_job.created", &who, &h, id).await?;
     let made = store::get(&state.db, h.tenant.id, id)
         .await
@@ -492,6 +554,7 @@ pub async fn change_job(
     {
         return Err(AppError::not_found("cron_job"));
     }
+    sync(&state, &h).await?;
     audit(&state, "cron_job.changed", &who, &h, id).await?;
     let now = store::get(&state.db, h.tenant.id, id)
         .await
@@ -528,14 +591,67 @@ pub async fn delete_job(
     {
         return Err(AppError::not_found("cron_job"));
     }
+    sync(&state, &h).await?;
     audit(&state, "cron_job.removed", &who, &h, id).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Run a job now, apart from its schedule. The result shows as the job's last run within
+/// about a minute.
+#[utoipa::path(
+    post,
+    path = "/api/v1/client/cron-jobs/{id}/run",
+    tag = "cron",
+    operation_id = "clientRunCronJob",
+    security(("session" = [])),
+    params(
+        ("id" = Uuid, Path, description = "Job id"),
+        ("X-CSRF-Token" = String, Header, description = "The session's csrf_token")
+    ),
+    responses(
+        (status = 202, description = "Asked for"),
+        (status = 404, description = "No such job", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "`tenant_not_running`", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+pub async fn run_job(
+    State(state): State<CronState>,
+    who: Principal,
+    Path(id): Path<Uuid>,
+) -> Result<StatusCode, AppError> {
+    let h = hosting(&state, &who).await?;
+    if h.tenant.status.as_str() != "active" {
+        return Err(AppError::conflict(
+            "tenant_not_running",
+            "Only a running account can run cron jobs.",
+        ));
+    }
+    let job = store::get(&state.db, h.tenant.id, id)
+        .await
+        .map_err(internal)?
+        .ok_or_else(|| AppError::not_found("cron_job"))?;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_micros());
+    queue(
+        &state,
+        &h,
+        &Operation::RunCronJob {
+            tenant_id: h.tenant.id,
+            username: h.tenant.username.clone(),
+            job: spec(&job),
+        },
+        &format!("cronrun:{id}:{stamp}"),
+    )
+    .await?;
+    audit(&state, "cron_job.run_requested", &who, &h, id).await?;
+    Ok(StatusCode::ACCEPTED)
 }
 
 /// The module's OpenAPI document.
 #[derive(OpenApi)]
 #[openapi(
-    paths(list_jobs, get_job, create_job, change_job, delete_job),
+    paths(list_jobs, get_job, create_job, change_job, delete_job, run_job),
     components(schemas(JobRequest, JobView, JobList)),
     tags((name = "cron", description = "Cron jobs"))
 )]

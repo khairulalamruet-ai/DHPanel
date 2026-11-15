@@ -365,6 +365,74 @@ async fn jobs_are_checked_against_the_rules_and_kept_per_account(pool: PgPool) {
         .unwrap();
     assert_eq!(version, 2);
 
+    // The node was told: the whole list, each time, and a job can be run at once.
+    let syncs: Vec<Value> = sqlx::query_scalar(
+        "SELECT payload FROM operations WHERE kind = 'sync_cron_jobs' ORDER BY created_at",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert!(syncs.len() >= 5, "{}", syncs.len());
+    let last = syncs.last().unwrap();
+    assert_eq!(last["jobs"].as_array().unwrap().len(), 3, "{last}");
+    assert_eq!(last["username"], "alice");
+    let (status, _) = e.call(&alice, "POST", &format!("{one}/run"), None).await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    let run: Value =
+        sqlx::query_scalar("SELECT payload FROM operations WHERE kind = 'run_cron_job'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(run["job"]["id"].as_str().unwrap(), id);
+    let (status, _) = e.call(&bob, "POST", &format!("{one}/run"), None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // What the node reports becomes the job's last result (and only if it is newer).
+    let node: Uuid = sqlx::query_scalar("SELECT node_id FROM tenants WHERE id = $1")
+        .bind(alice_tenant)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let report = |at: i64, status: &str, code: i32, output: &str| {
+        json!({"type": "cron_runs", "runs": [
+            {"job_id": id, "tenant_id": alice_tenant, "started_at": at, "status": status, "exit_code": code, "output": output},
+            {"job_id": id, "tenant_id": alice_tenant, "started_at": at + 1, "status": "skipped", "exit_code": null, "output": "still going"}
+        ]})
+    };
+    for (at, status, code, output) in [
+        (1_800_000_100i64, "failed", 2, "boom"),
+        (1_800_000_000, "ok", 0, "older, must not win"),
+    ] {
+        let op: Uuid = sqlx::query_scalar(
+            "INSERT INTO operations (kind, node_id, payload, idempotency_key, status, output, expires_at)
+             VALUES ('report_cron_runs', $1, '{}', $2, 'dispatched', NULL, now() + interval '1 hour') RETURNING id",
+        )
+        .bind(node)
+        .bind(format!("cronruns:{at}"))
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        sqlx::query("UPDATE operations SET status = 'succeeded', output = $2, finished_at = now() WHERE id = $1")
+            .bind(op)
+            .bind(report(at, status, code, output))
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    let (st, ex, out): (Option<String>, Option<i32>, Option<String>) = sqlx::query_as(
+        "SELECT last_status, last_exit_code, last_output FROM cron_jobs WHERE id = $1::uuid",
+    )
+    .bind(&id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        (st.as_deref(), ex, out.as_deref()),
+        (Some("failed"), Some(2), Some("boom"))
+    );
+    let (_, shown) = e.call(&alice, "GET", &one, None).await;
+    assert_eq!(shown["last_status"], "failed");
+
     // The plan's limit.
     sqlx::query("UPDATE plans SET limits = jsonb_set(limits, '{max_cron_jobs}', '3') WHERE id = (SELECT plan_id FROM tenants WHERE id = $1)")
         .bind(alice_tenant)

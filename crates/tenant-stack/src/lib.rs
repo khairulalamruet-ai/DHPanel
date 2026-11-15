@@ -460,6 +460,14 @@ pub fn web_container_name(tenant: &TenantUsername) -> Result<Name, SpecError> {
     name(tenant, Role::Web.as_str())
 }
 
+/// Name of a tenant's main PHP container (where its cron jobs run).
+///
+/// # Errors
+/// [`SpecError`] (cannot happen for a valid tenant name).
+pub fn php_container_name(tenant: &TenantUsername) -> Result<Name, SpecError> {
+    name(tenant, Role::Php.as_str())
+}
+
 /// Name of a tenant's web server configuration volume: the site files of
 /// nginx's `conf.d`, written by the node agent and only read by the container.
 ///

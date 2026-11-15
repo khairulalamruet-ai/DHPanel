@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT DISTINCT t.node_id AS \"node_id!\" FROM cron_jobs j JOIN tenants t ON t.id = j.tenant_id\n           WHERE j.enabled",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "node_id!",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "tenants",
+            "name": "node_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "a4c9b1347adb14e31e03cd86cef83d05fd069102d472508061c90a4abd0ab8a7"
+}

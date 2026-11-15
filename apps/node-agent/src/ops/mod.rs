@@ -23,6 +23,7 @@
 pub mod backup;
 pub mod cache;
 pub mod capabilities;
+pub mod cron;
 pub mod db;
 pub mod files;
 pub mod ftp;
@@ -181,6 +182,18 @@ impl Registry {
                 move |op| backup::export_backup(context.clone(), op)
             });
             registry.register("import_export", backup::import_export);
+            registry.register("sync_cron_jobs", {
+                let context = context.clone();
+                move |op| cron::sync_cron_jobs(context.clone(), op)
+            });
+            registry.register("run_cron_job", {
+                let context = context.clone();
+                move |op| cron::run_cron_job(context.clone(), op)
+            });
+            registry.register("report_cron_runs", {
+                let context = context.clone();
+                move |op| cron::report_cron_runs(context.clone(), op)
+            });
             registry.register("file_op", {
                 let context = context.clone();
                 move |op| files::file_op(context.clone(), op)

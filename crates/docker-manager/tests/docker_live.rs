@@ -309,3 +309,72 @@ async fn missing_things_and_a_dead_socket_are_clear_errors() {
     };
     assert!(err.is_retryable(), "{err:?}");
 }
+
+#[tokio::test]
+#[ignore = "needs Docker"]
+async fn a_cron_command_runs_inside_the_container_with_its_exit_code_output_and_time_limit() {
+    let m = manager();
+    m.pull_image(&busybox()).await.unwrap();
+    let name = unique("cron");
+    let mut spec = ContainerSpec::new(name.clone(), busybox());
+    spec.command = vec!["sleep".into(), "120".into()];
+    spec.tmpfs.push(Tmpfs {
+        target: "/work".into(),
+        size_bytes: 1 << 20,
+    });
+    m.create_container(&spec).await.unwrap();
+    // Not running: refused.
+    assert!(matches!(
+        m.run_user_command(&name, "true", "/work", Duration::from_secs(5))
+            .await,
+        Err(DockerError::Conflict(_))
+    ));
+    m.start(&name).await.unwrap();
+    let run = |cmd: &'static str, secs: u64| {
+        let (m, name) = (m.clone(), name.clone());
+        async move {
+            m.run_user_command(&name, cmd, "/work", Duration::from_secs(secs))
+                .await
+                .unwrap()
+        }
+    };
+    let ok = run("pwd; echo out; echo err >&2", 10).await;
+    assert_eq!(ok.exit_code, 0);
+    assert!(
+        ok.output.contains("/work") && ok.output.contains("out") && ok.output.contains("err"),
+        "{}",
+        ok.output
+    );
+    let failed = run("echo nope; exit 3", 10).await;
+    assert_eq!((failed.exit_code, failed.output.trim()), (3, "nope"));
+    // Pipes and variables are the shell's.
+    assert_eq!(run("echo $((6*7)) | tr 4 5", 10).await.output.trim(), "52");
+    // The time limit kills it.
+    let started = std::time::Instant::now();
+    let slow = run("sleep 60", 2).await;
+    assert_eq!(slow.exit_code, 137, "{slow:?}");
+    assert!(started.elapsed() < Duration::from_secs(30));
+    // A lot of output keeps its end.
+    let loud = run(
+        "i=0; while [ $i -lt 3000 ]; do echo line-$i-padding-padding; i=$((i+1)); done",
+        20,
+    )
+    .await;
+    assert!(
+        loud.output.len() <= 8 * 1024 && loud.output.contains("line-2999-"),
+        "{}",
+        loud.output.len()
+    );
+    // Bad arguments.
+    assert!(matches!(
+        m.run_user_command(&name, "a\0b", "/work", Duration::from_secs(5))
+            .await,
+        Err(DockerError::Conflict(_))
+    ));
+    assert!(matches!(
+        m.run_user_command(&name, "true", "work", Duration::from_secs(5))
+            .await,
+        Err(DockerError::Conflict(_))
+    ));
+    m.remove(&name, true).await.unwrap();
+}

@@ -404,6 +404,96 @@ impl DockerManager {
         })
     }
 
+    /// Runs a cron job's command line (`sh -c`) inside a running container of ours, as the
+    /// container's own user, in `workdir`, stopped after `timeout`. The command is the
+    /// tenant's own, but it runs **inside the tenant's sandboxed container** (no new
+    /// privileges, read-only root, limits, its own network), never on the host.
+    ///
+    /// Returns the exit code (`124` or `137` when the time ran out) and the end of what the
+    /// command printed.
+    ///
+    /// # Errors
+    /// [`DockerError::NotFound`], [`DockerError::NotManaged`], [`DockerError::Conflict`]
+    /// (not running, or a command with a NUL), an API error.
+    pub async fn run_user_command(
+        &self,
+        container: &Name,
+        command: &str,
+        workdir: &str,
+        timeout: Duration,
+    ) -> Result<CommandResult, DockerError> {
+        if command.is_empty() || command.contains('\0') || !workdir.starts_with('/') {
+            return Err(DockerError::Conflict("bad command".into()));
+        }
+        let info = self.require_managed_container(container).await?;
+        if !info.running {
+            return Err(DockerError::Conflict("the container is not running".into()));
+        }
+        // `timeout` ends the process inside the container; the wait below is a second belt.
+        let seconds = timeout.as_secs().max(1).to_string();
+        let created = self
+            .docker
+            .create_exec(
+                container.as_str(),
+                CreateExecOptions {
+                    attach_stdout: Some(true),
+                    attach_stderr: Some(true),
+                    working_dir: Some(workdir.to_owned()),
+                    cmd: Some(vec![
+                        "timeout".to_owned(),
+                        "-s".to_owned(),
+                        "KILL".to_owned(),
+                        seconds,
+                        "sh".to_owned(),
+                        "-c".to_owned(),
+                        command.to_owned(),
+                    ]),
+                    ..Default::default()
+                },
+            )
+            .await
+            .map_err(map_error)?;
+        let started = self
+            .docker
+            .start_exec(&created.id, None)
+            .await
+            .map_err(map_error)?;
+        let mut output = String::new();
+        if let StartExecResults::Attached {
+            output: mut stream, ..
+        } = started
+        {
+            let read = async {
+                while let Some(chunk) = stream.next().await {
+                    let chunk = chunk.map_err(map_error)?;
+                    output.push_str(&String::from_utf8_lossy(&chunk.into_bytes()));
+                    // Keep the end: the last lines say how it went.
+                    if output.len() > 2 * MAX_EXEC_OUTPUT {
+                        let cut = output.ceil_char_boundary(output.len() - MAX_EXEC_OUTPUT);
+                        output.drain(..cut);
+                    }
+                }
+                Ok::<(), DockerError>(())
+            };
+            tokio::time::timeout(timeout + Duration::from_secs(10), read)
+                .await
+                .map_err(|_| DockerError::Unavailable("the command timed out".into()))??;
+        }
+        if output.len() > MAX_EXEC_OUTPUT {
+            let cut = output.ceil_char_boundary(output.len() - MAX_EXEC_OUTPUT);
+            output.drain(..cut);
+        }
+        let done = self
+            .docker
+            .inspect_exec(&created.id)
+            .await
+            .map_err(map_error)?;
+        Ok(CommandResult {
+            exit_code: done.exit_code.unwrap_or(-1),
+            output,
+        })
+    }
+
     /// Dumps one database with `mariadb-dump` run inside the database container
     /// and sends what it prints to `sink`, a piece at a time. The command is fixed;
     /// only `database` and `user` (plain identifiers, checked here) and the

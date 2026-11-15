@@ -214,6 +214,60 @@ pub struct DbSize {
     pub bytes: u64,
 }
 
+/// One cron job, as the node's scheduler needs it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CronJobSpec {
+    /// The job's id.
+    pub id: Uuid,
+    /// Five fields: minute hour day-of-month month day-of-week (UTC).
+    pub schedule: String,
+    /// The command line, run with `sh -c` inside the account's PHP container.
+    pub command: String,
+    /// Whether it runs.
+    pub enabled: bool,
+    /// Stopped after this many seconds.
+    pub timeout_seconds: u32,
+}
+
+/// Most cron jobs one account may have on a node.
+pub const MAX_CRON_JOBS: usize = 200;
+
+/// How a cron run ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CronStatus {
+    /// Exit code 0.
+    Ok,
+    /// Another exit code, or the container could not run it.
+    Failed,
+    /// Stopped for taking longer than its timeout.
+    Timeout,
+    /// Not started: the last run was still going.
+    Skipped,
+}
+
+/// One run of a cron job.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CronRun {
+    /// The job.
+    pub job_id: Uuid,
+    /// Its account.
+    pub tenant_id: Uuid,
+    /// When it started (Unix seconds).
+    pub started_at: i64,
+    /// How it ended.
+    pub status: CronStatus,
+    /// The exit code, when there was one.
+    pub exit_code: Option<i32>,
+    /// The end of what it printed (clipped).
+    pub output: String,
+}
+
+/// Most runs in one report.
+pub const MAX_CRON_RUNS_PER_REPORT: usize = 500;
+
 /// Most databases in one size report.
 pub const MAX_DB_SIZES_PER_REPORT: usize = 5000;
 
@@ -752,6 +806,33 @@ pub enum Operation {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         credentials: Option<DbPassword>,
     },
+    /// Replaces the cron jobs of an account on this node; the node's scheduler runs them
+    /// from now on, and keeps them across restarts. Safe to repeat. Answered with
+    /// [`Output::CronSynced`].
+    SyncCronJobs {
+        /// The tenant.
+        tenant_id: Uuid,
+        /// The tenant's system name (its PHP container is `dh-<name>-php`).
+        username: String,
+        /// All of the account's jobs (at most [`MAX_CRON_JOBS`]).
+        jobs: Vec<CronJobSpec>,
+    },
+    /// Starts one job now, apart from its schedule (the result is reported like any run).
+    /// Answered with [`Output::CronStarted`].
+    RunCronJob {
+        /// The tenant.
+        tenant_id: Uuid,
+        /// The tenant's system name.
+        username: String,
+        /// The job (as it is now: it need not be synced).
+        job: CronJobSpec,
+    },
+    /// The runs that started at or after `since` (Unix seconds; the node keeps the last
+    /// hour). Answered with [`Output::CronRuns`].
+    ReportCronRuns {
+        /// The oldest start wanted.
+        since: i64,
+    },
     /// One file manager request on a tenant's files, done as the tenant's own user
     /// id. Answered with [`Output::File`].
     FileOp {
@@ -1006,6 +1087,9 @@ impl Operation {
         "create_backup",
         "restore_backup",
         "delete_backup",
+        "sync_cron_jobs",
+        "run_cron_job",
+        "report_cron_runs",
         "export_backup",
         "import_export",
         "upsert_ftp_account",
@@ -1058,6 +1142,9 @@ impl Operation {
             Self::CreateBackup { .. } => "create_backup",
             Self::RestoreBackup { .. } => "restore_backup",
             Self::DeleteBackup { .. } => "delete_backup",
+            Self::SyncCronJobs { .. } => "sync_cron_jobs",
+            Self::RunCronJob { .. } => "run_cron_job",
+            Self::ReportCronRuns { .. } => "report_cron_runs",
             Self::ExportBackup { .. } => "export_backup",
             Self::ImportExport { .. } => "import_export",
             Self::UpsertFtpAccount { .. } => "upsert_ftp_account",
@@ -1319,6 +1406,21 @@ pub enum Output {
         parts: Vec<BackupPartInfo>,
         /// Everything put in place, in bytes.
         size_bytes: u64,
+    },
+    /// Answer to [`Operation::SyncCronJobs`].
+    CronSynced {
+        /// How many jobs the node has for the account now.
+        count: u32,
+    },
+    /// Answer to [`Operation::RunCronJob`].
+    CronStarted {
+        /// Whether it was started (not when its last run is still going).
+        started: bool,
+    },
+    /// Answer to [`Operation::ReportCronRuns`].
+    CronRuns {
+        /// The runs, oldest first (at most [`MAX_CRON_RUNS_PER_REPORT`]).
+        runs: Vec<CronRun>,
     },
     /// Answer to [`Operation::DeleteBackup`].
     BackupDeleted {
@@ -2383,7 +2485,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            46,
+            49,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }
