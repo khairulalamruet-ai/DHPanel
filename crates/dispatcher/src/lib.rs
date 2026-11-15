@@ -181,7 +181,7 @@ impl Dispatcher {
                 _ = tick.tick() => { self.tick().await; }
                 _ = capabilities.tick() => { self.request_capabilities().await; }
                 _ = purges.tick() => { self.request_purges().await; }
-                _ = routes.tick() => { self.expire_previews().await; self.request_route_syncs().await; self.request_error_pages().await; self.request_user_agents().await; self.request_import_progress().await; self.request_cron_runs().await; self.request_metrics().await; self.request_services().await; }
+                _ = routes.tick() => { self.expire_previews().await; self.request_route_syncs().await; self.request_error_pages().await; self.request_user_agents().await; self.request_firewalls().await; self.request_import_progress().await; self.request_cron_runs().await; self.request_metrics().await; self.request_services().await; }
                 _ = certificates.tick() => { self.request_certificates().await; self.request_db_sizes().await; }
                 _ = expiry.tick() => { self.announce_expiring().await; }
                 Some(report) = results.recv() => self.handle_result(report).await,
@@ -603,6 +603,45 @@ impl Dispatcher {
                 Ok(dhpanel_operations::Enqueued::Created(_)) => told += 1,
                 Ok(dhpanel_operations::Enqueued::Existing(_)) => {}
                 Err(error) => tracing::warn!(%node, %error, "could not queue the User-Agent list"),
+            }
+        }
+        told
+    }
+
+    /// Sends each connected node its firewall policy whenever it changed (the key is made from
+    /// the policy: a node is told once per version, and one that connects later is told too).
+    /// A node without a policy is left alone. Returns how many nodes were told.
+    pub async fn request_firewalls(&self) -> usize {
+        let all = match dhpanel_database::node_firewalls::all(self.ops.db()).await {
+            Ok(a) => a,
+            Err(err) => {
+                tracing::warn!(error = %err, "could not read the node firewalls");
+                return 0;
+            }
+        };
+        let connected = self.gateway.connected_nodes();
+        let mut told = 0;
+        for (node, value) in all {
+            if !connected.contains(&node) {
+                continue;
+            }
+            let policy: dhpanel_node_protocol::FirewallPolicy =
+                match serde_json::from_value(value.clone()) {
+                    Ok(p) => p,
+                    Err(error) => {
+                        tracing::warn!(%node, %error, "a stored firewall policy is unreadable");
+                        continue;
+                    }
+                };
+            let request = dhpanel_operations::Request::new(
+                node,
+                dhpanel_node_protocol::Operation::SetFirewallRules { policy },
+                format!("firewall:{:016x}", short_hash(&value.to_string())),
+            );
+            match self.ops.enqueue(&request).await {
+                Ok(dhpanel_operations::Enqueued::Created(_)) => told += 1,
+                Ok(dhpanel_operations::Enqueued::Existing(_)) => {}
+                Err(error) => tracing::warn!(%node, %error, "could not queue the firewall policy"),
             }
         }
         told

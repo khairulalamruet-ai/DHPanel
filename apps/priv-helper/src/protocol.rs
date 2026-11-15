@@ -122,6 +122,12 @@ pub enum Action {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         folder: Option<String>,
     },
+    /// Replaces the node's firewall table `dhpanel_fw` with the one the policy describes (see
+    /// [`crate::nodefw`]): checked with the packet filter first, applied in one transaction.
+    SetNodeFirewall {
+        /// The policy (checked again here).
+        policy: dhpanel_node_protocol::FirewallPolicy,
+    },
     /// Sets the machine's time zone (a zone file of this machine; see [`crate::servertools`]).
     SetTimezone {
         /// `Area/City`.
@@ -160,6 +166,7 @@ impl Action {
             Self::TakeFile { .. } => "take_file",
             Self::BackupFiles { .. } => "backup_files",
             Self::RestoreFiles { .. } => "restore_files",
+            Self::SetNodeFirewall { .. } => "set_node_firewall",
             Self::SetTimezone { .. } => "set_timezone",
             Self::SetSwap { .. } => "set_swap",
             Self::DropCaches => "drop_caches",

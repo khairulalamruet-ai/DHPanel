@@ -197,6 +197,29 @@ pub async fn set_swap(context: Arc<TenantContext>, op: Operation) -> Result<Outp
     through_helper(&context, Action::SetSwap { megabytes }, "set_swap").await
 }
 
+/// `set_firewall_rules`: the policy is checked here, and again by the helper.
+///
+/// # Errors
+/// [`AgentError`]: a policy that is not valid (not retryable), the helper or the packet filter
+/// refusing (the old rules stay in force).
+pub async fn set_firewall_rules(
+    context: Arc<TenantContext>,
+    op: Operation,
+) -> Result<Output, AgentError> {
+    let Operation::SetFirewallRules { policy } = op else {
+        return Err(super::wrong_operation());
+    };
+    let policy = policy.checked().map_err(|m| invalid(&m))?;
+    let rules = dhpanel_priv_helper::nodefw::rule_count(&policy);
+    through_helper(
+        &context,
+        Action::SetNodeFirewall { policy },
+        "set_firewall_rules",
+    )
+    .await?;
+    Ok(Output::FirewallSet { rules })
+}
+
 /// `drop_caches`.
 ///
 /// # Errors

@@ -58,6 +58,8 @@ pub struct Config {
     pub transfers: PathBuf,
     /// The commands and paths of the server tools.
     pub server: crate::servertools::Env,
+    /// The port SSH listens on: always open in the node firewall.
+    pub ssh_port: u16,
 }
 
 /// Creates the socket: owned by the agent, mode 0600. A stale socket file from
@@ -251,6 +253,7 @@ fn execute_one(action: &Action, config: &Config) -> Result<(), (ErrorCode, &'sta
             inodes,
         } => tenant::set_storage_quota(&config.tenants, tenant_id, *uid, *disk_bytes, *inodes),
         Action::SetDbFirewall { cidrs } => crate::firewall::set(config.db_port, cidrs),
+        Action::SetNodeFirewall { policy } => crate::nodefw::set(policy, config.ssh_port),
         Action::SetTimezone { zone } => crate::servertools::set_timezone(&config.server, zone),
         Action::SetSwap { megabytes } => crate::servertools::set_swap(&config.server, *megabytes),
         Action::DropCaches => crate::servertools::drop_caches(&config.server),
@@ -415,6 +418,7 @@ mod tests {
                 db_port: 13306,
                 transfers: std::env::temp_dir(),
                 server: crate::servertools::Env::default(),
+                ssh_port: 22,
             };
             let listener = bind(&bind_config).unwrap();
             let config = Config {
@@ -597,6 +601,7 @@ mod tests {
             db_port: 13306,
             transfers: std::env::temp_dir(),
             server: crate::servertools::Env::default(),
+            ssh_port: 22,
         };
         drop(bind(&config).unwrap()); // leaves the socket file behind
         assert!(path.exists());

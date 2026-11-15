@@ -27,6 +27,7 @@ pub mod imports;
 pub mod mfa;
 pub mod modules;
 pub mod node_enrollments;
+pub mod node_firewalls;
 pub mod node_services;
 pub mod nodes;
 pub mod operations;

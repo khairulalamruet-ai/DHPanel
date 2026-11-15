@@ -20,6 +20,7 @@
 
 pub mod files;
 pub mod firewall;
+pub mod nodefw;
 pub mod protocol;
 pub mod quota;
 pub mod server;

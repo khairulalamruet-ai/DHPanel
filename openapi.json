@@ -4664,6 +4664,184 @@
         ]
       }
     },
+    "/api/v1/admin/nodes/{id}/firewall": {
+      "get": {
+        "tags": [
+          "security"
+        ],
+        "summary": "A node's firewall policy.",
+        "operationId": "adminGetNodeFirewall",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Node id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The policy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeFirewall"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such node",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "security"
+        ],
+        "summary": "Set a node's firewall policy; the node is told within seconds (or when it connects). A\npolicy that denies by default needs an `always_allow` address, so the panel stays reachable.",
+        "operationId": "adminSetNodeFirewall",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Node id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FirewallPolicy"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Stored (the checked form: addresses written plainly)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeFirewall"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such node",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A policy that is not valid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "security"
+        ],
+        "summary": "Take every rule away from a node's firewall (the panel keeps managing it: an empty policy).",
+        "operationId": "adminResetNodeFirewall",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Node id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Emptied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeFirewall"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such node",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/nodes/{id}/ping": {
       "post": {
         "tags": [
@@ -19569,6 +19747,52 @@
           }
         }
       },
+      "FirewallPolicy": {
+        "type": "object",
+        "description": "The node's firewall (T11.06): who may reach which port. Applied by the privileged helper as\none nftables table of its own; IPv4 only.",
+        "properties": {
+          "allowed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Addresses allowed to everything (before `blocked` is looked at)."
+          },
+          "always_allow": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Addresses that always get in, whatever else is said: the panel's own, an administrator's.\nWith `default_deny` at least one is needed (it is what keeps the panel reachable)."
+          },
+          "blocked": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Addresses refused everything."
+          },
+          "default_deny": {
+            "type": "boolean",
+            "description": "Drop whatever is not allowed below (and not SSH, loopback, answers to what the node\nasked for, ICMP and the `always_allow` addresses). Without it only the `blocked`\naddresses and the rate limits act."
+          },
+          "open_ports": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PortRule"
+            },
+            "description": "Ports open to everybody (or to the listed addresses only)."
+          },
+          "rate_limits": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RateLimit"
+            },
+            "description": "New connections per minute one address may make to a port."
+          }
+        },
+        "additionalProperties": false
+      },
       "FolderUse": {
         "type": "object",
         "description": "What one folder uses.",
@@ -20569,6 +20793,23 @@
           }
         }
       },
+      "NodeFirewall": {
+        "type": "object",
+        "description": "A node's firewall policy.",
+        "properties": {
+          "policy": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FirewallPolicy",
+                "description": "The policy (`null`: the panel manages no firewall on this node)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
       "NodeList": {
         "type": "object",
         "description": "The nodes.",
@@ -21436,6 +21677,43 @@
         },
         "additionalProperties": false
       },
+      "PortRule": {
+        "type": "object",
+        "description": "One open port (or range).",
+        "required": [
+          "port",
+          "proto"
+        ],
+        "properties": {
+          "from": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Only these addresses (empty: everybody)."
+          },
+          "port": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The port (the first of a range).",
+            "minimum": 0
+          },
+          "proto": {
+            "type": "string",
+            "description": "`tcp` or `udp`."
+          },
+          "to": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The last port of a range (`port` to `to`).",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
       "Preview": {
         "type": "object",
         "description": "What a template makes for a made-up site.",
@@ -21642,6 +21920,34 @@
             "type": "string",
             "description": "Path below the docroot: names of letters, digits, `.`, `_`, `-` separated\nby `/`, at most 6 levels.",
             "example": "index.html"
+          }
+        },
+        "additionalProperties": false
+      },
+      "RateLimit": {
+        "type": "object",
+        "description": "A limit on new connections.",
+        "required": [
+          "port",
+          "proto",
+          "per_minute"
+        ],
+        "properties": {
+          "per_minute": {
+            "type": "integer",
+            "format": "int32",
+            "description": "New connections a minute per source address (1 to 100000).",
+            "minimum": 0
+          },
+          "port": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The port.",
+            "minimum": 0
+          },
+          "proto": {
+            "type": "string",
+            "description": "`tcp` or `udp`."
           }
         },
         "additionalProperties": false

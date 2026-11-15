@@ -558,3 +558,87 @@ async fn administrators_keep_the_list_of_refused_user_agents(pool: PgPool) {
     .unwrap();
     assert_eq!(audited, ["user_agent.blocked", "user_agent.unblocked"]);
 }
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn administrators_set_a_nodes_firewall_and_a_bad_policy_is_refused(pool: PgPool) {
+    let e = env(&pool).await;
+    let (alice_account, _) = client(&pool, "alice", 10_000).await;
+    let a = e.sign_in(alice_account).await;
+    let admin_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO accounts (kind, username, email, password_hash)
+         VALUES ('admin', 'rootuser', 'root@example.com', $1) RETURNING id",
+    )
+    .bind(HASH)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    dhpanel_database::rbac::assign_role(&pool, admin_id, "super_admin", None)
+        .await
+        .unwrap();
+    let root = e.sign_in(admin_id).await;
+    let node: Uuid = sqlx::query_scalar("INSERT INTO nodes (name) VALUES ('fw-node') RETURNING id")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let path = format!("/api/v1/admin/nodes/{node}/firewall");
+    assert_eq!(
+        e.call(&a, "GET", &path, None).await.0,
+        StatusCode::FORBIDDEN
+    );
+    // None yet.
+    let (status, got) = e.call(&root, "GET", &path, None).await;
+    assert_eq!(
+        (status, got["policy"].is_null()),
+        (StatusCode::OK, true),
+        "{got}"
+    );
+    // Set: stored and read back as written.
+    let policy = json!({
+        "default_deny": true,
+        "always_allow": ["203.0.113.250"],
+        "blocked": ["192.0.2.0/24"],
+        "open_ports": [{"port": 80, "proto": "tcp"}, {"port": 21100, "to": 21119, "proto": "tcp"}],
+        "rate_limits": [{"port": 80, "proto": "tcp", "per_minute": 120}]
+    });
+    let (status, put) = e.call(&root, "PUT", &path, Some(policy)).await;
+    assert_eq!(status, StatusCode::OK, "{put}");
+    assert_eq!(put["policy"]["blocked"][0], "192.0.2.0/24", "{put}");
+    let (_, got) = e.call(&root, "GET", &path, None).await;
+    assert_eq!(
+        got["policy"]["open_ports"].as_array().unwrap().len(),
+        2,
+        "{got}"
+    );
+    // Not valid: a deny-everything policy that keeps nobody in, a wrong address, an unknown field.
+    for bad in [
+        json!({"default_deny": true}),
+        json!({"blocked": ["not an address"]}),
+        json!({"blocked": ["192.0.2.1/24"]}),
+        json!({"blocked": ["0.0.0.0/0"]}),
+        json!({"surprise": 1}),
+    ] {
+        let (status, _) = e.call(&root, "PUT", &path, Some(bad.clone())).await;
+        assert!(
+            status == StatusCode::UNPROCESSABLE_ENTITY || status == StatusCode::BAD_REQUEST,
+            "{bad} -> {status}"
+        );
+    }
+    // The stored policy did not change.
+    let (_, got) = e.call(&root, "GET", &path, None).await;
+    assert_eq!(got["policy"]["default_deny"], true);
+    // Reset: an empty policy stays (so the node is told to drop the rules).
+    let (status, reset) = e.call(&root, "DELETE", &path, None).await;
+    assert_eq!(status, StatusCode::OK, "{reset}");
+    assert_eq!(reset["policy"]["default_deny"], false);
+    // No such node.
+    let other = format!("/api/v1/admin/nodes/{}/firewall", Uuid::new_v4());
+    assert_eq!(
+        e.call(&root, "GET", &other, None).await.0,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        e.call(&root, "PUT", &other, Some(json!({}))).await.0,
+        StatusCode::NOT_FOUND
+    );
+}

@@ -167,6 +167,167 @@ pub struct WafSetting {
     pub disabled_rules: Vec<u32>,
 }
 
+/// The node's firewall (T11.06): who may reach which port. Applied by the privileged helper as
+/// one nftables table of its own; IPv4 only.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(deny_unknown_fields)]
+pub struct FirewallPolicy {
+    /// Drop whatever is not allowed below (and not SSH, loopback, answers to what the node
+    /// asked for, ICMP and the `always_allow` addresses). Without it only the `blocked`
+    /// addresses and the rate limits act.
+    #[serde(default)]
+    pub default_deny: bool,
+    /// Addresses that always get in, whatever else is said: the panel's own, an administrator's.
+    /// With `default_deny` at least one is needed (it is what keeps the panel reachable).
+    #[serde(default)]
+    pub always_allow: Vec<String>,
+    /// Addresses allowed to everything (before `blocked` is looked at).
+    #[serde(default)]
+    pub allowed: Vec<String>,
+    /// Addresses refused everything.
+    #[serde(default)]
+    pub blocked: Vec<String>,
+    /// Ports open to everybody (or to the listed addresses only).
+    #[serde(default)]
+    pub open_ports: Vec<PortRule>,
+    /// New connections per minute one address may make to a port.
+    #[serde(default)]
+    pub rate_limits: Vec<RateLimit>,
+}
+
+/// One open port (or range).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(deny_unknown_fields)]
+pub struct PortRule {
+    /// The port (the first of a range).
+    pub port: u16,
+    /// The last port of a range (`port` to `to`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to: Option<u16>,
+    /// `tcp` or `udp`.
+    pub proto: String,
+    /// Only these addresses (empty: everybody).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub from: Vec<String>,
+}
+
+/// A limit on new connections.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(deny_unknown_fields)]
+pub struct RateLimit {
+    /// The port.
+    pub port: u16,
+    /// `tcp` or `udp`.
+    pub proto: String,
+    /// New connections a minute per source address (1 to 100000).
+    pub per_minute: u32,
+}
+
+/// Most entries in each list of a firewall policy.
+pub const MAX_FIREWALL_ENTRIES: usize = 2000;
+
+/// An IPv4 address or range as `a.b.c.d` or `a.b.c.d/n` (n from 8 to 32, at the start of its
+/// range), made `a.b.c.d/n`; `None` when it is anything else.
+#[must_use]
+pub fn normalize_cidr(text: &str) -> Option<String> {
+    let (ip, bits) = match text.split_once('/') {
+        Some((ip, bits)) => (
+            ip,
+            bits.parse::<u32>().ok().filter(|b| bits == b.to_string())?,
+        ),
+        None => (text, 32),
+    };
+    if !(8..=32).contains(&bits) {
+        return None;
+    }
+    let parts: Vec<&str> = ip.split('.').collect();
+    if parts.len() != 4 {
+        return None;
+    }
+    let mut octets = [0u8; 4];
+    for (slot, part) in octets.iter_mut().zip(&parts) {
+        let plain = !part.is_empty()
+            && part.len() <= 3
+            && part.bytes().all(|b| b.is_ascii_digit())
+            && (part.len() == 1 || !part.starts_with('0'));
+        match part.parse::<u8>() {
+            Ok(n) if plain => *slot = n,
+            _ => return None,
+        }
+    }
+    let mask = u32::MAX << (32 - bits);
+    (u32::from_be_bytes(octets) & !mask == 0).then(|| format!("{ip}/{bits}"))
+}
+
+impl FirewallPolicy {
+    /// Checks the policy and returns it in its plain form (addresses as `a.b.c.d/n`, no
+    /// duplicates), or says what is wrong.
+    ///
+    /// # Errors
+    /// A message naming the field.
+    pub fn checked(&self) -> Result<Self, String> {
+        fn cidrs(name: &str, list: &[String]) -> Result<Vec<String>, String> {
+            if list.len() > MAX_FIREWALL_ENTRIES {
+                return Err(format!("{name}: too many entries"));
+            }
+            let mut out: Vec<String> = Vec::new();
+            for item in list {
+                let c = normalize_cidr(item).ok_or_else(|| {
+                    format!(
+                        "{name}: `{}` is not an IPv4 address or range (a.b.c.d/n, n from 8 to 32)",
+                        item.escape_default()
+                    )
+                })?;
+                if !out.contains(&c) {
+                    out.push(c);
+                }
+            }
+            Ok(out)
+        }
+        let proto = |p: &str| matches!(p, "tcp" | "udp");
+        let always_allow = cidrs("always_allow", &self.always_allow)?;
+        let allowed = cidrs("allowed", &self.allowed)?;
+        let blocked = cidrs("blocked", &self.blocked)?;
+        if self.default_deny && always_allow.is_empty() {
+            return Err("always_allow: at least one address is needed with default_deny".into());
+        }
+        if self.open_ports.len() > MAX_FIREWALL_ENTRIES
+            || self.rate_limits.len() > MAX_FIREWALL_ENTRIES
+        {
+            return Err("too many ports".into());
+        }
+        let mut open_ports = Vec::new();
+        for rule in &self.open_ports {
+            if rule.port == 0
+                || rule.to.is_some_and(|t| t < rule.port || t == 0)
+                || !proto(&rule.proto)
+            {
+                return Err("open_ports: a port, a range or a protocol is not valid".into());
+            }
+            open_ports.push(PortRule {
+                from: cidrs("open_ports.from", &rule.from)?,
+                ..rule.clone()
+            });
+        }
+        for rule in &self.rate_limits {
+            if rule.port == 0 || !proto(&rule.proto) || !(1..=100_000).contains(&rule.per_minute) {
+                return Err("rate_limits: a port, a protocol or a rate is not valid".into());
+            }
+        }
+        Ok(Self {
+            default_deny: self.default_deny,
+            always_allow,
+            allowed,
+            blocked,
+            open_ports,
+            rate_limits: self.rate_limits.clone(),
+        })
+    }
+}
+
 /// Most User-Agent texts one node's list may hold.
 pub const MAX_USER_AGENT_PATTERNS: usize = 500;
 
@@ -1243,6 +1404,14 @@ pub enum Operation {
         /// At most one page of each kind.
         pages: Vec<ErrorPage>,
     },
+    /// Replaces the node's firewall (see [`FirewallPolicy`]): checked, then put in place by the
+    /// privileged helper as one transaction, so that a ruleset the packet filter refuses leaves
+    /// the old one in force. SSH, loopback, answers and the `always_allow` addresses are never
+    /// cut off. Answered with [`Output::FirewallSet`].
+    SetFirewallRules {
+        /// The policy.
+        policy: FirewallPolicy,
+    },
     /// Replaces the node's list of User-Agent texts the web server refuses: a request whose
     /// User-Agent contains one of them (any case) is answered `403` before any site sees it.
     /// The agent keeps the list and puts it back whenever the web server loses it. Answered
@@ -1385,6 +1554,7 @@ impl Operation {
         "restore_backup",
         "delete_backup",
         "sync_cron_jobs",
+        "set_firewall_rules",
         "set_user_agent_blocklist",
         "report_server_info",
         "set_timezone",
@@ -1456,6 +1626,7 @@ impl Operation {
             Self::RestoreBackup { .. } => "restore_backup",
             Self::DeleteBackup { .. } => "delete_backup",
             Self::SyncCronJobs { .. } => "sync_cron_jobs",
+            Self::SetFirewallRules { .. } => "set_firewall_rules",
             Self::SetUserAgentBlocklist { .. } => "set_user_agent_blocklist",
             Self::ReportServerInfo => "report_server_info",
             Self::SetTimezone { .. } => "set_timezone",
@@ -1639,6 +1810,11 @@ pub enum Output {
         containers: Vec<String>,
         /// How storage limits are enforced (`xfs`), or `None` when they are not.
         storage_quota: Option<String>,
+    },
+    /// Answer to [`Operation::SetFirewallRules`].
+    FirewallSet {
+        /// How many rules the table has now.
+        rules: usize,
     },
     /// Answer to [`Operation::SetUserAgentBlocklist`].
     UserAgentBlocklistSet {
@@ -2878,7 +3054,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            65,
+            66,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }

@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO node_firewalls (node_id, policy, updated_by)\n         SELECT id, $2, $3 FROM nodes WHERE id = $1\n         ON CONFLICT (node_id) DO UPDATE SET policy = $2, updated_by = $3, updated_at = now()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Jsonb",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "380e664628e0ca7e4cbfada15f38d25648aa704244545934563125d329d5b932"
+}

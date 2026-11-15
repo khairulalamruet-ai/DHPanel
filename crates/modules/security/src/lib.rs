@@ -7,6 +7,7 @@
 //! | GET, PUT, DELETE | `/api/v1/admin/waf/domains/{id}` | the same |
 //! | GET, POST | `/api/v1/admin/security/user-agents` | `admin.security.read`, `.manage` |
 //! | DELETE | `/api/v1/admin/security/user-agents/{id}` | `admin.security.manage` |
+//! | GET, PUT, DELETE | `/api/v1/admin/nodes/{id}/firewall` | `admin.security.read`, `.manage` |
 //! | GET | `/api/v1/client/waf/domains` | a client |
 //! | PUT, DELETE | `/api/v1/client/waf/domains/{id}` | the domain's owner |
 //!
@@ -87,6 +88,12 @@ pub fn admin_router() -> Router<SecurityState> {
         .route(
             "/api/v1/admin/security/user-agents/{id}",
             axum::routing::delete(remove_user_agent),
+        )
+        .route(
+            "/api/v1/admin/nodes/{id}/firewall",
+            get(get_node_firewall)
+                .put(put_node_firewall)
+                .delete(reset_node_firewall),
         )
         .route(
             "/api/v1/admin/waf/domains/{id}",
@@ -794,15 +801,124 @@ pub async fn remove_user_agent(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// A node's firewall policy.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct NodeFirewall {
+    /// The policy (`null`: the panel manages no firewall on this node).
+    pub policy: Option<dhpanel_node_protocol::FirewallPolicy>,
+}
+
+fn firewall_of(
+    value: serde_json::Value,
+) -> Result<dhpanel_node_protocol::FirewallPolicy, AppError> {
+    serde_json::from_value(value).map_err(internal)
+}
+
+/// A node's firewall policy.
+#[utoipa::path(get, path = "/api/v1/admin/nodes/{id}/firewall", tag = "security", operation_id = "adminGetNodeFirewall",
+    security(("session" = [])), params(("id" = Uuid, Path, description = "Node id")),
+    responses((status = 200, description = "The policy", body = NodeFirewall),
+              (status = 404, description = "No such node", body = ProblemDetails, content_type = "application/problem+json")))]
+pub async fn get_node_firewall(
+    State(state): State<SecurityState>,
+    _who: Require<SecurityRead>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<NodeFirewall>, AppError> {
+    if !dhpanel_database::node_firewalls::node_exists(&state.db, id)
+        .await
+        .map_err(internal)?
+    {
+        return Err(AppError::not_found("node"));
+    }
+    let policy = dhpanel_database::node_firewalls::get(&state.db, id)
+        .await
+        .map_err(internal)?
+        .map(firewall_of)
+        .transpose()?;
+    Ok(Json(NodeFirewall { policy }))
+}
+
+/// Set a node's firewall policy; the node is told within seconds (or when it connects). A
+/// policy that denies by default needs an `always_allow` address, so the panel stays reachable.
+#[utoipa::path(put, path = "/api/v1/admin/nodes/{id}/firewall", tag = "security", operation_id = "adminSetNodeFirewall",
+    security(("session" = [])), params(("id" = Uuid, Path, description = "Node id"), ("X-CSRF-Token" = String, Header, description = "The session's csrf_token")),
+    request_body = dhpanel_node_protocol::FirewallPolicy,
+    responses((status = 200, description = "Stored (the checked form: addresses written plainly)", body = NodeFirewall),
+              (status = 404, description = "No such node", body = ProblemDetails, content_type = "application/problem+json"),
+              (status = 422, description = "A policy that is not valid", body = ProblemDetails, content_type = "application/problem+json")))]
+pub async fn put_node_firewall(
+    State(state): State<SecurityState>,
+    who: Require<SecurityManage>,
+    Path(id): Path<Uuid>,
+    Json(req): Json<dhpanel_node_protocol::FirewallPolicy>,
+) -> Result<Json<NodeFirewall>, AppError> {
+    let policy = req.checked().map_err(|message| {
+        AppError::validation(vec![FieldError::new("policy", "invalid", &message)])
+    })?;
+    store_firewall(&state, &who.0, id, policy).await
+}
+
+/// Take every rule away from a node's firewall (the panel keeps managing it: an empty policy).
+#[utoipa::path(delete, path = "/api/v1/admin/nodes/{id}/firewall", tag = "security", operation_id = "adminResetNodeFirewall",
+    security(("session" = [])), params(("id" = Uuid, Path, description = "Node id"), ("X-CSRF-Token" = String, Header, description = "The session's csrf_token")),
+    responses((status = 200, description = "Emptied", body = NodeFirewall),
+              (status = 404, description = "No such node", body = ProblemDetails, content_type = "application/problem+json")))]
+pub async fn reset_node_firewall(
+    State(state): State<SecurityState>,
+    who: Require<SecurityManage>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<NodeFirewall>, AppError> {
+    store_firewall(
+        &state,
+        &who.0,
+        id,
+        dhpanel_node_protocol::FirewallPolicy::default(),
+    )
+    .await
+}
+
+async fn store_firewall(
+    state: &SecurityState,
+    who: &Principal,
+    id: Uuid,
+    policy: dhpanel_node_protocol::FirewallPolicy,
+) -> Result<Json<NodeFirewall>, AppError> {
+    let value = serde_json::to_value(&policy).map_err(internal)?;
+    if !dhpanel_database::node_firewalls::set(&state.db, id, &value, who.account_id())
+        .await
+        .map_err(internal)?
+    {
+        return Err(AppError::not_found("node"));
+    }
+    let entry = AuditEntry::new("node_firewall.set", Outcome::Success)
+        .actor(who.account_id())
+        .target("node", id)
+        .metadata(serde_json::json!({
+            "default_deny": policy.default_deny,
+            "always_allow": policy.always_allow.len(),
+            "allowed": policy.allowed.len(),
+            "blocked": policy.blocked.len(),
+            "open_ports": policy.open_ports.len(),
+            "rate_limits": policy.rate_limits.len(),
+        }));
+    dhpanel_audit::insert(&state.db, &entry)
+        .await
+        .map_err(internal)?;
+    Ok(Json(NodeFirewall {
+        policy: Some(policy),
+    }))
+}
+
 /// The module's OpenAPI document.
 #[derive(OpenApi)]
 #[openapi(
     paths(
         admin_get_global, admin_put_global, admin_delete_global, admin_get_tenant, admin_put_tenant,
         admin_delete_tenant, admin_get_domain, admin_put_domain, admin_delete_domain, client_list,
-        client_put, client_delete, list_user_agents, add_user_agent, remove_user_agent
+        client_put, client_delete, list_user_agents, add_user_agent, remove_user_agent,
+        get_node_firewall, put_node_firewall, reset_node_firewall
     ),
-    components(schemas(UserAgentView, UserAgentList, AddUserAgent, PolicyRequest, PolicyView, EffectiveView, PolicyState, DomainWaf, DomainWafList)),
+    components(schemas(NodeFirewall, dhpanel_node_protocol::FirewallPolicy, dhpanel_node_protocol::PortRule, dhpanel_node_protocol::RateLimit, UserAgentView, UserAgentList, AddUserAgent, PolicyRequest, PolicyView, EffectiveView, PolicyState, DomainWaf, DomainWafList)),
     tags((name = "security", description = "The web application firewall"))
 )]
 pub struct SecurityApi;

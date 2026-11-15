@@ -82,6 +82,7 @@ fn main() -> ExitCode {
     let mut db_port: u16 = 13306;
     let mut transfers = PathBuf::from("/var/lib/dhpanel-transfers");
     let mut server = dhpanel_priv_helper::servertools::Env::default();
+    let mut ssh_port: u16 = 22;
     let (mut uid, mut gid) = (None::<u32>, None::<u32>);
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -92,6 +93,10 @@ fn main() -> ExitCode {
             "--tenants-root" => value().map(|v| tenants_root = v.into()),
             "--transfers-dir" => value().map(|v| transfers = v.into()),
             // For tests: where the server tools find their commands and files.
+            "--ssh-port" => value()
+                .and_then(|v| v.parse().ok())
+                .filter(|p: &u16| *p >= 1)
+                .map(|p| ssh_port = p),
             "--reboot-command" => value().map(|v| server.reboot_command = v.into()),
             "--swap-file" => value().map(|v| server.swap_file = v.into()),
             "--zoneinfo-dir" => value().map(|v| server.zoneinfo = v.into()),
@@ -151,6 +156,7 @@ fn main() -> ExitCode {
         db_port,
         transfers,
         server,
+        ssh_port,
     };
     let listener = match bind(&config) {
         Ok(listener) => listener,
