@@ -175,10 +175,10 @@ async fn main() -> ExitCode {
     let runner_key = master_key.clone();
     let system_key = master_key.clone();
     let minutes = |m: u32| std::time::Duration::from_secs(u64::from(m) * 60);
-    let lockout = |threshold| dhpanel_cache::lockout::LockoutPolicy {
+    let lockout = |threshold, lock_minutes| dhpanel_cache::lockout::LockoutPolicy {
         threshold,
         window: minutes(config.auth.lockout_window_minutes),
-        lockout: minutes(config.auth.lockout_minutes),
+        lockout: minutes(lock_minutes),
     };
     // No CA yet is fine (enrollment then answers 503); a CA that exists but is
     // unusable (expired, wrong key, key readable by others) must not be ignored.
@@ -268,8 +268,11 @@ async fn main() -> ExitCode {
         hasher,
         limits: dhpanel_mod_auth::LoginLimits::new(
             redis.clone(),
-            lockout(config.auth.lockout_threshold),
-            lockout(config.auth.ip_lockout_threshold),
+            lockout(config.auth.lockout_threshold, config.auth.lockout_minutes),
+            lockout(
+                config.auth.ip_lockout_threshold,
+                config.auth.ip_lockout_minutes,
+            ),
         ),
         trusted_proxies: config.trusted_proxies.clone().into(),
         redis: redis.clone(),

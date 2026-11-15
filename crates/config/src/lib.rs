@@ -204,6 +204,9 @@ pub struct AuthConfig {
     /// that address (`lockout_threshold`..=100000). Higher than the per-account
     /// limit because many users can share one address (NAT).
     pub ip_lockout_threshold: u32,
+    /// How long a locked client address stays locked, minutes (1..=10080). Longer than the
+    /// per-account lock: a blocked address is a brute-force source, not a forgetful user.
+    pub ip_lockout_minutes: u32,
     /// Name shown in authenticator apps for TOTP entries (1..=64 characters, no `:`).
     pub totp_issuer: String,
 }
@@ -284,7 +287,8 @@ impl Default for ControlConfig {
                 lockout_threshold: 5,
                 lockout_window_minutes: 15,
                 lockout_minutes: 15,
-                ip_lockout_threshold: 50,
+                ip_lockout_threshold: 10,
+                ip_lockout_minutes: 60,
                 totp_issuer: "DHPanel".to_owned(),
             },
             secrets: SecretsConfig {
@@ -470,7 +474,7 @@ impl ControlConfig {
                 reason: "must not exceed session_absolute_hours".to_owned(),
             });
         }
-        let range_checks: [(&'static str, u32, std::ops::RangeInclusive<u32>); 6] = [
+        let range_checks: [(&'static str, u32, std::ops::RangeInclusive<u32>); 7] = [
             ("auth.sudo_minutes", self.auth.sudo_minutes, 1..=60),
             (
                 "agent.enrollment_token_minutes",
@@ -488,6 +492,11 @@ impl ControlConfig {
                 1..=1440,
             ),
             ("auth.lockout_minutes", self.auth.lockout_minutes, 1..=1440),
+            (
+                "auth.ip_lockout_minutes",
+                self.auth.ip_lockout_minutes,
+                1..=10_080,
+            ),
             (
                 "auth.ip_lockout_threshold",
                 self.auth.ip_lockout_threshold,
@@ -840,7 +849,7 @@ mod tests {
                     cfg.auth.lockout_minutes,
                     cfg.auth.ip_lockout_threshold
                 ),
-                (5, 15, 15, 50)
+                (5, 15, 15, 10)
             );
             jail.set_env("DHPANEL_AUTH__LOCKOUT_THRESHOLD", "0");
             let msg = load(jail).expect_err("zero").to_string();

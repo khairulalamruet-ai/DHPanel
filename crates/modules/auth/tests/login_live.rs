@@ -1699,3 +1699,49 @@ async fn an_impersonation_token_opens_one_marked_session_and_only_once(pool: PgP
     let token = secrecy::ExposeSecret::expose_secret(&token).to_owned();
     assert_eq!(redeem(&token).await.status, StatusCode::FORBIDDEN);
 }
+
+/// T11.07: ten failures from one address block it for an hour, whatever it types afterwards.
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn ten_failures_from_one_address_block_it_for_an_hour(pool: PgPool) {
+    let hasher = PasswordHasher::new(fast_params(2)).unwrap();
+    create_account(&pool, &hasher, "mona", "active").await;
+    let mut state = limited_state(&pool, hasher, 5, 10, &[]);
+    let url = std::env::var("REDIS_URL").unwrap();
+    let redis = RedisHandle::new(&SecretString::from(url)).unwrap();
+    state.limits.ip = FailureLimiter::new(
+        redis,
+        format!("test:{}:hour", Uuid::now_v7().simple()),
+        LockoutPolicy {
+            threshold: 10,
+            window: Duration::from_secs(900),
+            lockout: Duration::from_secs(3600),
+        },
+    );
+    let app = app(state);
+    let uri = "/api/v1/public/auth/login";
+    // Ten different names, so no single account locks first.
+    for n in 0..10 {
+        let r = send(
+            &app,
+            "POST",
+            uri,
+            None,
+            Some(json!({"login": format!("ghost{n}"), "password": "Wrong-Password-Here-9"})),
+        )
+        .await;
+        assert_eq!(r.status, StatusCode::UNAUTHORIZED, "attempt {n}");
+    }
+    // Now even the right password is refused, for about an hour.
+    let r = send(
+        &app,
+        "POST",
+        uri,
+        None,
+        Some(json!({"login": "mona", "password": PASSWORD})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS);
+    let left: u64 = r.retry_after.expect("retry-after");
+    assert!((3500..=3600).contains(&left), "{left}");
+}
