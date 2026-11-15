@@ -41,6 +41,7 @@ dhpanel-mod-backups.workspace = true
 dhpanel-mod-cron.workspace = true
 dhpanel-mod-logs.workspace = true
 dhpanel-mod-usage.workspace = true
+dhpanel-mod-services.workspace = true
 dhpanel-backup.workspace = true
 dhpanel-backup-dest.workspace = true
 dhpanel-system-backup.workspace = true

@@ -1,0 +1,14 @@
+# Services: an account's own containers, listed and restarted (crates/modules/services).
+[module]
+name       = "services"
+version    = "0.1.0"
+title      = { en = "Services", bn = "সার্ভিস" }
+category   = "system"
+core       = false
+depends_on = ["auth", "rbac", "audit", "system", "plans", "users"]
+
+[permissions]
+keys = []
+
+[ui]
+client_nav = { group = "Advanced", order = 40, icon = "server" }

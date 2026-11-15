@@ -14875,6 +14875,148 @@
         ]
       }
     },
+    "/api/v1/client/services": {
+      "get": {
+        "tags": [
+          "services"
+        ],
+        "summary": "The account's containers.",
+        "operationId": "clientListServices",
+        "responses": {
+          "200": {
+            "description": "The services",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceList"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The node is slow; ask again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Pending"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`node_unavailable`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/services/{name}/restart": {
+      "post": {
+        "tags": [
+          "services"
+        ],
+        "summary": "Restart one of the account's services.",
+        "operationId": "clientRestartService",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "The container's name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Restarted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Restarted"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The node is slow; the restart goes on",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Pending"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The account has no such service",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`tenant_not_running`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`node_unavailable`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/client/services/{service}/restart": {
       "post": {
         "tags": [
@@ -20142,6 +20284,61 @@
         },
         "additionalProperties": false
       },
+      "ServiceList": {
+        "type": "object",
+        "description": "The services.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ServiceView"
+            },
+            "description": "By name."
+          }
+        }
+      },
+      "ServiceView": {
+        "type": "object",
+        "description": "One of the account's containers.",
+        "required": [
+          "name",
+          "role",
+          "image",
+          "state",
+          "status",
+          "created"
+        ],
+        "properties": {
+          "created": {
+            "type": "integer",
+            "format": "int64",
+            "description": "When it was made (Unix seconds)."
+          },
+          "image": {
+            "type": "string",
+            "description": "The image it runs."
+          },
+          "name": {
+            "type": "string",
+            "description": "Its name (`dh-<account>-<role>`)."
+          },
+          "role": {
+            "type": "string",
+            "description": "What it is for (`web`, `php`)."
+          },
+          "state": {
+            "type": "string",
+            "description": "`running`, `exited`, `restarting`, `created`, ..."
+          },
+          "status": {
+            "type": "string",
+            "description": "Docker's words (\"Up 3 hours\")."
+          }
+        }
+      },
       "SessionList": {
         "type": "object",
         "description": "Live sessions.",
@@ -21745,6 +21942,10 @@
     {
       "name": "usage",
       "description": "Usage"
+    },
+    {
+      "name": "services",
+      "description": "An account's own services"
     }
   ]
 }

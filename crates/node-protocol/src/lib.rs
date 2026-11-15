@@ -345,6 +345,24 @@ pub struct ContainerMetrics {
 /// Most containers in one metrics report.
 pub const MAX_METRIC_CONTAINERS: usize = 5000;
 
+/// One of an account's containers, as listed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ContainerItem {
+    /// Its name (`dh-<account>-<role>`).
+    pub name: String,
+    /// What it is for (`web`, `php`).
+    pub role: String,
+    /// The image.
+    pub image: String,
+    /// `running`, `exited`, `restarting`, `created`, ...
+    pub state: String,
+    /// Docker's words ("Up 3 hours").
+    pub status: String,
+    /// When it was made (Unix seconds).
+    pub created: i64,
+}
+
 /// Most runs in one report.
 pub const MAX_CRON_RUNS_PER_REPORT: usize = 500;
 
@@ -904,6 +922,20 @@ pub enum Operation {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         contains: Option<String>,
     },
+    /// Lists the containers of one account (and only those: the ones that carry its id).
+    /// Answered with [`Output::Containers`].
+    ListContainers {
+        /// The tenant.
+        tenant_id: Uuid,
+    },
+    /// Restarts one container of an account: it must carry the account's id, or nothing is
+    /// done. Answered with [`Output::ContainerRestarted`].
+    RestartContainer {
+        /// The tenant.
+        tenant_id: Uuid,
+        /// The container's name.
+        name: String,
+    },
     /// Reads the node's and every running container's usage now (cheap: one statistics read
     /// per container, a few at a time). Answered with [`Output::Metrics`].
     CollectMetrics,
@@ -1189,6 +1221,8 @@ impl Operation {
         "restore_backup",
         "delete_backup",
         "sync_cron_jobs",
+        "list_containers",
+        "restart_container",
         "collect_metrics",
         "read_log",
         "run_cron_job",
@@ -1246,6 +1280,8 @@ impl Operation {
             Self::RestoreBackup { .. } => "restore_backup",
             Self::DeleteBackup { .. } => "delete_backup",
             Self::SyncCronJobs { .. } => "sync_cron_jobs",
+            Self::ListContainers { .. } => "list_containers",
+            Self::RestartContainer { .. } => "restart_container",
             Self::CollectMetrics => "collect_metrics",
             Self::ReadLog { .. } => "read_log",
             Self::RunCronJob { .. } => "run_cron_job",
@@ -1518,6 +1554,18 @@ pub enum Output {
         lines: Vec<LogLine>,
         /// More was there than one read returns.
         truncated: bool,
+    },
+    /// Answer to [`Operation::ListContainers`].
+    Containers {
+        /// By name.
+        items: Vec<ContainerItem>,
+    },
+    /// Answer to [`Operation::RestartContainer`].
+    ContainerRestarted {
+        /// The container.
+        name: String,
+        /// The state it is in now.
+        state: String,
     },
     /// Answer to [`Operation::CollectMetrics`].
     Metrics {
@@ -2606,7 +2654,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            51,
+            53,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }

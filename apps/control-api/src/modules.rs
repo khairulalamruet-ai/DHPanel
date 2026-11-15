@@ -28,6 +28,7 @@ const EMBEDDED: &[(&str, &str)] = &[
     ("cron", dhpanel_mod_cron::MANIFEST),
     ("logs", dhpanel_mod_logs::MANIFEST),
     ("usage", dhpanel_mod_usage::MANIFEST),
+    ("services", dhpanel_mod_services::MANIFEST),
 ];
 
 /// Days the data of a deleted user is kept before it is purged.
@@ -428,6 +429,19 @@ pub fn mount(
                         }
                     })
                 }
+                "services" => {
+                    let (db, sessions) = (db.clone(), sessions.clone());
+                    Box::new(move || ModuleRoutes {
+                        client: Some(dhpanel_mod_services::client_router().with_state(
+                            dhpanel_mod_services::ServicesState {
+                                db: db.clone(),
+                                sessions: sessions.clone(),
+                                wait: dhpanel_mod_services::DEFAULT_WAIT,
+                            },
+                        )),
+                        ..ModuleRoutes::none()
+                    })
+                }
                 // A manifest without code behind it has no routes.
                 _ => Box::new(ModuleRoutes::none),
             };
@@ -658,7 +672,8 @@ mod tests {
                 "backups",
                 "cron",
                 "logs",
-                "usage"
+                "usage",
+                "services"
             ]
         );
         // And they fit together: dependencies first.
@@ -679,6 +694,7 @@ mod tests {
                 "domains",
                 "files",
                 "logs",
+                "services",
                 "usage"
             ]
         );
@@ -696,6 +712,7 @@ mod tests {
                 "domains",
                 "files",
                 "logs",
+                "services",
                 "usage"
             ]
         );

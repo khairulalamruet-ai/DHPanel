@@ -30,6 +30,7 @@ pub mod ftp;
 pub mod logs;
 pub mod metrics;
 pub mod pma;
+pub mod services;
 pub mod sqlexport;
 pub mod sqlimport;
 pub mod sqlsplit;
@@ -184,6 +185,14 @@ impl Registry {
                 move |op| backup::export_backup(context.clone(), op)
             });
             registry.register("import_export", backup::import_export);
+            registry.register("list_containers", {
+                let context = context.clone();
+                move |op| services::list_containers(context.clone(), op)
+            });
+            registry.register("restart_container", {
+                let context = context.clone();
+                move |op| services::restart_container(context.clone(), op)
+            });
             registry.register("collect_metrics", {
                 let context = context.clone();
                 move |op| metrics::collect_metrics(context.clone(), op)

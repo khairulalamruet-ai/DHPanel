@@ -279,6 +279,23 @@ pub struct ContainerInfo {
     pub limits: Limits,
 }
 
+/// A container of an account, as listed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TenantContainer {
+    /// Its name (`dh-<account>-<role>`).
+    pub name: String,
+    /// What it is for (`web`, `php`, ...).
+    pub role: String,
+    /// The image it runs.
+    pub image: String,
+    /// `running`, `exited`, `restarting`, `created`, ...
+    pub state: String,
+    /// Docker's words ("Up 3 hours").
+    pub status: String,
+    /// When it was made (Unix seconds).
+    pub created: i64,
+}
+
 /// A point-in-time reading of a container's resource usage.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ContainerUsage {
@@ -883,6 +900,59 @@ impl DockerManager {
             .collect();
         names.sort();
         Ok(names)
+    }
+
+    /// The containers of one account (the label `dhpanel.tenant` is its id), running or not.
+    ///
+    /// # Errors
+    /// [`DockerError::Api`].
+    pub async fn list_tenant(&self, tenant_id: &str) -> Result<Vec<TenantContainer>, DockerError> {
+        let filters: HashMap<String, Vec<String>> = [(
+            "label".to_owned(),
+            vec![
+                format!("{MANAGED_LABEL}=true"),
+                format!("{TENANT_LABEL}={tenant_id}"),
+            ],
+        )]
+        .into();
+        let options = ListContainersOptionsBuilder::default()
+            .all(true)
+            .filters(&filters)
+            .build();
+        let mut found: Vec<TenantContainer> = self
+            .docker
+            .list_containers(Some(options))
+            .await
+            .map_err(map_error)?
+            .into_iter()
+            .filter_map(|c| {
+                let name = c
+                    .names
+                    .and_then(|n| n.into_iter().next())?
+                    .trim_start_matches('/')
+                    .to_owned();
+                let labels = c.labels.unwrap_or_default();
+                Some(TenantContainer {
+                    name,
+                    role: labels.get(ROLE_LABEL).cloned().unwrap_or_default(),
+                    image: c.image.unwrap_or_default(),
+                    state: c.state.map(|s| s.to_string()).unwrap_or_default(),
+                    status: c.status.unwrap_or_default(),
+                    created: c.created.unwrap_or(0),
+                })
+            })
+            .collect();
+        found.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(found)
+    }
+
+    /// Restarts a container of ours: SIGTERM, SIGKILL after `grace`, then start.
+    ///
+    /// # Errors
+    /// [`DockerError::NotFound`], [`DockerError::NotManaged`], [`DockerError::Api`].
+    pub async fn restart(&self, name: &Name, grace: Duration) -> Result<(), DockerError> {
+        self.stop(name, grace).await?;
+        self.start(name).await
     }
 
     /// Creates a named volume. Creating one that already exists (and is ours)
