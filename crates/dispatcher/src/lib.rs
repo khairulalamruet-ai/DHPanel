@@ -181,7 +181,7 @@ impl Dispatcher {
                 _ = tick.tick() => { self.tick().await; }
                 _ = capabilities.tick() => { self.request_capabilities().await; }
                 _ = purges.tick() => { self.request_purges().await; }
-                _ = routes.tick() => { self.expire_previews().await; self.request_route_syncs().await; self.request_error_pages().await; self.request_import_progress().await; self.request_cron_runs().await; self.request_metrics().await; }
+                _ = routes.tick() => { self.expire_previews().await; self.request_route_syncs().await; self.request_error_pages().await; self.request_import_progress().await; self.request_cron_runs().await; self.request_metrics().await; self.request_services().await; }
                 _ = certificates.tick() => { self.request_certificates().await; self.request_db_sizes().await; }
                 _ = expiry.tick() => { self.announce_expiring().await; }
                 Some(report) = results.recv() => self.handle_result(report).await,
@@ -607,6 +607,33 @@ impl Dispatcher {
         asked
     }
 
+    /// Asks every connected node how its core services are (the key has a thirty-second slot).
+    /// A service that stopped is announced once, within about a minute. Returns how many
+    /// operations were queued.
+    pub async fn request_services(&self) -> usize {
+        let slot = u64::try_from(unix_now()).unwrap_or(0) / 30;
+        let mut asked = 0;
+        for node in self.gateway.connected_nodes() {
+            for (op, key) in [
+                (dhpanel_node_protocol::Operation::ReportServices, "services"),
+                (
+                    dhpanel_node_protocol::Operation::ReportWebService,
+                    "webservice",
+                ),
+            ] {
+                let request = dhpanel_operations::Request::new(node, op, format!("{key}:{slot}"));
+                match self.ops.enqueue(&request).await {
+                    Ok(dhpanel_operations::Enqueued::Created(_)) => asked += 1,
+                    Ok(dhpanel_operations::Enqueued::Existing(_)) => {}
+                    Err(error) => {
+                        tracing::warn!(%node, %error, "could not queue the services report")
+                    }
+                }
+            }
+        }
+        asked
+    }
+
     /// Asks every connected node for its usage readings (the key has a one-minute slot, so a
     /// node is asked once a minute however often this runs). Returns how many were asked.
     pub async fn request_metrics(&self) -> usize {
@@ -717,6 +744,49 @@ impl Dispatcher {
         };
         if let Err(err) = result {
             tracing::warn!(%import_id, error = %err, "could not keep the progress of an import");
+        }
+    }
+
+    async fn store_services(&self, node_id: Uuid, items: &[dhpanel_node_protocol::ServiceStatus]) {
+        let result = async {
+            let mut tx = self.ops.db().begin().await?;
+            for item in items {
+                let change = dhpanel_database::node_services::record(
+                    &mut tx,
+                    node_id,
+                    &item.name,
+                    &item.state,
+                    &item.detail,
+                )
+                .await?;
+                let event = match change {
+                    dhpanel_database::node_services::Change::Down => {
+                        Some(dhpanel_kernel::Event::NodeServiceDown {
+                            node_id,
+                            service: item.name.clone(),
+                            state: item.state.clone(),
+                        })
+                    }
+                    dhpanel_database::node_services::Change::Recovered => {
+                        Some(dhpanel_kernel::Event::NodeServiceRecovered {
+                            node_id,
+                            service: item.name.clone(),
+                        })
+                    }
+                    dhpanel_database::node_services::Change::None => None,
+                };
+                if let Some(event) = &event {
+                    dhpanel_events::publish(&mut tx, event)
+                        .await
+                        .map_err(|e| dhpanel_database::sqlx::Error::Protocol(e.to_string()))?;
+                }
+            }
+            tx.commit().await?;
+            Ok::<_, dhpanel_database::sqlx::Error>(())
+        }
+        .await;
+        if let Err(err) = result {
+            tracing::warn!(%node_id, error = %err, "could not keep the services a node reported");
         }
     }
 
@@ -974,6 +1044,9 @@ impl Dispatcher {
                 }
                 if let Some(dhpanel_node_protocol::Output::DbSizes { items }) = &output {
                     self.store_db_sizes(node_id, items).await;
+                }
+                if let Some(dhpanel_node_protocol::Output::Services { items }) = &output {
+                    self.store_services(node_id, items).await;
                 }
                 if let Some(dhpanel_node_protocol::Output::Metrics {
                     at,

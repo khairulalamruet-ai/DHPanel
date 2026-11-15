@@ -29,6 +29,7 @@ pub mod files;
 pub mod ftp;
 pub mod logs;
 pub mod metrics;
+pub mod nodeservices;
 pub mod pma;
 pub mod services;
 pub mod sqlexport;
@@ -185,6 +186,18 @@ impl Registry {
                 move |op| backup::export_backup(context.clone(), op)
             });
             registry.register("import_export", backup::import_export);
+            registry.register("report_services", {
+                let context = context.clone();
+                move |op| nodeservices::report_services(context.clone(), op)
+            });
+            registry.register("restart_node_service", {
+                let context = context.clone();
+                move |op| nodeservices::restart_node_service(context.clone(), op)
+            });
+            registry.register("read_service_log", {
+                let context = context.clone();
+                move |op| nodeservices::read_service_log(context.clone(), op)
+            });
             registry.register("list_containers", {
                 let context = context.clone();
                 move |op| services::list_containers(context.clone(), op)
@@ -325,6 +338,10 @@ impl Registry {
             self.register("set_custom_certificates", {
                 let context = context.clone();
                 move |op| crate::web::set_custom_certificates(context.clone(), op)
+            });
+            self.register("report_web_service", {
+                let context = context.clone();
+                move |op| crate::web::report_web_service(context.clone(), op)
             });
             self.register("report_certificates", move |op| {
                 crate::web::report_certificates(context.clone(), op)

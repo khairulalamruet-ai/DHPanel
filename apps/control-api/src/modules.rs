@@ -431,15 +431,19 @@ pub fn mount(
                 }
                 "services" => {
                     let (db, sessions) = (db.clone(), sessions.clone());
-                    Box::new(move || ModuleRoutes {
-                        client: Some(dhpanel_mod_services::client_router().with_state(
-                            dhpanel_mod_services::ServicesState {
-                                db: db.clone(),
-                                sessions: sessions.clone(),
-                                wait: dhpanel_mod_services::DEFAULT_WAIT,
-                            },
-                        )),
-                        ..ModuleRoutes::none()
+                    Box::new(move || {
+                        let state = dhpanel_mod_services::ServicesState {
+                            db: db.clone(),
+                            sessions: sessions.clone(),
+                            wait: dhpanel_mod_services::DEFAULT_WAIT,
+                        };
+                        ModuleRoutes {
+                            admin: Some(
+                                dhpanel_mod_services::admin_router().with_state(state.clone()),
+                            ),
+                            client: Some(dhpanel_mod_services::client_router().with_state(state)),
+                            ..ModuleRoutes::none()
+                        }
                     })
                 }
                 // A manifest without code behind it has no routes.

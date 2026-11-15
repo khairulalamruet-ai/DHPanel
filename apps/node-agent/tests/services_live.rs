@@ -126,7 +126,16 @@ async fn an_account_lists_and_restarts_only_its_own_containers() {
                 .count()
         }
     };
-    assert_eq!(starts(a_web.clone()).await, 2);
+    // The log catches up a moment after the start.
+    let mut seen = 0;
+    for _ in 0..20 {
+        seen = starts(a_web.clone()).await;
+        if seen == 2 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    }
+    assert_eq!(seen, 2);
     assert_eq!(starts(a_php.clone()).await, 1);
 
     // Another account's container, the node's, one that does not exist and a bad name:

@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO node_services (node_id, name, state, detail, alerted)\n         VALUES ($1, $2, $3, left($4, 500), $5)\n         ON CONFLICT (node_id, name) DO UPDATE\n         SET state = EXCLUDED.state, detail = EXCLUDED.detail, checked_at = now(),\n             since = CASE WHEN node_services.state = EXCLUDED.state THEN node_services.since ELSE now() END,\n             alerted = EXCLUDED.alerted",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "141eb19c73b3dc4bac24f2017c6d2fdc7a60482dc84d16ae5a562ecb74e00934"
+}

@@ -1,0 +1,41 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT state, alerted FROM node_services WHERE node_id = $1 AND name = $2 FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "state",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "node_services",
+            "name": "state"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "alerted",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "node_services",
+            "name": "alerted"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "deca744b3f7909c349c9ebc7f4cbd86fb9d7da2583a2a2ccaec5dcb70c1df054"
+}

@@ -12,7 +12,7 @@ use axum::{
 use dhpanel_cache::RedisHandle;
 use dhpanel_database::modules as db;
 use dhpanel_kernel::{Manifest, Module, ModuleMount, ModuleRoutes, Registry};
-use dhpanel_mod_services::{ServicesState, client_router};
+use dhpanel_mod_services::{ServicesState, admin_router, client_router};
 use dhpanel_session::{CSRF_HEADER, NewSession, SessionConfig, SessionStore, set_cookie};
 use secrecy::SecretString;
 use serde_json::{Value, json};
@@ -60,6 +60,11 @@ async fn env(pool: &PgPool, wait: Duration) -> Env {
         routes: Box::new({
             let (pool, sessions) = (pool.clone(), sessions.clone());
             move || ModuleRoutes {
+                admin: Some(admin_router().with_state(ServicesState {
+                    db: pool.clone(),
+                    sessions: sessions.clone(),
+                    wait,
+                })),
                 client: Some(client_router().with_state(ServicesState {
                     db: pool.clone(),
                     sessions: sessions.clone(),
@@ -174,7 +179,7 @@ fn node(pool: PgPool) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         loop {
             let rows: Vec<(Uuid, Value)> = sqlx::query_as(
-                "SELECT id, payload FROM operations WHERE kind IN ('list_containers', 'restart_container') AND status = 'pending'",
+                "SELECT id, payload FROM operations WHERE kind IN ('list_containers', 'restart_container', 'restart_node_service', 'read_service_log') AND status = 'pending'",
             )
             .fetch_all(&pool)
             .await
@@ -201,6 +206,42 @@ fn node(pool: PgPool) -> tokio::task::JoinHandle<()> {
                         ]})),
                         None,
                     )
+                } else if kind == "read_service_log" {
+                    if payload["name"] == "database" {
+                        (
+                            "succeeded",
+                            Some(
+                                json!({"type": "log_lines", "truncated": false, "lines": [{"at_ms": 5, "text": "ready for connections"}]}),
+                            ),
+                            None,
+                        )
+                    } else {
+                        (
+                            "failed",
+                            None,
+                            Some(
+                                json!({"code": "invalid_arguments", "message": "not a core service of the node", "retryable": false}),
+                            ),
+                        )
+                    }
+                } else if kind == "restart_node_service" {
+                    if payload["name"] == "database" {
+                        (
+                            "succeeded",
+                            Some(
+                                json!({"type": "container_restarted", "name": "database", "state": "Up 1 second"}),
+                            ),
+                            None,
+                        )
+                    } else {
+                        (
+                            "failed",
+                            None,
+                            Some(
+                                json!({"code": "invalid_arguments", "message": "not a core service of the node", "retryable": false}),
+                            ),
+                        )
+                    }
                 } else if payload["name"] == "dh-alice-web" {
                     (
                         "succeeded",
@@ -246,6 +287,9 @@ async fn an_account_lists_and_restarts_its_services_and_nobody_elses(pool: PgPoo
     .fetch_one(&pool)
     .await
     .unwrap();
+    dhpanel_database::rbac::assign_role(&pool, admin_id, "super_admin", None)
+        .await
+        .unwrap();
     let root = e.sign_in(admin_id).await;
     let played = node(pool.clone());
 
@@ -311,5 +355,81 @@ async fn an_account_lists_and_restarts_its_services_and_nobody_elses(pool: PgPoo
         (status, body["code"].as_str()),
         (StatusCode::CONFLICT, Some("tenant_not_running"))
     );
+
+    // ---- Administrators: the node's core services.
+    let node: Uuid = sqlx::query_scalar("SELECT node_id FROM tenants WHERE username = 'alice'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    for (name, state) in [("database", "running"), ("sftp", "stopped")] {
+        sqlx::query(
+            "INSERT INTO node_services (node_id, name, state, detail) VALUES ($1, $2, $3, 'x')",
+        )
+        .bind(node)
+        .bind(name)
+        .bind(state)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    let base = format!("/api/v1/admin/nodes/{node}/services");
+    // Accounts and administrators without the permission see nothing.
+    let plain_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO accounts (kind, username, email, password_hash)
+         VALUES ('admin', 'plain', 'plain@example.com', $1) RETURNING id",
+    )
+    .bind(HASH)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let plain = e.sign_in(plain_id).await;
+    for who in [&alice, &plain] {
+        assert_eq!(e.call(who, "GET", &base).await.0, StatusCode::FORBIDDEN);
+        assert_eq!(
+            e.call(who, "POST", &format!("{base}/database/restart"))
+                .await
+                .0,
+            StatusCode::FORBIDDEN
+        );
+    }
+    let (status, list) = e.call(&root, "GET", &base).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(list["items"][0]["name"], "database");
+    assert_eq!(list["items"][1]["state"], "stopped");
+    let (status, log) = e
+        .call(&root, "GET", &format!("{base}/database/log?lines=20"))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{log}");
+    assert_eq!(log["lines"][0]["text"], "ready for connections");
+    assert_eq!(
+        e.call(&root, "GET", &format!("{base}/database/log?lines=0"))
+            .await
+            .0,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(
+        e.call(&root, "GET", &format!("{base}/shadow/log")).await.0,
+        StatusCode::NOT_FOUND
+    );
+    let (status, done) = e
+        .call(&root, "POST", &format!("{base}/database/restart"))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{done}");
+    assert_eq!(
+        e.call(&root, "POST", &format!("{base}/caddy/restart"))
+            .await
+            .0,
+        StatusCode::NOT_FOUND
+    );
+    let audited: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_logs WHERE action = 'node_service.restarted'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(audited, 1);
+    // The operations are the node's, not an account's.
+    let tenant_ops: i64 = sqlx::query_scalar("SELECT count(*) FROM operations WHERE kind IN ('restart_node_service', 'read_service_log') AND tenant_id IS NOT NULL").fetch_one(&pool).await.unwrap();
+    assert_eq!(tenant_ops, 0);
     played.abort();
 }

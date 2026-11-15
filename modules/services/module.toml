@@ -5,10 +5,11 @@ version    = "0.1.0"
 title      = { en = "Services", bn = "সার্ভিস" }
 category   = "system"
 core       = false
-depends_on = ["auth", "rbac", "audit", "system", "plans", "users"]
+depends_on = ["auth", "rbac", "audit", "system", "plans", "users", "nodes"]
 
 [permissions]
 keys = []
 
 [ui]
+admin_nav  = { group = "System", order = 50, icon = "server" }
 client_nav = { group = "Advanced", order = 40, icon = "server" }

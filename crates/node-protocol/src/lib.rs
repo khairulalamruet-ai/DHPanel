@@ -363,6 +363,21 @@ pub struct ContainerItem {
     pub created: i64,
 }
 
+/// A core service of the node.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ServiceStatus {
+    /// `database`, `phpmyadmin`, `sftp`, `caddy` or `agent`.
+    pub name: String,
+    /// `running`, `stopped`, `unreachable` or `not_installed`.
+    pub state: String,
+    /// Docker's words, or what went wrong.
+    pub detail: String,
+}
+
+/// The core services a node can name (and only these can be restarted or have their log read).
+pub const NODE_SERVICES: [&str; 3] = ["database", "phpmyadmin", "sftp"];
+
 /// Most runs in one report.
 pub const MAX_CRON_RUNS_PER_REPORT: usize = 500;
 
@@ -922,6 +937,26 @@ pub enum Operation {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         contains: Option<String>,
     },
+    /// The state of the node's core services that run as containers (database server,
+    /// phpMyAdmin, file server) and of the agent itself. Answered with [`Output::Services`].
+    ReportServices,
+    /// The state of the node's web server (Caddy), asked through its admin address; only a
+    /// node that drives one has this operation. Answered with [`Output::Services`].
+    ReportWebService,
+    /// Restarts one core service (one of [`NODE_SERVICES`]: nothing else can be named).
+    /// Answered with [`Output::ContainerRestarted`].
+    RestartNodeService {
+        /// The service.
+        name: String,
+    },
+    /// The end of a core service's log (one of [`NODE_SERVICES`]): the newest `tail` lines.
+    /// Answered with [`Output::LogLines`].
+    ReadServiceLog {
+        /// The service.
+        name: String,
+        /// At most this many lines (1 to [`MAX_LOG_LINES`]).
+        tail: u32,
+    },
     /// Lists the containers of one account (and only those: the ones that carry its id).
     /// Answered with [`Output::Containers`].
     ListContainers {
@@ -1221,6 +1256,10 @@ impl Operation {
         "restore_backup",
         "delete_backup",
         "sync_cron_jobs",
+        "report_services",
+        "report_web_service",
+        "restart_node_service",
+        "read_service_log",
         "list_containers",
         "restart_container",
         "collect_metrics",
@@ -1280,6 +1319,10 @@ impl Operation {
             Self::RestoreBackup { .. } => "restore_backup",
             Self::DeleteBackup { .. } => "delete_backup",
             Self::SyncCronJobs { .. } => "sync_cron_jobs",
+            Self::ReportServices => "report_services",
+            Self::ReportWebService => "report_web_service",
+            Self::RestartNodeService { .. } => "restart_node_service",
+            Self::ReadServiceLog { .. } => "read_service_log",
             Self::ListContainers { .. } => "list_containers",
             Self::RestartContainer { .. } => "restart_container",
             Self::CollectMetrics => "collect_metrics",
@@ -1554,6 +1597,11 @@ pub enum Output {
         lines: Vec<LogLine>,
         /// More was there than one read returns.
         truncated: bool,
+    },
+    /// Answer to [`Operation::ReportServices`] and [`Operation::ReportWebService`].
+    Services {
+        /// One entry per service.
+        items: Vec<ServiceStatus>,
     },
     /// Answer to [`Operation::ListContainers`].
     Containers {
@@ -2654,7 +2702,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            53,
+            57,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }

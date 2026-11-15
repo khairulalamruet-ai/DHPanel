@@ -131,6 +131,23 @@ pub enum Event {
         /// When the certificate ends (Unix seconds).
         not_after: i64,
     },
+    /// A core service of a node (its database server, phpMyAdmin, its file server, its web
+    /// server) is not running. Sent once when it stops, not every time it is seen stopped.
+    NodeServiceDown {
+        /// The node.
+        node_id: Uuid,
+        /// The service (`database`, `phpmyadmin`, `sftp`, `caddy`).
+        service: String,
+        /// How it is: `stopped`, `unreachable`.
+        state: String,
+    },
+    /// A core service that was down is running again.
+    NodeServiceRecovered {
+        /// The node.
+        node_id: Uuid,
+        /// The service.
+        service: String,
+    },
 }
 
 impl Event {
@@ -146,6 +163,8 @@ impl Event {
             Self::DomainAdded { .. } => "domain_added",
             Self::DomainRemoved { .. } => "domain_removed",
             Self::CertificateExpiring { .. } => "certificate_expiring",
+            Self::NodeServiceDown { .. } => "node_service_down",
+            Self::NodeServiceRecovered { .. } => "node_service_recovered",
         }
     }
 }

@@ -995,6 +995,30 @@ pub async fn report_certificates(
     Ok(Output::Certificates { items })
 }
 
+/// `report_web_service`: whether Caddy answers on its admin address.
+///
+/// # Errors
+/// [`AgentError`]: none in practice (not answering is the answer).
+pub async fn report_web_service(
+    context: Arc<WebContext>,
+    op: Operation,
+) -> Result<Output, AgentError> {
+    let Operation::ReportWebService = op else {
+        return Err(crate::ops::wrong_operation());
+    };
+    let (state, detail) = match context.live_config().await {
+        Ok(_) => ("running", "answers on its admin address".to_owned()),
+        Err(e) => ("unreachable", e),
+    };
+    Ok(Output::Services {
+        items: vec![dhpanel_node_protocol::ServiceStatus {
+            name: "caddy".into(),
+            state: state.into(),
+            detail: detail.chars().take(200).collect(),
+        }],
+    })
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::unwrap_used)]
 mod tests {
