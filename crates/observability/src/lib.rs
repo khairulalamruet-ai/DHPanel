@@ -13,6 +13,8 @@
 //! This crate has no web-framework dependency; HTTP middleware lives in
 //! `dhpanel-http-kit` and reports through [`record_http_request`].
 
+pub mod ring;
+
 use std::time::Duration;
 
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
@@ -152,7 +154,8 @@ pub fn init(config: &TelemetryConfig) -> Result<Telemetry, TelemetryError> {
     let registry = tracing_subscriber::registry()
         .with(filter)
         .with(json_layer)
-        .with(pretty_layer);
+        .with(pretty_layer)
+        .with(ring::RingLayer);
     #[cfg(feature = "otel")]
     let registry = registry.with(otel_layer);
     registry.try_init()?;

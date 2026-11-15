@@ -722,12 +722,13 @@ mod tests {
             p::DatabasesManage::KEY,
             p::BackupsRead::KEY,
             p::BackupsManage::KEY,
+            p::LogsRead::KEY,
         ] {
             assert!(declared.iter().any(|d| d == key), "{key} is in no manifest");
         }
         assert_eq!(
             declared.len(),
-            22,
+            23,
             "a manifest declares a key the code does not know: {declared:?}"
         );
     }

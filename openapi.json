@@ -6059,6 +6059,102 @@
         ]
       }
     },
+    "/api/v1/admin/system-logs": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "The control plane's own log: the newest events this process wrote (it keeps 2000; the\nfull log is in the service's journal).",
+        "operationId": "adminSystemLogs",
+        "parameters": [
+          {
+            "name": "level",
+            "in": "path",
+            "description": "The worst level wanted: `error`, `warn`, `info` (default) or `debug`.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "since_ms",
+            "in": "path",
+            "description": "Only events after this time (Unix milliseconds).",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "search",
+            "in": "path",
+            "description": "Only events whose text or module contains this (case-insensitive).",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "lines",
+            "in": "path",
+            "description": "The newest this many (1-1000, default 200).",
+            "required": true,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The events",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemLogList"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied` (needs admin.logs.read) or the caller is not an administrator",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A level or count that is not usable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/users": {
       "get": {
         "tags": [
@@ -20274,6 +20370,51 @@
             "format": "int64",
             "description": "Seconds until sensitive actions need re-authentication again.",
             "minimum": 0
+          }
+        }
+      },
+      "SystemLogLine": {
+        "type": "object",
+        "description": "One event of the control plane's log.",
+        "required": [
+          "at_ms",
+          "level",
+          "target",
+          "text"
+        ],
+        "properties": {
+          "at_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "When (Unix milliseconds)."
+          },
+          "level": {
+            "type": "string",
+            "description": "`ERROR`, `WARN`, `INFO`, `DEBUG` or `TRACE`."
+          },
+          "target": {
+            "type": "string",
+            "description": "The module that wrote it."
+          },
+          "text": {
+            "type": "string",
+            "description": "The message and its fields."
+          }
+        }
+      },
+      "SystemLogList": {
+        "type": "object",
+        "description": "The events.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SystemLogLine"
+            },
+            "description": "Oldest first."
           }
         }
       },

@@ -1512,6 +1512,7 @@ dependencies = [
  "dhpanel-events",
  "dhpanel-http-kit",
  "dhpanel-kernel",
+ "dhpanel-observability",
  "dhpanel-rbac",
  "dhpanel-session",
  "dhpanel-settings",
@@ -1522,6 +1523,7 @@ dependencies = [
  "tokio",
  "tower",
  "tracing",
+ "tracing-subscriber",
  "utoipa",
  "uuid",
 ]

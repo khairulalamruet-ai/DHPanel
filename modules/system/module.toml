@@ -14,6 +14,7 @@ keys = [
     "admin.modules.manage",
     "admin.settings.read",
     "admin.settings.manage",
+    "admin.logs.read",
 ]
 
 [ui]

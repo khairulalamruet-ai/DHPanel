@@ -839,3 +839,56 @@ async fn bootstrap_answers_in_under_fifty_milliseconds_and_follows_the_settings(
     assert_eq!(body["branding"]["panel_name"], "My Hosting");
     assert_eq!(body["branding"]["default_language"], "bn");
 }
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn the_control_planes_own_log_is_for_administrators_with_the_permission_only(pool: PgPool) {
+    let e = env(&pool).await;
+    let root = e
+        .sign_in(account(&pool, "rootuser", &["super_admin"]).await)
+        .await;
+    let plain = e
+        .sign_in(account(&pool, "plainadmin", &["admin"]).await)
+        .await;
+    let url = "/api/v1/admin/system-logs";
+    assert_eq!(
+        e.call(None, "GET", url, None, false).await.0,
+        StatusCode::UNAUTHORIZED
+    );
+    let (status, b) = e.call(Some(&plain), "GET", url, None, false).await;
+    assert_eq!(
+        (status, code(&b)),
+        (StatusCode::FORBIDDEN, "permission_denied")
+    );
+    // The events of this process go to the ring when a subscriber with its layer is installed;
+    // here one is installed for the test.
+    use tracing_subscriber::layer::SubscriberExt as _;
+    let subscriber = tracing_subscriber::registry().with(dhpanel_observability::ring::RingLayer);
+    let _guard = tracing::subscriber::set_default(subscriber);
+    tracing::warn!(marker = "the-log-api-test", "something worth a look");
+    let (status, b) = e
+        .call(
+            Some(&root),
+            "GET",
+            &format!("{url}?level=warn&search=the-log-api-test"),
+            None,
+            false,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{b}");
+    let items = b["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1, "{b}");
+    assert_eq!(items[0]["level"], "WARN");
+    assert!(
+        items[0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("something worth a look")
+    );
+    for q in ["level=loud", "lines=0", "lines=5000"] {
+        let (status, _) = e
+            .call(Some(&root), "GET", &format!("{url}?{q}"), None, false)
+            .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{q}");
+    }
+}

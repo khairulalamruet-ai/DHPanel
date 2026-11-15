@@ -36,7 +36,7 @@ use dhpanel_http_kit::{AppError, FieldError, ProblemDetails};
 use dhpanel_kernel::{Event, ModuleMount};
 use dhpanel_rbac::{
     Require, RequireRecent,
-    permissions::{ModulesManage, ModulesRead, SettingsManage, SettingsRead},
+    permissions::{LogsRead, ModulesManage, ModulesRead, SettingsManage, SettingsRead},
 };
 use dhpanel_session::SessionStore;
 use dhpanel_settings::{ModuleSettings, Scope, SettingsError, SettingsRegistry};
@@ -82,11 +82,103 @@ pub fn router() -> Router<SystemState> {
         .route("/api/v1/admin/bootstrap", get(bootstrap::admin_bootstrap))
         .route("/api/v1/admin/modules", get(list_modules))
         .route("/api/v1/admin/modules/{name}", put(set_module))
+        .route("/api/v1/admin/system-logs", get(system_logs))
         .route("/api/v1/admin/settings", get(list_settings))
         .route(
             "/api/v1/admin/settings/{module}",
             get(get_settings).put(put_settings),
         )
+}
+
+/// Which events of the control plane's log.
+#[derive(Debug, Deserialize, utoipa::IntoParams)]
+pub struct SystemLogQuery {
+    /// The worst level wanted: `error`, `warn`, `info` (default) or `debug`.
+    pub level: Option<String>,
+    /// Only events after this time (Unix milliseconds).
+    #[serde(default)]
+    pub since_ms: i64,
+    /// Only events whose text or module contains this (case-insensitive).
+    pub search: Option<String>,
+    /// The newest this many (1-1000, default 200).
+    pub lines: Option<u32>,
+}
+
+/// One event of the control plane's log.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct SystemLogLine {
+    /// When (Unix milliseconds).
+    pub at_ms: i64,
+    /// `ERROR`, `WARN`, `INFO`, `DEBUG` or `TRACE`.
+    pub level: String,
+    /// The module that wrote it.
+    pub target: String,
+    /// The message and its fields.
+    pub text: String,
+}
+
+/// The events.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct SystemLogList {
+    /// Oldest first.
+    pub items: Vec<SystemLogLine>,
+}
+
+/// The control plane's own log: the newest events this process wrote (it keeps 2000; the
+/// full log is in the service's journal).
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/system-logs",
+    tag = "system",
+    operation_id = "adminSystemLogs",
+    security(("session" = [])),
+    params(SystemLogQuery),
+    responses(
+        (status = 200, description = "The events", body = SystemLogList),
+        (status = 403, description = "`permission_denied` (needs admin.logs.read) or the caller is not an administrator", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 422, description = "A level or count that is not usable", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+pub async fn system_logs(
+    _who: Require<LogsRead>,
+    axum::extract::Query(q): axum::extract::Query<SystemLogQuery>,
+) -> Result<Json<SystemLogList>, AppError> {
+    let level = match q.level.as_deref().unwrap_or("info") {
+        "error" => "ERROR",
+        "warn" => "WARN",
+        "info" => "INFO",
+        "debug" => "DEBUG",
+        _ => {
+            return Err(AppError::validation(vec![FieldError::new(
+                "level",
+                "invalid",
+                "error, warn, info or debug.",
+            )]));
+        }
+    };
+    let lines = q.lines.unwrap_or(200);
+    if !(1..=1000).contains(&lines) || q.since_ms < 0 {
+        return Err(AppError::validation(vec![FieldError::new(
+            "lines",
+            "out_of_range",
+            "Between 1 and 1000 lines.",
+        )]));
+    }
+    let items = dhpanel_observability::ring::recent(
+        q.since_ms,
+        level,
+        q.search.as_deref(),
+        usize::try_from(lines).unwrap_or(200),
+    )
+    .into_iter()
+    .map(|e| SystemLogLine {
+        at_ms: e.at_ms,
+        level: e.level.to_owned(),
+        target: e.target,
+        text: e.text,
+    })
+    .collect();
+    Ok(Json(SystemLogList { items }))
 }
 
 /// A module as shown to administrators.
@@ -599,12 +691,12 @@ pub async fn put_settings(
 #[derive(OpenApi)]
 #[openapi(
     paths(
-        bootstrap::admin_bootstrap, list_modules, set_module, list_settings, get_settings,
+        bootstrap::admin_bootstrap, system_logs, list_modules, set_module, list_settings, get_settings,
         put_settings
     ),
     components(schemas(
         ModuleView, ModuleList, SetModule, ModuleChange, SettingsView, SettingsList, PutSettings,
-        SettingsChange, bootstrap::Bootstrap, bootstrap::BootstrapUser, bootstrap::BootstrapMfa,
+        SettingsChange, SystemLogLine, SystemLogList, bootstrap::Bootstrap, bootstrap::BootstrapUser, bootstrap::BootstrapMfa,
         bootstrap::BootstrapNav, bootstrap::BootstrapModule, bootstrap::Branding
     )),
     tags((name = "system", description = "Modules and settings"))

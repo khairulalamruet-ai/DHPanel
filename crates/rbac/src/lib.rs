@@ -129,6 +129,10 @@ pub mod permissions {
         pub BackupsManage = "admin.backups.manage"
     );
     crate::permission!(
+        /// Read the control plane's own log.
+        pub LogsRead = "admin.logs.read"
+    );
+    crate::permission!(
         /// See the panel's settings.
         pub SettingsRead = "admin.settings.read"
     );
