@@ -624,9 +624,198 @@ pub async fn node_series(
         .collect())
 }
 
+fn label(value: &str) -> String {
+    value
+        .chars()
+        .flat_map(|c| match c {
+            '\\' => vec!['\\', '\\'],
+            '"' => vec!['\\', '"'],
+            '\n' => vec!['\\', 'n'],
+            c => vec![c],
+        })
+        .collect()
+}
+
+/// The panel's fleet as Prometheus text (T10.11): the nodes' and accounts' newest readings
+/// (not older than five minutes), how many accounts there are in each state and how many
+/// node operations wait or fail. At most 5000 accounts.
+///
+/// # Errors
+/// Database errors.
+pub async fn prometheus_text(pool: &PgPool) -> Result<String, sqlx::Error> {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    let nodes = sqlx::query!(
+        r#"SELECT DISTINCT ON (u.node_id) n.name AS "node!", u.cpus, u.cpu_busy_millis,
+                  u.memory_used_bytes, u.memory_total_bytes, u.swap_used_bytes, u.load1_x100,
+                  u.disk_used_bytes, u.disk_total_bytes, u.containers
+           FROM node_usage_minute u JOIN nodes n ON n.id = u.node_id
+           WHERE u.at > now() - interval '5 minutes'
+           ORDER BY u.node_id, u.at DESC"#
+    )
+    .fetch_all(pool)
+    .await?;
+    let gauge = |out: &mut String, name: &str, help: &str| {
+        let _ = writeln!(out, "# HELP {name} {help}\n# TYPE {name} gauge");
+    };
+    gauge(
+        &mut out,
+        "dhpanel_node_cpu_busy_ratio",
+        "Share of the node's CPU that was busy (0 to 1).",
+    );
+    for n in &nodes {
+        let _ = writeln!(
+            out,
+            "dhpanel_node_cpu_busy_ratio{{node=\"{}\"}} {}",
+            label(&n.node),
+            f64::from(n.cpu_busy_millis) / 1000.0
+        );
+    }
+    for (name, help, value) in [
+        (
+            "dhpanel_node_memory_used_bytes",
+            "Memory in use on the node.",
+            0usize,
+        ),
+        ("dhpanel_node_memory_total_bytes", "Memory of the node.", 1),
+        (
+            "dhpanel_node_swap_used_bytes",
+            "Swap in use on the node.",
+            2,
+        ),
+        (
+            "dhpanel_node_disk_used_bytes",
+            "Disk in use where the accounts' files are.",
+            3,
+        ),
+        (
+            "dhpanel_node_disk_total_bytes",
+            "Size of the disk where the accounts' files are.",
+            4,
+        ),
+        (
+            "dhpanel_node_load1",
+            "One-minute load average of the node.",
+            5,
+        ),
+        (
+            "dhpanel_node_containers",
+            "Running containers on the node.",
+            6,
+        ),
+        ("dhpanel_node_cpus", "Logical CPUs of the node.", 7),
+    ] {
+        gauge(&mut out, name, help);
+        for n in &nodes {
+            let v = match value {
+                0 => n.memory_used_bytes as f64,
+                1 => n.memory_total_bytes as f64,
+                2 => n.swap_used_bytes as f64,
+                3 => n.disk_used_bytes as f64,
+                4 => n.disk_total_bytes as f64,
+                5 => f64::from(n.load1_x100) / 100.0,
+                6 => f64::from(n.containers),
+                _ => f64::from(n.cpus),
+            };
+            let _ = writeln!(out, "{name}{{node=\"{}\"}} {v}", label(&n.node));
+        }
+    }
+    let tenants = sqlx::query!(
+        r#"SELECT DISTINCT ON (u.tenant_id) t.username AS "account!", u.cpu_millis, u.memory_bytes,
+                  u.pids, u.net_rx_bytes, u.net_tx_bytes, u.io_read_bytes, u.io_write_bytes
+           FROM usage_minute u JOIN tenants t ON t.id = u.tenant_id
+           WHERE u.at > now() - interval '5 minutes'
+           ORDER BY u.tenant_id, u.at DESC
+           LIMIT 5000"#
+    )
+    .fetch_all(pool)
+    .await?;
+    for (name, help, which) in [
+        (
+            "dhpanel_tenant_cpu_cores",
+            "CPU an account used (1 = one whole CPU).",
+            0usize,
+        ),
+        ("dhpanel_tenant_memory_bytes", "Memory an account uses.", 1),
+        ("dhpanel_tenant_processes", "Processes of an account.", 2),
+        (
+            "dhpanel_tenant_net_receive_bytes",
+            "Bytes an account received in its last minute.",
+            3,
+        ),
+        (
+            "dhpanel_tenant_net_transmit_bytes",
+            "Bytes an account sent in its last minute.",
+            4,
+        ),
+        (
+            "dhpanel_tenant_io_read_bytes",
+            "Disk bytes an account read in its last minute.",
+            5,
+        ),
+        (
+            "dhpanel_tenant_io_write_bytes",
+            "Disk bytes an account wrote in its last minute.",
+            6,
+        ),
+    ] {
+        gauge(&mut out, name, help);
+        for t in &tenants {
+            let v = match which {
+                0 => f64::from(t.cpu_millis) / 1000.0,
+                1 => t.memory_bytes as f64,
+                2 => f64::from(t.pids),
+                3 => t.net_rx_bytes as f64,
+                4 => t.net_tx_bytes as f64,
+                5 => t.io_read_bytes as f64,
+                _ => t.io_write_bytes as f64,
+            };
+            let _ = writeln!(out, "{name}{{account=\"{}\"}} {v}", label(&t.account));
+        }
+    }
+    gauge(&mut out, "dhpanel_tenants", "Hosting accounts by state.");
+    for r in
+        sqlx::query!(r#"SELECT status AS "status!", count(*) AS "n!" FROM tenants GROUP BY status"#)
+            .fetch_all(pool)
+            .await?
+    {
+        let _ = writeln!(
+            out,
+            "dhpanel_tenants{{status=\"{}\"}} {}",
+            label(&r.status),
+            r.n
+        );
+    }
+    gauge(
+        &mut out,
+        "dhpanel_operations",
+        "Node operations in the ledger by state (the last day).",
+    );
+    for r in sqlx::query!(
+        r#"SELECT status AS "status!", count(*) AS "n!" FROM operations
+           WHERE created_at > now() - interval '1 day' GROUP BY status"#
+    )
+    .fetch_all(pool)
+    .await?
+    {
+        let _ = writeln!(
+            out,
+            "dhpanel_operations{{status=\"{}\"}} {}",
+            label(&r.status),
+            r.n
+        );
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn label_values_are_escaped() {
+        assert_eq!(label("a\"b\\c\nd"), "a\\\"b\\\\c\\nd");
+    }
 
     #[test]
     fn a_container_belongs_to_the_longest_account_name_in_front_of_its_role() {

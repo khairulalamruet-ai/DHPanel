@@ -56,6 +56,22 @@ pub struct ControlConfig {
     /// Where uploaded SQL dumps wait for the node to fetch them.
     #[serde(default)]
     pub imports: ImportsConfig,
+    /// What `/metrics` shows and to whom.
+    #[serde(default)]
+    pub metrics: MetricsConfig,
+}
+
+/// Prometheus endpoint settings (T10.11).
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct MetricsConfig {
+    /// A bearer token Prometheus must send. With one, `/metrics` also lists every node and
+    /// account (names and usage) and refuses a request without the token; without one it
+    /// shows the process's own HTTP metrics only, as before. Prefer `token_file`.
+    #[serde(default, skip_serializing)]
+    pub token: Option<SecretString>,
+    /// File holding the token (mode 0600).
+    pub token_file: Option<PathBuf>,
 }
 
 /// SQL import settings.
@@ -292,6 +308,7 @@ impl Default for ControlConfig {
                 sync_seconds: 30,
             },
             imports: ImportsConfig::default(),
+            metrics: MetricsConfig::default(),
         }
     }
 }
@@ -548,6 +565,22 @@ impl ControlConfig {
             self.secrets.master_key.as_ref(),
             self.secrets.master_key_file.as_deref(),
         )
+    }
+
+    /// The bearer token of `/metrics`, if one is configured.
+    ///
+    /// # Errors
+    /// An unreadable file or unsafe permissions.
+    pub fn metrics_token(&self) -> Result<Option<SecretString>, ConfigError> {
+        if self.metrics.token.is_none() && self.metrics.token_file.is_none() {
+            return Ok(None);
+        }
+        resolve_secret(
+            "metrics.token",
+            self.metrics.token.as_ref(),
+            self.metrics.token_file.as_deref(),
+        )
+        .map(Some)
     }
 
     /// Resolves the PowerDNS API key from `dns.powerdns_api_key` or its file.

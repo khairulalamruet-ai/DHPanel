@@ -1,0 +1,134 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT DISTINCT ON (u.node_id) n.name AS \"node!\", u.cpus, u.cpu_busy_millis,\n                  u.memory_used_bytes, u.memory_total_bytes, u.swap_used_bytes, u.load1_x100,\n                  u.disk_used_bytes, u.disk_total_bytes, u.containers\n           FROM node_usage_minute u JOIN nodes n ON n.id = u.node_id\n           WHERE u.at > now() - interval '5 minutes'\n           ORDER BY u.node_id, u.at DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "node!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "nodes",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "cpus",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "node_usage_minute",
+            "name": "cpus"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "cpu_busy_millis",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "node_usage_minute",
+            "name": "cpu_busy_millis"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "memory_used_bytes",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "node_usage_minute",
+            "name": "memory_used_bytes"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "memory_total_bytes",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "node_usage_minute",
+            "name": "memory_total_bytes"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "swap_used_bytes",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "node_usage_minute",
+            "name": "swap_used_bytes"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "load1_x100",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "node_usage_minute",
+            "name": "load1_x100"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "disk_used_bytes",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "node_usage_minute",
+            "name": "disk_used_bytes"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "disk_total_bytes",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "node_usage_minute",
+            "name": "disk_total_bytes"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "containers",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "node_usage_minute",
+            "name": "containers"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "2743bf636c86eaf08a497440551b4f108ef35dfe1361fe286afceac4db2ef5a6"
+}

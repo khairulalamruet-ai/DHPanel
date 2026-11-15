@@ -42,6 +42,18 @@ pub struct AppState {
     /// Reverse proxies whose `X-Forwarded-For` is trusted when resolving the
     /// client address (recorded in the audit log).
     pub trusted_proxies: Arc<[IpAddr]>,
+    /// With a token and a database, `/metrics` also lists the fleet (T10.11) and asks for the
+    /// token as a bearer credential.
+    pub fleet: Option<FleetMetrics>,
+}
+
+/// What `/metrics` needs to show the fleet.
+#[derive(Clone)]
+pub struct FleetMetrics {
+    /// The database.
+    pub db: dhpanel_database::sqlx::PgPool,
+    /// The bearer token Prometheus sends.
+    pub token: Arc<secrecy::SecretString>,
 }
 
 impl FromRef<AppState> for Readiness {
@@ -116,14 +128,51 @@ async fn openapi_json() -> impl IntoResponse {
     )
 }
 
-async fn render_metrics(State(metrics): State<MetricsHandle>) -> impl IntoResponse {
+async fn render_metrics(State(state): State<AppState>, headers: axum::http::HeaderMap) -> Response {
+    use secrecy::ExposeSecret as _;
+    let mut body = (state.metrics)();
+    if let Some(fleet) = &state.fleet {
+        let given = headers
+            .get(header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.strip_prefix("Bearer "))
+            .unwrap_or("");
+        let wanted = fleet.token.expose_secret();
+        // Compared without stopping at the first difference.
+        let same = given.len() == wanted.len()
+            && given
+                .bytes()
+                .zip(wanted.bytes())
+                .fold(0u8, |acc, (a, b)| acc | (a ^ b))
+                == 0;
+        if !same {
+            return (
+                StatusCode::UNAUTHORIZED,
+                [(header::WWW_AUTHENTICATE, "Bearer")],
+                "a bearer token is needed\n",
+            )
+                .into_response();
+        }
+        // A slow database must not hold up the scrape: the process's own numbers still go.
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            dhpanel_database::usage::prometheus_text(&fleet.db),
+        )
+        .await
+        {
+            Ok(Ok(text)) => body.push_str(&text),
+            Ok(Err(error)) => tracing::warn!(%error, "could not read the fleet metrics"),
+            Err(_) => tracing::warn!("reading the fleet metrics took too long"),
+        }
+    }
     (
         [(
             header::CONTENT_TYPE,
             "text/plain; version=0.0.4; charset=utf-8",
         )],
-        metrics(),
+        body,
     )
+        .into_response()
 }
 
 /// Turns a handler panic into a Problem Details 500 instead of dropping the connection.
@@ -153,6 +202,7 @@ mod tests {
             metrics: Arc::new(|| "http_requests_total 1\n".to_owned()),
             readiness,
             trusted_proxies: Arc::from(Vec::new()),
+            fleet: None,
         }
     }
 
@@ -346,5 +396,63 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod fleet_metrics_tests {
+    use axum::{body::Body, http::Request};
+    use tower::ServiceExt;
+
+    use super::*;
+
+    fn app(token: &str) -> Router {
+        // A database that is not there: the answer must not depend on it being so.
+        let db = dhpanel_database::sqlx::postgres::PgPoolOptions::new()
+            .acquire_timeout(std::time::Duration::from_secs(1))
+            .connect_lazy("postgres://x:x@127.0.0.1:1/x")
+            .expect("a lazy pool");
+        let state = AppState {
+            metrics: Arc::new(|| "http_requests_total 1\n".to_owned()),
+            readiness: Readiness::new(std::time::Duration::from_secs(1)),
+            trusted_proxies: Arc::from(Vec::new()),
+            fleet: Some(FleetMetrics {
+                db,
+                token: Arc::new(secrecy::SecretString::from(token.to_owned())),
+            }),
+        };
+        let proxies = state.trusted_proxies.clone();
+        router(base_router(state), proxies)
+    }
+
+    async fn ask(app: Router, auth: Option<&str>) -> (StatusCode, String) {
+        let mut req = Request::builder().uri("/metrics");
+        if let Some(a) = auth {
+            req = req.header("authorization", a);
+        }
+        let res = app.oneshot(req.body(Body::empty()).unwrap()).await.unwrap();
+        let status = res.status();
+        let bytes = axum::body::to_bytes(res.into_body(), 1 << 20)
+            .await
+            .unwrap();
+        (status, String::from_utf8(bytes.to_vec()).unwrap())
+    }
+
+    #[tokio::test]
+    async fn the_fleet_needs_the_token_and_the_process_metrics_stay_whole_without_the_database() {
+        let secret = "s3cret-token-for-prometheus";
+        assert_eq!(ask(app(secret), None).await.0, StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            ask(app(secret), Some("Bearer nope")).await.0,
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            ask(app(secret), Some(secret)).await.0,
+            StatusCode::UNAUTHORIZED
+        );
+        let (status, body) = ask(app(secret), Some(&format!("Bearer {secret}"))).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.contains("http_requests_total 1"), "{body}");
     }
 }

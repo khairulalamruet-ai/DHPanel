@@ -281,3 +281,66 @@ async fn thirty_days_of_one_account_read_back_in_under_200_ms_among_many(pool: P
             .is_empty()
     );
 }
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs PostgreSQL; see tests/migrations.rs"]
+async fn the_fleet_is_shown_as_prometheus_text_and_the_dashboard_uses_what_is_shown(pool: PgPool) {
+    let (_, node_id) = tenant(&pool, "alice", 10_000).await;
+    let (_, _) = tenant(&pool, "bobby", 10_001).await;
+    let now: i64 = sqlx::query_scalar("SELECT extract(epoch FROM now())::bigint")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    usage::record(
+        &pool,
+        node_id,
+        now - 60,
+        &node(1000, 10_000),
+        &[container("dh-alice-web", 10, 0, 1 << 20)],
+    )
+    .await
+    .unwrap();
+    usage::record(
+        &pool,
+        node_id,
+        now,
+        &node(1100, 10_400),
+        &[
+            container("dh-alice-web", 40, 500, 2 << 20),
+            container("dh-bobby-web", 5, 0, 1 << 20),
+        ],
+    )
+    .await
+    .unwrap();
+    let text = usage::prometheus_text(&pool).await.unwrap();
+    // The newest reading of the node and the accounts, in Prometheus's format.
+    assert!(
+        text.contains("# TYPE dhpanel_node_cpu_busy_ratio gauge"),
+        "{text}"
+    );
+    assert!(
+        text.contains("dhpanel_node_cpu_busy_ratio{node=\"node1\"} 0.25"),
+        "{text}"
+    );
+    assert!(text.contains("dhpanel_node_containers{node=\"node1\"} 2"));
+    assert!(text.contains("dhpanel_tenant_memory_bytes{account=\"alice\"} 2097152"));
+    assert!(text.contains("dhpanel_tenant_net_receive_bytes{account=\"alice\"} 500"));
+    assert!(
+        text.contains("dhpanel_tenant_memory_bytes{account=\"bobby\"} 1048576"),
+        "{text}"
+    );
+    assert!(text.contains("dhpanel_tenants{status=\"active\"} 2"));
+    // Every metric the Grafana dashboard asks for is among them.
+    let dashboard = include_str!("../../../deploy/grafana/dhpanel-fleet.json");
+    let mut seen = 0;
+    for word in dashboard.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_')) {
+        if word.starts_with("dhpanel_") {
+            assert!(
+                text.contains(&format!("# TYPE {word} gauge")),
+                "the dashboard uses {word}, which is not shown"
+            );
+            seen += 1;
+        }
+    }
+    assert!(seen >= 15, "{seen}");
+}

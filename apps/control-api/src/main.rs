@@ -284,6 +284,17 @@ async fn main() -> ExitCode {
         metrics: Arc::new(move || handle.render()),
         readiness,
         trusted_proxies: trusted_proxies.clone(),
+        fleet: match config.metrics_token() {
+            Ok(Some(token)) => Some(app::FleetMetrics {
+                db: db.clone(),
+                token: Arc::new(token),
+            }),
+            Ok(None) => None,
+            Err(error) => {
+                tracing::error!(%error, "the metrics token cannot be used");
+                return ExitCode::from(EXIT_CONFIG);
+            }
+        },
     });
     // Module routes: core modules at once, the others as soon as the modules
     // table can be read, and again whenever an administrator switches one.
