@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM usage_minute\n         WHERE at < now() - make_interval(hours => $1) AND at < date_trunc('hour', now())",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c087b7b53844adaf81a961bf5f101a0daf3d83c0231ac88d507d288479ecf1fd"
+}

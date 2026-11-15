@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO node_usage_minute\n             (node_id, at, cpus, cpu_busy_millis, memory_used_bytes, memory_total_bytes,\n              swap_used_bytes, load1_x100, disk_used_bytes, disk_total_bytes, containers,\n              cpu_busy_jiffies, cpu_total_jiffies)\n         VALUES ($1, date_trunc('minute', to_timestamp($2::bigint)), $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)\n         ON CONFLICT (node_id, at) DO UPDATE\n         SET cpus = EXCLUDED.cpus, cpu_busy_millis = EXCLUDED.cpu_busy_millis,\n             memory_used_bytes = EXCLUDED.memory_used_bytes, memory_total_bytes = EXCLUDED.memory_total_bytes,\n             swap_used_bytes = EXCLUDED.swap_used_bytes, load1_x100 = EXCLUDED.load1_x100,\n             disk_used_bytes = EXCLUDED.disk_used_bytes, disk_total_bytes = EXCLUDED.disk_total_bytes,\n             containers = EXCLUDED.containers, cpu_busy_jiffies = EXCLUDED.cpu_busy_jiffies,\n             cpu_total_jiffies = EXCLUDED.cpu_total_jiffies",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8",
+        "Int4",
+        "Int4",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int4",
+        "Int8",
+        "Int8",
+        "Int4",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8fd47d587362f8e99cc581c056a82f4213da7dc62947daaa7115e5dc7af81173"
+}

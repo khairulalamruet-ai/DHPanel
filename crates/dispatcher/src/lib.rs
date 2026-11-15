@@ -181,7 +181,7 @@ impl Dispatcher {
                 _ = tick.tick() => { self.tick().await; }
                 _ = capabilities.tick() => { self.request_capabilities().await; }
                 _ = purges.tick() => { self.request_purges().await; }
-                _ = routes.tick() => { self.expire_previews().await; self.request_route_syncs().await; self.request_error_pages().await; self.request_import_progress().await; self.request_cron_runs().await; }
+                _ = routes.tick() => { self.expire_previews().await; self.request_route_syncs().await; self.request_error_pages().await; self.request_import_progress().await; self.request_cron_runs().await; self.request_metrics().await; }
                 _ = certificates.tick() => { self.request_certificates().await; self.request_db_sizes().await; }
                 _ = expiry.tick() => { self.announce_expiring().await; }
                 Some(report) = results.recv() => self.handle_result(report).await,
@@ -607,6 +607,26 @@ impl Dispatcher {
         asked
     }
 
+    /// Asks every connected node for its usage readings (the key has a one-minute slot, so a
+    /// node is asked once a minute however often this runs). Returns how many were asked.
+    pub async fn request_metrics(&self) -> usize {
+        let slot = u64::try_from(unix_now()).unwrap_or(0) / 60;
+        let mut asked = 0;
+        for node in self.gateway.connected_nodes() {
+            let request = dhpanel_operations::Request::new(
+                node,
+                dhpanel_node_protocol::Operation::CollectMetrics,
+                format!("metrics:{slot}"),
+            );
+            match self.ops.enqueue(&request).await {
+                Ok(dhpanel_operations::Enqueued::Created(_)) => asked += 1,
+                Ok(dhpanel_operations::Enqueued::Existing(_)) => {}
+                Err(error) => tracing::warn!(%node, %error, "could not queue the metrics reading"),
+            }
+        }
+        asked
+    }
+
     /// Asks the nodes that have accounts with cron jobs for the runs of the last half hour
     /// (the key has a thirty-second slot). The answers become the jobs' last results (a
     /// trigger of the ledger). Returns how many were asked.
@@ -697,6 +717,46 @@ impl Dispatcher {
         };
         if let Err(err) = result {
             tracing::warn!(%import_id, error = %err, "could not keep the progress of an import");
+        }
+    }
+
+    async fn store_metrics(
+        &self,
+        node_id: Uuid,
+        at: i64,
+        node: &dhpanel_node_protocol::NodeMetrics,
+        containers: &[dhpanel_node_protocol::ContainerMetrics],
+    ) {
+        let containers: Vec<dhpanel_database::usage::Container> = containers
+            .iter()
+            .map(|c| dhpanel_database::usage::Container {
+                name: c.name.clone(),
+                memory_bytes: c.memory_bytes,
+                cpu_nanos: c.cpu_nanos,
+                pids: c.pids,
+                net_rx: c.net_rx_bytes,
+                net_tx: c.net_tx_bytes,
+                io_read: c.io_read_bytes,
+                io_write: c.io_write_bytes,
+            })
+            .collect();
+        let node = dhpanel_database::usage::Node {
+            cpus: node.cpus,
+            busy_jiffies: node.cpu_busy_jiffies,
+            total_jiffies: node.cpu_total_jiffies,
+            memory_used: node
+                .memory_total_bytes
+                .saturating_sub(node.memory_available_bytes),
+            memory_total: node.memory_total_bytes,
+            swap_used: node.swap_used_bytes,
+            load1_x100: node.load_x100[0],
+            disk_used: node.disk_used_bytes,
+            disk_total: node.disk_total_bytes,
+        };
+        if let Err(err) =
+            dhpanel_database::usage::record(self.ops.db(), node_id, at, &node, &containers).await
+        {
+            tracing::warn!(%node_id, error = %err, "could not keep a usage reading");
         }
     }
 
@@ -914,6 +974,14 @@ impl Dispatcher {
                 }
                 if let Some(dhpanel_node_protocol::Output::DbSizes { items }) = &output {
                     self.store_db_sizes(node_id, items).await;
+                }
+                if let Some(dhpanel_node_protocol::Output::Metrics {
+                    at,
+                    node,
+                    containers,
+                }) = &output
+                {
+                    self.store_metrics(node_id, *at, node, containers).await;
                 }
                 if let Some(dhpanel_node_protocol::Output::File {
                     result:

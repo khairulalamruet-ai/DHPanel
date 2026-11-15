@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO usage_hour\n             (tenant_id, at, cpu_millis, memory_bytes, pids, net_rx_bytes, net_tx_bytes,\n              io_read_bytes, io_write_bytes)\n         SELECT tenant_id, date_trunc('hour', at),\n                avg(cpu_millis)::int, avg(memory_bytes)::bigint, max(pids),\n                sum(net_rx_bytes), sum(net_tx_bytes), sum(io_read_bytes), sum(io_write_bytes)\n         FROM usage_minute\n         WHERE at < date_trunc('hour', now())\n         GROUP BY tenant_id, date_trunc('hour', at)\n         ON CONFLICT (tenant_id, at) DO UPDATE\n         SET cpu_millis = EXCLUDED.cpu_millis, memory_bytes = EXCLUDED.memory_bytes,\n             pids = EXCLUDED.pids, net_rx_bytes = EXCLUDED.net_rx_bytes,\n             net_tx_bytes = EXCLUDED.net_tx_bytes, io_read_bytes = EXCLUDED.io_read_bytes,\n             io_write_bytes = EXCLUDED.io_write_bytes",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "68fe5b0d40a6c8496ac37ae40ee16957c88f0ebaaa0262d5f71884df14c8cbf2"
+}

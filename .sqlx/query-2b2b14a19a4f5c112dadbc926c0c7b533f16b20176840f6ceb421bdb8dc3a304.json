@@ -1,0 +1,75 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT extract(epoch FROM date_bin(make_interval(secs => $4::int), at, 'epoch'))::bigint AS \"at!\",\n                      avg(cpu_millis)::int AS \"cpu_millis!\", avg(memory_bytes)::bigint AS \"memory_bytes!\",\n                      max(pids) AS \"pids!\", sum(net_rx_bytes)::bigint AS \"rx!\", sum(net_tx_bytes)::bigint AS \"tx!\",\n                      sum(io_read_bytes)::bigint AS \"read!\", sum(io_write_bytes)::bigint AS \"write!\"\n               FROM usage_hour\n               WHERE tenant_id = $1 AND at >= to_timestamp($2::bigint) AND at < to_timestamp($3::bigint)\n               GROUP BY 1 ORDER BY 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "at!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "cpu_millis!",
+        "type_info": "Int4",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "memory_bytes!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "pids!",
+        "type_info": "Int4",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "rx!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "tx!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 6,
+        "name": "read!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 7,
+        "name": "write!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8",
+        "Int8",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "2b2b14a19a4f5c112dadbc926c0c7b533f16b20176840f6ceb421bdb8dc3a304"
+}

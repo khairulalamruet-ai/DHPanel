@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT c.relname AS \"name!\"\n           FROM pg_inherits i\n           JOIN pg_class c ON c.oid = i.inhrelid\n           JOIN pg_class p ON p.oid = i.inhparent\n           WHERE p.relname = 'usage_hour' AND c.relname ~ '^usage_hour_[0-9]{4}_[0-9]{2}$'\n             AND to_date(substr(c.relname, 12), 'YYYY_MM') + interval '1 month'\n                 <= now() - make_interval(days => $1)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "name!",
+        "type_info": "Name",
+        "origin": {
+          "Table": {
+            "table": "pg_class",
+            "name": "relname"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "ed890e75c74138ba05456e5f9e3348a0211487d72c7cfb7e3efa60caee72086c"
+}

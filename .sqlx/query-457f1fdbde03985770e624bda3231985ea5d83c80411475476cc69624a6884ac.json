@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT 'usage_hour_' || to_char(date_trunc('month', now()) + make_interval(months => $1), 'YYYY_MM') AS \"n!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "n!",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "457f1fdbde03985770e624bda3231985ea5d83c80411475476cc69624a6884ac"
+}

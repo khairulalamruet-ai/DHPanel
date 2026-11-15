@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO usage_minute\n                 (tenant_id, at, cpu_millis, memory_bytes, pids, net_rx_bytes, net_tx_bytes,\n                  io_read_bytes, io_write_bytes)\n             VALUES ($1, date_trunc('minute', to_timestamp($2::bigint)), $3, $4, $5, $6, $7, $8, $9)\n             ON CONFLICT (tenant_id, at) DO UPDATE\n             SET cpu_millis = EXCLUDED.cpu_millis, memory_bytes = EXCLUDED.memory_bytes,\n                 pids = EXCLUDED.pids, net_rx_bytes = usage_minute.net_rx_bytes + EXCLUDED.net_rx_bytes,\n                 net_tx_bytes = usage_minute.net_tx_bytes + EXCLUDED.net_tx_bytes,\n                 io_read_bytes = usage_minute.io_read_bytes + EXCLUDED.io_read_bytes,\n                 io_write_bytes = usage_minute.io_write_bytes + EXCLUDED.io_write_bytes",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8",
+        "Int4",
+        "Int8",
+        "Int4",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "128464514f2b3c4c6869dd14372b86364cb7bf88d5177a5f6e4192be8c3b8c9c"
+}

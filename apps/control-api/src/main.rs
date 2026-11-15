@@ -350,6 +350,20 @@ async fn main() -> ExitCode {
             }
         }
     });
+    // Usage readings are rolled up into hours, and old ones removed (T10.09).
+    tokio::spawn({
+        let db = db.clone();
+        async move {
+            let mut every = tokio::time::interval(std::time::Duration::from_secs(900));
+            every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                every.tick().await;
+                if let Err(error) = dhpanel_database::usage::maintain(&db).await {
+                    tracing::warn!(%error, "could not roll up the usage readings");
+                }
+            }
+        }
+    });
     // What has been in the accounts' trash longer than the setting says goes for good.
     tokio::spawn({
         let (db, settings) = (db.clone(), settings.clone());

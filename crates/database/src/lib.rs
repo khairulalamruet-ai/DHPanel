@@ -40,6 +40,7 @@ pub mod routes;
 pub mod settings;
 pub mod skeleton;
 pub mod tenants;
+pub mod usage;
 pub mod users;
 pub mod vhost_templates;
 

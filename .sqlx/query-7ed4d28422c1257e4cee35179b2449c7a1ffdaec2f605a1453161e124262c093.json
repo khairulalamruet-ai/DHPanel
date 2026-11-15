@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT to_char(date_trunc('month', now()) + make_interval(months => $1), 'YYYY-MM-DD') AS \"from!\",\n                          to_char(date_trunc('month', now()) + make_interval(months => $1 + 1), 'YYYY-MM-DD') AS \"to!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "from!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "to!",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "7ed4d28422c1257e4cee35179b2449c7a1ffdaec2f605a1453161e124262c093"
+}

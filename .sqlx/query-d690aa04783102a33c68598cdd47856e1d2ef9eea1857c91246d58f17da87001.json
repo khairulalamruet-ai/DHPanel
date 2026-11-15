@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT cpu_busy_jiffies, cpu_total_jiffies FROM node_usage_minute\n         WHERE node_id = $1 ORDER BY at DESC LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "cpu_busy_jiffies",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "node_usage_minute",
+            "name": "cpu_busy_jiffies"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "cpu_total_jiffies",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "node_usage_minute",
+            "name": "cpu_total_jiffies"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "d690aa04783102a33c68598cdd47856e1d2ef9eea1857c91246d58f17da87001"
+}
