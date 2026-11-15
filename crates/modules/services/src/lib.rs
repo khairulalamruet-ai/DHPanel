@@ -4,6 +4,8 @@
 //! |---|---|---|
 //! | GET | `/api/v1/client/services` | the owner |
 //! | POST | `/api/v1/client/services/{name}/restart` | the owner |
+//! | GET | `/api/v1/client/processes` | the owner |
+//! | POST | `/api/v1/client/processes/{container}/{pid}/signal` | the owner |
 //! | GET | `/api/v1/admin/nodes/{id}/services` | `admin.nodes.read` |
 //! | POST | `/api/v1/admin/nodes/{id}/services/{name}/restart` | `admin.nodes.manage` |
 //! | GET | `/api/v1/admin/nodes/{id}/services/{name}/log` | `admin.nodes.read` |
@@ -94,6 +96,11 @@ pub fn client_router() -> Router<ServicesState> {
         .route(
             "/api/v1/client/services/{name}/restart",
             post(restart_service),
+        )
+        .route("/api/v1/client/processes", get(list_processes))
+        .route(
+            "/api/v1/client/processes/{container}/{pid}/signal",
+            post(signal_process),
         )
 }
 
@@ -345,6 +352,191 @@ async fn sqlx_insert_audit(
             .metadata(serde_json::json!({ "container": name })),
     )
     .await
+}
+
+/// A process inside one of the account's containers.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ProcessView {
+    /// The container it runs in.
+    pub container: String,
+    /// Its id inside the container.
+    pub pid: u32,
+    /// The user id it runs as.
+    pub uid: u32,
+    /// `R` running, `S` sleeping, `D` waiting for the disk, `Z` zombie, ...
+    pub state: String,
+    /// The command line, clipped.
+    pub command: String,
+}
+
+/// The processes.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ProcessList {
+    /// By container and id.
+    pub items: Vec<ProcessView>,
+}
+
+/// The processes inside the account's containers (and only its own).
+#[utoipa::path(
+    get,
+    path = "/api/v1/client/processes",
+    tag = "services",
+    operation_id = "clientListProcesses",
+    security(("session" = [])),
+    responses(
+        (status = 200, description = "The processes", body = ProcessList),
+        (status = 202, description = "The node is slow; ask again", body = Pending),
+        (status = 403, description = "`client_only`", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+pub async fn list_processes(
+    State(state): State<ServicesState>,
+    who: Principal,
+) -> Result<Response, AppError> {
+    let tenant = tenant_of(&state, &who).await?;
+    let op = Operation::ListProcesses {
+        tenant_id: tenant.id,
+    };
+    match ask(&state, &tenant, &who, &op).await? {
+        Ok(Output::Processes { items }) => Ok(Json(ProcessList {
+            items: items
+                .into_iter()
+                .map(|p| ProcessView {
+                    container: p.container,
+                    pid: p.pid,
+                    uid: p.uid,
+                    state: p.state,
+                    command: p.command,
+                })
+                .collect(),
+        })
+        .into_response()),
+        Ok(_) => Err(internal(std::io::Error::other("an unexpected answer"))),
+        Err(operation_id) => {
+            Ok((StatusCode::ACCEPTED, Json(Pending { operation_id })).into_response())
+        }
+    }
+}
+
+/// What to send.
+#[derive(Debug, serde::Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SignalRequest {
+    /// `term` (ask it to end; default) or `kill` (end it at once).
+    #[serde(default = "term")]
+    pub signal: String,
+    /// After `term`: wait up to ten seconds and `kill` what is still there.
+    #[serde(default)]
+    pub escalate: bool,
+}
+
+fn term() -> String {
+    "term".to_owned()
+}
+
+/// How it went.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct Signalled {
+    /// The process.
+    pub pid: u32,
+    /// `exited`, `killed`, `not_found` or `still_running`.
+    pub outcome: String,
+}
+
+/// End a process of the account: SIGTERM, or SIGKILL; with `escalate`, SIGTERM and then
+/// SIGKILL after ten seconds if it stays. Process 1 of a container cannot be signalled
+/// (restart the service instead).
+#[utoipa::path(
+    post,
+    path = "/api/v1/client/processes/{container}/{pid}/signal",
+    tag = "services",
+    operation_id = "clientSignalProcess",
+    security(("session" = [])),
+    params(
+        ("container" = String, Path, description = "The container's name"),
+        ("pid" = u32, Path, description = "The process id inside it (2 or more)"),
+        ("X-CSRF-Token" = String, Header, description = "The session's csrf_token")
+    ),
+    request_body = SignalRequest,
+    responses(
+        (status = 200, description = "Done", body = Signalled),
+        (status = 202, description = "The node is slow; the signal goes on", body = Pending),
+        (status = 404, description = "The account has no such container", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "`tenant_not_running`", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 422, description = "A signal that is not `term` or `kill`, or process 1", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+pub async fn signal_process(
+    State(state): State<ServicesState>,
+    who: Principal,
+    Path((container, pid)): Path<(String, u32)>,
+    Json(req): Json<SignalRequest>,
+) -> Result<Response, AppError> {
+    let tenant = tenant_of(&state, &who).await?;
+    if tenant.status.as_str() != "active" {
+        return Err(AppError::conflict(
+            "tenant_not_running",
+            "Only a running account can end processes.",
+        ));
+    }
+    let kill = match req.signal.as_str() {
+        "term" => false,
+        "kill" => true,
+        _ => {
+            return Err(AppError::validation(vec![
+                dhpanel_http_kit::FieldError::new("signal", "invalid", "term or kill."),
+            ]));
+        }
+    };
+    if pid < 2 {
+        return Err(AppError::validation(vec![
+            dhpanel_http_kit::FieldError::new(
+                "pid",
+                "invalid",
+                "Process 1 cannot be ended: restart the service instead.",
+            ),
+        ]));
+    }
+    let op = Operation::SignalProcess {
+        tenant_id: tenant.id,
+        container: container.clone(),
+        pid,
+        kill,
+        escalate: req.escalate && !kill,
+    };
+    match ask(&state, &tenant, &who, &op).await? {
+        Ok(Output::ProcessSignalled { pid, outcome }) => {
+            dhpanel_audit::insert(
+                &state.db,
+                &dhpanel_audit::AuditEntry::new(
+                    "process.signalled",
+                    dhpanel_audit::Outcome::Success,
+                )
+                .actor(who.account_id())
+                .tenant(tenant.id)
+                .metadata(serde_json::json!({
+                    "container": container, "pid": pid, "signal": req.signal
+                })),
+            )
+            .await
+            .map_err(internal)?;
+            let outcome = match outcome {
+                dhpanel_node_protocol::SignalOutcome::Exited => "exited",
+                dhpanel_node_protocol::SignalOutcome::Killed => "killed",
+                dhpanel_node_protocol::SignalOutcome::NotFound => "not_found",
+                dhpanel_node_protocol::SignalOutcome::StillRunning => "still_running",
+            };
+            Ok(Json(Signalled {
+                pid,
+                outcome: outcome.to_owned(),
+            })
+            .into_response())
+        }
+        Ok(_) => Err(internal(std::io::Error::other("an unexpected answer"))),
+        Err(operation_id) => {
+            Ok((StatusCode::ACCEPTED, Json(Pending { operation_id })).into_response())
+        }
+    }
 }
 
 /// A core service of a node.
@@ -599,10 +791,11 @@ pub async fn node_service_log(
 #[derive(OpenApi)]
 #[openapi(
     paths(
-        list_services, restart_service, node_services, restart_node_service, node_service_log
+        list_services, restart_service, list_processes, signal_process, node_services, restart_node_service, node_service_log
     ),
     components(schemas(
-        ServiceView, ServiceList, Restarted, Pending, NodeServiceView, NodeServiceList,
+        ServiceView, ServiceList, Restarted, Pending, ProcessView, ProcessList, SignalRequest,
+        Signalled, NodeServiceView, NodeServiceList,
         ServiceLogLine, ServiceLog
     )),
     tags((name = "services", description = "An account's own services"))

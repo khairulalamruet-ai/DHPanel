@@ -378,6 +378,36 @@ pub struct ServiceStatus {
 /// The core services a node can name (and only these can be restarted or have their log read).
 pub const NODE_SERVICES: [&str; 3] = ["database", "phpmyadmin", "sftp"];
 
+/// A process inside one of an account's containers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProcessItem {
+    /// The container it runs in (`dh-<account>-<role>`).
+    pub container: String,
+    /// Its id inside the container.
+    pub pid: u32,
+    /// The user id it runs as.
+    pub uid: u32,
+    /// `R` running, `S` sleeping, `D` waiting for the disk, `Z` zombie, ...
+    pub state: String,
+    /// The command line, clipped.
+    pub command: String,
+}
+
+/// How a signalled process ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SignalOutcome {
+    /// It ended after SIGTERM.
+    Exited,
+    /// It did not end and was killed (SIGKILL).
+    Killed,
+    /// There was no such process (any more).
+    NotFound,
+    /// It is still there (SIGKILL was not asked for, or did not work).
+    StillRunning,
+}
+
 /// Most runs in one report.
 pub const MAX_CRON_RUNS_PER_REPORT: usize = 500;
 
@@ -957,6 +987,28 @@ pub enum Operation {
         /// At most this many lines (1 to [`MAX_LOG_LINES`]).
         tail: u32,
     },
+    /// The processes inside the containers of one account (only those: the ones that carry its
+    /// id). Answered with [`Output::Processes`].
+    ListProcesses {
+        /// The tenant.
+        tenant_id: Uuid,
+    },
+    /// Sends SIGTERM to one process of an account (SIGKILL when `kill` is set; or, with
+    /// `escalate`, SIGKILL after ten seconds if it is still there). Process 1 of a container
+    /// cannot be signalled (restart the service instead). Answered with
+    /// [`Output::ProcessSignalled`].
+    SignalProcess {
+        /// The tenant.
+        tenant_id: Uuid,
+        /// The container (one of the account's).
+        container: String,
+        /// The process, from 2 up.
+        pid: u32,
+        /// SIGKILL at once.
+        kill: bool,
+        /// After SIGTERM, wait up to ten seconds and then SIGKILL.
+        escalate: bool,
+    },
     /// Lists the containers of one account (and only those: the ones that carry its id).
     /// Answered with [`Output::Containers`].
     ListContainers {
@@ -1256,6 +1308,8 @@ impl Operation {
         "restore_backup",
         "delete_backup",
         "sync_cron_jobs",
+        "list_processes",
+        "signal_process",
         "report_services",
         "report_web_service",
         "restart_node_service",
@@ -1319,6 +1373,8 @@ impl Operation {
             Self::RestoreBackup { .. } => "restore_backup",
             Self::DeleteBackup { .. } => "delete_backup",
             Self::SyncCronJobs { .. } => "sync_cron_jobs",
+            Self::ListProcesses { .. } => "list_processes",
+            Self::SignalProcess { .. } => "signal_process",
             Self::ReportServices => "report_services",
             Self::ReportWebService => "report_web_service",
             Self::RestartNodeService { .. } => "restart_node_service",
@@ -1602,6 +1658,18 @@ pub enum Output {
     Services {
         /// One entry per service.
         items: Vec<ServiceStatus>,
+    },
+    /// Answer to [`Operation::ListProcesses`].
+    Processes {
+        /// The processes (at most 2000).
+        items: Vec<ProcessItem>,
+    },
+    /// Answer to [`Operation::SignalProcess`].
+    ProcessSignalled {
+        /// The process.
+        pid: u32,
+        /// How it ended.
+        outcome: SignalOutcome,
     },
     /// Answer to [`Operation::ListContainers`].
     Containers {
@@ -2702,7 +2770,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            57,
+            59,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }

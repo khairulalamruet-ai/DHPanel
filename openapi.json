@@ -15100,6 +15100,159 @@
         ]
       }
     },
+    "/api/v1/client/processes": {
+      "get": {
+        "tags": [
+          "services"
+        ],
+        "summary": "The processes inside the account's containers (and only its own).",
+        "operationId": "clientListProcesses",
+        "responses": {
+          "200": {
+            "description": "The processes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessList"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The node is slow; ask again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Pending"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/processes/{container}/{pid}/signal": {
+      "post": {
+        "tags": [
+          "services"
+        ],
+        "summary": "End a process of the account: SIGTERM, or SIGKILL; with `escalate`, SIGTERM and then\nSIGKILL after ten seconds if it stays. Process 1 of a container cannot be signalled\n(restart the service instead).",
+        "operationId": "clientSignalProcess",
+        "parameters": [
+          {
+            "name": "container",
+            "in": "path",
+            "description": "The container's name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "pid",
+            "in": "path",
+            "description": "The process id inside it (2 or more)",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Done",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Signalled"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The node is slow; the signal goes on",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Pending"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The account has no such container",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`tenant_not_running`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A signal that is not `term` or `kill`, or process 1",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/client/services": {
       "get": {
         "tags": [
@@ -20061,6 +20214,59 @@
           }
         }
       },
+      "ProcessList": {
+        "type": "object",
+        "description": "The processes.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProcessView"
+            },
+            "description": "By container and id."
+          }
+        }
+      },
+      "ProcessView": {
+        "type": "object",
+        "description": "A process inside one of the account's containers.",
+        "required": [
+          "container",
+          "pid",
+          "uid",
+          "state",
+          "command"
+        ],
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "The command line, clipped."
+          },
+          "container": {
+            "type": "string",
+            "description": "The container it runs in."
+          },
+          "pid": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Its id inside the container.",
+            "minimum": 0
+          },
+          "state": {
+            "type": "string",
+            "description": "`R` running, `S` sleeping, `D` waiting for the disk, `Z` zombie, ..."
+          },
+          "uid": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The user id it runs as.",
+            "minimum": 0
+          }
+        }
+      },
       "PutSettings": {
         "type": "object",
         "description": "New values for some settings of a module.",
@@ -20896,6 +21102,41 @@
           "values": {
             "type": "object",
             "description": "Current values (the default where nothing was changed), by setting key."
+          }
+        }
+      },
+      "SignalRequest": {
+        "type": "object",
+        "description": "What to send.",
+        "properties": {
+          "escalate": {
+            "type": "boolean",
+            "description": "After `term`: wait up to ten seconds and `kill` what is still there."
+          },
+          "signal": {
+            "type": "string",
+            "description": "`term` (ask it to end; default) or `kill` (end it at once)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "Signalled": {
+        "type": "object",
+        "description": "How it went.",
+        "required": [
+          "pid",
+          "outcome"
+        ],
+        "properties": {
+          "outcome": {
+            "type": "string",
+            "description": "`exited`, `killed`, `not_found` or `still_running`."
+          },
+          "pid": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The process.",
+            "minimum": 0
           }
         }
       },

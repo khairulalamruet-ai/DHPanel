@@ -179,7 +179,7 @@ fn node(pool: PgPool) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         loop {
             let rows: Vec<(Uuid, Value)> = sqlx::query_as(
-                "SELECT id, payload FROM operations WHERE kind IN ('list_containers', 'restart_container', 'restart_node_service', 'read_service_log') AND status = 'pending'",
+                "SELECT id, payload FROM operations WHERE kind IN ('list_containers', 'restart_container', 'restart_node_service', 'read_service_log', 'list_processes', 'signal_process') AND status = 'pending'",
             )
             .fetch_all(&pool)
             .await
@@ -206,6 +206,33 @@ fn node(pool: PgPool) -> tokio::task::JoinHandle<()> {
                         ]})),
                         None,
                     )
+                } else if kind == "list_processes" {
+                    (
+                        "succeeded",
+                        Some(json!({"type": "processes", "items": [
+                            {"container": "dh-alice-php", "pid": 1, "uid": 10000, "state": "S (sleeping)", "command": "php-fpm: master process"},
+                            {"container": "dh-alice-php", "pid": 17, "uid": 10000, "state": "R (running)", "command": "php-fpm: pool www"}
+                        ]})),
+                        None,
+                    )
+                } else if kind == "signal_process" {
+                    if payload["container"] == "dh-alice-php" && payload["pid"] == 17 {
+                        (
+                            "succeeded",
+                            Some(
+                                json!({"type": "process_signalled", "pid": 17, "outcome": if payload["kill"] == true { "killed" } else { "exited" }}),
+                            ),
+                            None,
+                        )
+                    } else {
+                        (
+                            "failed",
+                            None,
+                            Some(
+                                json!({"code": "invalid_arguments", "message": "this account has no such container", "retryable": false}),
+                            ),
+                        )
+                    }
                 } else if kind == "read_service_log" {
                     if payload["name"] == "database" {
                         (
@@ -355,6 +382,84 @@ async fn an_account_lists_and_restarts_its_services_and_nobody_elses(pool: PgPoo
         (status, body["code"].as_str()),
         (StatusCode::CONFLICT, Some("tenant_not_running"))
     );
+
+    // ---- Processes (the account runs again).
+    sqlx::query("UPDATE tenants SET status = 'active' WHERE username = 'alice'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, procs) = e.call(&alice, "GET", "/api/v1/client/processes").await;
+    assert_eq!(status, StatusCode::OK, "{procs}");
+    assert_eq!(procs["items"][1]["command"], "php-fpm: pool www");
+    assert_eq!(
+        e.call(&root, "GET", "/api/v1/client/processes").await.0,
+        StatusCode::FORBIDDEN
+    );
+    let sig =
+        |container: &str, pid: u32| format!("/api/v1/client/processes/{container}/{pid}/signal");
+    let post = |who: &Browser, path: String, body: Value| {
+        let app = e.app.clone();
+        let (cookie, csrf) = (who.cookie.clone(), who.csrf.clone());
+        async move {
+            let req = Request::builder()
+                .method("POST")
+                .uri(path)
+                .header(header::COOKIE, cookie)
+                .header(CSRF_HEADER, csrf)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap();
+            let res = app.oneshot(req).await.unwrap();
+            let status = res.status();
+            let bytes = axum::body::to_bytes(res.into_body(), 1 << 20)
+                .await
+                .unwrap();
+            (
+                status,
+                serde_json::from_slice::<Value>(&bytes).unwrap_or(Value::Null),
+            )
+        }
+    };
+    let (status, out) = post(&alice, sig("dh-alice-php", 17), json!({})).await;
+    assert_eq!(
+        (status, out["outcome"].as_str()),
+        (StatusCode::OK, Some("exited")),
+        "{out}"
+    );
+    let (_, out) = post(&alice, sig("dh-alice-php", 17), json!({"signal": "kill"})).await;
+    assert_eq!(out["outcome"], "killed");
+    // Process 1, a bad signal: refused before the node is asked. Another container: 404.
+    let before: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM operations WHERE kind = 'signal_process'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        post(&alice, sig("dh-alice-php", 1), json!({})).await.0,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(
+        post(&alice, sig("dh-alice-php", 17), json!({"signal": "stop"}))
+            .await
+            .0,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    let after: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM operations WHERE kind = 'signal_process'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(before, after);
+    assert_eq!(
+        post(&alice, sig("dh-bob-php", 17), json!({})).await.0,
+        StatusCode::NOT_FOUND
+    );
+    let audited: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM audit_logs WHERE action = 'process.signalled'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(audited, 2);
 
     // ---- Administrators: the node's core services.
     let node: Uuid = sqlx::query_scalar("SELECT node_id FROM tenants WHERE username = 'alice'")

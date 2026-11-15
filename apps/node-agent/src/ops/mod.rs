@@ -198,6 +198,14 @@ impl Registry {
                 let context = context.clone();
                 move |op| nodeservices::read_service_log(context.clone(), op)
             });
+            registry.register("list_processes", {
+                let context = context.clone();
+                move |op| services::list_processes(context.clone(), op)
+            });
+            registry.register("signal_process", {
+                let context = context.clone();
+                move |op| services::signal_process(context.clone(), op)
+            });
             registry.register("list_containers", {
                 let context = context.clone();
                 move |op| services::list_containers(context.clone(), op)
