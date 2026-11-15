@@ -1,0 +1,32 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO malware_scans (tenant_id, folder, quarantine, source, requested_by)\n         VALUES ($1, $2, $3, $4, $5)\n         ON CONFLICT (tenant_id) WHERE state IN ('queued', 'running') DO NOTHING\n         RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "malware_scans",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Bool",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "b295ec3851be23ac0a0be60beb57c6c652981adbe2a34e073919c35401f6d207"
+}

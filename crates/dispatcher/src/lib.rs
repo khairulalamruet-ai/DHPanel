@@ -104,6 +104,9 @@ pub struct TickStats {
 }
 
 /// A short number made from a name, for ledger keys that must stay short.
+/// A tenant is scanned for malware again after this long (a week).
+const SCAN_EVERY_SECS: i64 = 7 * 24 * 3600;
+
 fn short_hash(text: &str) -> u64 {
     use std::hash::{Hash as _, Hasher as _};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -181,7 +184,7 @@ impl Dispatcher {
                 _ = tick.tick() => { self.tick().await; }
                 _ = capabilities.tick() => { self.request_capabilities().await; }
                 _ = purges.tick() => { self.request_purges().await; }
-                _ = routes.tick() => { self.expire_previews().await; self.request_route_syncs().await; self.request_error_pages().await; self.request_user_agents().await; self.request_firewalls().await; self.request_import_progress().await; self.request_cron_runs().await; self.request_metrics().await; self.request_services().await; }
+                _ = routes.tick() => { self.expire_previews().await; self.request_route_syncs().await; self.request_error_pages().await; self.request_user_agents().await; self.request_firewalls().await; self.request_scans().await; self.request_signature_updates().await; self.request_import_progress().await; self.request_cron_runs().await; self.request_metrics().await; self.request_services().await; }
                 _ = certificates.tick() => { self.request_certificates().await; self.request_db_sizes().await; }
                 _ = expiry.tick() => { self.announce_expiring().await; }
                 Some(report) = results.recv() => self.handle_result(report).await,
@@ -642,6 +645,166 @@ impl Dispatcher {
                 Ok(dhpanel_operations::Enqueued::Created(_)) => told += 1,
                 Ok(dhpanel_operations::Enqueued::Existing(_)) => {}
                 Err(error) => tracing::warn!(%node, %error, "could not queue the firewall policy"),
+            }
+        }
+        told
+    }
+
+    /// Malware scans (T11.09): sends the queued ones to their nodes, writes down the results of
+    /// the ones that ended, and starts the scheduled scan of tenants not scanned for a week (at
+    /// most two scans are active panel-wide at a time, since each needs about 2 GiB on its
+    /// node). Returns how many scans were sent.
+    pub async fn request_scans(&self) -> usize {
+        let db = self.ops.db();
+        // Results first: a finished scan frees a place for a scheduled one.
+        match dhpanel_database::malware::running(db).await {
+            Ok(running) => {
+                for (scan_id, op_id) in running {
+                    self.settle_scan(scan_id, op_id).await;
+                }
+            }
+            Err(err) => tracing::warn!(error = %err, "could not look for running scans"),
+        }
+        if dhpanel_database::malware::active_count(db)
+            .await
+            .is_ok_and(|n| n < 2)
+        {
+            match dhpanel_database::malware::due(db, SCAN_EVERY_SECS, 1).await {
+                Ok(due) => {
+                    for tenant_id in due {
+                        if let Err(err) = dhpanel_database::malware::request(
+                            db, tenant_id, None, false, "schedule", None,
+                        )
+                        .await
+                        {
+                            tracing::warn!(%tenant_id, error = %err, "could not queue a scheduled scan");
+                        }
+                    }
+                }
+                Err(err) => tracing::warn!(error = %err, "could not look for tenants to scan"),
+            }
+        }
+        let queued = match dhpanel_database::malware::queued(db, 20).await {
+            Ok(q) => q,
+            Err(err) => {
+                tracing::warn!(error = %err, "could not read the queued scans");
+                return 0;
+            }
+        };
+        let connected = self.gateway.connected_nodes();
+        let mut sent = 0;
+        for scan in queued {
+            if !connected.contains(&scan.node_id) {
+                continue;
+            }
+            let mut request = dhpanel_operations::Request::new(
+                scan.node_id,
+                dhpanel_node_protocol::Operation::ScanTenant {
+                    tenant_id: scan.tenant_id,
+                    uid: u32::try_from(scan.uid).unwrap_or_default(),
+                    folder: scan.folder.clone(),
+                    quarantine: scan.quarantine,
+                },
+                format!("scan:{}", scan.id.simple()),
+            );
+            request.tenant_id = Some(scan.tenant_id);
+            request.ttl = std::time::Duration::from_secs(3600);
+            request.max_attempts = 2;
+            match self.ops.enqueue(&request).await {
+                Ok(
+                    dhpanel_operations::Enqueued::Created(op)
+                    | dhpanel_operations::Enqueued::Existing(op),
+                ) => {
+                    if let Err(err) = dhpanel_database::malware::sent(db, scan.id, op.id).await {
+                        tracing::warn!(scan = %scan.id, error = %err, "could not note a sent scan");
+                    }
+                    sent += 1;
+                }
+                Err(error) => {
+                    tracing::warn!(scan = %scan.id, %error, "could not queue a scan");
+                    let _ = dhpanel_database::malware::fail(
+                        db,
+                        scan.id,
+                        "the scan could not be queued",
+                    )
+                    .await;
+                }
+            }
+        }
+        sent
+    }
+
+    async fn settle_scan(&self, scan_id: Uuid, op_id: Uuid) {
+        let db = self.ops.db();
+        let Ok(Some(row)) = self.ops.get(op_id).await else {
+            return;
+        };
+        match row.status {
+            dhpanel_database::operations::Status::Succeeded => {
+                let output = row
+                    .output
+                    .and_then(|o| serde_json::from_value::<dhpanel_node_protocol::Output>(o).ok());
+                let result = match output {
+                    Some(dhpanel_node_protocol::Output::Scanned {
+                        scanned,
+                        infected,
+                        more,
+                    }) => {
+                        let findings = serde_json::to_value(&infected).unwrap_or_default();
+                        dhpanel_database::malware::finish(
+                            db,
+                            scan_id,
+                            i64::try_from(scanned).unwrap_or(i64::MAX),
+                            &findings,
+                            more,
+                        )
+                        .await
+                    }
+                    _ => {
+                        dhpanel_database::malware::fail(
+                            db,
+                            scan_id,
+                            "the node's answer is unreadable",
+                        )
+                        .await
+                    }
+                };
+                if let Err(err) = result {
+                    tracing::warn!(%scan_id, error = %err, "could not keep a scan result");
+                }
+            }
+            dhpanel_database::operations::Status::Failed => {
+                let message = row
+                    .error
+                    .as_ref()
+                    .and_then(|e| e.get("message"))
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("the scan failed")
+                    .to_owned();
+                if let Err(err) = dhpanel_database::malware::fail(db, scan_id, &message).await {
+                    tracing::warn!(%scan_id, error = %err, "could not keep a scan failure");
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Tells every connected node to bring its malware signatures up to date, once per six
+    /// hours (the key carries the time slot). Returns how many nodes were told.
+    pub async fn request_signature_updates(&self) -> usize {
+        let slot = u64::try_from(unix_now()).unwrap_or(0) / (6 * 3600);
+        let mut told = 0;
+        for node in self.gateway.connected_nodes() {
+            let mut request = dhpanel_operations::Request::new(
+                node,
+                dhpanel_node_protocol::Operation::UpdateMalwareSignatures,
+                format!("clamsig:{slot}"),
+            );
+            request.max_attempts = 3;
+            match self.ops.enqueue(&request).await {
+                Ok(dhpanel_operations::Enqueued::Created(_)) => told += 1,
+                Ok(dhpanel_operations::Enqueued::Existing(_)) => {}
+                Err(error) => tracing::warn!(%node, %error, "could not queue the signature update"),
             }
         }
         told

@@ -31,6 +31,7 @@ pub mod logs;
 pub mod metrics;
 pub mod nodeservices;
 pub mod pma;
+pub mod scan;
 pub mod server;
 pub mod services;
 pub mod sqlexport;
@@ -200,6 +201,14 @@ impl Registry {
                 move |op| nodeservices::read_service_log(context.clone(), op)
             });
             registry.register("report_server_info", server::report_server_info);
+            registry.register("scan_tenant", {
+                let context = context.clone();
+                move |op| scan::scan_tenant(context.clone(), op)
+            });
+            registry.register("update_malware_signatures", {
+                let context = context.clone();
+                move |op| scan::update_malware_signatures(context.clone(), op)
+            });
             registry.register("set_firewall_rules", {
                 let context = context.clone();
                 move |op| server::set_firewall_rules(context.clone(), op)

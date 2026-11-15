@@ -24,6 +24,7 @@ pub mod feature_sets;
 pub mod file_transfers;
 pub mod ftp_accounts;
 pub mod imports;
+pub mod malware;
 pub mod mfa;
 pub mod modules;
 pub mod node_enrollments;

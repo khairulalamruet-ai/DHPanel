@@ -8,6 +8,8 @@
 //! | GET, POST | `/api/v1/admin/security/user-agents` | `admin.security.read`, `.manage` |
 //! | DELETE | `/api/v1/admin/security/user-agents/{id}` | `admin.security.manage` |
 //! | GET, PUT, DELETE | `/api/v1/admin/nodes/{id}/firewall` | `admin.security.read`, `.manage` |
+//! | GET, POST | `/api/v1/admin/tenants/{id}/malware-scans` | `admin.security.read`, `.manage` |
+//! | GET, POST | `/api/v1/client/malware-scans` | a client |
 //! | GET | `/api/v1/client/waf/domains` | a client |
 //! | PUT, DELETE | `/api/v1/client/waf/domains/{id}` | the domain's owner |
 //!
@@ -96,6 +98,10 @@ pub fn admin_router() -> Router<SecurityState> {
                 .delete(reset_node_firewall),
         )
         .route(
+            "/api/v1/admin/tenants/{id}/malware-scans",
+            get(admin_list_scans).post(admin_start_scan),
+        )
+        .route(
             "/api/v1/admin/waf/domains/{id}",
             get(admin_get_domain)
                 .put(admin_put_domain)
@@ -107,6 +113,10 @@ pub fn admin_router() -> Router<SecurityState> {
 pub fn client_router() -> Router<SecurityState> {
     Router::new()
         .route("/api/v1/client/waf/domains", get(client_list))
+        .route(
+            "/api/v1/client/malware-scans",
+            get(client_list_scans).post(client_start_scan),
+        )
         .route(
             "/api/v1/client/waf/domains/{id}",
             axum::routing::put(client_put).delete(client_delete),
@@ -801,6 +811,203 @@ pub async fn remove_user_agent(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// What to scan.
+#[derive(Debug, Default, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ScanRequest {
+    /// Only this folder of the files (relative to `www`; `wp-content/uploads`); all when absent.
+    #[serde(default)]
+    pub folder: Option<String>,
+    /// Move what is found to the trash (the file manager puts it back).
+    #[serde(default)]
+    pub quarantine: bool,
+}
+
+/// One scan.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ScanView {
+    /// Id.
+    pub id: Uuid,
+    /// The folder scanned (`null`: everything).
+    pub folder: Option<String>,
+    /// Infected files were moved to the trash.
+    pub quarantine: bool,
+    /// `admin`, `client` or `schedule`.
+    pub source: String,
+    /// `queued`, `running`, `done` or `failed`.
+    pub state: String,
+    /// When it was asked for (Unix seconds).
+    pub requested_at: i64,
+    /// When it ended (Unix seconds).
+    pub finished_at: Option<i64>,
+    /// Files looked at.
+    pub scanned: Option<i64>,
+    /// What was found.
+    pub findings: Vec<dhpanel_node_protocol::Infection>,
+    /// More was found than listed.
+    pub more: bool,
+    /// Why it failed.
+    pub error: Option<String>,
+}
+
+/// A tenant's scans, newest first.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ScanList {
+    /// The scans.
+    pub items: Vec<ScanView>,
+}
+
+fn scan_view(s: dhpanel_database::malware::Scan) -> ScanView {
+    ScanView {
+        id: s.id,
+        folder: s.folder,
+        quarantine: s.quarantine,
+        source: s.source,
+        state: s.state,
+        requested_at: s.requested_at,
+        finished_at: s.finished_at,
+        scanned: s.scanned,
+        findings: serde_json::from_value(s.findings).unwrap_or_default(),
+        more: s.more,
+        error: s.error,
+    }
+}
+
+async fn list_scans(state: &SecurityState, tenant: Uuid) -> Result<Json<ScanList>, AppError> {
+    let items = dhpanel_database::malware::list(&state.db, tenant, 50)
+        .await
+        .map_err(internal)?
+        .into_iter()
+        .map(scan_view)
+        .collect();
+    Ok(Json(ScanList { items }))
+}
+
+async fn start_scan(
+    state: &SecurityState,
+    who: &Principal,
+    tenant: Uuid,
+    source: &str,
+    req: ScanRequest,
+) -> Result<(StatusCode, Json<ScanView>), AppError> {
+    let folder = req
+        .folder
+        .as_deref()
+        .map(str::trim)
+        .filter(|f| !f.is_empty());
+    if let Some(f) = folder
+        && (f.len() > 1024
+            || f.contains(['\0', '\\'])
+            || f.starts_with('/')
+            || f.split('/').any(|p| p.is_empty() || p == "." || p == ".."))
+    {
+        return Err(AppError::validation(vec![FieldError::new(
+            "folder",
+            "invalid",
+            "A folder inside your files, such as wp-content/uploads.",
+        )]));
+    }
+    let Some(id) = dhpanel_database::malware::request(
+        &state.db,
+        tenant,
+        folder,
+        req.quarantine,
+        source,
+        Some(who.account_id()),
+    )
+    .await
+    .map_err(internal)?
+    else {
+        return Err(AppError::conflict(
+            "scan_under_way",
+            "A scan of these files is queued or running already.",
+        ));
+    };
+    let entry = AuditEntry::new("malware_scan.requested", Outcome::Success)
+        .actor(who.account_id())
+        .tenant(tenant)
+        .target("malware_scan", id)
+        .metadata(serde_json::json!({ "folder": folder, "quarantine": req.quarantine }));
+    dhpanel_audit::insert(&state.db, &entry)
+        .await
+        .map_err(internal)?;
+    let made = dhpanel_database::malware::list(&state.db, tenant, 1)
+        .await
+        .map_err(internal)?
+        .into_iter()
+        .find(|s| s.id == id)
+        .ok_or_else(|| AppError::not_found("malware_scan"))?;
+    Ok((StatusCode::ACCEPTED, Json(scan_view(made))))
+}
+
+/// A hosting account's malware scans.
+#[utoipa::path(get, path = "/api/v1/admin/tenants/{id}/malware-scans", tag = "security", operation_id = "adminListMalwareScans",
+    security(("session" = [])), params(("id" = Uuid, Path, description = "Hosting account id")),
+    responses((status = 200, description = "The scans", body = ScanList),
+              (status = 404, description = "No such hosting account", body = ProblemDetails, content_type = "application/problem+json")))]
+pub async fn admin_list_scans(
+    State(state): State<SecurityState>,
+    _who: Require<SecurityRead>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<ScanList>, AppError> {
+    tenants::get(&state.db, id)
+        .await
+        .map_err(internal)?
+        .ok_or_else(|| AppError::not_found("tenant"))?;
+    list_scans(&state, id).await
+}
+
+/// Scan a hosting account's files for malware (the node does it in the next seconds).
+#[utoipa::path(post, path = "/api/v1/admin/tenants/{id}/malware-scans", tag = "security", operation_id = "adminStartMalwareScan",
+    security(("session" = [])), params(("id" = Uuid, Path, description = "Hosting account id"), ("X-CSRF-Token" = String, Header, description = "The session's csrf_token")),
+    request_body = ScanRequest,
+    responses((status = 202, description = "Queued", body = ScanView),
+              (status = 404, description = "No such hosting account", body = ProblemDetails, content_type = "application/problem+json"),
+              (status = 409, description = "`scan_under_way`", body = ProblemDetails, content_type = "application/problem+json"),
+              (status = 422, description = "A folder that is not inside the files", body = ProblemDetails, content_type = "application/problem+json")))]
+pub async fn admin_start_scan(
+    State(state): State<SecurityState>,
+    who: Require<SecurityManage>,
+    Path(id): Path<Uuid>,
+    Json(req): Json<ScanRequest>,
+) -> Result<(StatusCode, Json<ScanView>), AppError> {
+    tenants::get(&state.db, id)
+        .await
+        .map_err(internal)?
+        .ok_or_else(|| AppError::not_found("tenant"))?;
+    start_scan(&state, &who.0, id, "admin", req).await
+}
+
+/// The account's own malware scans.
+#[utoipa::path(get, path = "/api/v1/client/malware-scans", tag = "security", operation_id = "clientListMalwareScans",
+    security(("session" = [])),
+    responses((status = 200, description = "The scans", body = ScanList),
+              (status = 403, description = "`client_only`", body = ProblemDetails, content_type = "application/problem+json")))]
+pub async fn client_list_scans(
+    State(state): State<SecurityState>,
+    who: Principal,
+) -> Result<Json<ScanList>, AppError> {
+    let tenant = client_tenant(&state, &who).await?;
+    list_scans(&state, tenant.id).await
+}
+
+/// Scan the account's own files for malware.
+#[utoipa::path(post, path = "/api/v1/client/malware-scans", tag = "security", operation_id = "clientStartMalwareScan",
+    security(("session" = [])), params(("X-CSRF-Token" = String, Header, description = "The session's csrf_token")),
+    request_body = ScanRequest,
+    responses((status = 202, description = "Queued", body = ScanView),
+              (status = 403, description = "`client_only`", body = ProblemDetails, content_type = "application/problem+json"),
+              (status = 409, description = "`scan_under_way`", body = ProblemDetails, content_type = "application/problem+json"),
+              (status = 422, description = "A folder that is not inside the files", body = ProblemDetails, content_type = "application/problem+json")))]
+pub async fn client_start_scan(
+    State(state): State<SecurityState>,
+    who: Principal,
+    Json(req): Json<ScanRequest>,
+) -> Result<(StatusCode, Json<ScanView>), AppError> {
+    let tenant = client_tenant(&state, &who).await?;
+    start_scan(&state, &who, tenant.id, "client", req).await
+}
+
 /// A node's firewall policy.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct NodeFirewall {
@@ -916,9 +1123,10 @@ async fn store_firewall(
         admin_get_global, admin_put_global, admin_delete_global, admin_get_tenant, admin_put_tenant,
         admin_delete_tenant, admin_get_domain, admin_put_domain, admin_delete_domain, client_list,
         client_put, client_delete, list_user_agents, add_user_agent, remove_user_agent,
-        get_node_firewall, put_node_firewall, reset_node_firewall
+        get_node_firewall, put_node_firewall, reset_node_firewall,
+        admin_list_scans, admin_start_scan, client_list_scans, client_start_scan
     ),
-    components(schemas(NodeFirewall, dhpanel_node_protocol::FirewallPolicy, dhpanel_node_protocol::PortRule, dhpanel_node_protocol::RateLimit, UserAgentView, UserAgentList, AddUserAgent, PolicyRequest, PolicyView, EffectiveView, PolicyState, DomainWaf, DomainWafList)),
+    components(schemas(ScanRequest, ScanView, ScanList, dhpanel_node_protocol::Infection, NodeFirewall, dhpanel_node_protocol::FirewallPolicy, dhpanel_node_protocol::PortRule, dhpanel_node_protocol::RateLimit, UserAgentView, UserAgentList, AddUserAgent, PolicyRequest, PolicyView, EffectiveView, PolicyState, DomainWaf, DomainWafList)),
     tags((name = "security", description = "The web application firewall"))
 )]
 pub struct SecurityApi;

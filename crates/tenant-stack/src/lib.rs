@@ -51,6 +51,8 @@ pub enum Role {
     Pma,
     /// The node's SFTP and FTPS server (not part of a tenant's stack).
     Sftp,
+    /// The node's malware scanner, run for one scan at a time (not part of a tenant's stack).
+    Clamav,
 }
 
 impl Role {
@@ -63,6 +65,7 @@ impl Role {
             Self::Db => "db",
             Self::Pma => "pma",
             Self::Sftp => "sftp",
+            Self::Clamav => "clamav",
         }
     }
 }
@@ -616,7 +619,7 @@ pub fn render(tenant: &Tenant<'_>, allowlist: &Allowlist) -> Result<Stack, Stack
                 }
             }
             // The database server is the node's, not a tenant's.
-            Role::Db | Role::Pma | Role::Sftp => continue,
+            Role::Db | Role::Pma | Role::Sftp | Role::Clamav => continue,
         }
         let copies = if template.role == Role::Php {
             php_copies

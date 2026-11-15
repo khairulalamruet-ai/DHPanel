@@ -642,3 +642,99 @@ async fn administrators_set_a_nodes_firewall_and_a_bad_policy_is_refused(pool: P
         StatusCode::NOT_FOUND
     );
 }
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn malware_scans_are_asked_for_listed_and_only_one_runs_at_a_time(pool: PgPool) {
+    let e = env(&pool).await;
+    let (alice_account, tenant) = client(&pool, "alice", 10_000).await;
+    let a = e.sign_in(alice_account).await;
+    let admin_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO accounts (kind, username, email, password_hash)
+         VALUES ('admin', 'rootuser', 'root@example.com', $1) RETURNING id",
+    )
+    .bind(HASH)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    dhpanel_database::rbac::assign_role(&pool, admin_id, "super_admin", None)
+        .await
+        .unwrap();
+    let root = e.sign_in(admin_id).await;
+    let own = "/api/v1/client/malware-scans";
+    // A client asks for a scan of a folder of their own files.
+    let (status, made) = e
+        .call(
+            &a,
+            "POST",
+            own,
+            Some(json!({"folder": "wp-content/uploads", "quarantine": true})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{made}");
+    assert_eq!(
+        (made["state"].as_str(), made["source"].as_str()),
+        (Some("queued"), Some("client"))
+    );
+    // Not outside the files, and not twice at once.
+    for bad in ["../etc", "/etc", "a//b", "a/./b"] {
+        let (status, _) = e.call(&a, "POST", own, Some(json!({"folder": bad}))).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{bad}");
+    }
+    let (status, got) = e.call(&a, "POST", own, Some(json!({}))).await;
+    assert_eq!(
+        (status, got["code"].as_str()),
+        (StatusCode::CONFLICT, Some("scan_under_way")),
+        "{got}"
+    );
+    // The dispatcher's part: sent, then finished with what the node found.
+    let id: Uuid = made["id"].as_str().unwrap().parse().unwrap();
+    let queued = dhpanel_database::malware::queued(&pool, 10).await.unwrap();
+    assert_eq!(queued.len(), 1);
+    assert_eq!(queued[0].folder.as_deref(), Some("wp-content/uploads"));
+    assert!(queued[0].quarantine);
+    // (The operation's own row is the dispatcher's business; the scan only keeps its id.)
+    let op = Uuid::new_v4();
+    dhpanel_database::malware::sent(&pool, id, op)
+        .await
+        .unwrap();
+    // Still one at a time while it runs.
+    let (status, _) = e.call(&a, "POST", own, Some(json!({}))).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let findings = json!([{"path": "www/wp-content/uploads/x.php", "signature": "Php.Trojan.Agent", "quarantined": true}]);
+    dhpanel_database::malware::finish(&pool, id, 1234, &findings, false)
+        .await
+        .unwrap();
+    let (status, list) = e.call(&a, "GET", own, None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    let first = &list["items"][0];
+    assert_eq!(first["state"], "done");
+    assert_eq!(first["scanned"], 1234);
+    assert_eq!(first["findings"][0]["signature"], "Php.Trojan.Agent");
+    assert_eq!(first["findings"][0]["quarantined"], true);
+    // After it ended another can be asked for, by an administrator too.
+    let path = format!("/api/v1/admin/tenants/{tenant}/malware-scans");
+    assert_eq!(
+        e.call(&a, "GET", &path, None).await.0,
+        StatusCode::FORBIDDEN
+    );
+    let (status, made) = e.call(&root, "POST", &path, Some(json!({}))).await;
+    assert_eq!(
+        (status, made["source"].as_str()),
+        (StatusCode::ACCEPTED, Some("admin")),
+        "{made}"
+    );
+    let (_, list) = e.call(&root, "GET", &path, None).await;
+    assert_eq!(list["items"].as_array().unwrap().len(), 2);
+    // A tenant just scanned is not due for the scheduled scan; one never scanned would be.
+    let due = dhpanel_database::malware::due(&pool, 7 * 24 * 3600, 10)
+        .await
+        .unwrap();
+    assert!(!due.contains(&tenant));
+    // No such hosting account.
+    let other = format!("/api/v1/admin/tenants/{}/malware-scans", Uuid::new_v4());
+    assert_eq!(
+        e.call(&root, "GET", &other, None).await.0,
+        StatusCode::NOT_FOUND
+    );
+}

@@ -626,6 +626,57 @@ impl DockerManager {
         })
     }
 
+    /// Runs a container of ours to its end: creates it, starts it, waits until it stops (or
+    /// `limit` passes, when it is killed), reads what it printed and removes it. For one-off
+    /// jobs such as a malware scan. Returns the exit code (`137` when it had to be killed) and
+    /// the end of what it printed (stdout and stderr together, about 1 MiB at most).
+    ///
+    /// # Errors
+    /// [`DockerError::Conflict`] when the name is taken, an API error.
+    pub async fn run_to_end(
+        &self,
+        spec: &ContainerSpec,
+        limit: Duration,
+    ) -> Result<CommandResult, DockerError> {
+        self.create_container(spec).await?;
+        let result = async {
+            self.start(&spec.name).await?;
+            let deadline = tokio::time::Instant::now() + limit;
+            let mut killed = false;
+            loop {
+                let info = self.inspect(&spec.name).await?;
+                if !info.running {
+                    break Ok::<Option<i64>, DockerError>(info.exit_code);
+                }
+                if tokio::time::Instant::now() >= deadline {
+                    killed = true;
+                    self.stop(&spec.name, Duration::from_secs(5)).await?;
+                    break Ok(None);
+                }
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+            .map(|code| (code, killed))
+        }
+        .await;
+        let read = match &result {
+            Ok(_) => self.logs(&spec.name, 0, 200_000).await.ok(),
+            Err(_) => None,
+        };
+        let _ = self.remove(&spec.name, true).await;
+        let (code, killed) = result?;
+        let mut output = String::new();
+        if let Some(read) = read {
+            for line in read.lines {
+                output.push_str(&line.text);
+                output.push('\n');
+            }
+        }
+        Ok(CommandResult {
+            exit_code: if killed { 137 } else { code.unwrap_or(-1) },
+            output,
+        })
+    }
+
     /// Dumps one database with `mariadb-dump` run inside the database container
     /// and sends what it prints to `sink`, a piece at a time. The command is fixed;
     /// only `database` and `user` (plain identifiers, checked here) and the

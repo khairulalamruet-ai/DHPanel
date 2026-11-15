@@ -7125,6 +7125,139 @@
         ]
       }
     },
+    "/api/v1/admin/tenants/{id}/malware-scans": {
+      "get": {
+        "tags": [
+          "security"
+        ],
+        "summary": "A hosting account's malware scans.",
+        "operationId": "adminListMalwareScans",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Hosting account id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The scans",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScanList"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such hosting account",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "security"
+        ],
+        "summary": "Scan a hosting account's files for malware (the node does it in the next seconds).",
+        "operationId": "adminStartMalwareScan",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Hosting account id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScanRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScanView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such hosting account",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`scan_under_way`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A folder that is not inside the files",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/usage/nodes/{id}": {
       "get": {
         "tags": [
@@ -16104,6 +16237,117 @@
         ]
       }
     },
+    "/api/v1/client/malware-scans": {
+      "get": {
+        "tags": [
+          "security"
+        ],
+        "summary": "The account's own malware scans.",
+        "operationId": "clientListMalwareScans",
+        "responses": {
+          "200": {
+            "description": "The scans",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScanList"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "security"
+        ],
+        "summary": "Scan the account's own files for malware.",
+        "operationId": "clientStartMalwareScan",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScanRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScanView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`scan_under_way`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A folder that is not inside the files",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/client/php": {
       "get": {
         "tags": [
@@ -20186,6 +20430,30 @@
           }
         }
       },
+      "Infection": {
+        "type": "object",
+        "description": "One infected file a scan found.",
+        "required": [
+          "path",
+          "signature",
+          "quarantined"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Where it is, relative to the tenant's files (`www/uploads/x.php`)."
+          },
+          "quarantined": {
+            "type": "boolean",
+            "description": "It was moved to the trash."
+          },
+          "signature": {
+            "type": "string",
+            "description": "The signature that matched (`Php.Trojan.Agent`)."
+          }
+        },
+        "additionalProperties": false
+      },
       "JobList": {
         "type": "object",
         "description": "The jobs of an account.",
@@ -22398,6 +22666,118 @@
           }
         },
         "additionalProperties": false
+      },
+      "ScanList": {
+        "type": "object",
+        "description": "A tenant's scans, newest first.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ScanView"
+            },
+            "description": "The scans."
+          }
+        }
+      },
+      "ScanRequest": {
+        "type": "object",
+        "description": "What to scan.",
+        "properties": {
+          "folder": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Only this folder of the files (relative to `www`; `wp-content/uploads`); all when absent."
+          },
+          "quarantine": {
+            "type": "boolean",
+            "description": "Move what is found to the trash (the file manager puts it back)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ScanView": {
+        "type": "object",
+        "description": "One scan.",
+        "required": [
+          "id",
+          "quarantine",
+          "source",
+          "state",
+          "requested_at",
+          "findings",
+          "more"
+        ],
+        "properties": {
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it failed."
+          },
+          "findings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Infection"
+            },
+            "description": "What was found."
+          },
+          "finished_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "When it ended (Unix seconds)."
+          },
+          "folder": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The folder scanned (`null`: everything)."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Id."
+          },
+          "more": {
+            "type": "boolean",
+            "description": "More was found than listed."
+          },
+          "quarantine": {
+            "type": "boolean",
+            "description": "Infected files were moved to the trash."
+          },
+          "requested_at": {
+            "type": "integer",
+            "format": "int64",
+            "description": "When it was asked for (Unix seconds)."
+          },
+          "scanned": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Files looked at."
+          },
+          "source": {
+            "type": "string",
+            "description": "`admin`, `client` or `schedule`."
+          },
+          "state": {
+            "type": "string",
+            "description": "`queued`, `running`, `done` or `failed`."
+          }
+        }
       },
       "ScheduleView": {
         "type": "object",

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE malware_scans SET state = 'failed', finished_at = now(), error = $2\n         WHERE id = $1 AND state IN ('queued', 'running')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "007f5e87765f9a216f033ab4bdd8ddd7474920ac5cebe1734c7e9d224fbeb9ec"
+}

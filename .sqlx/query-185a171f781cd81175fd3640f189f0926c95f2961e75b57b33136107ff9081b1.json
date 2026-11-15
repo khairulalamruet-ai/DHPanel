@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE malware_scans SET state = 'done', finished_at = now(), scanned = $2, findings = $3, more = $4\n         WHERE id = $1 AND state = 'running'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8",
+        "Jsonb",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "185a171f781cd81175fd3640f189f0926c95f2961e75b57b33136107ff9081b1"
+}

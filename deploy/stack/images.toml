@@ -66,3 +66,8 @@ note      = "phpMyAdmin 5.2.3 (Apache), the node's one database browser; clients
 role      = "sftp"
 reference = "drakkan/sftpgo@sha256:1edd28d80de2a008863fbfc58c8ff7db47b1b410bae48d4e6076192337809b11"
 note      = "SFTPGo 2.7.6, the node's SFTP and FTPS server (virtual users, one per account, confined to a folder of the tenant's files)"
+
+[[image]]
+role      = "clamav"
+reference = "clamav/clamav@sha256:64ca916618842ba469ef38a501e6c2f42a68281c064c03749b0126c0fb085ce5"
+note      = "ClamAV 1.5.4 (stable_base, no signatures inside): run once per scan (clamscan) and once per signature update (freshclam), never as a service"

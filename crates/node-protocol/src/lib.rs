@@ -167,6 +167,19 @@ pub struct WafSetting {
     pub disabled_rules: Vec<u32>,
 }
 
+/// One infected file a scan found.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(deny_unknown_fields)]
+pub struct Infection {
+    /// Where it is, relative to the tenant's files (`www/uploads/x.php`).
+    pub path: String,
+    /// The signature that matched (`Php.Trojan.Agent`).
+    pub signature: String,
+    /// It was moved to the trash.
+    pub quarantined: bool,
+}
+
 /// The node's firewall (T11.06): who may reach which port. Applied by the privileged helper as
 /// one nftables table of its own; IPv4 only.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1412,6 +1425,24 @@ pub enum Operation {
         /// The policy.
         policy: FirewallPolicy,
     },
+    /// Looks for malware in a tenant's files with ClamAV, in a container of its own with no
+    /// network and the files read-only. With `quarantine`, each infected file is moved to the
+    /// tenant's trash (the file manager can put it back). Answered with [`Output::Scanned`].
+    ScanTenant {
+        /// The tenant.
+        tenant_id: Uuid,
+        /// The tenant's numeric user id.
+        uid: u32,
+        /// Only this folder of the tenant's files (relative to its `www`); all when absent.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        folder: Option<String>,
+        /// Move what is found to the trash.
+        #[serde(default)]
+        quarantine: bool,
+    },
+    /// Brings the node's malware signatures up to date (freshclam, in a container of its own).
+    /// Answered with [`Output::SignaturesUpdated`].
+    UpdateMalwareSignatures,
     /// Replaces the node's list of User-Agent texts the web server refuses: a request whose
     /// User-Agent contains one of them (any case) is answered `403` before any site sees it.
     /// The agent keeps the list and puts it back whenever the web server loses it. Answered
@@ -1555,6 +1586,8 @@ impl Operation {
         "delete_backup",
         "sync_cron_jobs",
         "set_firewall_rules",
+        "scan_tenant",
+        "update_malware_signatures",
         "set_user_agent_blocklist",
         "report_server_info",
         "set_timezone",
@@ -1627,6 +1660,8 @@ impl Operation {
             Self::DeleteBackup { .. } => "delete_backup",
             Self::SyncCronJobs { .. } => "sync_cron_jobs",
             Self::SetFirewallRules { .. } => "set_firewall_rules",
+            Self::ScanTenant { .. } => "scan_tenant",
+            Self::UpdateMalwareSignatures => "update_malware_signatures",
             Self::SetUserAgentBlocklist { .. } => "set_user_agent_blocklist",
             Self::ReportServerInfo => "report_server_info",
             Self::SetTimezone { .. } => "set_timezone",
@@ -1810,6 +1845,20 @@ pub enum Output {
         containers: Vec<String>,
         /// How storage limits are enforced (`xfs`), or `None` when they are not.
         storage_quota: Option<String>,
+    },
+    /// Answer to [`Operation::ScanTenant`].
+    Scanned {
+        /// How many files were looked at.
+        scanned: u64,
+        /// What was found (at most 500; `more` says when there was more).
+        infected: Vec<Infection>,
+        /// More was found than listed.
+        more: bool,
+    },
+    /// Answer to [`Operation::UpdateMalwareSignatures`].
+    SignaturesUpdated {
+        /// What freshclam said last (clipped), such as the daily database's version.
+        detail: String,
     },
     /// Answer to [`Operation::SetFirewallRules`].
     FirewallSet {
@@ -3054,7 +3103,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            66,
+            68,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }

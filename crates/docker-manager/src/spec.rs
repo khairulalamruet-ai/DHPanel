@@ -244,6 +244,8 @@ pub struct ContainerSpec {
     pub image: ImageRef,
     /// Arguments for the image's entrypoint (empty: the image's default).
     pub command: Vec<String>,
+    /// Replaces the image's entrypoint (empty: keep it).
+    pub entrypoint: Vec<String>,
     /// Environment variables. Never secrets: those are mounted, not passed here.
     pub env: BTreeMap<String, String>,
     /// Numeric `uid:gid` to run as (default: what the image says).
@@ -287,6 +289,7 @@ impl ContainerSpec {
             name,
             image,
             command: Vec::new(),
+            entrypoint: Vec::new(),
             env: BTreeMap::new(),
             user: None,
             memory_bytes: 256 * 1024 * 1024,
@@ -322,9 +325,11 @@ impl ContainerSpec {
     pub fn validate(&self) -> Result<(), SpecError> {
         self.limits().validate()?;
         if self.command.len() > 64
+            || self.entrypoint.len() > 64
             || self
                 .command
                 .iter()
+                .chain(&self.entrypoint)
                 .any(|a| a.len() > 4096 || a.contains('\0'))
         {
             return Err(invalid(
@@ -557,6 +562,7 @@ impl ContainerSpec {
         Ok(ContainerCreateBody {
             image: Some(self.image.as_str().to_owned()),
             cmd: (!self.command.is_empty()).then(|| self.command.clone()),
+            entrypoint: (!self.entrypoint.is_empty()).then(|| self.entrypoint.clone()),
             env: Some(self.env.iter().map(|(k, v)| format!("{k}={v}")).collect()),
             user: self.user.map(|(uid, gid)| format!("{uid}:{gid}")),
             labels: Some(labels),
