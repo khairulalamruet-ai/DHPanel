@@ -365,3 +365,54 @@ fn the_files_of_an_account_are_packed_into_an_encrypted_stream_that_unpacks_the_
             .is_err()
     );
 }
+
+#[test]
+fn packed_files_are_put_back_over_changes_and_only_where_asked() {
+    use dhpanel_backup::KEY_LEN;
+    use dhpanel_fileops::backup::{pack_files, unpack_files};
+    let s = Scratch::new("unpack");
+    let root = s.root();
+    std::fs::create_dir_all(s.path("www/sub")).unwrap();
+    std::fs::create_dir_all(s.path("other")).unwrap();
+    std::fs::write(s.path("www/index.php"), "original").unwrap();
+    std::fs::write(s.path("www/sub/a.txt"), "a").unwrap();
+    std::fs::write(s.path("other/b.txt"), "b").unwrap();
+    let key = [5u8; KEY_LEN];
+    let mut stored = Vec::new();
+    pack_files(&root, &key, &mut stored).unwrap();
+    // Damage: a changed file, a deleted file, a file made since, a link in the way.
+    std::fs::write(s.path("www/index.php"), "hacked").unwrap();
+    std::fs::remove_file(s.path("www/sub/a.txt")).unwrap();
+    std::fs::remove_file(s.path("other/b.txt")).unwrap();
+    symlink("/etc/passwd", s.path("other/b.txt")).unwrap();
+    std::fs::write(s.path("www/new.txt"), "keep me").unwrap();
+    // Only the folder asked for.
+    let done = unpack_files(&root, &key, &stored[..], Some("www")).unwrap();
+    assert_eq!(done.bytes, 9, "{done:?}");
+    assert_eq!(
+        std::fs::read_to_string(s.path("www/index.php")).unwrap(),
+        "original"
+    );
+    assert_eq!(
+        std::fs::read_to_string(s.path("www/sub/a.txt")).unwrap(),
+        "a"
+    );
+    assert_eq!(
+        std::fs::read_to_string(s.path("www/new.txt")).unwrap(),
+        "keep me"
+    );
+    assert!(
+        std::fs::symlink_metadata(s.path("other/b.txt"))
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    // Everything: the link is replaced by the file, nothing is written through it.
+    unpack_files(&root, &key, &stored[..], None).unwrap();
+    assert_eq!(std::fs::read_to_string(s.path("other/b.txt")).unwrap(), "b");
+    assert!(std::fs::read_to_string("/etc/passwd").unwrap().len() > 10);
+    // A wrong key writes nothing.
+    assert!(unpack_files(&root, &[6u8; KEY_LEN], &stored[..], None).is_err());
+    // A cut stream is refused.
+    assert!(unpack_files(&root, &key, &stored[..stored.len() - 20], None).is_err());
+}

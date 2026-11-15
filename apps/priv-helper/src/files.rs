@@ -10,7 +10,7 @@
 //! `dhpanel-fileops` and prints one answer. It is given a time limit and killed after.
 
 use std::{
-    io::{Read as _, Write as _},
+    io::{BufRead as _, Read, Write as _},
     path::Path,
     process::{Command, Stdio},
     time::{Duration, Instant},
@@ -227,7 +227,7 @@ fn run_worker_with(
     args: &[String],
     stdin: Stdio,
     stdout: Stdio,
-    input: Option<Vec<u8>>,
+    input: Option<Box<dyn Read + Send>>,
 ) -> Result<(bool, Vec<u8>, String), Failure> {
     let program = std::env::current_exe()
         .map_err(|_| (ErrorCode::Failed, "cannot find the helper itself"))?;
@@ -256,9 +256,9 @@ fn run_worker_with(
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|_| (ErrorCode::Failed, "cannot start the file worker"))?;
-    let feeder = input.zip(child.stdin.take()).map(|(data, mut pipe)| {
+    let feeder = input.zip(child.stdin.take()).map(|(mut data, mut pipe)| {
         std::thread::spawn(move || {
-            let _ = pipe.write_all(&data);
+            let _ = std::io::copy(&mut data, &mut pipe);
         })
     });
     let out = child.stdout.take();
@@ -477,7 +477,9 @@ pub fn backup_files(
         &[],
         Stdio::null(),
         Stdio::from(File::from(out)),
-        Some(format!("{key}\n").into_bytes()),
+        Some(Box::new(std::io::Cursor::new(
+            format!("{key}\n").into_bytes(),
+        ))),
     )
     .and_then(|(ok, out, err)| said(ok, &out, &err));
     if result.is_err() {
@@ -556,6 +558,93 @@ pub fn get_worker(
     let root = Root::open(root)
         .map_err(|_| FileResult::error(FileErrorCode::NotFound, "the files are not there"))?;
     dhpanel_fileops::take(&root, path, max_bytes, out)
+        .map(|_| ())
+        .map_err(|(code, message)| FileResult::error(code, message))
+}
+
+/// `restore_files`: puts the files of an encrypted stream (a staged file of the agent's
+/// transfer folder) back into the tenant's folder, as the tenant's own user. The key goes to
+/// the worker first on its input, then the staged file, never through a command line.
+///
+/// # Errors
+/// As [`place_file`].
+pub fn restore_files(
+    env: &TenantEnv,
+    transfers: &Path,
+    tenant_id: &str,
+    uid: u32,
+    staged: &str,
+    key: &str,
+    only: Option<&str>,
+) -> Result<(), Failure> {
+    if key.len() != 64 || !key.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err((ErrorCode::InvalidArguments, "the key is 64 hex digits"));
+    }
+    let (host, root) = host_ids(env, tenant_id, uid)?;
+    dhpanel_safe_fs::check_name(staged)
+        .map_err(|_| (ErrorCode::InvalidArguments, "bad staged name"))?;
+    if let Some(folder) = only
+        && (folder.len() > 1024 || folder.contains('\0') || dhpanel_safe_fs::parts(folder).is_err())
+    {
+        return Err((ErrorCode::InvalidArguments, "bad folder"));
+    }
+    let fd = staged_root(transfers)?
+        .open_at(
+            staged,
+            rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::CLOEXEC,
+            rustix::fs::Mode::empty(),
+        )
+        .map_err(|_| (ErrorCode::Failed, "the staged file is not usable"))?;
+    let mut args = Vec::new();
+    if let Some(folder) = only {
+        args.push("--folder".to_owned());
+        args.push(folder.to_owned());
+    }
+    let input = std::io::Cursor::new(format!("{key}\n").into_bytes()).chain(File::from(fd));
+    let (ok, out, err) = run_worker_with(
+        host,
+        "filerestore",
+        &root,
+        &args,
+        Stdio::null(),
+        Stdio::piped(),
+        Some(Box::new(input)),
+    )?;
+    said(ok, &out, &err)
+}
+
+/// The worker of `filerestore`: the key (one line), then the encrypted stream, arrive on
+/// stdin.
+///
+/// # Errors
+/// The refusal, as the answer to print on stderr.
+pub fn restore_worker(
+    root: &Path,
+    mut input: impl std::io::BufRead,
+    only: Option<&str>,
+) -> Result<(), FileResult> {
+    let mut text = String::new();
+    input
+        .by_ref()
+        .take(256)
+        .read_line(&mut text)
+        .map_err(|_| FileResult::error(FileErrorCode::InvalidArguments, "no key"))?;
+    let hex = text.trim();
+    let mut key = [0u8; dhpanel_backup::KEY_LEN];
+    if hex.len() != key.len() * 2 {
+        return Err(FileResult::error(
+            FileErrorCode::InvalidArguments,
+            "the key is not 64 hex digits",
+        ));
+    }
+    for (i, b) in key.iter_mut().enumerate() {
+        *b = u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).map_err(|_| {
+            FileResult::error(FileErrorCode::InvalidArguments, "the key is not hex")
+        })?;
+    }
+    let root = Root::open(root)
+        .map_err(|_| FileResult::error(FileErrorCode::NotFound, "the files are not there"))?;
+    dhpanel_fileops::backup::unpack_files(&root, &key, input, only)
         .map(|_| ())
         .map_err(|(code, message)| FileResult::error(code, message))
 }

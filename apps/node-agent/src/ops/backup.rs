@@ -15,12 +15,13 @@
 
 use std::{
     io::{Read, Write},
+    os::unix::fs::OpenOptionsExt as _,
     path::PathBuf,
     sync::{Arc, Mutex},
 };
 
 use dhpanel_backup::{
-    KEY_LEN, Manifest, Part, PartKind, StreamWriter,
+    KEY_LEN, Manifest, Part, PartKind, StreamReader, StreamWriter,
     manifest::{Counting, hex},
 };
 use dhpanel_backup_dest::{
@@ -379,6 +380,45 @@ pub async fn create_backup(
     }
 }
 
+/// The tenant's files, packed by the helper into a staged file, stored as `object`.
+async fn files_part(
+    context: &TenantContext,
+    dest: &Shared,
+    object: &str,
+    staged_name: &str,
+    tenant_id: Uuid,
+    uid: u32,
+    key_text: &DbPassword,
+) -> Result<(u64, String), AgentError> {
+    let dir = transfers_dir(context);
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| failed(&format!("cannot make the folder: {}", e.kind())).retryable())?;
+    let staged = dir.join(staged_name);
+    let _ = std::fs::remove_file(&staged);
+    let socket = context.helper_socket.clone();
+    let action = Action::BackupFiles {
+        tenant_id: tenant_id.to_string(),
+        uid,
+        staged: staged_name.to_owned(),
+        key: key_text.0.trim().to_owned(),
+    };
+    tokio::task::spawn_blocking(move || ask_helper(&socket, action))
+        .await
+        .map_err(|_| failed("the packing was cancelled"))??;
+    let stored = {
+        let (dest, staged2, object) = (dest.clone(), staged.clone(), object.to_owned());
+        tokio::task::spawn_blocking(move || {
+            let file = std::fs::File::open(&staged2)
+                .map_err(|e| failed(&format!("cannot read the packed files: {}", e.kind())))?;
+            store(&dest, &object, file)
+        })
+        .await
+        .map_err(|_| failed("the storing was cancelled"))?
+    };
+    let _ = std::fs::remove_file(&staged);
+    stored
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn make_parts(
     context: &Arc<TenantContext>,
@@ -394,37 +434,19 @@ async fn make_parts(
     parts: &mut Vec<Part>,
 ) -> Result<(), AgentError> {
     // 1. The files.
-    let dir = transfers_dir(context);
-    std::fs::create_dir_all(&dir)
-        .map_err(|e| failed(&format!("cannot make the folder: {}", e.kind())).retryable())?;
-    let staged_name = format!("{id}.bk");
-    let staged = dir.join(&staged_name);
-    let _ = std::fs::remove_file(&staged);
-    let socket = context.helper_socket.clone();
-    let action = Action::BackupFiles {
-        tenant_id: tenant_id.to_string(),
+    let name = "files.tar.zst.enc";
+    let (size, sha) = files_part(
+        context,
+        dest,
+        &format!("{id}/{name}"),
+        &format!("{id}.bk"),
+        tenant_id,
         uid,
-        staged: staged_name,
-        key: key_text.0.trim().to_owned(),
-    };
-    tokio::task::spawn_blocking(move || ask_helper(&socket, action))
-        .await
-        .map_err(|_| failed("the packing was cancelled"))??;
-    let object = format!("{id}/files.tar.zst.enc");
-    let stored = {
-        let (dest, staged2, object) = (dest.clone(), staged.clone(), object.clone());
-        tokio::task::spawn_blocking(move || {
-            let file = std::fs::File::open(&staged2)
-                .map_err(|e| failed(&format!("cannot read the packed files: {}", e.kind())))?;
-            store(&dest, &object, file)
-        })
-        .await
-        .map_err(|_| failed("the storing was cancelled"))?
-    };
-    let _ = std::fs::remove_file(&staged);
-    let (size, sha) = stored?;
+        key_text,
+    )
+    .await?;
     parts.push(Part {
-        name: "files.tar.zst.enc".into(),
+        name: name.into(),
         kind: PartKind::Files,
         stored_bytes: size,
         sha256: sha,
@@ -490,4 +512,358 @@ async fn finish_manifest(
     })
     .await
     .map_err(|_| failed("the storing was cancelled"))?
+}
+
+/// Reads the backup's manifest (decrypted) from the destination.
+fn read_manifest(dest: &Shared, id: &str, key: &[u8; KEY_LEN]) -> Result<Manifest, AgentError> {
+    let guard = dest
+        .lock()
+        .map_err(|_| failed("the destination is not usable"))?;
+    let raw = guard
+        .get(&format!("{id}/manifest.json.enc"))
+        .map_err(|e| failed(&format!("the manifest cannot be read: {e}")).retryable())?;
+    let manifest = Manifest::from_reader(StreamReader::new(raw, key))
+        .map_err(|e| invalid(&format!("the backup's manifest is not good: {e}")))?;
+    if manifest.backup_id != id {
+        return Err(invalid("the manifest belongs to another backup"));
+    }
+    Ok(manifest)
+}
+
+/// Reads one stored part and checks it against the manifest (size and SHA-256).
+fn verify(dest: &Shared, id: &str, manifest: &Manifest, name: &str) -> Result<(), AgentError> {
+    let guard = dest
+        .lock()
+        .map_err(|_| failed("the destination is not usable"))?;
+    let stored = guard
+        .get(&format!("{id}/{name}"))
+        .map_err(|_| invalid(&format!("the part {name} is missing")))?;
+    manifest
+        .verify_part(name, stored)
+        .map_err(|e| invalid(&format!("the backup is damaged: {e}")))
+}
+
+/// Puts a database part into a plain dump file (decrypted and decompressed), at most
+/// `limit` bytes.
+fn unpack_dump(
+    dest: &Shared,
+    object: &str,
+    key: &[u8; KEY_LEN],
+    path: &std::path::Path,
+) -> Result<(), AgentError> {
+    let guard = dest
+        .lock()
+        .map_err(|_| failed("the destination is not usable"))?;
+    let stored = guard
+        .get(object)
+        .map_err(|e| failed(&format!("cannot read a part: {e}")).retryable())?;
+    let mut plain = zstd::stream::Decoder::new(StreamReader::new(stored, key))
+        .map_err(|e| failed(&format!("cannot open the dump: {}", e.kind())))?;
+    let mut out = std::fs::File::create(path)
+        .map_err(|e| failed(&format!("cannot write the dump: {}", e.kind())))?;
+    std::io::copy(&mut plain, &mut out)
+        .map_err(|e| failed(&format!("cannot unpack the dump: {}", e.kind())))?;
+    Ok(())
+}
+
+/// `restore_backup`: see [`Operation::RestoreBackup`].
+///
+/// # Errors
+/// [`AgentError`]: bad arguments or a damaged backup (not retryable, nothing was touched);
+/// the destination, the database server or the helper failing (retryable).
+pub async fn restore_backup(
+    context: Arc<TenantContext>,
+    op: Operation,
+) -> Result<Output, AgentError> {
+    let Operation::RestoreBackup {
+        tenant_id,
+        uid,
+        backup_id,
+        restore_id,
+        account,
+        target,
+        credentials,
+        key,
+        files,
+        folder,
+        databases,
+        snapshot,
+        verify_only,
+    } = op
+    else {
+        return Err(super::wrong_operation());
+    };
+    dhpanel_domain::TenantUsername::parse(&account).map_err(|e| invalid(&e.to_string()))?;
+    for d in &databases {
+        dhpanel_domain::databases::check_identifier(d).map_err(|e| invalid(&e.to_string()))?;
+    }
+    if databases.len() > 100 {
+        return Err(invalid("too many databases"));
+    }
+    if let Some(f) = &folder
+        && (!files || f.len() > 1024 || f.contains(['\0', '\\']) || f.split('/').any(|p| p == ".."))
+    {
+        return Err(invalid("the folder is not usable"));
+    }
+    if !files && databases.is_empty() && !verify_only {
+        return Err(invalid("nothing to restore"));
+    }
+    let key_text = key.ok_or_else(|| invalid("no key"))?;
+    let key = parse_key(&key_text)?;
+    let id = backup_id.simple().to_string();
+    let dest: Shared = {
+        let (target, credentials) = (target.clone(), credentials.clone());
+        let opened =
+            tokio::task::spawn_blocking(move || open_destination(&target, credentials.as_ref()))
+                .await
+                .map_err(|_| failed("the destination work was cancelled"))??;
+        Arc::new(Mutex::new(opened))
+    };
+    // 1. The manifest, and every part that is needed, checked before anything is touched.
+    let (manifest, needed) = {
+        let (dest, id, account, databases) =
+            (dest.clone(), id.clone(), account.clone(), databases.clone());
+        tokio::task::spawn_blocking(move || -> Result<(Manifest, Vec<String>), AgentError> {
+            let manifest = read_manifest(&dest, &id, &key)?;
+            if manifest.account != account {
+                return Err(invalid("the backup belongs to another account"));
+            }
+            let mut needed = Vec::new();
+            for part in &manifest.parts {
+                let wanted = match part.kind {
+                    PartKind::Files => files || verify_only,
+                    PartKind::Database => {
+                        verify_only
+                            || part
+                                .database
+                                .as_ref()
+                                .is_some_and(|d| databases.contains(d))
+                    }
+                    PartKind::Dns | PartKind::Meta => verify_only,
+                };
+                if wanted {
+                    needed.push(part.name.clone());
+                }
+            }
+            if files && !manifest.parts.iter().any(|p| p.kind == PartKind::Files) {
+                return Err(invalid("the backup has no files"));
+            }
+            for d in &databases {
+                if !manifest
+                    .parts
+                    .iter()
+                    .any(|p| p.database.as_deref() == Some(d.as_str()))
+                {
+                    return Err(invalid(&format!("the backup has no database {d}")));
+                }
+            }
+            for name in &needed {
+                verify(&dest, &id, &manifest, name)?;
+            }
+            Ok((manifest, needed))
+        })
+        .await
+        .map_err(|_| failed("the check was cancelled"))??
+    };
+    let verified = u32::try_from(needed.len()).unwrap_or(u32::MAX);
+    if verify_only {
+        return Ok(Output::BackupRestored {
+            verified_parts: verified,
+            files_restored: false,
+            databases: Vec::new(),
+            snapshot: Vec::new(),
+        });
+    }
+    // 2. The present state, kept (at the destination) so that a restore can be undone.
+    let rid = restore_id.simple().to_string();
+    let mut snap: Vec<BackupPartInfo> = Vec::new();
+    if snapshot {
+        let result = make_snapshot(
+            &context, &dest, &rid, tenant_id, uid, &key_text, key, files, &databases, &mut snap,
+        )
+        .await;
+        if let Err(e) = result {
+            remove_snapshot(&dest, &rid, &snap).await;
+            return Err(e);
+        }
+    }
+    // 3. The files, over the present ones, as the tenant.
+    if files {
+        let name = manifest
+            .parts
+            .iter()
+            .find(|p| p.kind == PartKind::Files)
+            .map(|p| p.name.clone())
+            .ok_or_else(|| invalid("the backup has no files"))?;
+        restore_files_part(
+            &context,
+            &dest,
+            &format!("{id}/{name}"),
+            &rid,
+            tenant_id,
+            uid,
+            &key_text,
+            folder.as_deref(),
+        )
+        .await?;
+    }
+    // 4. The databases, replaced by their dumps.
+    for database in &databases {
+        let name = manifest
+            .parts
+            .iter()
+            .find(|p| p.database.as_deref() == Some(database.as_str()))
+            .map(|p| p.name.clone())
+            .ok_or_else(|| invalid("the backup has no such database"))?;
+        let dir = super::sqlimport::imports_dir(&context);
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| failed(&format!("cannot prepare the folder: {}", e.kind())).retryable())?;
+        let path = dir.join(format!("{rid}-{database}.sql"));
+        let unpacked = {
+            let (dest, object, path) = (dest.clone(), format!("{id}/{name}"), path.clone());
+            tokio::task::spawn_blocking(move || unpack_dump(&dest, &object, &key, &path))
+                .await
+                .map_err(|_| failed("the unpacking was cancelled"))?
+        };
+        let ran = match unpacked {
+            Ok(()) => {
+                super::sqlimport::import_file(&context, database, restore_id, &path, false).await
+            }
+            Err(e) => Err(e),
+        };
+        let _ = std::fs::remove_file(&path);
+        ran?;
+    }
+    Ok(Output::BackupRestored {
+        verified_parts: verified,
+        files_restored: files,
+        databases,
+        snapshot: snap,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn make_snapshot(
+    context: &Arc<TenantContext>,
+    dest: &Shared,
+    rid: &str,
+    tenant_id: Uuid,
+    uid: u32,
+    key_text: &DbPassword,
+    key: [u8; KEY_LEN],
+    files: bool,
+    databases: &[String],
+    snap: &mut Vec<BackupPartInfo>,
+) -> Result<(), AgentError> {
+    if files {
+        let name = "files.tar.zst.enc";
+        let (size, sha) = files_part(
+            context,
+            dest,
+            &format!("pre-{rid}/{name}"),
+            &format!("pre-{rid}.bk"),
+            tenant_id,
+            uid,
+            key_text,
+        )
+        .await?;
+        snap.push(BackupPartInfo {
+            name: name.into(),
+            kind: "files".into(),
+            stored_bytes: size,
+            sha256: sha,
+            database: None,
+        });
+    }
+    for database in databases {
+        let name = format!("db-{database}.sql.zst.enc");
+        let (size, sha) =
+            database_part(context, dest, format!("pre-{rid}/{name}"), database, key).await?;
+        snap.push(BackupPartInfo {
+            name,
+            kind: "database".into(),
+            stored_bytes: size,
+            sha256: sha,
+            database: Some(database.clone()),
+        });
+    }
+    Ok(())
+}
+
+async fn remove_snapshot(dest: &Shared, rid: &str, snap: &[BackupPartInfo]) {
+    let dest = dest.clone();
+    let names: Vec<String> = snap
+        .iter()
+        .map(|p| format!("pre-{rid}/{}", p.name))
+        .chain([format!("pre-{rid}/files.tar.zst.enc")])
+        .collect();
+    let _ = tokio::task::spawn_blocking(move || {
+        if let Ok(d) = dest.lock() {
+            for n in names {
+                let _ = d.delete(&n);
+            }
+        }
+    })
+    .await;
+}
+
+/// The stored files part, fetched to a staged file and put back by the helper.
+#[allow(clippy::too_many_arguments)]
+async fn restore_files_part(
+    context: &TenantContext,
+    dest: &Shared,
+    object: &str,
+    rid: &str,
+    tenant_id: Uuid,
+    uid: u32,
+    key_text: &DbPassword,
+    folder: Option<&str>,
+) -> Result<(), AgentError> {
+    let dir = transfers_dir(context);
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| failed(&format!("cannot make the folder: {}", e.kind())).retryable())?;
+    let staged_name = format!("{rid}.rs");
+    let staged = dir.join(&staged_name);
+    let _ = std::fs::remove_file(&staged);
+    let fetched = {
+        let (dest, object, staged) = (dest.clone(), object.to_owned(), staged.clone());
+        tokio::task::spawn_blocking(move || -> Result<(), AgentError> {
+            let guard = dest
+                .lock()
+                .map_err(|_| failed("the destination is not usable"))?;
+            let mut reader = guard
+                .get(&object)
+                .map_err(|e| failed(&format!("cannot read the files: {e}")).retryable())?;
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&staged)
+                .map_err(|e| failed(&format!("cannot stage the files: {}", e.kind())))?;
+            std::io::copy(&mut reader, &mut file)
+                .map_err(|e| failed(&format!("cannot stage the files: {}", e.kind())))?;
+            Ok(())
+        })
+        .await
+        .map_err(|_| failed("the fetching was cancelled"))?
+    };
+    let result = match fetched {
+        Ok(()) => {
+            let socket = context.helper_socket.clone();
+            let action = Action::RestoreFiles {
+                tenant_id: tenant_id.to_string(),
+                uid,
+                staged: staged_name,
+                key: key_text.0.trim().to_owned(),
+                folder: folder.map(str::to_owned),
+            };
+            tokio::task::spawn_blocking(move || ask_helper(&socket, action))
+                .await
+                .map_err(|_| failed("the restoring was cancelled"))?
+                .map(|_| ())
+        }
+        Err(e) => Err(e),
+    };
+    let _ = std::fs::remove_file(&staged);
+    result
 }

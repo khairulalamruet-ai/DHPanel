@@ -391,6 +391,18 @@ async fn run_with_file(
             "the dump does not match its SHA-256: nothing was run",
         ));
     }
+    import_file(context, database, import_id, path, gzip).await
+}
+
+/// Runs a dump that is in a file (plain or gzip) into `database`, as a temporary account
+/// that is locked again afterwards. Shared by the SQL import and the backup restore.
+pub(super) async fn import_file(
+    context: &TenantContext,
+    database: &str,
+    import_id: Uuid,
+    path: &Path,
+    gzip: bool,
+) -> Result<u64, AgentError> {
     // 3. The temporary account, with rights in this one database.
     db::ensure_server(context).await?;
     let password =

@@ -668,6 +668,47 @@ pub enum Operation {
         /// When it was asked for (Unix seconds).
         created_at: i64,
     },
+    /// Checks a backup and, unless `verify_only`, puts all of it or a part of it back.
+    ///
+    /// First the manifest is opened and every part that is needed is read, hashed and
+    /// compared with the manifest: one that is missing, changed or cut stops everything
+    /// before anything is touched. Then, when `snapshot` is set, the present state of what
+    /// will be replaced (the files, and each database to restore) is stored at the
+    /// destination under `pre-<restore_id>/`, so a restore can be taken back. Then the files
+    /// (all, or the `folder`) are written over the present ones (files that are not in the
+    /// backup stay) and each database is replaced by its dump. Answered with
+    /// [`Output::BackupRestored`].
+    RestoreBackup {
+        /// The tenant.
+        tenant_id: Uuid,
+        /// The tenant's numeric user id.
+        uid: u32,
+        /// The backup to restore from.
+        backup_id: Uuid,
+        /// This restore's id (names the snapshot).
+        restore_id: Uuid,
+        /// The hosting account's system name (must be the one in the manifest).
+        account: String,
+        /// Where the backup is.
+        target: BackupTarget,
+        /// The destination's secret part, as JSON text; absent in the ledger.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        credentials: Option<DbPassword>,
+        /// The key the parts were encrypted with (64 hex digits); absent in the ledger.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        key: Option<DbPassword>,
+        /// Put the files back.
+        files: bool,
+        /// Only this folder of the files (relative); all of them when absent.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        folder: Option<String>,
+        /// The whole names of the databases to put back.
+        databases: Vec<String>,
+        /// Store the present state before replacing it.
+        snapshot: bool,
+        /// Only check the backup; change nothing.
+        verify_only: bool,
+    },
     /// One file manager request on a tenant's files, done as the tenant's own user
     /// id. Answered with [`Output::File`].
     FileOp {
@@ -920,6 +961,7 @@ impl Operation {
         "export_sql",
         "file_op",
         "create_backup",
+        "restore_backup",
         "upsert_ftp_account",
         "drop_ftp_account",
         "fetch_file",
@@ -968,6 +1010,7 @@ impl Operation {
             Self::ExportSql { .. } => "export_sql",
             Self::FileOp { .. } => "file_op",
             Self::CreateBackup { .. } => "create_backup",
+            Self::RestoreBackup { .. } => "restore_backup",
             Self::UpsertFtpAccount { .. } => "upsert_ftp_account",
             Self::DropFtpAccount { .. } => "drop_ftp_account",
             Self::FetchFile { .. } => "fetch_file",
@@ -1202,6 +1245,17 @@ pub enum Output {
         size_bytes: u64,
         /// The parts, as stored.
         parts: Vec<BackupPartInfo>,
+    },
+    /// Answer to [`Operation::RestoreBackup`].
+    BackupRestored {
+        /// How many parts were read and found whole.
+        verified_parts: u32,
+        /// Whether the files were put back.
+        files_restored: bool,
+        /// The databases that were put back.
+        databases: Vec<String>,
+        /// The parts of the snapshot taken before (its folder is `pre-<restore_id>`).
+        snapshot: Vec<BackupPartInfo>,
     },
     /// Answer to [`Operation::FileOp`].
     File {
@@ -2261,7 +2315,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            42,
+            43,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }

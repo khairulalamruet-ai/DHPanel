@@ -233,7 +233,7 @@ struct Seen {
 }
 
 /// Checks a name from an archive and splits it.
-fn entry_parts(raw: &str) -> Out<Vec<String>> {
+pub(super) fn entry_parts(raw: &str) -> Out<Vec<String>> {
     let parts = dhpanel_safe_fs::parts(raw).map_err(|_| bad("an entry would leave the folder"))?;
     // A name with a backslash is a Windows path in disguise.
     if parts.iter().any(|p| p.contains('\\')) {
@@ -242,7 +242,7 @@ fn entry_parts(raw: &str) -> Out<Vec<String>> {
     Ok(parts.into_iter().map(str::to_owned).collect())
 }
 
-fn wanted_mode(mode: u32, dir: bool) -> u32 {
+pub(super) fn wanted_mode(mode: u32, dir: bool) -> u32 {
     let mode = mode & 0o777;
     if dir { mode | 0o700 } else { mode | 0o600 }
 }
@@ -404,7 +404,7 @@ fn scan_tar(
     Ok(())
 }
 
-fn make_dir(root: &Root, rel: &str, mode: u32) -> Out<()> {
+pub(super) fn make_dir(root: &Root, rel: &str, mode: u32) -> Out<()> {
     let (parent, name) = fs(root.parent(rel))?;
     match rustix::fs::mkdirat(&parent, name.as_str(), Mode::from_raw_mode(mode)) {
         Ok(()) => Ok(()),

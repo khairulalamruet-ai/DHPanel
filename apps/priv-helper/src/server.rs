@@ -281,6 +281,21 @@ fn execute_one(action: &Action, config: &Config) -> Result<(), (ErrorCode, &'sta
             staged,
             key,
         ),
+        Action::RestoreFiles {
+            tenant_id,
+            uid,
+            staged,
+            key,
+            folder,
+        } => crate::files::restore_files(
+            &config.tenants,
+            &config.transfers,
+            tenant_id,
+            *uid,
+            staged,
+            key,
+            folder.as_deref(),
+        ),
         Action::TakeFile {
             tenant_id,
             uid,

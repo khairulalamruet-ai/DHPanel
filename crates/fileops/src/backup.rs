@@ -12,12 +12,16 @@ use std::{
     os::fd::OwnedFd,
 };
 
-use dhpanel_backup::{KEY_LEN, StreamWriter};
+use dhpanel_backup::{KEY_LEN, StreamReader, StreamWriter};
 use dhpanel_node_protocol::files::{FileErrorCode, TRASH_DIR};
 use dhpanel_safe_fs::Root;
 use rustix::fs::{FileType, Mode, OFlags};
 
-use super::{EntryKind, Out, fail, kind_of, names, stat_at, sys};
+use super::{
+    EntryKind, Out,
+    archive::{entry_parts, make_dir, wanted_mode},
+    fail, fs, kind_of, names, random_hex, stat_at, sys,
+};
 
 const MAX_DEPTH: usize = 128;
 
@@ -161,4 +165,149 @@ fn walk<W: Write>(
         }
     }
     Ok(())
+}
+
+/// What was unpacked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Unpacked {
+    /// Files and folders written.
+    pub entries: u64,
+    /// Bytes of file contents written.
+    pub bytes: u64,
+    /// Entries left out (links, special files, the trash, a folder where a file is).
+    pub skipped: u64,
+}
+
+/// Puts the files of a stream made by [`pack_files`] back below `root`, over what is there
+/// (files that are not in the stream stay). With `only`, just that folder (and what is
+/// below it) is put back. Every name is checked against escaping the folder, every file is
+/// written beside its place and moved in at the end, so a cut stream leaves no half file.
+///
+/// # Errors
+/// A wrong key, a changed or cut stream (the entries before it are already back), a bad
+/// name, or the disk failing.
+pub fn unpack_files(
+    root: &Root,
+    key: &[u8; KEY_LEN],
+    input: impl Read,
+    only: Option<&str>,
+) -> Out<Unpacked> {
+    let io = |e: std::io::Error| {
+        (
+            FileErrorCode::Failed,
+            format!("cannot unpack: {}", e.kind()),
+        )
+    };
+    let only: Option<Vec<String>> = only
+        .filter(|f| !f.is_empty() && *f != "/")
+        .map(entry_parts)
+        .transpose()?;
+    let decrypted = StreamReader::new(input, key);
+    let plain = zstd::stream::Decoder::new(decrypted).map_err(io)?;
+    let mut archive = tar::Archive::new(plain);
+    let mut done = Unpacked::default();
+    for entry in archive.entries().map_err(io)? {
+        let mut entry = entry.map_err(io)?;
+        let raw = entry
+            .path()
+            .map_err(|_| {
+                (
+                    FileErrorCode::InvalidPath,
+                    "an entry has no usable name".to_owned(),
+                )
+            })?
+            .to_string_lossy()
+            .into_owned();
+        let parts = entry_parts(raw.trim_end_matches('/'))?;
+        let wanted = only
+            .as_ref()
+            .is_none_or(|o| parts.len() >= o.len() && parts[..o.len()] == o[..]);
+        if !wanted || parts.first().is_some_and(|p| p == TRASH_DIR) {
+            done.skipped += 1;
+            continue;
+        }
+        let mode = entry.header().mode().unwrap_or(0o644);
+        let mtime = entry.header().mtime().unwrap_or(0);
+        let (last, folders) = parts.split_last().ok_or_else(|| {
+            (
+                FileErrorCode::InvalidPath,
+                "an entry names nothing".to_owned(),
+            )
+        })?;
+        let mut rel = String::new();
+        for folder in folders {
+            if !rel.is_empty() {
+                rel.push('/');
+            }
+            rel.push_str(folder);
+            make_dir(root, &rel, 0o755)?;
+        }
+        if !rel.is_empty() {
+            rel.push('/');
+        }
+        rel.push_str(last);
+        match entry.header().entry_type() {
+            tar::EntryType::Directory => {
+                make_dir(root, &rel, wanted_mode(mode, true))?;
+                done.entries += 1;
+            }
+            tar::EntryType::Regular => {
+                let (dir, name) = fs(root.parent(&rel))?;
+                // A folder where the backup has a file stays: it is not ours to remove.
+                if let Ok(st) = stat_at(&dir, &name)
+                    && kind_of(FileType::from_raw_mode(st.st_mode)) == EntryKind::Dir
+                {
+                    done.skipped += 1;
+                    continue;
+                }
+                let tmp = format!(".dh-rs-{}", random_hex(8)?);
+                let fd = sys(rustix::fs::openat(
+                    &dir,
+                    tmp.as_str(),
+                    OFlags::WRONLY
+                        | OFlags::CREATE
+                        | OFlags::EXCL
+                        | OFlags::NOFOLLOW
+                        | OFlags::CLOEXEC,
+                    Mode::from_raw_mode(0o600),
+                ))?;
+                let size = entry.header().size().unwrap_or(0);
+                let mut file = std::fs::File::from(fd);
+                let copied = std::io::copy(&mut (&mut entry).take(size), &mut file);
+                let ok = copied.as_ref().is_ok_and(|n| *n == size);
+                if !ok {
+                    let _ = dhpanel_safe_fs::remove(&dir, &tmp, false);
+                    return Err(match copied {
+                        Err(e) => io(e),
+                        Ok(_) => (
+                            FileErrorCode::Failed,
+                            "an entry is shorter than it says".to_owned(),
+                        ),
+                    });
+                }
+                let _ = rustix::fs::fchmod(&file, Mode::from_raw_mode(wanted_mode(mode, false)));
+                let _ = rustix::fs::futimens(
+                    &file,
+                    &rustix::fs::Timestamps {
+                        last_access: rustix::fs::Timespec {
+                            tv_sec: i64::try_from(mtime).unwrap_or(0),
+                            tv_nsec: 0,
+                        },
+                        last_modification: rustix::fs::Timespec {
+                            tv_sec: i64::try_from(mtime).unwrap_or(0),
+                            tv_nsec: 0,
+                        },
+                    },
+                );
+                if let Err(e) = rustix::fs::renameat(&dir, tmp.as_str(), &dir, name.as_str()) {
+                    let _ = dhpanel_safe_fs::remove(&dir, &tmp, false);
+                    return Err(super::from_fs(dhpanel_safe_fs::FsError::from(e)));
+                }
+                done.entries += 1;
+                done.bytes += size;
+            }
+            _ => done.skipped += 1,
+        }
+    }
+    Ok(done)
 }

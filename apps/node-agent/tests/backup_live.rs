@@ -9,7 +9,7 @@ use dhpanel_backup::{KEY_LEN, Manifest, StreamReader};
 use dhpanel_backup_dest::{Destination as _, local::Local};
 use dhpanel_docker_manager::{DockerManager, Name};
 use dhpanel_node_agent::ops::{
-    backup::create_backup,
+    backup::{create_backup, restore_backup},
     db::{CONTAINER, create_database, ensure_db_server, port},
     files::file_op,
     tenant::{TenantContext, create_tenant},
@@ -312,6 +312,213 @@ async fn an_account_is_backed_up_encrypted_and_every_part_checks_out() {
         .await
         .unwrap_err();
     assert!(e.retryable || e.code == ErrorCode::Internal, "{e:?}");
+
+    // ---- Restore (T09.05, T09.06): damage the account, then put it back.
+    let read_file = |path: &'static str| {
+        let context = context.clone();
+        async move {
+            let out = file_op(
+                context,
+                Operation::FileOp {
+                    tenant_id,
+                    uid,
+                    request: FileRequest::Read {
+                        path: path.into(),
+                        max_bytes: 1000,
+                    },
+                },
+            )
+            .await
+            .unwrap();
+            format!("{out:?}")
+        }
+    };
+    let write_file = |path: &'static str, content: &'static str| {
+        let context = context.clone();
+        async move {
+            file_op(
+                context,
+                Operation::FileOp {
+                    tenant_id,
+                    uid,
+                    request: FileRequest::Write {
+                        path: path.into(),
+                        content: content.into(),
+                        max_bytes: 1000,
+                        expected_mtime: None,
+                        create_only: false,
+                    },
+                },
+            )
+            .await
+            .unwrap()
+        }
+    };
+    write_file("www/index.php", "DEFACED").await;
+    write_file("www/new.txt", "made later").await;
+    write_file("notes.txt", "changed").await;
+    admin.query_drop("DROP VIEW v").await.unwrap();
+    admin.query_drop("DELETE FROM items").await.unwrap();
+    admin
+        .query_drop("INSERT INTO items VALUES (9, 'wrong')")
+        .await
+        .unwrap();
+    let restore = |id: Uuid,
+                   key: &str,
+                   files: bool,
+                   folder: Option<&str>,
+                   dbs: &[&str],
+                   snapshot: bool,
+                   verify_only: bool| {
+        Operation::RestoreBackup {
+            tenant_id,
+            uid,
+            backup_id: id,
+            restore_id: Uuid::now_v7(),
+            account: username.clone(),
+            target: target.clone(),
+            credentials: None,
+            key: Some(DbPassword(key.into())),
+            files,
+            folder: folder.map(str::to_owned),
+            databases: dbs.iter().map(|d| (*d).to_owned()).collect(),
+            snapshot,
+            verify_only,
+        }
+    };
+    // Verifying changes nothing and reads every part.
+    let checked = restore_backup(
+        context.clone(),
+        restore(backup_id, &key_text, false, None, &[], false, true),
+    )
+    .await
+    .unwrap();
+    assert!(
+        matches!(
+            checked,
+            Output::BackupRestored {
+                verified_parts: 4,
+                ..
+            }
+        ),
+        "{checked:?}"
+    );
+    assert!(read_file("www/index.php").await.contains("DEFACED"));
+    // A wrong key, another account, an unknown database, a bad folder: refused, nothing touched.
+    let (wrong_text, _) = hex_key(0x11);
+    for bad in [
+        restore(backup_id, &wrong_text, true, None, &[], false, false),
+        restore(
+            backup_id,
+            &key_text,
+            false,
+            None,
+            &["nope_db"],
+            false,
+            false,
+        ),
+        restore(backup_id, &key_text, true, Some("../x"), &[], false, false),
+        restore(backup_id, &key_text, false, None, &[], false, false),
+    ] {
+        let e = restore_backup(context.clone(), bad).await.unwrap_err();
+        assert_eq!(e.code, ErrorCode::InvalidArguments, "{e:?}");
+    }
+    assert!(read_file("www/index.php").await.contains("DEFACED"));
+    // A damaged part stops the restore before anything is touched.
+    let damaged = dest_dir.join(&id).join("db-bkp_shop.sql.zst.enc");
+    let original = std::fs::read(&damaged).unwrap();
+    let mut broken = original.clone();
+    let at = broken.len() / 2;
+    broken[at] ^= 1;
+    std::fs::write(&damaged, &broken).unwrap();
+    let e = restore_backup(
+        context.clone(),
+        restore(backup_id, &key_text, true, None, &["bkp_shop"], true, false),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(e.code, ErrorCode::InvalidArguments, "{e:?}");
+    assert!(e.message.contains("damaged"), "{e:?}");
+    assert!(read_file("www/index.php").await.contains("DEFACED"));
+    std::fs::write(&damaged, &original).unwrap();
+    // One folder only.
+    restore_backup(
+        context.clone(),
+        restore(backup_id, &key_text, true, Some("www"), &[], false, false),
+    )
+    .await
+    .unwrap();
+    assert!(read_file("www/index.php").await.contains("hello"));
+    assert!(read_file("notes.txt").await.contains("changed"));
+    assert!(read_file("www/new.txt").await.contains("made later"));
+    // Everything, with the snapshot of what is there now.
+    let restored = restore_backup(
+        context.clone(),
+        restore(backup_id, &key_text, true, None, &["bkp_shop"], true, false),
+    )
+    .await
+    .unwrap();
+    let Output::BackupRestored {
+        files_restored,
+        databases,
+        snapshot,
+        ..
+    } = restored
+    else {
+        panic!("{restored:?}")
+    };
+    assert!(files_restored && databases == ["bkp_shop"]);
+    assert_eq!(snapshot.len(), 2, "{snapshot:?}");
+    assert!(
+        read_file("notes.txt").await.contains("\"n\"")
+            || read_file("notes.txt").await.contains("n\"")
+    );
+    let rows: Vec<(i32, String)> = admin
+        .query("SELECT id, note FROM bkp_shop.items ORDER BY id")
+        .await
+        .unwrap();
+    assert_eq!(rows, [(1, "one".to_owned()), (2, "it's two ☃".to_owned())]);
+    let views: Vec<String> = admin
+        .query("SELECT table_name FROM information_schema.views WHERE table_schema = 'bkp_shop'")
+        .await
+        .unwrap();
+    assert_eq!(views, ["v"]);
+    // The snapshot holds what was there before: the files part opens and has the file made later.
+    let snap_dir = std::fs::read_dir(&dest_dir)
+        .unwrap()
+        .filter_map(Result::ok)
+        .find(|e| e.file_name().to_string_lossy().starts_with("pre-"))
+        .expect("a snapshot folder");
+    let mut before = Vec::new();
+    let mut files_snap = tar::Archive::new(
+        zstd::stream::Decoder::new(StreamReader::new(
+            std::fs::File::open(snap_dir.path().join("files.tar.zst.enc")).unwrap(),
+            &key,
+        ))
+        .unwrap(),
+    );
+    for entry in files_snap.entries().unwrap() {
+        before.push(
+            entry
+                .unwrap()
+                .path()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned(),
+        );
+    }
+    assert!(before.iter().any(|n| n == "www/new.txt"), "{before:?}");
+    // The transfer folder is left clean.
+    let transfers = std::env::var_os("DHPANEL_AGENT_TRANSFERS").map(PathBuf::from);
+    if let Some(t) = transfers {
+        assert!(
+            std::fs::read_dir(t)
+                .unwrap()
+                .filter_map(Result::ok)
+                .all(|e| !e.file_name().to_string_lossy().ends_with(".rs")),
+            "staged restore files are removed"
+        );
+    }
 
     let _ = docker.remove(&Name::parse(CONTAINER).unwrap(), true).await;
     let _ = docker

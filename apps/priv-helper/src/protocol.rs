@@ -106,6 +106,22 @@ pub enum Action {
         /// The key.
         key: String,
     },
+    /// Puts the files of an encrypted backup stream (a staged file of the agent's transfer
+    /// folder, see [`Action::BackupFiles`]) back into a tenant's folder, as the tenant's own
+    /// user: over what is there, nothing removed. The key goes to the worker through its input.
+    RestoreFiles {
+        /// The tenant's id (a lower-case UUID).
+        tenant_id: String,
+        /// The tenant's numeric id (10000..59999).
+        uid: u32,
+        /// The staged file to read: a plain name in the agent's transfer folder.
+        staged: String,
+        /// The key (64 hex digits).
+        key: String,
+        /// Only this folder (relative to the tenant's files); everything when absent.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        folder: Option<String>,
+    },
     /// Removes a tenant's two (empty) directories after its files were
     /// deleted. Never deletes any file: a non-empty directory is a failure.
     RemoveTenant {
@@ -129,6 +145,7 @@ impl Action {
             Self::PlaceFile { .. } => "place_file",
             Self::TakeFile { .. } => "take_file",
             Self::BackupFiles { .. } => "backup_files",
+            Self::RestoreFiles { .. } => "restore_files",
             Self::RemoveTenant { .. } => "remove_tenant",
         }
     }

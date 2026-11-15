@@ -41,6 +41,27 @@ fn main() -> ExitCode {
             None => ExitCode::from(64),
         };
     }
+    if std::env::args().nth(1).as_deref() == Some("filerestore") {
+        let args: Vec<String> = std::env::args().collect();
+        let root = args.get(3).map(PathBuf::from);
+        let folder = (args.get(4).map(String::as_str) == Some("--folder"))
+            .then(|| args.get(5).cloned())
+            .flatten();
+        return match root {
+            Some(root) => match dhpanel_priv_helper::files::restore_worker(
+                &root,
+                std::io::BufReader::new(std::io::stdin()),
+                folder.as_deref(),
+            ) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(answer) => {
+                    eprintln!("{}", serde_json::to_string(&answer).unwrap_or_default());
+                    ExitCode::from(3)
+                }
+            },
+            None => ExitCode::from(64),
+        };
+    }
     // The file worker: started by the helper itself, as the tenant's user id.
     if std::env::args().nth(1).as_deref() == Some("fileop") {
         let root = std::env::args().nth(3).map(PathBuf::from);
