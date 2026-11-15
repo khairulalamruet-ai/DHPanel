@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT sealed_key FROM backups WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "sealed_key",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "backups",
+            "name": "sealed_key"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "5f0c40840c26b6f0d54e676936de09a3dfbb0c9c7e72c40073e2620ffbbd3dfe"
+}

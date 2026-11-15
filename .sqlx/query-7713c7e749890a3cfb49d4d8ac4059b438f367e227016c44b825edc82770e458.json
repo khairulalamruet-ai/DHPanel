@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE backups SET status = 'deleting', updated_at = now()\n         WHERE id = $1 AND status = 'ready'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7713c7e749890a3cfb49d4d8ac4059b438f367e227016c44b825edc82770e458"
+}

@@ -207,6 +207,10 @@ pub fn operation_secrets(
                         token: Some(token),
                     });
                 }
+                // The key and the destination's credentials of a backup.
+                op @ (Operation::CreateBackup { .. } | Operation::DeleteBackup { .. }) => {
+                    return dhpanel_mod_backups::runner::fill(&db, &master_key, op).await;
+                }
                 other => return Ok(other),
             };
             let mut filled = Vec::with_capacity(items.len());

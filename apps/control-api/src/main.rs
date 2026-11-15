@@ -171,6 +171,7 @@ async fn main() -> ExitCode {
         }
     };
     let operation_secrets = secrets::operation_secrets(db.clone(), master_key.clone());
+    let runner_key = master_key.clone();
     let minutes = |m: u32| std::time::Duration::from_secs(u64::from(m) * 60);
     let lockout = |threshold| dhpanel_cache::lockout::LockoutPolicy {
         threshold,
@@ -319,6 +320,23 @@ async fn main() -> ExitCode {
                 }
                 if let Err(error) = dhpanel_mod_files::transfers::sweep(&db, &spool_dir).await {
                     tracing::warn!(%error, "could not sweep the file transfers");
+                }
+            }
+        }
+    });
+    // Scheduled backups are made, and the old ones removed (T09.07).
+    tokio::spawn({
+        let db = db.clone();
+        async move {
+            let mut every = tokio::time::interval(std::time::Duration::from_secs(30));
+            every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                every.tick().await;
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(0));
+                if let Err(error) = dhpanel_mod_backups::runner::tick(&db, &runner_key, now).await {
+                    tracing::warn!(%error, "the backup runner could not finish a round");
                 }
             }
         }

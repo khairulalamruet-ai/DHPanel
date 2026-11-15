@@ -709,6 +709,18 @@ pub enum Operation {
         /// Only check the backup; change nothing.
         verify_only: bool,
     },
+    /// Removes everything a backup stored at its destination (`<backup id>/`; with
+    /// `snapshots`, also the `pre-*` folders of its restores are not touched). Safe to
+    /// repeat: what is gone is not an error. Answered with [`Output::BackupDeleted`].
+    DeleteBackup {
+        /// The backup.
+        backup_id: Uuid,
+        /// Where it is.
+        target: BackupTarget,
+        /// The destination's secret part, as JSON text; absent in the ledger.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        credentials: Option<DbPassword>,
+    },
     /// One file manager request on a tenant's files, done as the tenant's own user
     /// id. Answered with [`Output::File`].
     FileOp {
@@ -962,6 +974,7 @@ impl Operation {
         "file_op",
         "create_backup",
         "restore_backup",
+        "delete_backup",
         "upsert_ftp_account",
         "drop_ftp_account",
         "fetch_file",
@@ -1011,6 +1024,7 @@ impl Operation {
             Self::FileOp { .. } => "file_op",
             Self::CreateBackup { .. } => "create_backup",
             Self::RestoreBackup { .. } => "restore_backup",
+            Self::DeleteBackup { .. } => "delete_backup",
             Self::UpsertFtpAccount { .. } => "upsert_ftp_account",
             Self::DropFtpAccount { .. } => "drop_ftp_account",
             Self::FetchFile { .. } => "fetch_file",
@@ -1256,6 +1270,11 @@ pub enum Output {
         databases: Vec<String>,
         /// The parts of the snapshot taken before (its folder is `pre-<restore_id>`).
         snapshot: Vec<BackupPartInfo>,
+    },
+    /// Answer to [`Operation::DeleteBackup`].
+    BackupDeleted {
+        /// How many stored objects were removed.
+        removed: u32,
     },
     /// Answer to [`Operation::FileOp`].
     File {
@@ -2315,7 +2334,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            43,
+            44,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }

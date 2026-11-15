@@ -867,3 +867,38 @@ async fn restore_files_part(
     let _ = std::fs::remove_file(&staged);
     result
 }
+
+/// `delete_backup`: every object of the backup is removed from the destination.
+///
+/// # Errors
+/// [`AgentError`]: bad arguments (not retryable); the destination failing (retryable).
+pub async fn delete_backup(op: Operation) -> Result<Output, AgentError> {
+    let Operation::DeleteBackup {
+        backup_id,
+        target,
+        credentials,
+    } = op
+    else {
+        return Err(super::wrong_operation());
+    };
+    let id = backup_id.simple().to_string();
+    tokio::task::spawn_blocking(move || -> Result<Output, AgentError> {
+        let dest = open_destination(&target, credentials.as_ref())?;
+        let names = dest
+            .list(&format!("{id}/"))
+            .map_err(|e| failed(&e.to_string()).retryable())?;
+        let mut removed = 0u32;
+        for name in names {
+            // Only what lies below this backup's own folder.
+            if !name.starts_with(&format!("{id}/")) {
+                continue;
+            }
+            dest.delete(&name)
+                .map_err(|e| failed(&e.to_string()).retryable())?;
+            removed += 1;
+        }
+        Ok(Output::BackupDeleted { removed })
+    })
+    .await
+    .map_err(|_| failed("the removal was cancelled"))?
+}

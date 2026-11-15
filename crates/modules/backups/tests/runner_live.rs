@@ -1,0 +1,272 @@
+//! The backup runner against real PostgreSQL (T09.07). Ignored by default; run with
+//! DATABASE_URL (superuser) and `--include-ignored`.
+#![allow(clippy::expect_used, clippy::unwrap_used)]
+
+use dhpanel_auth_core::secretbox::MasterKey;
+use dhpanel_mod_backups::runner::{self, tick};
+use dhpanel_node_protocol::Operation;
+use serde_json::{Value, json};
+use sqlx::PgPool;
+use uuid::Uuid;
+
+const HASH: &str = "$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHQ$aGFzaGhhc2hoYXNoaGFzaA";
+const NOW: i64 = 1_710_000_000; // 2024-03-09
+
+async fn tenant(pool: &PgPool, name: &str, uid: i32) -> (Uuid, Uuid) {
+    let account: Uuid = sqlx::query_scalar(
+        "INSERT INTO accounts (kind, username, email, password_hash)
+         VALUES ('client', $1, $1 || '@example.com', $2) RETURNING id",
+    )
+    .bind(name)
+    .bind(HASH)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let node: Uuid = sqlx::query_scalar(
+        "INSERT INTO nodes (name) VALUES ('node1') ON CONFLICT (name) DO UPDATE SET name = 'node1' RETURNING id",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let plan: Uuid = sqlx::query_scalar("SELECT id FROM plans WHERE is_default")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    let tenant: Uuid = sqlx::query_scalar(
+        "INSERT INTO tenants (owner_account_id, node_id, plan_id, username, uid, status)
+         VALUES ($1, $2, $3, $4, $5, 'active') RETURNING id",
+    )
+    .bind(account)
+    .bind(node)
+    .bind(plan)
+    .bind(name)
+    .bind(uid)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    (tenant, node)
+}
+
+async fn count(pool: &PgPool, sql: &'static str) -> i64 {
+    sqlx::query_scalar(sql).fetch_one(pool).await.unwrap()
+}
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL"]
+async fn schedules_make_backups_and_retention_removes_the_old_ones(pool: PgPool) {
+    let key = MasterKey::from_bytes(&[7u8; 32]);
+    let (t1, node) = tenant(&pool, "alpha", 10_001).await;
+    let (t2, _) = tenant(&pool, "beta", 10_002).await;
+    let (t3, _) = tenant(&pool, "gamma", 10_003).await;
+    let dest: Uuid = sqlx::query_scalar(
+        "INSERT INTO backup_destinations (name, kind, settings, is_default)
+         VALUES ('Disk', 'local', '{\"path\": \"/var/backups\"}', true) RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    for t in [t1, t2, t3] {
+        // Due a minute ago; keep the newest of 2 days.
+        dhpanel_database::backups::upsert_schedule(
+            &pool,
+            t,
+            "30 2 * * *",
+            2,
+            0,
+            None,
+            true,
+            Some(NOW - 60),
+        )
+        .await
+        .unwrap();
+    }
+    tick(&pool, &key, NOW).await.unwrap();
+    // Two at a time on one node: the third waits, still due.
+    let queued: Vec<(Uuid, String)> = sqlx::query_as(
+        "SELECT id, status FROM backups WHERE trigger = 'schedule' ORDER BY created_at",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(queued.len(), 2, "{queued:?}");
+    assert_eq!(
+        count(
+            &pool,
+            "SELECT count(*) FROM backup_schedules WHERE next_run_at = to_timestamp(1709999940)"
+        )
+        .await,
+        1
+    );
+    // Each has its operation, without a key in the ledger, and a sealed key of its own.
+    let (backup, _) = queued[0].clone();
+    let op: (String, Value, String) = sqlx::query_as(
+        "SELECT kind, payload, idempotency_key FROM operations WHERE kind = 'create_backup' ORDER BY created_at LIMIT 1",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(op.0, "create_backup");
+    assert!(op.2.starts_with("backup:"), "{}", op.2);
+    assert!(
+        op.1.get("key").is_none() && op.1.get("credentials").is_none(),
+        "{}",
+        op.1
+    );
+    assert_eq!(
+        count(
+            &pool,
+            "SELECT count(DISTINCT sealed_key) FROM backups WHERE sealed_key IS NOT NULL"
+        )
+        .await,
+        2
+    );
+    // The same tick again changes nothing.
+    tick(&pool, &key, NOW).await.unwrap();
+    assert_eq!(
+        count(
+            &pool,
+            "SELECT count(*) FROM operations WHERE kind = 'create_backup'"
+        )
+        .await,
+        2
+    );
+
+    // The key and the credentials are put in only on the way out.
+    let payload: Operation = serde_json::from_value(op.1.clone()).unwrap();
+    let filled = runner::fill(&pool, &key, payload).await.unwrap();
+    let Operation::CreateBackup { key: Some(k), .. } = filled else {
+        panic!("no key")
+    };
+    assert_eq!(k.0.len(), 64);
+
+    // The node starts, then finishes.
+    let id: Uuid = sqlx::query_scalar("SELECT id FROM operations WHERE idempotency_key = $1")
+        .bind(format!("backup:{backup}"))
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE operations SET status = 'dispatched', attempts = 1, dispatched_at = now() WHERE id = $1")
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let s: String = sqlx::query_scalar("SELECT status FROM backups WHERE id = $1")
+        .bind(backup)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(s, "running");
+    sqlx::query("UPDATE operations SET status = 'succeeded', output = $2, finished_at = now() WHERE id = $1")
+        .bind(id)
+        .bind(json!({"type": "backup_created", "manifest_sha256": "a".repeat(64), "size_bytes": 1234,
+                     "parts": [{"name": "files.tar.zst.enc", "kind": "files", "stored_bytes": 1000, "sha256": "b".repeat(64)}]}))
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, size, parts): (String, i64, Value) =
+        sqlx::query_as("SELECT status, size_bytes, parts FROM backups WHERE id = $1")
+            .bind(backup)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        (status.as_str(), size, parts.as_array().unwrap().len()),
+        ("ready", 1234, 1)
+    );
+
+    // Retention: five ready scheduled backups of one account on five different days; the
+    // newest two days are kept (the one made above is the newest of its day).
+    for days_ago in 1..=5 {
+        sqlx::query(
+            "INSERT INTO backups (tenant_id, account_name, kind, trigger, destination_id, status, created_at)
+             SELECT tenant_id, 'alpha', 'tenant', 'schedule', $2, 'ready', now() - make_interval(days => $3)
+             FROM backups WHERE id = $1",
+        )
+        .bind(backup)
+        .bind(dest)
+        .bind(days_ago)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    // A manual one is never removed by retention.
+    sqlx::query(
+        "INSERT INTO backups (tenant_id, account_name, kind, trigger, destination_id, status, created_at)
+         SELECT tenant_id, 'alpha', 'tenant', 'manual', $2, 'ready', now() - interval '90 days'
+         FROM backups WHERE id = $1",
+    )
+    .bind(backup)
+    .bind(dest)
+    .execute(&pool)
+    .await
+    .unwrap();
+    tick(&pool, &key, NOW).await.unwrap();
+    let rows: Vec<(String, String)> = sqlx::query_as(
+        "SELECT trigger, status FROM backups WHERE tenant_id = (SELECT tenant_id FROM backups WHERE id = $1) ORDER BY created_at DESC",
+    )
+    .bind(backup)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let deleting = rows.iter().filter(|r| r.1 == "deleting").count();
+    assert_eq!(deleting, 4, "{rows:?}");
+    assert!(rows.iter().any(|r| r.0 == "manual" && r.1 == "ready"));
+    // Their removal is queued; the node does it and the rows are marked deleted.
+    let removals: Vec<(Uuid, String)> =
+        sqlx::query_as("SELECT id, idempotency_key FROM operations WHERE kind = 'delete_backup'")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(removals.len(), 4);
+    for (op, _) in &removals[..3] {
+        sqlx::query("UPDATE operations SET status = 'dispatched', attempts = 1, dispatched_at = now() WHERE id = $1")
+            .bind(op)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE operations SET status = 'succeeded', output = '{\"type\": \"backup_deleted\", \"removed\": 5}', finished_at = now() WHERE id = $1")
+            .bind(op)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    // One removal fails: the backup is ready again and the next round tries again, with a new key.
+    let (failing, key1) = removals[3].clone();
+    sqlx::query("UPDATE operations SET status = 'dispatched', attempts = 1, dispatched_at = now() WHERE id = $1")
+        .bind(failing)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE operations SET status = 'failed', error = '{\"message\": \"destination down\"}', finished_at = now() WHERE id = $1")
+        .bind(failing)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        count(
+            &pool,
+            "SELECT count(*) FROM backups WHERE status = 'deleted'"
+        )
+        .await,
+        3
+    );
+    assert_eq!(
+        count(
+            &pool,
+            "SELECT count(*) FROM backups WHERE status = 'deleting'"
+        )
+        .await,
+        0
+    );
+    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+    tick(&pool, &key, NOW + 3600).await.unwrap();
+    let again: Vec<String> = sqlx::query_scalar(
+        "SELECT idempotency_key FROM operations WHERE kind = 'delete_backup' AND status = 'pending'",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(again.len(), 1, "{again:?}");
+    assert_ne!(again[0], key1);
+    let _ = node;
+}

@@ -14,6 +14,22 @@ use chacha20poly1305::{
 
 /// Length of a key.
 pub const KEY_LEN: usize = 32;
+/// A new random key (for one backup).
+///
+/// # Errors
+/// The system's random source failing.
+pub fn new_key() -> io::Result<[u8; KEY_LEN]> {
+    let mut key = [0u8; KEY_LEN];
+    getrandom::fill(&mut key).map_err(|_| io::Error::other("no random numbers"))?;
+    Ok(key)
+}
+
+/// The key as the 64 hex digits the node operations carry.
+#[must_use]
+pub fn key_hex(key: &[u8; KEY_LEN]) -> String {
+    key.iter().map(|b| format!("{b:02x}")).collect()
+}
+
 /// Plain bytes per chunk.
 pub const CHUNK: usize = 64 * 1024;
 const MAGIC: &[u8; 5] = b"DHBK1";

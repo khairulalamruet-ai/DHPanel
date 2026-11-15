@@ -39,6 +39,7 @@
 
 pub mod crypto;
 pub mod manifest;
+pub mod schedule;
 
 pub use crypto::{KEY_LEN, StreamReader, StreamWriter};
 pub use manifest::{Manifest, ManifestError, Part, PartKind};

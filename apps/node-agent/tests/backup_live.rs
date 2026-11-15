@@ -9,7 +9,7 @@ use dhpanel_backup::{KEY_LEN, Manifest, StreamReader};
 use dhpanel_backup_dest::{Destination as _, local::Local};
 use dhpanel_docker_manager::{DockerManager, Name};
 use dhpanel_node_agent::ops::{
-    backup::{create_backup, restore_backup},
+    backup::{create_backup, delete_backup, restore_backup},
     db::{CONTAINER, create_database, ensure_db_server, port},
     files::file_op,
     tenant::{TenantContext, create_tenant},
@@ -519,6 +519,29 @@ async fn an_account_is_backed_up_encrypted_and_every_part_checks_out() {
             "staged restore files are removed"
         );
     }
+
+    // Removing a backup takes away what it stored (and only that); doing it again is fine.
+    for _ in 0..2 {
+        let gone = delete_backup(Operation::DeleteBackup {
+            backup_id,
+            target: target.clone(),
+            credentials: None,
+        })
+        .await
+        .unwrap();
+        assert!(matches!(gone, Output::BackupDeleted { .. }), "{gone:?}");
+    }
+    assert!(
+        dest.list(&format!("{id}/")).unwrap().is_empty(),
+        "nothing of the backup is left"
+    );
+    assert!(
+        std::fs::read_dir(&dest_dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .any(|e| e.file_name().to_string_lossy().starts_with("pre-")),
+        "the snapshot of the restore is not touched"
+    );
 
     let _ = docker.remove(&Name::parse(CONTAINER).unwrap(), true).await;
     let _ = docker

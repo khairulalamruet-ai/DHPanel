@@ -175,6 +175,7 @@ impl Registry {
                 let context = context.clone();
                 move |op| backup::restore_backup(context.clone(), op)
             });
+            registry.register("delete_backup", backup::delete_backup);
             registry.register("file_op", {
                 let context = context.clone();
                 move |op| files::file_op(context.clone(), op)

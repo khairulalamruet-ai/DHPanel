@@ -35,6 +35,8 @@ use serde::{Deserialize, Serialize};
 use utoipa::{OpenApi, ToSchema};
 use uuid::Uuid;
 
+pub mod runner;
+
 /// The module's manifest.
 pub const MANIFEST: &str = include_str!("../../../../modules/backups/module.toml");
 
