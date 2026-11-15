@@ -265,6 +265,31 @@ pub struct CronRun {
     pub output: String,
 }
 
+/// Which log of an account.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LogSource {
+    /// What the account's web server (nginx) wrote to standard output: requests.
+    WebAccess,
+    /// What the account's web server wrote to standard error: its errors.
+    WebError,
+    /// What the account's PHP container wrote to standard error: PHP and PHP-FPM errors.
+    PhpError,
+}
+
+/// One line of a log.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LogLine {
+    /// When it was written (Unix milliseconds).
+    pub at_ms: i64,
+    /// The line.
+    pub text: String,
+}
+
+/// Most lines one log read returns.
+pub const MAX_LOG_LINES: u32 = 2000;
+
 /// Most runs in one report.
 pub const MAX_CRON_RUNS_PER_REPORT: usize = 500;
 
@@ -806,6 +831,24 @@ pub enum Operation {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         credentials: Option<DbPassword>,
     },
+    /// Reads the end of one of an account's logs: the newest `tail` lines at or after
+    /// `since_ms`, optionally only those that contain a text. Only the three logs of
+    /// [`LogSource`], only the account's own containers. Answered with [`Output::LogLines`].
+    ReadLog {
+        /// The tenant.
+        tenant_id: Uuid,
+        /// The tenant's system name.
+        username: String,
+        /// Which log.
+        source: LogSource,
+        /// Lines before this time (Unix milliseconds) are left out; `0` for none.
+        since_ms: i64,
+        /// At most this many lines (1 to [`MAX_LOG_LINES`]), the newest.
+        tail: u32,
+        /// Only lines that contain this text (case-insensitive, at most 200 characters).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        contains: Option<String>,
+    },
     /// Replaces the cron jobs of an account on this node; the node's scheduler runs them
     /// from now on, and keeps them across restarts. Safe to repeat. Answered with
     /// [`Output::CronSynced`].
@@ -1088,6 +1131,7 @@ impl Operation {
         "restore_backup",
         "delete_backup",
         "sync_cron_jobs",
+        "read_log",
         "run_cron_job",
         "report_cron_runs",
         "export_backup",
@@ -1143,6 +1187,7 @@ impl Operation {
             Self::RestoreBackup { .. } => "restore_backup",
             Self::DeleteBackup { .. } => "delete_backup",
             Self::SyncCronJobs { .. } => "sync_cron_jobs",
+            Self::ReadLog { .. } => "read_log",
             Self::RunCronJob { .. } => "run_cron_job",
             Self::ReportCronRuns { .. } => "report_cron_runs",
             Self::ExportBackup { .. } => "export_backup",
@@ -1406,6 +1451,13 @@ pub enum Output {
         parts: Vec<BackupPartInfo>,
         /// Everything put in place, in bytes.
         size_bytes: u64,
+    },
+    /// Answer to [`Operation::ReadLog`].
+    LogLines {
+        /// Oldest first.
+        lines: Vec<LogLine>,
+        /// More was there than one read returns.
+        truncated: bool,
     },
     /// Answer to [`Operation::SyncCronJobs`].
     CronSynced {
@@ -2485,7 +2537,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            49,
+            50,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }

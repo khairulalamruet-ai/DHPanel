@@ -27,6 +27,7 @@ pub mod cron;
 pub mod db;
 pub mod files;
 pub mod ftp;
+pub mod logs;
 pub mod pma;
 pub mod sqlexport;
 pub mod sqlimport;
@@ -182,6 +183,10 @@ impl Registry {
                 move |op| backup::export_backup(context.clone(), op)
             });
             registry.register("import_export", backup::import_export);
+            registry.register("read_log", {
+                let context = context.clone();
+                move |op| logs::read_log(context.clone(), op)
+            });
             registry.register("sync_cron_jobs", {
                 let context = context.clone();
                 move |op| cron::sync_cron_jobs(context.clone(), op)

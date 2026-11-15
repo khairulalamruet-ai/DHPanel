@@ -1,0 +1,17 @@
+# Logs: an account's web, error and PHP logs (crates/modules/logs).
+[module]
+name       = "logs"
+version    = "0.1.0"
+title      = { en = "Logs", bn = "লগ" }
+category   = "system"
+core       = false
+depends_on = ["auth", "rbac", "audit", "system", "plans", "users"]
+
+[permissions]
+keys = []
+
+[features]
+keys = ["logs"]
+
+[ui]
+client_nav = { group = "Advanced", order = 20, icon = "file-text" }

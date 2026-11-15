@@ -96,6 +96,69 @@ pub struct CommandResult {
     pub output: String,
 }
 
+/// Most bytes of log text one read returns.
+const MAX_LOG_BYTES: usize = 1 << 20;
+
+/// One line of a container's log.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LogLine {
+    /// When Docker saw it (Unix milliseconds).
+    pub at_ms: i64,
+    /// Written to standard error (otherwise standard output).
+    pub stderr: bool,
+    /// The line, without its time.
+    pub text: String,
+}
+
+/// What a log read found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LogRead {
+    /// Oldest first.
+    pub lines: Vec<LogLine>,
+    /// More was there than one read returns.
+    pub truncated: bool,
+}
+
+/// Splits Docker's `2026-11-15T07:00:00.123456789Z text` into milliseconds and text.
+fn split_timestamp(line: &str) -> (i64, &str) {
+    let Some((stamp, text)) = line.split_once(' ') else {
+        return (0, line);
+    };
+    match parse_stamp(stamp) {
+        Some(at) => (at, text),
+        None => (0, line),
+    }
+}
+
+fn parse_stamp(s: &str) -> Option<i64> {
+    let (date, rest) = s.split_once('T')?;
+    let rest = rest.strip_suffix('Z')?;
+    let mut d = date.split('-');
+    let (y, m, day): (i64, i64, i64) = (
+        d.next()?.parse().ok()?,
+        d.next()?.parse().ok()?,
+        d.next()?.parse().ok()?,
+    );
+    let (clock, fraction) = rest.split_once('.').unwrap_or((rest, "0"));
+    let mut c = clock.split(':');
+    let (h, mi, sec): (i64, i64, i64) = (
+        c.next()?.parse().ok()?,
+        c.next()?.parse().ok()?,
+        c.next()?.parse().ok()?,
+    );
+    let millis: i64 = format!("{:0<3}", &fraction[..fraction.len().min(3)])
+        .parse()
+        .ok()?;
+    // Days since 1970-01-01 (the civil-from-days algorithm, the other way round).
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+    Some(((days * 24 + h) * 60 + mi) * 60_000 + sec * 1000 + millis)
+}
+
 /// What went wrong.
 #[derive(Debug, thiserror::Error)]
 pub enum DockerError {
@@ -595,6 +658,67 @@ impl DockerManager {
             .await
             .map_err(map_error)?;
         Ok((done.exit_code.unwrap_or(-1), stderr))
+    }
+
+    /// The end of a container's log: at most `tail` lines at or after `since_ms` (Unix
+    /// milliseconds; `0` for any), oldest first, each with its time and stream. Only
+    /// containers of ours. About 1 MiB of text is kept, the newest; the answer says when older lines were dropped.
+    ///
+    /// # Errors
+    /// [`DockerError::NotFound`], [`DockerError::NotManaged`], an API error.
+    pub async fn logs(
+        &self,
+        name: &Name,
+        since_ms: i64,
+        tail: u32,
+    ) -> Result<LogRead, DockerError> {
+        self.require_managed_container(name).await?;
+        let options = bollard::query_parameters::LogsOptionsBuilder::default()
+            .stdout(true)
+            .stderr(true)
+            .timestamps(true)
+            .since(i32::try_from((since_ms / 1000).max(0)).unwrap_or(i32::MAX))
+            .tail(&tail.to_string())
+            .build();
+        let mut stream = self.docker.logs(name.as_str(), Some(options));
+        let mut lines: std::collections::VecDeque<LogLine> = std::collections::VecDeque::new();
+        let mut bytes = 0usize;
+        let mut truncated = false;
+        let mut pending: [String; 2] = [String::new(), String::new()];
+        while let Some(chunk) = stream.next().await {
+            let (is_err, message) = match chunk.map_err(map_error)? {
+                bollard::container::LogOutput::StdOut { message } => (0, message),
+                bollard::container::LogOutput::StdErr { message } => (1, message),
+                _ => continue,
+            };
+            pending[is_err].push_str(&String::from_utf8_lossy(&message));
+            while let Some(end) = pending[is_err].find('\n') {
+                let line: String = pending[is_err].drain(..=end).collect();
+                let line = line.trim_end_matches(['\n', '\r']);
+                let (at_ms, text) = split_timestamp(line);
+                if at_ms < since_ms {
+                    continue;
+                }
+                bytes += text.len();
+                lines.push_back(LogLine {
+                    at_ms,
+                    stderr: is_err == 1,
+                    text: text.to_owned(),
+                });
+                // The newest lines are the ones worth keeping.
+                while bytes > MAX_LOG_BYTES {
+                    truncated = true;
+                    match lines.pop_front() {
+                        Some(old) => bytes -= old.text.len(),
+                        None => break,
+                    }
+                }
+            }
+        }
+        let mut lines: Vec<LogLine> = lines.into();
+        // stdout and stderr arrive as they were written; two streams are put in time order.
+        lines.sort_by_key(|l| l.at_ms);
+        Ok(LogRead { lines, truncated })
     }
 
     /// Reads a running container's resource usage once.
