@@ -25,6 +25,108 @@ pub const SCHEMA_VERSION: u32 = 1;
 /// never valid for another (entitlements, release manifests and so on use their own).
 pub const ENTITLEMENT_DOMAIN: &[u8] = b"dhpanel-entitlement-v1\n";
 
+/// What a license is bound to. All three lists are part of the signed claims, so they cannot be
+/// changed by whoever holds the entitlement. A host name or domain is written in lower case, a
+/// domain without a trailing dot, an address in its usual text form.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Binding {
+    /// The domains the panel is reached at (a sub-domain of a listed domain is allowed).
+    pub domains: Vec<String>,
+    /// The machine's host names.
+    pub hostnames: Vec<String>,
+    /// The public addresses the machine is seen from (checked by the authority).
+    pub ips: Vec<String>,
+}
+
+/// What a host says about itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HostFacts<'a> {
+    /// The machine's host name.
+    pub hostname: &'a str,
+    /// The domain the panel is reached at.
+    pub domain: &'a str,
+}
+
+/// Why a host does not fit a binding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum BindingError {
+    /// The license is not bound to anything, so it cannot be used.
+    #[error("the license is not bound to a domain, a host name and an address")]
+    Unbound,
+    /// The host name is not one the license is bound to.
+    #[error("this host name is not the one the license is bound to")]
+    Hostname,
+    /// The domain is not one the license is bound to.
+    #[error("this domain is not the one the license is bound to")]
+    Domain,
+    /// The address is not one the license is bound to.
+    #[error("this address is not the one the license is bound to")]
+    Ip,
+}
+
+/// Lower case, no trailing dot.
+#[must_use]
+pub fn normalize_name(name: &str) -> String {
+    name.trim().trim_end_matches('.').to_ascii_lowercase()
+}
+
+impl Binding {
+    /// Whether all three lists name something (a license that is bound to nothing is not used).
+    #[must_use]
+    pub fn is_complete(&self) -> bool {
+        !self.domains.is_empty() && !self.hostnames.is_empty() && !self.ips.is_empty()
+    }
+
+    /// Whether `hostname` and `domain` fit (the address is the authority's to check: the
+    /// installation cannot see how it is seen from outside).
+    ///
+    /// # Errors
+    /// [`BindingError`].
+    pub fn check_host(&self, host: &HostFacts<'_>) -> Result<(), BindingError> {
+        if !self.is_complete() {
+            return Err(BindingError::Unbound);
+        }
+        let hostname = normalize_name(host.hostname);
+        if !self.hostnames.contains(&hostname) {
+            return Err(BindingError::Hostname);
+        }
+        let domain = normalize_name(host.domain);
+        let fits = self
+            .domains
+            .iter()
+            .any(|d| domain == *d || domain.ends_with(&format!(".{d}")));
+        if fits {
+            Ok(())
+        } else {
+            Err(BindingError::Domain)
+        }
+    }
+
+    /// Whether the address the authority sees fits.
+    ///
+    /// # Errors
+    /// [`BindingError`].
+    pub fn check_ip(&self, ip: &std::net::IpAddr) -> Result<(), BindingError> {
+        if !self.is_complete() {
+            return Err(BindingError::Unbound);
+        }
+        // Compared as addresses, not as text (`::1` and `0:0:0:0:0:0:0:1` are one address,
+        // and so are an IPv4 address and its IPv4-mapped IPv6 form).
+        let seen = ip.to_canonical();
+        if self
+            .ips
+            .iter()
+            .filter_map(|i| i.parse::<std::net::IpAddr>().ok())
+            .any(|i| i.to_canonical() == seen)
+        {
+            Ok(())
+        } else {
+            Err(BindingError::Ip)
+        }
+    }
+}
+
 /// The claims of an entitlement.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -43,6 +145,8 @@ pub struct Claims {
     pub features: Vec<String>,
     /// Numeric limits (`max_nodes`, `max_tenants`); `-1` is no limit.
     pub limits: BTreeMap<String, i64>,
+    /// Where the license may be used: the domains, host names and addresses it is bound to.
+    pub bind: Binding,
     /// Issued at (Unix seconds).
     pub iat: i64,
     /// Valid until (Unix seconds).
@@ -77,6 +181,9 @@ pub enum DocumentError {
     /// Out of date.
     #[error("the document has expired")]
     Expired,
+    /// The license is bound to another host name, domain or address.
+    #[error(transparent)]
+    Binding(#[from] BindingError),
 }
 
 /// A signed entitlement, as it travels.
@@ -163,6 +270,7 @@ impl Document {
         {
             return Err(DocumentError::Wrong);
         }
+        claims.bind.check_host(&expect.host)?;
         if claims.iat > now + expect.clock_skew {
             return Err(DocumentError::NotYet);
         }
@@ -184,6 +292,8 @@ pub struct Expect<'a> {
     pub installation_id: Uuid,
     /// How far ahead of this clock `iat` may be (seconds).
     pub clock_skew: i64,
+    /// What this host says about itself; the license must be bound to it.
+    pub host: HostFacts<'a>,
 }
 
 #[cfg(test)]
@@ -201,6 +311,11 @@ mod tests {
             installation_id: installation,
             features: vec!["resellers".into(), "mail".into()],
             limits: BTreeMap::from([("max_nodes".into(), 3), ("max_tenants".into(), -1)]),
+            bind: Binding {
+                domains: vec!["panel.example.com".into()],
+                hostnames: vec!["web1".into()],
+                ips: vec!["203.0.113.7".into(), "2001:db8::7".into()],
+            },
             iat: 1_000,
             exp: 2_000,
             jti: Uuid::from_u128(2),
@@ -222,7 +337,63 @@ mod tests {
             audience: "dhpanel",
             installation_id: installation,
             clock_skew: 60,
+            host: HostFacts {
+                hostname: "web1",
+                domain: "panel.example.com",
+            },
         }
+    }
+
+    #[test]
+    fn a_license_works_only_where_it_is_bound() {
+        let (key, keys, inst) = setup();
+        let doc = Document::sign(&claims(inst), &key).unwrap();
+        let on = |hostname, domain| Expect {
+            host: HostFacts { hostname, domain },
+            ..expect(inst)
+        };
+        // Case and a trailing dot do not matter; a sub-domain of a bound domain does fit.
+        doc.verify(&keys, &on("WEB1", "Panel.Example.com."), 1_500)
+            .unwrap();
+        doc.verify(&keys, &on("web1", "a.panel.example.com"), 1_500)
+            .unwrap();
+        assert_eq!(
+            doc.verify(&keys, &on("web2", "panel.example.com"), 1_500),
+            Err(DocumentError::Binding(BindingError::Hostname))
+        );
+        for domain in ["other.example.com", "xpanel.example.com", "example.com"] {
+            assert_eq!(
+                doc.verify(&keys, &on("web1", domain), 1_500),
+                Err(DocumentError::Binding(BindingError::Domain)),
+                "{domain}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_license_that_is_bound_to_nothing_is_not_used_and_addresses_compare_as_addresses() {
+        let (key, keys, inst) = setup();
+        for empty in ["domains", "hostnames", "ips"] {
+            let mut c = claims(inst);
+            match empty {
+                "domains" => c.bind.domains.clear(),
+                "hostnames" => c.bind.hostnames.clear(),
+                _ => c.bind.ips.clear(),
+            }
+            let doc = Document::sign(&c, &key).unwrap();
+            assert_eq!(
+                doc.verify(&keys, &expect(inst), 1_500),
+                Err(DocumentError::Binding(BindingError::Unbound)),
+                "{empty}"
+            );
+        }
+        let bind = claims(inst).bind;
+        let ip = |t: &str| t.parse::<std::net::IpAddr>().unwrap();
+        bind.check_ip(&ip("203.0.113.7")).unwrap();
+        bind.check_ip(&ip("::ffff:203.0.113.7")).unwrap();
+        bind.check_ip(&ip("2001:0db8:0:0:0:0:0:7")).unwrap();
+        assert_eq!(bind.check_ip(&ip("203.0.113.8")), Err(BindingError::Ip));
+        assert_eq!(bind.check_ip(&ip("127.0.0.1")), Err(BindingError::Ip));
     }
 
     #[test]

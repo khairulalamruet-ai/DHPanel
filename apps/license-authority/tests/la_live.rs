@@ -156,7 +156,7 @@ async fn license(env: &Env, token: &str, max: i32, features: &[&str]) -> (String
         "POST",
         "/api/v1/admin/licenses",
         Some(token),
-        Some(json!({"customer_id": customer["id"], "plan_id": plan["id"]})),
+        Some(json!({"customer_id": customer["id"], "plan_id": plan["id"], "domains": ["panel.example"], "hostnames": ["web1"], "ips": ["203.0.113.7"]})),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{made}");
@@ -204,30 +204,60 @@ impl Installation {
     }
 
     async fn activate(&self, env: &Env, key: &str) -> (StatusCode, Value) {
+        self.activate_as(env, key, "web1", "panel.example", "203.0.113.7")
+            .await
+    }
+
+    /// Activates saying it is `hostname` at `domain`, seen from `ip` (what the proxy writes).
+    async fn activate_as(
+        &self,
+        env: &Env,
+        key: &str,
+        hostname: &str,
+        domain: &str,
+        ip: &str,
+    ) -> (StatusCode, Value) {
         let nonce = self.nonce(env).await;
         let hash: String = dhpanel_license_authority::sha256(key.trim())
             .iter()
             .map(|b| format!("{b:02x}"))
             .collect();
-        call(
+        call_with(
             &env.app,
             "POST",
             "/api/v1/licenses/activate",
             None,
             Some(json!({"license_key": key, "installation_id": self.id, "public_key": STANDARD.encode(self.key.public_key()),
-                        "nonce": nonce, "signature": self.sign("activate", &nonce, Some(&hash)), "hostname": "panel.example"})),
+                        "nonce": nonce, "signature": self.sign("activate", &nonce, Some(&format!("{hash}\n{hostname}\n{domain}"))),
+                        "hostname": hostname, "domain": domain})),
+            &[("x-forwarded-for", ip)],
         )
         .await
     }
 
     async fn ask(&self, env: &Env, what: &str) -> (StatusCode, Value) {
+        self.ask_as(env, what, "web1", "panel.example", "203.0.113.7")
+            .await
+    }
+
+    async fn ask_as(
+        &self,
+        env: &Env,
+        what: &str,
+        hostname: &str,
+        domain: &str,
+        ip: &str,
+    ) -> (StatusCode, Value) {
         let nonce = self.nonce(env).await;
-        call(
+        call_with(
             &env.app,
             "POST",
             &format!("/api/v1/licenses/{what}"),
             None,
-            Some(json!({"installation_id": self.id, "nonce": nonce, "signature": self.sign(what, &nonce, None)})),
+            Some(json!({"installation_id": self.id, "nonce": nonce,
+                        "signature": self.sign(what, &nonce, Some(&format!("{hostname}\n{domain}"))),
+                        "hostname": hostname, "domain": domain})),
+            &[("x-forwarded-for", ip)],
         )
         .await
     }
@@ -245,6 +275,10 @@ fn expect(inst: Uuid) -> Expect<'static> {
         audience: "dhpanel",
         installation_id: inst,
         clock_skew: 120,
+        host: dhpanel_license::HostFacts {
+            hostname: "web1",
+            domain: "panel.example",
+        },
     }
 }
 
@@ -797,7 +831,8 @@ async fn the_private_key_is_never_in_the_database_and_a_replayed_activation_gets
             .map(|b| format!("{b:02x}"))
             .collect();
         let body = json!({"license_key": key2, "installation_id": other.id, "public_key": STANDARD.encode(other.key.public_key()),
-                          "nonce": nonce, "signature": other.sign("activate", &nonce, Some(&hash))});
+                          "nonce": nonce, "signature": other.sign("activate", &nonce, Some(&format!("{hash}\nweb1\npanel.example"))),
+                          "hostname": "web1", "domain": "panel.example"});
         let app = e.app.clone();
         async move {
             call_with(
@@ -806,7 +841,10 @@ async fn the_private_key_is_never_in_the_database_and_a_replayed_activation_gets
                 "/api/v1/licenses/activate",
                 None,
                 Some(body),
-                &[("idempotency-key", "retry-key-0001")],
+                &[
+                    ("idempotency-key", "retry-key-0001"),
+                    ("x-forwarded-for", "203.0.113.7"),
+                ],
             )
             .await
         }
@@ -831,5 +869,157 @@ async fn the_private_key_is_never_in_the_database_and_a_replayed_activation_gets
     assert_eq!(
         (status, got["code"].as_str()),
         (StatusCode::CONFLICT, Some("idempotency_key_reused"))
+    );
+}
+
+/// A license works only where it is bound (the user's rule: domain, host name and address are
+/// all assigned in the license). The address is read from the connection, so a request that
+/// merely claims another one gets nowhere.
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "needs PostgreSQL"]
+async fn a_license_is_bound_to_its_domain_host_name_and_address(pool: PgPool) {
+    let e = env(&pool).await;
+    let token = admin(&pool, &e, "root@la.example", "admin").await;
+    let (id, key) = license(&e, &token, 2, &["mail"]).await;
+    let inst = Installation::new(&e.key_dir);
+
+    // Without all three lists a license cannot even be made.
+    let (_, customer) = call(&e.app, "GET", "/api/v1/admin/customers", Some(&token), None).await;
+    let _ = customer;
+    for body in [
+        json!({"domains": [], "hostnames": ["web1"], "ips": ["203.0.113.7"]}),
+        json!({"domains": ["panel.example"], "hostnames": [], "ips": ["203.0.113.7"]}),
+        json!({"domains": ["panel.example"], "hostnames": ["web1"], "ips": ["203.0.113.0/24"]}),
+    ] {
+        let (status, got) = call(
+            &e.app,
+            "PUT",
+            &format!("/api/v1/admin/licenses/{id}/binding"),
+            Some(&token),
+            Some(body),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{got}");
+    }
+
+    // Another address, host name or domain: refused, and each refusal is written down.
+    for (host, domain, ip, why) in [
+        ("web1", "panel.example", "198.51.100.9", "ip"),
+        ("web2", "panel.example", "203.0.113.7", "hostname"),
+        ("web1", "other.example", "203.0.113.7", "domain"),
+    ] {
+        let (status, got) = inst.activate_as(&e, &key, host, domain, ip).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{why}: {got}");
+        assert_eq!(got["code"], "binding_mismatch", "{why}: {got}");
+    }
+    let refused: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_logs WHERE action = 'license.binding_refused'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(refused, 3);
+    // Nothing was activated by those.
+    let held: i64 = sqlx::query_scalar("SELECT count(*) FROM activations")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(held, 0);
+
+    // Where it is bound, it works, and the entitlement says where.
+    let (status, got) = inst.activate(&e, &key).await;
+    assert_eq!(status, StatusCode::OK, "{got}");
+    let doc: Document = serde_json::from_value(got["entitlement"].clone()).unwrap();
+    let claims = doc
+        .verify(&bundle(&e).await, &expect(inst.id), now())
+        .unwrap();
+    assert_eq!(claims.bind.domains, vec!["panel.example"]);
+    assert_eq!(claims.bind.hostnames, vec!["web1"]);
+    assert_eq!(claims.bind.ips, vec!["203.0.113.7"]);
+    // An installation that is elsewhere cannot verify it either.
+    let elsewhere = Expect {
+        host: dhpanel_license::HostFacts {
+            hostname: "web9",
+            domain: "panel.example",
+        },
+        ..expect(inst.id)
+    };
+    assert!(doc.verify(&bundle(&e).await, &elsewhere, now()).is_err());
+
+    // Refresh and heartbeat are checked every time: moved to another address, no entitlement
+    // and the installation is told why; an event is kept against the installation.
+    for what in ["refresh", "heartbeat"] {
+        let (status, got) = inst.ask(&e, what).await;
+        assert_eq!(status, StatusCode::OK, "{what}: {got}");
+        let (status, got) = inst
+            .ask_as(&e, what, "web1", "panel.example", "198.51.100.9")
+            .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{what}: {got}");
+        assert_eq!(got["code"], "binding_mismatch");
+    }
+    let events: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM integrity_events WHERE kind = 'binding' AND installation_id = $1",
+    )
+    .bind(inst.id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(events, 2);
+
+    // A signature does not cover a host name that was changed on the way.
+    let nonce = inst.nonce(&e).await;
+    let (status, _) = call_with(
+        &e.app,
+        "POST",
+        "/api/v1/licenses/refresh",
+        None,
+        Some(json!({"installation_id": inst.id, "nonce": nonce,
+                    "signature": inst.sign("refresh", &nonce, Some("web1\npanel.example")),
+                    "hostname": "web2", "domain": "panel.example"})),
+        &[("x-forwarded-for", "203.0.113.7")],
+    )
+    .await;
+    assert_ne!(status, StatusCode::OK);
+
+    // The administrator can move the license; the old place stops working at the next refresh.
+    let (status, got) = call(
+        &e.app,
+        "PUT",
+        &format!("/api/v1/admin/licenses/{id}/binding"),
+        Some(&token),
+        Some(json!({"domains": ["new.example"], "hostnames": ["web2"], "ips": ["198.51.100.9", "2001:db8::9"]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{got}");
+    assert_eq!(got["bound_ips"], json!(["198.51.100.9", "2001:db8::9"]));
+    let (status, _) = inst.ask(&e, "refresh").await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, got) = inst
+        .ask_as(&e, "refresh", "web2", "new.example", "2001:db8::9")
+        .await;
+    assert_eq!(status, StatusCode::OK, "{got}");
+
+    // A header from a stranger's connection is not believed: the connection decides.
+    let nonce = inst.nonce(&e).await;
+    let mut req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/licenses/refresh")
+        .header(header::CONTENT_TYPE, "application/json")
+        .header("x-forwarded-for", "198.51.100.9")
+        .body(Body::from(
+            json!({"installation_id": inst.id, "nonce": nonce,
+                   "signature": inst.sign("refresh", &nonce, Some("web2\nnew.example")),
+                   "hostname": "web2", "domain": "new.example"})
+            .to_string(),
+        ))
+        .unwrap();
+    req.extensions_mut().insert(axum::extract::ConnectInfo(
+        "192.0.2.50:4444".parse::<std::net::SocketAddr>().unwrap(),
+    ));
+    let res = e.app.clone().oneshot(req).await.unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::FORBIDDEN,
+        "the claimed address is not the connection's"
     );
 }

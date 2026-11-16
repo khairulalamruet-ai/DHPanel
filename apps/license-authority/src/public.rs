@@ -130,6 +130,24 @@ pub struct Proof {
     pub nonce: String,
     /// Its signature of [`proof_message`] (base64url).
     pub signature: String,
+    /// Its host name (signed together with the nonce; the license is bound to it).
+    #[serde(default)]
+    pub hostname: Option<String>,
+    /// The domain the panel is reached at (signed too).
+    #[serde(default)]
+    pub domain: Option<String>,
+}
+
+/// The host facts an installation signs with a request: its host name and domain, normalised.
+fn host_proof(hostname: Option<&str>, domain: Option<&str>) -> Option<String> {
+    match (hostname, domain) {
+        (Some(h), Some(d)) => Some(format!(
+            "{}\n{}",
+            dhpanel_license::normalize_name(h),
+            dhpanel_license::normalize_name(d)
+        )),
+        _ => None,
+    }
 }
 
 /// What an installation signs: the purpose, the nonce, itself (and, to activate, the license
@@ -205,7 +223,12 @@ async fn prove(
     take_nonce(&state.db, proof.installation_id, &proof.nonce).await?;
     check_signature(
         &public_key,
-        &proof_message(purpose, &proof.nonce, proof.installation_id, None),
+        &proof_message(
+            purpose,
+            &proof.nonce,
+            proof.installation_id,
+            host_proof(proof.hostname.as_deref(), proof.domain.as_deref()).as_deref(),
+        ),
         &proof.signature,
     )
 }
@@ -220,12 +243,26 @@ struct Held {
     features: Vec<String>,
     limits: serde_json::Value,
     max_activations: i32,
+    bound_domains: Vec<String>,
+    bound_hostnames: Vec<String>,
+    bound_ips: Vec<String>,
+}
+
+impl Held {
+    fn bound(&self) -> crate::binding::Bound {
+        crate::binding::Bound {
+            domains: self.bound_domains.clone(),
+            hostnames: self.bound_hostnames.clone(),
+            ips: self.bound_ips.clone(),
+        }
+    }
 }
 
 macro_rules! held {
     ($($tail:literal),*) => {
         concat!("SELECT l.id, l.status, extract(epoch FROM l.expires_at)::bigint AS expires_at,
-    p.name AS plan_name, p.features, p.limits, p.max_activations
+    p.name AS plan_name, p.features, p.limits, p.max_activations,
+    l.bound_domains, l.bound_hostnames, l.bound_ips
     FROM licenses l JOIN plans p ON p.id = l.plan_id"$(, $tail)*)
     };
 }
@@ -303,6 +340,7 @@ async fn issue(
         installation_id,
         features: held.features.clone(),
         limits: limits.clone(),
+        bind: held.bound().binding(),
         iat: now,
         exp,
         jti,
@@ -359,10 +397,14 @@ pub struct ActivateRequest {
     /// Its host name.
     #[serde(default)]
     pub hostname: Option<String>,
+    /// The domain the panel is reached at.
+    #[serde(default)]
+    pub domain: Option<String>,
 }
 
 async fn activate(
     State(state): State<LaState>,
+    extensions: axum::http::Extensions,
     headers: HeaderMap,
     Json(req): Json<ActivateRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
@@ -417,7 +459,17 @@ async fn activate(
     let hash_hex: String = key_hash.iter().map(|b| format!("{b:02x}")).collect();
     check_signature(
         &public_key,
-        &proof_message("activate", &req.nonce, req.installation_id, Some(&hash_hex)),
+        &proof_message(
+            "activate",
+            &req.nonce,
+            req.installation_id,
+            Some(
+                &match host_proof(req.hostname.as_deref(), req.domain.as_deref()) {
+                    Some(host) => format!("{hash_hex}\n{host}"),
+                    None => hash_hex.clone(),
+                },
+            ),
+        ),
         &req.signature,
     )?;
     // The license, locked for the length of the check and the insert.
@@ -431,6 +483,17 @@ async fn activate(
     })?;
     let now = unix_now();
     usable(&held, now)?;
+    // Where the request comes from, and what it says it is, must be what the license is bound to.
+    crate::binding::enforce(
+        &state,
+        held.id,
+        req.installation_id,
+        &held.bound(),
+        crate::binding::source_ip(&state.settings, &extensions, &headers),
+        req.hostname.as_deref(),
+        req.domain.as_deref(),
+    )
+    .await?;
     // The installation: new, or the same key as before (a different key under the same id
     // would be somebody else claiming it).
     let known: Option<Vec<u8>> =
@@ -548,8 +611,30 @@ async fn held_by(
     .ok_or_else(|| AppError::forbidden("not_activated", "This installation holds no license."))
 }
 
+/// The binding check of a request that carries a proof.
+async fn enforce_for(
+    state: &LaState,
+    held: &Held,
+    proof: &Proof,
+    extensions: &axum::http::Extensions,
+    headers: &HeaderMap,
+) -> Result<(), AppError> {
+    crate::binding::enforce(
+        state,
+        held.id,
+        proof.installation_id,
+        &held.bound(),
+        crate::binding::source_ip(&state.settings, extensions, headers),
+        proof.hostname.as_deref(),
+        proof.domain.as_deref(),
+    )
+    .await
+}
+
 async fn refresh(
     State(state): State<LaState>,
+    extensions: axum::http::Extensions,
+    headers: HeaderMap,
     Json(proof): Json<Proof>,
 ) -> Result<Json<Granted>, AppError> {
     let mut tx = state.db.begin().await.map_err(db)?;
@@ -557,6 +642,7 @@ async fn refresh(
     let held = held_by(&mut tx, proof.installation_id).await?;
     let now = unix_now();
     usable(&held, now)?;
+    enforce_for(&state, &held, &proof, &extensions, &headers).await?;
     let granted = issue(&state, &mut tx, &held, proof.installation_id, now).await?;
     sqlx::query("UPDATE installations SET last_seen_at = now() WHERE id = $1")
         .bind(proof.installation_id)
@@ -589,6 +675,8 @@ pub struct Beat {
 
 async fn heartbeat(
     State(state): State<LaState>,
+    extensions: axum::http::Extensions,
+    headers: HeaderMap,
     Json(req): Json<HeartbeatRequest>,
 ) -> Result<Json<Beat>, AppError> {
     let info = if req.info.is_object() {
@@ -602,6 +690,7 @@ async fn heartbeat(
     let mut tx = state.db.begin().await.map_err(db)?;
     prove(&state, &mut tx, "heartbeat", &req.proof).await?;
     let held = held_by(&mut tx, req.proof.installation_id).await?;
+    enforce_for(&state, &held, &req.proof, &extensions, &headers).await?;
     sqlx::query("UPDATE activations SET last_heartbeat_at = now(), heartbeat_info = $3 WHERE license_id = $1 AND installation_id = $2 AND deactivated_at IS NULL")
         .bind(held.id)
         .bind(req.proof.installation_id)

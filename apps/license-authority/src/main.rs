@@ -94,9 +94,12 @@ async fn main() -> ExitCode {
     let shutdown = async {
         let _ = tokio::signal::ctrl_c().await;
     };
-    if let Err(err) = axum::serve(listener, router(state))
-        .with_graceful_shutdown(shutdown)
-        .await
+    if let Err(err) = axum::serve(
+        listener,
+        router(state).into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown)
+    .await
     {
         tracing::error!(error = %err, "server error");
         return ExitCode::FAILURE;

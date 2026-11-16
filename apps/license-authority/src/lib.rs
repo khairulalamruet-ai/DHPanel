@@ -6,6 +6,7 @@
 //! they hold their own private key before anything is signed for them.
 
 pub mod admin;
+pub mod binding;
 pub mod config;
 pub mod public;
 
@@ -40,6 +41,9 @@ pub struct Settings {
     pub nonce_ttl: Duration,
     /// Where new signing keys are written when the key is rotated.
     pub key_dir: std::path::PathBuf,
+    /// The reverse proxies in front of the authority: only from these is `X-Forwarded-For`
+    /// believed, to learn the address a request really comes from.
+    pub trusted_proxies: Vec<std::net::IpAddr>,
 }
 
 impl Settings {
@@ -56,6 +60,7 @@ impl Settings {
                 || std::path::PathBuf::from("."),
                 std::path::Path::to_path_buf,
             ),
+            trusted_proxies: c.trusted_proxies.clone(),
         }
     }
 }

@@ -140,6 +140,10 @@ pub fn evaluate(
         Err(dhpanel_license::DocumentError::Expired) => {
             return verdict(Mode::Restricted, Some("entitlement_expired"), None, None);
         }
+        // Moved to another machine or another domain: the license is bound to where it was.
+        Err(dhpanel_license::DocumentError::Binding(_)) => {
+            return verdict(Mode::Restricted, Some("binding_mismatch"), None, None);
+        }
         Err(_) => return verdict(Mode::Restricted, Some("entitlement_invalid"), None, None),
     };
     if let Some(code) = &stored.refused {
@@ -213,6 +217,11 @@ mod tests {
                 installation_id: r.inst,
                 features: vec!["mail".into()],
                 limits: BTreeMap::from([("max_nodes".into(), 2), ("max_tenants".into(), -1)]),
+                bind: dhpanel_license::Binding {
+                    domains: vec!["panel.example.com".into()],
+                    hostnames: vec!["web1".into()],
+                    ips: vec!["203.0.113.7".into()],
+                },
                 iat,
                 exp,
                 jti: Uuid::from_u128(9),
@@ -229,8 +238,39 @@ mod tests {
             audience: "dhpanel",
             installation_id: r.inst,
             clock_skew: 60,
+            host: dhpanel_license::HostFacts {
+                hostname: "web1",
+                domain: "panel.example.com",
+            },
         };
         evaluate(stored, &r.keys, &expect, &Policy::default(), now)
+    }
+
+    #[test]
+    fn a_license_moved_to_another_machine_or_domain_restricts_management() {
+        let r = rig();
+        let t0 = 1_000_000;
+        let stored = Stored {
+            entitlement: Some(entitlement(&r, t0, t0 + 200 * HOUR)),
+            last_refresh_ok_at: Some(t0),
+            ..Stored::default()
+        };
+        assert_eq!(at(&r, &stored, t0 + HOUR).mode, Mode::Active);
+        for (hostname, domain) in [("web2", "panel.example.com"), ("web1", "other.example.org")] {
+            let expect = Expect {
+                issuer: "la",
+                audience: "dhpanel",
+                installation_id: r.inst,
+                clock_skew: 60,
+                host: dhpanel_license::HostFacts { hostname, domain },
+            };
+            let got = evaluate(&stored, &r.keys, &expect, &Policy::default(), t0 + HOUR);
+            assert_eq!(
+                (got.mode, got.reason.as_deref()),
+                (Mode::Restricted, Some("binding_mismatch")),
+                "{hostname} {domain}"
+            );
+        }
     }
 
     #[test]

@@ -37,6 +37,9 @@ pub struct LaConfig {
     pub entitlement_hours: u32,
     /// How long an admin sign-in lasts, in hours.
     pub session_hours: u32,
+    /// The reverse proxies in front of the authority (their addresses). The address of a
+    /// request is read from `X-Forwarded-For` only when the connection is from one of these.
+    pub trusted_proxies: Vec<std::net::IpAddr>,
     /// Log format: `json` or `pretty`.
     pub log_format: String,
     /// Log filter directives.
@@ -60,6 +63,10 @@ impl Default for LaConfig {
             audience: "dhpanel".to_owned(),
             entitlement_hours: 96,
             session_hours: 8,
+            trusted_proxies: vec![
+                std::net::IpAddr::from([127, 0, 0, 1]),
+                std::net::IpAddr::from([0, 0, 0, 0, 0, 0, 0, 1]),
+            ],
             log_format: "json".to_owned(),
             log_filter: "info".to_owned(),
         }

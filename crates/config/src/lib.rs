@@ -126,6 +126,9 @@ pub struct LicenseConfig {
     /// A file of trusted authority public keys (`kid base64-key` per line), instead of the
     /// ones built into the program.
     pub public_keys_file: Option<PathBuf>,
+    /// The domain the panel is reached at (`panel.example.com`). The license is bound to it, so
+    /// it must be set when licensing is on.
+    pub domain: Option<String>,
     /// The `iss` the authority writes into entitlements.
     pub issuer: String,
     /// The `aud` it writes.
@@ -144,6 +147,7 @@ impl Default for LicenseConfig {
             authority_url: None,
             identity_dir: PathBuf::from("/var/lib/dhpanel/license"),
             public_keys_file: None,
+            domain: None,
             issuer: "dhpanel-la".to_owned(),
             audience: "dhpanel".to_owned(),
             heartbeat_hours: 6,

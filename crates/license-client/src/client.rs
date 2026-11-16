@@ -67,7 +67,7 @@ impl ClientError {
     #[must_use]
     pub fn is_license_refusal(&self) -> bool {
         matches!(self, Self::Refused { code, .. }
-            if matches!(code.as_str(), "license_revoked" | "license_suspended" | "license_expired"))
+            if matches!(code.as_str(), "license_revoked" | "license_suspended" | "license_expired" | "binding_mismatch"))
     }
 }
 
@@ -78,6 +78,10 @@ pub struct LicenseClient {
     identity: Identity,
     issuer: String,
     audience: String,
+    /// The machine's host name and the domain the panel is reached at: sent with every
+    /// request the license is bound to, and checked against the entitlement that comes back.
+    hostname: String,
+    domain: String,
     agent: ureq::Agent,
 }
 
@@ -157,8 +161,29 @@ impl LicenseClient {
             identity,
             issuer: issuer.to_owned(),
             audience: audience.to_owned(),
+            hostname: String::new(),
+            domain: String::new(),
             agent,
         })
+    }
+
+    /// Says what this host is: its host name and the domain the panel is reached at. A license
+    /// is bound to both, so a client without them is refused by the authority.
+    #[must_use]
+    pub fn with_host(mut self, hostname: &str, domain: &str) -> Self {
+        self.hostname = hostname.to_owned();
+        self.domain = domain.to_owned();
+        self
+    }
+
+    /// What is signed together with the nonce, so that the host name and domain a request
+    /// states cannot be changed on the way.
+    fn host_proof(&self) -> String {
+        format!(
+            "{}\n{}",
+            dhpanel_license::normalize_name(&self.hostname),
+            dhpanel_license::normalize_name(&self.domain)
+        )
     }
 
     /// This installation's id.
@@ -205,11 +230,15 @@ impl LicenseClient {
 
     fn proof(&self, purpose: &str) -> Result<serde_json::Value, ClientError> {
         let nonce = self.challenge()?;
-        let signature = self.identity.prove(purpose, &nonce, None)?;
+        let signature = self
+            .identity
+            .prove(purpose, &nonce, Some(&self.host_proof()))?;
         Ok(serde_json::json!({
             "installation_id": self.identity.installation_id,
             "nonce": nonce,
             "signature": signature,
+            "hostname": self.hostname,
+            "domain": self.domain,
         }))
     }
 
@@ -221,6 +250,10 @@ impl LicenseClient {
             audience: &self.audience,
             installation_id: self.identity.installation_id,
             clock_skew: 300,
+            host: dhpanel_license::HostFacts {
+                hostname: &self.hostname,
+                domain: &self.domain,
+            },
         };
         let claims = granted
             .entitlement
@@ -238,27 +271,24 @@ impl LicenseClient {
     ///
     /// # Errors
     /// [`ClientError`].
-    pub fn activate(
-        &self,
-        license_key: &str,
-        hostname: Option<&str>,
-    ) -> Result<Received, ClientError> {
+    pub fn activate(&self, license_key: &str) -> Result<Received, ClientError> {
         use sha2_hex::hex_sha256;
         let nonce = self.challenge()?;
         let key = license_key.trim();
-        let signature = self
-            .identity
-            .prove("activate", &nonce, Some(&hex_sha256(key)))?;
-        let mut body = serde_json::json!({
+        let signature = self.identity.prove(
+            "activate",
+            &nonce,
+            Some(&format!("{}\n{}", hex_sha256(key), self.host_proof())),
+        )?;
+        let body = serde_json::json!({
             "license_key": key,
             "installation_id": self.identity.installation_id,
             "public_key": self.identity.public_key(),
             "nonce": nonce,
             "signature": signature,
+            "hostname": self.hostname,
+            "domain": self.domain,
         });
-        if let Some(h) = hostname {
-            body["hostname"] = h.into();
-        }
         let (_, text) = self.post("/api/v1/licenses/activate", &body)?;
         self.received(&text)
     }

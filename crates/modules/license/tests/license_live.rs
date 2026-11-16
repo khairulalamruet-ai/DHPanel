@@ -107,7 +107,14 @@ async fn authority() -> Authority {
     };
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = format!("http://{}", listener.local_addr().unwrap());
-    tokio::spawn(async move { axum::serve(listener, la_router(state)).await.unwrap() });
+    tokio::spawn(async move {
+        axum::serve(
+            listener,
+            la_router(state).into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .await
+        .unwrap()
+    });
     let hash = hasher
         .hash(&SecretString::from("a-long-admin-password".to_owned()))
         .unwrap();
@@ -203,7 +210,8 @@ async fn make_license(a: &Authority, max: i32) -> (String, String) {
         "POST",
         "/api/v1/admin/licenses",
         Some(&a.admin_token),
-        Some(json!({"customer_id": c["id"], "plan_id": plan["id"]})),
+        Some(json!({"customer_id": c["id"], "plan_id": plan["id"],
+                    "domains": ["panel.example"], "hostnames": [this_host()], "ips": ["127.0.0.1"]})),
     )
     .await;
     (
@@ -212,12 +220,20 @@ async fn make_license(a: &Authority, max: i32) -> (String, String) {
     )
 }
 
+/// This machine's host name, which the licenses are bound to.
+fn this_host() -> String {
+    std::fs::read_to_string("/proc/sys/kernel/hostname")
+        .map(|h| h.trim().to_owned())
+        .unwrap_or_default()
+}
+
 fn config_for(a: Option<&Authority>) -> LicenseConfig {
     let dir = std::env::temp_dir().join(format!("dh-lic-ident-{}", Uuid::new_v4().simple()));
     LicenseConfig {
         authority_url: a.map(|a| a.url.clone()),
         identity_dir: dir,
         public_keys_file: a.map(|a| a.dir.join("keys.txt")),
+        domain: Some("panel.example".to_owned()),
         ..LicenseConfig::default()
     }
 }

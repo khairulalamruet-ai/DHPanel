@@ -52,7 +52,14 @@ async fn serve(pool: &PgPool, register: bool) -> Authority {
     };
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
-    tokio::spawn(async move { axum::serve(listener, router(state)).await.unwrap() });
+    tokio::spawn(async move {
+        axum::serve(
+            listener,
+            router(state).into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .await
+        .unwrap()
+    });
     Authority { url, keys, dir }
 }
 
@@ -148,7 +155,7 @@ async fn make_license(a: &Authority, token: &str, max: i32) -> (String, String) 
         "POST",
         "/api/v1/admin/licenses",
         Some(token),
-        Some(json!({"customer_id": c["id"], "plan_id": plan["id"]})),
+        Some(json!({"customer_id": c["id"], "plan_id": plan["id"], "domains": ["panel.example"], "hostnames": ["web1"], "ips": ["127.0.0.1"]})),
     )
     .await;
     (
@@ -176,6 +183,7 @@ fn client(a: &Authority, keys: PublicKeys, identity_dir: &std::path::Path) -> Li
         "dhpanel",
     )
     .unwrap()
+    .with_host("web1", "panel.example")
 }
 
 #[sqlx::test(migrations = "./migrations")]
@@ -192,13 +200,13 @@ async fn an_installation_activates_refreshes_and_lets_go_and_a_forged_answer_is_
     let result = tokio::task::spawn_blocking({
         let (identity_dir, a_dir) = (identity_dir.clone(), a.dir.clone());
         move || {
-            let c = LicenseClient::new(&url, keys.clone(), Identity::load_or_create(&identity_dir).unwrap(), "dhpanel-la", "dhpanel").unwrap();
+            let c = LicenseClient::new(&url, keys.clone(), Identity::load_or_create(&identity_dir).unwrap(), "dhpanel-la", "dhpanel").unwrap().with_host("web1", "panel.example");
             // Activation: verified, and the stored form evaluates as an active license.
-            let got = c.activate(&format!("  {key}\n"), Some("panel.example")).unwrap();
+            let got = c.activate(&format!("  {key}\n")).unwrap();
             assert_eq!(got.claims.features, ["mail"]);
             assert_eq!(got.license.plan, "Pro");
             let stored = Stored { entitlement: Some(got.document.clone()), last_refresh_ok_at: Some(now()), ..Stored::default() };
-            let expect = Expect { issuer: "dhpanel-la", audience: "dhpanel", installation_id: c.installation_id(), clock_skew: 300 };
+            let expect = Expect { issuer: "dhpanel-la", audience: "dhpanel", installation_id: c.installation_id(), clock_skew: 300, host: dhpanel_license::HostFacts { hostname: "web1", domain: "panel.example" } };
             let verdict = evaluate(&stored, &keys, &expect, &Policy::default(), now());
             assert_eq!(verdict.mode, Mode::Active);
             assert!(verdict.has_feature("mail"));
@@ -212,13 +220,13 @@ async fn an_installation_activates_refreshes_and_lets_go_and_a_forged_answer_is_
             for f in ["installation.id", "installation.key"] {
                 std::fs::copy(identity_dir.join(f), copy.join(f)).unwrap();
             }
-            let restored = LicenseClient::new(&url, keys.clone(), Identity::load_or_create(&copy).unwrap(), "dhpanel-la", "dhpanel").unwrap();
+            let restored = LicenseClient::new(&url, keys.clone(), Identity::load_or_create(&copy).unwrap(), "dhpanel-la", "dhpanel").unwrap().with_host("web1", "panel.example");
             assert_eq!(restored.installation_id(), c.installation_id());
-            assert!(restored.activate(&key, None).is_ok());
+            assert!(restored.activate(&key).is_ok());
             // A different installation cannot take the one place.
             let other_dir = a_dir.join("identity-other");
-            let other = LicenseClient::new(&url, keys.clone(), Identity::load_or_create(&other_dir).unwrap(), "dhpanel-la", "dhpanel").unwrap();
-            assert!(matches!(other.activate(&key, None), Err(ClientError::Refused { ref code, .. }) if code == "activation_limit"));
+            let other = LicenseClient::new(&url, keys.clone(), Identity::load_or_create(&other_dir).unwrap(), "dhpanel-la", "dhpanel").unwrap().with_host("web1", "panel.example");
+            assert!(matches!(other.activate(&key), Err(ClientError::Refused { ref code, .. }) if code == "activation_limit"));
             // A help request is accepted.
             c.recovery_request("the binaries were replaced by an update that failed").unwrap();
             (c.installation_id(), key)
@@ -246,8 +254,9 @@ async fn an_installation_activates_refreshes_and_lets_go_and_a_forged_answer_is_
             "dhpanel-la",
             "dhpanel",
         )
-        .unwrap();
-        c.activate(&key2, None)
+        .unwrap()
+        .with_host("web1", "panel.example");
+        c.activate(&key2)
     })
     .await
     .unwrap();
@@ -280,7 +289,8 @@ async fn an_installation_activates_refreshes_and_lets_go_and_a_forged_answer_is_
         "dhpanel-la",
         "dhpanel",
     )
-    .unwrap();
+    .unwrap()
+    .with_host("web1", "panel.example");
     let down = tokio::task::spawn_blocking(move || c.refresh())
         .await
         .unwrap();
@@ -312,6 +322,7 @@ fn client_refresh(url: &str, keys: PublicKeys, dir: &std::path::Path) -> Result<
         "dhpanel",
     )
     .unwrap()
+    .with_host("web1", "panel.example")
     .refresh()
     .map(|_| ())
 }

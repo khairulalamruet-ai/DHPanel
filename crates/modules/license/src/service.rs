@@ -41,6 +41,16 @@ fn db(e: &dhpanel_database::sqlx::Error) -> ServiceError {
     ServiceError::Database(e.to_string())
 }
 
+/// The machine's host name, as the kernel knows it.
+fn machine_hostname() -> String {
+    std::fs::read_to_string("/proc/sys/kernel/hostname")
+        .ok()
+        .map(|h| h.trim().to_owned())
+        .filter(|h| !h.is_empty())
+        .or_else(|| std::env::var("HOSTNAME").ok())
+        .unwrap_or_default()
+}
+
 fn unix_now() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -55,6 +65,10 @@ pub struct LicenseService {
     issuer: String,
     audience: String,
     installation_id: Option<Uuid>,
+    /// The machine's host name and the domain the panel is reached at (the license is bound to
+    /// both).
+    hostname: String,
+    domain: String,
     policy: Policy,
     heartbeat_every: Duration,
     refresh_every: Duration,
@@ -72,6 +86,8 @@ impl LicenseService {
             refresh_every: i64::from(config.refresh_hours) * 3600,
             grace: i64::from(config.grace_hours) * 3600,
         };
+        let hostname = machine_hostname();
+        let domain = config.domain.clone().unwrap_or_default();
         let keys = dhpanel_license_client::trusted_keys(config.public_keys_file.as_deref())
             .map_err(|e| format!("the authority's public keys: {e}"))?;
         let (client, installation_id) = match &config.authority_url {
@@ -87,7 +103,8 @@ impl LicenseService {
                     &config.issuer,
                     &config.audience,
                 )
-                .map_err(|e| e.to_string())?;
+                .map_err(|e| e.to_string())?
+                .with_host(&hostname, &domain);
                 (Some(Arc::new(client)), Some(id))
             }
         };
@@ -98,6 +115,8 @@ impl LicenseService {
             issuer: config.issuer.clone(),
             audience: config.audience.clone(),
             installation_id,
+            hostname,
+            domain,
             policy,
             heartbeat_every: hours(config.heartbeat_hours),
             refresh_every: hours(config.refresh_hours),
@@ -154,6 +173,10 @@ impl LicenseService {
             audience: &self.audience,
             installation_id: id,
             clock_skew: 300,
+            host: dhpanel_license::HostFacts {
+                hostname: &self.hostname,
+                domain: &self.domain,
+            },
         };
         let verdict = evaluate(&stored, &self.keys, &expect, &self.policy, unix_now());
         let mode = match verdict.mode {
@@ -252,11 +275,9 @@ impl LicenseService {
     /// [`ServiceError`].
     pub async fn activate(&self, license_key: String) -> Result<(), ServiceError> {
         let client = self.client()?;
-        let hostname = std::env::var("HOSTNAME").ok();
-        let result =
-            tokio::task::spawn_blocking(move || client.activate(&license_key, hostname.as_deref()))
-                .await
-                .map_err(|_| ServiceError::Cancelled)?;
+        let result = tokio::task::spawn_blocking(move || client.activate(&license_key))
+            .await
+            .map_err(|_| ServiceError::Cancelled)?;
         match result {
             Ok(got) => self.confirmed(got).await,
             Err(e) => {

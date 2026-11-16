@@ -10,7 +10,7 @@ use axum::{
     Json, Router,
     extract::{Path, Query, State},
     http::StatusCode,
-    routing::{get, post},
+    routing::{get, post, put},
 };
 use dhpanel_http_kit::{AppError, FieldError};
 use dhpanel_license::FileSigningKey;
@@ -41,6 +41,7 @@ pub fn router() -> Router<LaState> {
             get(list_licenses).post(add_license),
         )
         .route("/api/v1/admin/licenses/{id}", get(get_license))
+        .route("/api/v1/admin/licenses/{id}/binding", put(set_binding))
         .route("/api/v1/admin/licenses/{id}/suspend", post(suspend))
         .route("/api/v1/admin/licenses/{id}/resume", post(resume))
         .route("/api/v1/admin/licenses/{id}/revoke", post(revoke))
@@ -523,6 +524,12 @@ pub struct License {
     pub created_at: i64,
     /// Installations holding it now.
     pub active_activations: i64,
+    /// The domains it is bound to.
+    pub bound_domains: Vec<String>,
+    /// The host names it is bound to.
+    pub bound_hostnames: Vec<String>,
+    /// The public addresses it is bound to.
+    pub bound_ips: Vec<String>,
 }
 
 macro_rules! license {
@@ -530,6 +537,7 @@ macro_rules! license {
         concat!("SELECT l.id, l.customer_id, l.plan_id, l.key_hint, l.status,
     extract(epoch FROM l.expires_at)::bigint AS expires_at, l.status_note,
     extract(epoch FROM l.created_at)::bigint AS created_at,
+    l.bound_domains, l.bound_hostnames, l.bound_ips,
     (SELECT count(*) FROM activations a WHERE a.license_id = l.id AND a.deactivated_at IS NULL) AS active_activations
     FROM licenses l"$(, $tail)*)
     };
@@ -546,6 +554,24 @@ pub struct NewLicense {
     /// When it ends (Unix seconds); when absent, the plan's `valid_days` from now, or never.
     #[serde(default)]
     pub expires_at: Option<i64>,
+    /// The domains it may be used at (the panel's domain; sub-domains fit). At least one.
+    pub domains: Vec<String>,
+    /// The host names of the machines it may run on. At least one.
+    pub hostnames: Vec<String>,
+    /// The public addresses the installation is seen from. At least one.
+    pub ips: Vec<String>,
+}
+
+/// Where a license may be used, replacing what it was bound to.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NewBinding {
+    /// The domains (at least one).
+    pub domains: Vec<String>,
+    /// The host names (at least one).
+    pub hostnames: Vec<String>,
+    /// The public addresses (at least one).
+    pub ips: Vec<String>,
 }
 
 /// A license made, with its key (this once).
@@ -614,12 +640,15 @@ async fn add_license(
     Json(req): Json<NewLicense>,
 ) -> Result<(StatusCode, Json<IssuedLicense>), AppError> {
     admin.may_change()?;
+    let binding = crate::binding::validate(&req.domains, &req.hostnames, &req.ips)?;
     let key = new_key()?;
     let hint = key.rsplit('-').next().unwrap_or_default().to_owned();
     let id: Result<Uuid, sqlx::Error> = sqlx::query_scalar(
-        "INSERT INTO licenses (customer_id, plan_id, key_hash, key_hint, expires_at)
+        "INSERT INTO licenses (customer_id, plan_id, key_hash, key_hint, expires_at,
+                               bound_domains, bound_hostnames, bound_ips)
          SELECT $1, p.id, $3, $4,
-                COALESCE(to_timestamp($5::bigint), now() + make_interval(days => p.valid_days))
+                COALESCE(to_timestamp($5::bigint), now() + make_interval(days => p.valid_days)),
+                $6, $7, $8
          FROM plans p WHERE p.id = $2
          RETURNING id",
     )
@@ -628,6 +657,9 @@ async fn add_license(
     .bind(sha256(&key))
     .bind(&hint)
     .bind(req.expires_at)
+    .bind(&binding.domains)
+    .bind(&binding.hostnames)
+    .bind(&binding.ips)
     .fetch_one(&state.db)
     .await;
     let id = id.map_err(|e| match e {
@@ -648,7 +680,11 @@ async fn add_license(
         &admin.email,
         "license.issued",
         Some(&id.to_string()),
-        serde_json::json!({}),
+        serde_json::json!({
+            "domains": binding.domains,
+            "hostnames": binding.hostnames,
+            "ips": binding.ips,
+        }),
     )
     .await?;
     Ok((
@@ -658,6 +694,44 @@ async fn add_license(
             key,
         }),
     ))
+}
+
+async fn set_binding(
+    State(state): State<LaState>,
+    admin: Admin,
+    Path(id): Path<Uuid>,
+    Json(req): Json<NewBinding>,
+) -> Result<Json<License>, AppError> {
+    admin.may_change()?;
+    let binding = crate::binding::validate(&req.domains, &req.hostnames, &req.ips)?;
+    let changed = sqlx::query(
+        "UPDATE licenses SET bound_domains = $2, bound_hostnames = $3, bound_ips = $4, updated_at = now()
+         WHERE id = $1",
+    )
+    .bind(id)
+    .bind(&binding.domains)
+    .bind(&binding.hostnames)
+    .bind(&binding.ips)
+    .execute(&state.db)
+    .await
+    .map_err(db)?
+    .rows_affected();
+    if changed == 0 {
+        return Err(AppError::not_found("license"));
+    }
+    audit(
+        &state.db,
+        &admin.email,
+        "license.rebound",
+        Some(&id.to_string()),
+        serde_json::json!({
+            "domains": binding.domains,
+            "hostnames": binding.hostnames,
+            "ips": binding.ips,
+        }),
+    )
+    .await?;
+    Ok(Json(fetch_license(&state, id).await?))
 }
 
 /// A license with the installations that hold it.
