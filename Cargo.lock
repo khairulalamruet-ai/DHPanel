@@ -1087,6 +1087,7 @@ dependencies = [
  "dhpanel-system-backup",
  "rpassword",
  "secrecy",
+ "serde_json",
  "time",
  "tokio",
 ]

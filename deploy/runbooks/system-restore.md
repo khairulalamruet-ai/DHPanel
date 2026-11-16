@@ -8,7 +8,10 @@ backup can be opened, and the sealed secrets in the database (TOTP secrets, tena
 keys, destination credentials, database passwords) cannot be read.
 
 Tested with `crates/system-backup/tests/live.rs` (dump, store, open, `pg_restore` into a new
-database, rows compared).
+database, rows compared) and by the drill `apps/dhctl/tests/restore_drill_live.rs`: a migrated
+panel with an administrator and a CA is backed up, then restored with the real `dhctl` steps
+of this runbook into a new database; every table has the same rows, the administrator's
+password hash is identical, the CA is the same file and `dhctl migrate` finds nothing to apply.
 
 ## 1. Prepare the new server
 
