@@ -63,6 +63,83 @@ enum Command {
         #[command(subcommand)]
         action: CaAction,
     },
+    /// Sign, check and install a release (the signed release manifest).
+    Release {
+        #[command(subcommand)]
+        action: ReleaseAction,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ReleaseAction {
+    /// Make a release key (written 0600, never over a file) and print its public half as
+    /// the line the trusted-keys file holds.
+    Keygen {
+        /// The key id (letters, digits, `-` and `_`).
+        #[arg(long)]
+        kid: String,
+        /// Where the private key goes.
+        #[arg(long)]
+        out: std::path::PathBuf,
+    },
+    /// Sign the manifest of the given files (their names are the file names).
+    Sign {
+        /// The private key file.
+        #[arg(long)]
+        key: std::path::PathBuf,
+        /// The key id.
+        #[arg(long)]
+        kid: String,
+        /// The release version.
+        #[arg(long)]
+        version: String,
+        /// The source commit (hex).
+        #[arg(long)]
+        commit: String,
+        /// When it was made (Unix seconds); now when absent.
+        #[arg(long)]
+        created_at: Option<i64>,
+        /// Where the signed manifest is written.
+        #[arg(long)]
+        out: std::path::PathBuf,
+        /// The release files.
+        #[arg(required = true)]
+        files: Vec<std::path::PathBuf>,
+    },
+    /// Check a signed manifest and every file of it, changing nothing.
+    Verify {
+        /// The signed manifest.
+        #[arg(long)]
+        manifest: std::path::PathBuf,
+        /// The trusted keys (lines of `kid base64-public-key`).
+        #[arg(long)]
+        keys: std::path::PathBuf,
+        /// The folder with the files.
+        #[arg(long)]
+        dir: std::path::PathBuf,
+    },
+    /// Check, then install a release into a folder; the files it replaces are kept as
+    /// known-good, and anything that goes wrong leaves the folder as it was.
+    Install {
+        /// The signed manifest.
+        #[arg(long)]
+        manifest: std::path::PathBuf,
+        /// The trusted keys.
+        #[arg(long)]
+        keys: std::path::PathBuf,
+        /// The folder with the downloaded files.
+        #[arg(long)]
+        from: std::path::PathBuf,
+        /// The folder the files are installed into.
+        #[arg(long)]
+        to: std::path::PathBuf,
+    },
+    /// Put the known-good files back over the installed ones.
+    Rollback {
+        /// The folder the release was installed into.
+        #[arg(long)]
+        to: std::path::PathBuf,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -183,10 +260,116 @@ async fn main() -> ExitCode {
         } => admin_create(&username, &email, password_stdin, &role, require_mfa).await,
         Command::Ca { action } => ca(action),
         Command::SystemBackup { action } => system_backup(&action),
+        Command::Release { action } => release(action),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(f) => f.exit(),
+    }
+}
+
+fn release_failure(e: &impl std::fmt::Display) -> Failure {
+    Failure(EXIT_DATAERR, e.to_string())
+}
+
+#[allow(clippy::print_stdout)]
+fn release(action: ReleaseAction) -> Result<(), Failure> {
+    use dhpanel_license::{
+        FileSigningKey, PublicKeys, ReleaseManifest, SignedManifest, SigningKey as _, update,
+    };
+    let read = |path: &std::path::Path| {
+        std::fs::read(path)
+            .map_err(|e| Failure(EXIT_IOERR, format!("{}: {}", path.display(), e.kind())))
+    };
+    let trusted = |path: &std::path::Path| -> Result<PublicKeys, Failure> {
+        let text = String::from_utf8(read(path)?)
+            .map_err(|_| Failure(EXIT_DATAERR, "the keys file is not text".to_owned()))?;
+        PublicKeys::parse(&text).map_err(|e| release_failure(&e))
+    };
+    let signed_of = |path: &std::path::Path| -> Result<SignedManifest, Failure> {
+        serde_json::from_slice(&read(path)?)
+            .map_err(|_| Failure(EXIT_DATAERR, "the manifest is not readable".to_owned()))
+    };
+    match action {
+        ReleaseAction::Keygen { kid, out } => {
+            let key =
+                FileSigningKey::generate_to_file(&out, &kid).map_err(|e| release_failure(&e))?;
+            let mut keys = PublicKeys::new();
+            keys = keys
+                .with(&kid, key.public_key())
+                .map_err(|e| release_failure(&e))?;
+            print!("{}", keys.to_text());
+            Ok(())
+        }
+        ReleaseAction::Sign {
+            key,
+            kid,
+            version,
+            commit,
+            created_at,
+            out,
+            files,
+        } => {
+            let key = FileSigningKey::load(&key, &kid).map_err(|e| release_failure(&e))?;
+            let mut contents = Vec::new();
+            for path in &files {
+                let name = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .ok_or_else(|| Failure(EXIT_USAGE, "a file has no usable name".to_owned()))?;
+                contents.push((name.to_owned(), read(path)?));
+            }
+            let now = i64::try_from(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |d| d.as_secs()),
+            )
+            .unwrap_or(0);
+            let manifest =
+                ReleaseManifest::build(&version, &commit, created_at.unwrap_or(now), &contents)
+                    .map_err(|e| release_failure(&e))?;
+            let signed = SignedManifest::sign(&manifest, &key).map_err(|e| release_failure(&e))?;
+            let json = serde_json::to_vec_pretty(&signed)
+                .map_err(|e| Failure(EXIT_SOFTWARE, e.to_string()))?;
+            std::fs::write(&out, json)
+                .map_err(|e| Failure(EXIT_IOERR, format!("{}: {}", out.display(), e.kind())))?;
+            println!(
+                "signed {} file(s) of release {version} with {kid}",
+                manifest.components.len()
+            );
+            Ok(())
+        }
+        ReleaseAction::Verify {
+            manifest,
+            keys,
+            dir,
+        } => {
+            let (m, _) = update::check_download(&signed_of(&manifest)?, &trusted(&keys)?, &dir)
+                .map_err(|e| release_failure(&e))?;
+            println!(
+                "release {} ({}) is good: {} file(s) match",
+                m.version,
+                m.commit,
+                m.components.len()
+            );
+            Ok(())
+        }
+        ReleaseAction::Install {
+            manifest,
+            keys,
+            from,
+            to,
+        } => {
+            let m = update::install(&signed_of(&manifest)?, &trusted(&keys)?, &from, &to)
+                .map_err(|e| release_failure(&e))?;
+            println!("installed release {} into {}", m.version, to.display());
+            Ok(())
+        }
+        ReleaseAction::Rollback { to } => {
+            let names = update::rollback(&to).map_err(|e| release_failure(&e))?;
+            println!("put back {} file(s): {}", names.len(), names.join(", "));
+            Ok(())
+        }
     }
 }
 

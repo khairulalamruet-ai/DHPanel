@@ -139,6 +139,26 @@ jobs:
           json.dump(manifest, open('manifest.json', 'w'), indent=2, sort_keys=True)
           PY
           cosign sign-blob --yes --bundle manifest.json.sigstore manifest.json
+      - name: Release-key manifest (T17.14)
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+          RELEASE_KID: ${{ vars.RELEASE_KID }}
+        run: |
+          # The manifest the installations check (Ed25519, the release key, which is not the
+          # license key). It needs the key as a secret; without it the release goes out with
+          # the cosign-signed manifest only and this says so.
+          if [ -z "$RELEASE_SIGNING_KEY" ] || [ -z "$RELEASE_KID" ]; then
+            echo "::warning::RELEASE_SIGNING_KEY or RELEASE_KID is not set: no release-key manifest was made"
+            exit 0
+          fi
+          v="${GITHUB_REF_NAME#v}"
+          mkdir -p tool && tar -xzf out/dhpanel-${v}-linux-x86_64.tar.gz -C tool --strip-components=2 "dhpanel-${v}-linux-x86_64/bin/dhctl"
+          umask 077
+          printf '%s' "$RELEASE_SIGNING_KEY" > "$RUNNER_TEMP/release.key"
+          tool/dhctl release sign --key "$RUNNER_TEMP/release.key" --kid "$RELEASE_KID" \
+            --version "$v" --commit "$GITHUB_SHA" --created-at "$(git log -1 --format=%ct)" \
+            --out out/release-manifest.json out/dhpanel-*.tar.gz
+          rm -f "$RUNNER_TEMP/release.key"
       - name: Changelog
         run: deploy/release/changelog.sh "$GITHUB_REF_NAME" > out/CHANGELOG.md
       - name: Publish
