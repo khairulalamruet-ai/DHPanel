@@ -66,9 +66,18 @@ fn gateway_for(ca: &CertificateAuthority, pool: &PgPool) -> Gateway {
 
 async fn plane_on(pool: &PgPool, ca: Arc<CertificateAuthority>, bind: &str) -> Plane {
     let gateway = gateway_for(&ca, pool);
-    let listener = dhpanel_node_gateway::bind(bind.parse().unwrap())
-        .await
-        .unwrap();
+    // A port just given up by a stopped plane (or a reserved one) can stay busy for a moment
+    // on a loaded machine, so binding is tried again for a few seconds.
+    let started = std::time::Instant::now();
+    let listener = loop {
+        match dhpanel_node_gateway::bind(bind.parse().unwrap()).await {
+            Ok(listener) => break listener,
+            Err(error) if started.elapsed() > Duration::from_secs(10) => {
+                panic!("could not bind {bind}: {error}")
+            }
+            Err(_) => tokio::time::sleep(Duration::from_millis(100)).await,
+        }
+    };
     let addr = listener.local_addr().unwrap();
     let (stop, stopped) = watch::channel(false);
     tokio::spawn(gateway.clone().serve(listener, stopped));
