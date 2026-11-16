@@ -18,7 +18,10 @@
 
 use std::{collections::BTreeMap, fmt};
 
-use dhpanel_docker_manager::{Capability, ContainerSpec, ImageRef, Limits, Name, Network, PublishedPort, Restart, SpecError, Tmpfs, VolumeMount};
+use dhpanel_docker_manager::{
+    Capability, ContainerSpec, ImageRef, Limits, Name, Network, PublishedPort, Restart, SpecError,
+    Tmpfs, VolumeMount,
+};
 use dhpanel_domain::{TenantUsername, Uid};
 use serde::Deserialize;
 use uuid::Uuid;
@@ -126,7 +129,7 @@ struct RawImage {
     /// The moving tag the pin was taken from (`8.4-fpm-alpine`): what to ask a registry about
     /// to learn whether a newer image exists.
     tag: Option<String>,
-    /// Our own image for the same version (`php` only), tried first; `reference`
+    /// Our own image for the same role (and version), tried first; `reference`
     /// is what is used when it cannot be pulled.
     preferred: Option<String>,
     #[serde(default)]
@@ -214,10 +217,13 @@ impl Allowlist {
                 .map(ImageRef::parse)
                 .transpose()
                 .map_err(|e| StackError::Allowlist(format!("preferred image: {e}")))?;
-            if preferred.is_some() && image.role != Role::Php {
-                return Err(StackError::Allowlist(
-                    "only php images have a preferred image".to_owned(),
-                ));
+            // Ours and the official one are two images: the same one twice would make the
+            // fallback point at itself.
+            if preferred.as_ref() == Some(&reference) {
+                return Err(StackError::Allowlist(format!(
+                    "{} lists the same image twice",
+                    image.role
+                )));
             }
             let mut own_image: Option<ImageRef> = None;
             match (image.role, image.version) {
@@ -248,7 +254,13 @@ impl Allowlist {
                         image.role
                     )));
                 }
-                (_, None) => {}
+                (_, None) => {
+                    // Any other role: ours first, the official one when ours cannot be pulled.
+                    if let Some(own) = preferred {
+                        fallbacks.push((own.clone(), reference.clone()));
+                        own_image = Some(own);
+                    }
+                }
             }
             let list = by_role.entry(image.role).or_default();
             if list.contains(&reference) || own_image.as_ref().is_some_and(|o| list.contains(o)) {
@@ -1199,27 +1211,51 @@ mod tests {
         // Both may run (a container made from the fallback is not replaced).
         assert!(list.allows(Role::Php, &own) && list.allows(Role::Php, &official));
         assert_eq!(list.fallback_for(&official), None);
-        // A tag, a preferred image on the web role, or the same image twice is refused.
-        for (text, needle) in [
-            (
-                php.replace("ghcr.io/o/dhpanel-php@", "ghcr.io/o/dhpanel-php:"),
-                "preferred",
-            ),
-            (
-                format!(
-                    "[[image]]\nrole = \"web\"\npreferred = \"x@sha256:{own_d}\"\nreference = \"nginx@sha256:{digest}\"\n{php}"
-                ),
-                "only php",
-            ),
+        // A tag instead of a digest is refused.
+        let err = Allowlist::parse(&format!(
+            "{web}{}",
+            php.replace("ghcr.io/o/dhpanel-php@", "ghcr.io/o/dhpanel-php:")
+        ))
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("preferred"), "{err}");
+    }
+
+    #[test]
+    fn every_role_may_have_an_image_of_ours_with_the_official_one_as_its_fallback() {
+        let (digest, own_d) = ("a".repeat(64), "b".repeat(64));
+        let php = format!(
+            "[[image]]\nrole = \"php\"\nversion = \"8.4\"\nreference = \"php@sha256:{digest}\"\n"
+        );
+        let web = format!(
+            "[[image]]\nrole = \"web\"\npreferred = \"ghcr.io/o/dhpanel-web@sha256:{own_d}\"\nreference = \"nginx@sha256:{digest}\"\n"
+        );
+        let db = format!(
+            "[[image]]\nrole = \"db\"\npreferred = \"ghcr.io/o/dhpanel-db@sha256:{own_d}\"\nreference = \"mariadb@sha256:{digest}\"\n"
+        );
+        let list = Allowlist::parse(&format!("{web}{db}{php}")).unwrap();
+        for (role, own_name, official_name) in [
+            (Role::Web, "ghcr.io/o/dhpanel-web@", "nginx@"),
+            (Role::Db, "ghcr.io/o/dhpanel-db@", "mariadb@"),
         ] {
-            let text = if needle == "preferred" {
-                format!("{web}{text}")
-            } else {
-                text
-            };
-            let err = Allowlist::parse(&text).unwrap_err().to_string();
-            assert!(err.contains(needle), "{needle}: {err}");
+            // New stacks use ours; the official one is its fallback; both may run.
+            let own = list.current(role).unwrap().clone();
+            assert!(own.as_str().starts_with(own_name), "{role}");
+            let official = list.fallback_for(&own).unwrap().clone();
+            assert!(official.as_str().starts_with(official_name), "{role}");
+            assert!(list.allows(role, &own) && list.allows(role, &official));
+            assert_eq!(list.fallback_for(&official), None);
         }
+        // The same image twice is still refused.
+        let twice = format!(
+            "[[image]]\nrole = \"web\"\npreferred = \"nginx@sha256:{digest}\"\nreference = \"nginx@sha256:{digest}\"\n{php}"
+        );
+        assert!(
+            Allowlist::parse(&twice)
+                .unwrap_err()
+                .to_string()
+                .contains("twice")
+        );
     }
 
     #[test]

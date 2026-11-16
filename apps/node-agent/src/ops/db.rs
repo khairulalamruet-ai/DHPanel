@@ -214,10 +214,7 @@ pub async fn ensure_server_with(context: &TenantContext, public: bool) -> Result
                 .create_volume(&volume)
                 .await
                 .map_err(|e| docker_error(&e))?;
-            docker
-                .pull_image(&image)
-                .await
-                .map_err(|e| docker_error(&e))?;
+            let image = super::tenant::pull_with_fallback(docker, &allowlist, &image).await?;
             let mut spec = ContainerSpec::new(container.clone(), image);
             spec.command = vec![
                 "--skip-name-resolve=1".into(),

@@ -8,11 +8,13 @@
 # (`version`); the first PHP entry is the version new accounts start with, and
 # an account may be moved to any version listed here.
 #
-# A PHP entry may also carry `preferred`: our own image for that version (built
-# by .github/workflows/rust-images.yml from deploy/images/php, published to
-# ghcr.io, with the extensions sites usually need). It is tried first; when it
-# cannot be pulled the official image in `reference` is used, so a site never
-# waits for our registry. Add `preferred` after the workflow prints the digest.
+# An entry may also carry `preferred`: our own image for the same role (and PHP version),
+# built by .github/workflows/rust-images.yml from deploy/images/<role> (the official image
+# with its OS packages upgraded; PHP also gets the extensions sites usually need) and
+# published to ghcr.io. It is tried first; when it cannot be pulled the official image in
+# `reference` is used, so a site never waits for our registry. Add `preferred` after the
+# workflow prints the digest. The image `reference` names is also what our own image is built
+# FROM, so it is the first entry of its role that counts.
 #
 # To change an image: pull it, check it (scan, user, size), copy the digest
 # that `docker image inspect --format '{{index .RepoDigests 0}}'` prints, add it

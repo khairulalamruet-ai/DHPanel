@@ -169,10 +169,7 @@ async fn ensure_container(context: &TenantContext) -> Result<(), AgentError> {
                 .ensure_network(&front, false)
                 .await
                 .map_err(|e| docker_error(&e))?;
-            docker
-                .pull_image(&image)
-                .await
-                .map_err(|e| docker_error(&e))?;
+            let image = super::tenant::pull_with_fallback(docker, &allowlist, &image).await?;
             let mut spec = ContainerSpec::new(container.clone(), image);
             // The node's web server reaches phpMyAdmin on the machine's loopback address (a port
             // Docker picks; the agent reads it back), the same way it reaches a site.

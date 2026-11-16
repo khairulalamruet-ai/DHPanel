@@ -8,6 +8,10 @@
 ARG PHP_VERSION=8.4
 FROM php:${PHP_VERSION}-fpm-alpine
 
+# The operating system's packages, up to date (what the distribution fixed after the official
+# image was built).
+RUN apk upgrade --no-cache
+
 # https://github.com/mlocati/docker-php-extension-installer
 COPY --from=ghcr.io/mlocati/php-extension-installer:2.13.2 /usr/bin/install-php-extensions /usr/local/bin/
 

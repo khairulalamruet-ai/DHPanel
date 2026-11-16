@@ -201,10 +201,7 @@ async fn ensure_container(context: &TenantContext) -> Result<(), AgentError> {
                 .ensure_network(&network, false)
                 .await
                 .map_err(|e| docker_error(&e))?;
-            docker
-                .pull_image(&image)
-                .await
-                .map_err(|e| docker_error(&e))?;
+            let image = super::tenant::pull_with_fallback(docker, &allowlist, &image).await?;
             let mut spec = ContainerSpec::new(container.clone(), image);
             // SFTPGo works as each account's own user id, which only root can do.
             spec.user = Some((0, 0));

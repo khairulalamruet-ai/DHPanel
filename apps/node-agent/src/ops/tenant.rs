@@ -444,6 +444,39 @@ pub async fn pull_first(
     ))
 }
 
+/// Pulls `image`; when it is one of ours that cannot be pulled (the registry is down, or it
+/// has not been published), the official image listed as its fallback is pulled instead.
+/// Returns the image that is there to use.
+///
+/// # Errors
+/// The pull's error when neither can be pulled.
+pub async fn pull_with_fallback(
+    docker: &DockerManager,
+    allowlist: &Allowlist,
+    image: &ImageRef,
+) -> Result<ImageRef, AgentError> {
+    match allowlist.fallback_for(image) {
+        Some(official) => {
+            if pull_first(docker, &[image, official]).await? == 1 {
+                eprintln!(
+                    "dhpanel-agent: {} could not be pulled; using the official image",
+                    image.as_str().split('@').next().unwrap_or("image")
+                );
+                Ok(official.clone())
+            } else {
+                Ok(image.clone())
+            }
+        }
+        None => {
+            docker
+                .pull_image(image)
+                .await
+                .map_err(|e| docker_error(&e))?;
+            Ok(image.clone())
+        }
+    }
+}
+
 /// Makes a container. An image of our own that cannot be pulled (the registry is
 /// down, or it has not been published) is replaced by the official one it lists as
 /// its fallback, so a site never waits for our registry.
@@ -453,21 +486,7 @@ async fn create_container(
     allowlist: &Allowlist,
 ) -> Result<(), AgentError> {
     let mut spec = spec.clone();
-    if let Some(official) = allowlist.fallback_for(&spec.image) {
-        let chosen = pull_first(docker, &[&spec.image, official]).await?;
-        if chosen == 1 {
-            eprintln!(
-                "dhpanel-agent: {} could not be pulled; using the official image",
-                spec.image.as_str().split('@').next().unwrap_or("image")
-            );
-            spec.image = official.clone();
-        }
-    } else {
-        docker
-            .pull_image(&spec.image)
-            .await
-            .map_err(|e| docker_error(&e))?;
-    }
+    spec.image = pull_with_fallback(docker, allowlist, &spec.image).await?;
     match docker.create_container(&spec).await {
         // Another attempt created it in the meantime.
         Ok(_) | Err(DockerError::Conflict(_)) => Ok(()),
