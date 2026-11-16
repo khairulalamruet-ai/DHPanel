@@ -445,6 +445,42 @@ pub async fn records(pool: &PgPool, zone_id: Uuid) -> Result<Vec<StoredRecord>, 
         .collect())
 }
 
+/// Every DNS record of the zones of a tenant's domains, as the JSON a backup keeps
+/// (`dns.json`): `[{"zone", "name", "type", "content", "ttl", "priority"}]`, ordered.
+///
+/// # Errors
+/// Database errors.
+pub async fn backup_records(
+    pool: &PgPool,
+    tenant_id: Uuid,
+) -> Result<serde_json::Value, sqlx::Error> {
+    let rows = sqlx::query!(
+        "SELECT z.name AS zone, r.name, r.rtype, r.content, r.ttl, r.priority
+         FROM dns_zones z
+         JOIN domains d ON d.id = z.domain_id
+         JOIN dns_records r ON r.zone_id = z.id
+         WHERE d.tenant_id = $1
+         ORDER BY z.name, r.name, r.rtype, r.content",
+        tenant_id,
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(serde_json::Value::Array(
+        rows.into_iter()
+            .map(|r| {
+                serde_json::json!({
+                    "zone": r.zone,
+                    "name": r.name,
+                    "type": r.rtype,
+                    "content": r.content,
+                    "ttl": r.ttl,
+                    "priority": r.priority,
+                })
+            })
+            .collect(),
+    ))
+}
+
 /// Removes the address records (`A`, `AAAA`) of one name in a zone: what was
 /// added for a subdomain that no longer exists.
 ///

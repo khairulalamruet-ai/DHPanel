@@ -1,0 +1,88 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT z.name AS zone, r.name, r.rtype, r.content, r.ttl, r.priority\n         FROM dns_zones z\n         JOIN domains d ON d.id = z.domain_id\n         JOIN dns_records r ON r.zone_id = z.id\n         WHERE d.tenant_id = $1\n         ORDER BY z.name, r.name, r.rtype, r.content",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "zone",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "dns_zones",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "dns_records",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "rtype",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "dns_records",
+            "name": "rtype"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "content",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "dns_records",
+            "name": "content"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "ttl",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "dns_records",
+            "name": "ttl"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "priority",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "dns_records",
+            "name": "priority"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "beaa88ef7c48be5003c936b561242ff2e3d50318f4d2c4b381138bc933b7964b"
+}

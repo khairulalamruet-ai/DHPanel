@@ -80,7 +80,49 @@ async fn schedules_make_backups_and_retention_removes_the_old_ones(pool: PgPool)
         .await
         .unwrap();
     }
+    // Alpha has a domain with a zone: its records go into the backup (T09.07).
+    let domain: Uuid = sqlx::query_scalar(
+        "INSERT INTO domains (tenant_id, fqdn, kind) VALUES ($1, 'alpha.example', 'primary') RETURNING id",
+    )
+    .bind(t1)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let zone: Uuid = sqlx::query_scalar(
+        "INSERT INTO dns_zones (domain_id, name) VALUES ($1, 'alpha.example') RETURNING id",
+    )
+    .bind(domain)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    for (name, rtype, content, priority) in [
+        ("@", "A", "203.0.113.7", None),
+        ("@", "MX", "mail.alpha.example", Some(10)),
+    ] {
+        sqlx::query("INSERT INTO dns_records (zone_id, name, rtype, content, ttl, priority) VALUES ($1, $2, $3, $4, 300, $5)")
+            .bind(zone)
+            .bind(name)
+            .bind(rtype)
+            .bind(content)
+            .bind(priority)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
     tick(&pool, &key, NOW).await.unwrap();
+    let alpha_dns: Value = sqlx::query_scalar(
+        "SELECT payload -> 'dns' FROM operations WHERE kind = 'create_backup' AND tenant_id = $1",
+    )
+    .bind(t1)
+    .fetch_optional(&pool)
+    .await
+    .unwrap()
+    .unwrap_or(Value::Null);
+    let records = alpha_dns.as_array().cloned().unwrap_or_default();
+    assert_eq!(records.len(), 2, "{alpha_dns}");
+    assert_eq!(records[0]["zone"], "alpha.example");
+    assert_eq!(records[0]["type"], "A");
+    assert_eq!(records[1]["priority"], 10);
     // Two at a time on one node: the third waits, still due.
     let queued: Vec<(Uuid, String)> = sqlx::query_as(
         "SELECT id, status FROM backups WHERE trigger = 'schedule' ORDER BY created_at",

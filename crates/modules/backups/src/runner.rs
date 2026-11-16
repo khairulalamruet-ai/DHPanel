@@ -175,8 +175,8 @@ async fn send_queued(db: &PgPool) -> Result<(), TickError> {
             credentials: None,
             key: None,
             databases,
-            // TODO(T09.07): the zone records of the account's domains.
-            dns: serde_json::json!([]),
+            // The zone records of the account's domains.
+            dns: dhpanel_database::dns::backup_records(db, tenant.id).await?,
             meta: serde_json::json!({
                 "username": tenant.username,
                 "plan_id": tenant.plan_id,
