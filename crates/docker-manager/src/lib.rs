@@ -447,6 +447,23 @@ impl DockerManager {
             .map_err(map_error)
     }
 
+    /// Gives a container we created another name (it keeps running; on its networks the new
+    /// name is what resolves from then on). For swapping a new container in place of an old one.
+    ///
+    /// # Errors
+    /// [`DockerError::NotFound`], [`DockerError::NotManaged`], [`DockerError::Conflict`] when the
+    /// new name is taken, [`DockerError::Api`].
+    pub async fn rename(&self, from: &Name, to: &Name) -> Result<(), DockerError> {
+        self.require_managed_container(from).await?;
+        let options = bollard::query_parameters::RenameContainerOptionsBuilder::default()
+            .name(to.as_str())
+            .build();
+        self.docker
+            .rename_container(from.as_str(), options)
+            .await
+            .map_err(map_error)
+    }
+
     /// Removes a container we created (killing it first if `force`). Its
     /// anonymous volumes go with it; named volumes stay.
     ///

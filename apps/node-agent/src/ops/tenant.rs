@@ -21,14 +21,14 @@ use std::{
 };
 
 use dhpanel_docker_manager::{
-    ContainerSpec, DockerError, DockerManager, ImageRef, Name, Network, VolumeMount,
+    ContainerSpec, DockerError, DockerManager, ImageRef, Name, Network, NginxCommand, VolumeMount,
 };
 use dhpanel_domain::{TenantUsername, UidRange};
 use dhpanel_node_protocol::{AgentError, ErrorCode, Operation, Output};
 use dhpanel_priv_helper::protocol::{Action, ErrorCode as HelperCode, Request, Response};
 use dhpanel_tenant_stack::{
     Allowlist, PlanResources, Role, Tenant, conf_volume_name, files_volume_name, network_name,
-    php_ini_volume_name, plan_limits, render,
+    php_ini_volume_name, plan_limits, render, web_container_name,
 };
 use uuid::Uuid;
 
@@ -330,15 +330,7 @@ async fn converge_stack(
                         .fallback_for(&spec.image)
                         .is_none_or(|official| info.image != official.as_str()) =>
             {
-                docker
-                    .stop(&spec.name, STOP_GRACE)
-                    .await
-                    .map_err(|e| docker_error(&e))?;
-                docker
-                    .remove(&spec.name, true)
-                    .await
-                    .map_err(|e| docker_error(&e))?;
-                create_container(docker, spec, &allowlist).await?;
+                roll_php(docker, username, spec, &allowlist).await?;
             }
             Ok(info) => {
                 // A change of the plan or of the number of PHP versions changes the share.
@@ -369,6 +361,56 @@ async fn converge_stack(
         }
     }
     Ok((started, removed))
+}
+
+/// Replaces a PHP container by one of another image without a gap (T11.12): the new one is
+/// pulled, created and started beside the old one under a temporary name and must be healthy;
+/// only then the names are swapped (the old one is renamed away, the new one takes the name the
+/// web server resolves) and the old one is stopped and removed. The site is without PHP for the
+/// moment between the two renames, not for a pull, a stop and a start.
+async fn roll_php(
+    docker: &DockerManager,
+    username: &TenantUsername,
+    spec: &dhpanel_docker_manager::ContainerSpec,
+    allowlist: &Allowlist,
+) -> Result<(), AgentError> {
+    let name = spec.name.as_str();
+    let next = Name::parse(&format!("{name}-next")).map_err(|e| invalid_arg(&e.to_string()))?;
+    let old = Name::parse(&format!("{name}-old")).map_err(|e| invalid_arg(&e.to_string()))?;
+    // What an earlier, interrupted roll left behind.
+    for leftover in [&next, &old] {
+        gone_is_fine(docker.remove(leftover, true).await)?;
+    }
+    let mut incoming = spec.clone();
+    incoming.name = next.clone();
+    create_container(docker, &incoming, allowlist).await?;
+    docker.start(&next).await.map_err(|e| docker_error(&e))?;
+    if let Err(e) = wait_healthy(docker, &next).await {
+        // The old one is still serving: keep it, drop the newcomer, report the failure.
+        gone_is_fine(docker.remove(&next, true).await)?;
+        return Err(e);
+    }
+    docker
+        .rename(&spec.name, &old)
+        .await
+        .map_err(|e| docker_error(&e))?;
+    docker
+        .rename(&next, &spec.name)
+        .await
+        .map_err(|e| docker_error(&e))?;
+    // The web server looked the PHP name up when it read its configuration: it has to read it
+    // again to find the new container (best effort; a web server that is not running reads it
+    // when it starts).
+    if let Ok(web) = web_container_name(username) {
+        let _ = docker.run_nginx(&web, NginxCommand::Reload).await;
+    }
+    // The old one goes quietly: its requests finish, then it is removed.
+    docker
+        .stop(&old, STOP_GRACE)
+        .await
+        .map_err(|e| docker_error(&e))?;
+    gone_is_fine(docker.remove(&old, true).await)?;
+    Ok(())
 }
 
 /// Pulls the first of `candidates` that can be pulled and says which it was.

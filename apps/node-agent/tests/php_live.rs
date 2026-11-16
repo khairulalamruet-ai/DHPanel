@@ -241,10 +241,54 @@ async fn the_main_php_changes_version_another_runs_beside_it_and_extras_are_remo
     .unwrap_err();
     assert_eq!(err.code, ErrorCode::InvalidArguments);
 
-    // The main container moves to 8.3: its files stay, the site follows.
+    // The main container moves to 8.3: its files stay, the site follows. A visitor asks the site
+    // ten times a second while it happens: the site may be without PHP for a moment, never for
+    // five seconds (T11.12).
+    let visitor = Name::parse(&format!("dh-{owner}-visitor")).unwrap();
+    let watching = {
+        let (docker, owner, visitor) = (docker.clone(), owner.clone(), visitor.clone());
+        tokio::spawn(async move {
+            let mut spec = ContainerSpec::new(visitor, ImageRef::parse(BUSYBOX).unwrap());
+            spec.command = vec![
+                "sh".into(),
+                "-c".into(),
+                format!(
+                    "i=0; while [ $i -lt 1500 ]; do if wget -q -T 1 -O /dev/null --header 'Host: one.example.com' http://dh-{owner}-web:8080/index.php; then echo up; else echo down; fi; i=$((i+1)); sleep 0.1; done"
+                ),
+            ];
+            spec.network = Network::Named(network_name(&owner).unwrap());
+            docker
+                .run_to_end(&spec, Duration::from_secs(300))
+                .await
+                .unwrap()
+                .output
+        })
+    };
+    tokio::time::sleep(Duration::from_secs(2)).await;
     let moved = set_php_versions(context.clone(), limits("8.3", &[]))
         .await
         .unwrap();
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    docker.stop(&visitor, Duration::from_secs(1)).await.unwrap();
+    let seen_by_visitor = watching.await.unwrap();
+    let (mut longest, mut run, mut ups) = (0, 0, 0);
+    for line in seen_by_visitor.lines() {
+        if line.trim() == "down" {
+            run += 1;
+            longest = longest.max(run);
+        } else if line.trim() == "up" {
+            run = 0;
+            ups += 1;
+        }
+    }
+    eprintln!("visitor: {ups} answers, longest run of failures: {longest}");
+    assert!(ups > 20, "the visitor really watched: {seen_by_visitor}");
+    // A failed request takes up to a second (the visitor's timeout) and a tenth more to repeat.
+    assert!(
+        f64::from(longest) * 1.1 < 5.0,
+        "the site was without PHP for about {} seconds",
+        f64::from(longest) * 1.1
+    );
     assert_eq!(
         moved,
         Output::PhpVersionsSet {
