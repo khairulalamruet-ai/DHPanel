@@ -1,0 +1,192 @@
+//! Failure injection against the operations ledger (T19.06): while workers keep claiming
+//! operations, nodes are unreachable, answers get lost, nodes vanish after taking a job and
+//! answer late, and the janitor times jobs out. Whatever happens, no operation is lost and
+//! every one ends up done exactly once in the ledger.
+//! Ignored by default; run with DATABASE_URL (superuser) and `--include-ignored`.
+#![allow(clippy::expect_used, clippy::unwrap_used)]
+
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
+
+use dhpanel_database::operations as ledger;
+use dhpanel_node_protocol::Operation;
+use dhpanel_operations::{Operations, Request};
+use serde_json::json;
+use sqlx::PgPool;
+use uuid::Uuid;
+
+/// A small deterministic generator, so a failing run can be repeated.
+struct Rng(u64);
+impl Rng {
+    fn next(&mut self) -> u64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        self.0
+    }
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs PostgreSQL"]
+async fn no_operation_is_lost_when_nodes_and_answers_go_missing(pool: PgPool) {
+    let mut nodes = Vec::new();
+    for name in ["chaos-a", "chaos-b"] {
+        let id: Uuid = sqlx::query_scalar("INSERT INTO nodes (name) VALUES ($1) RETURNING id")
+            .bind(name)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        nodes.push(id);
+    }
+    let ops = Operations::new(pool.clone());
+    let total = 200u64;
+    for i in 0..total {
+        let mut request = Request::new(
+            nodes[(i % 2) as usize],
+            Operation::Ping { nonce: i },
+            format!("chaos-{i}"),
+        );
+        // Plenty of deliveries: running out of them is a visible failure, tested below.
+        request.max_attempts = 20;
+        ops.enqueue(&request).await.unwrap();
+    }
+
+    // What the nodes did (a job may run more than once: the agent's jobs are idempotent) and
+    // how often the ledger accepted an answer for each job.
+    let ran: Arc<Mutex<HashMap<Uuid, u32>>> = Arc::default();
+    let accepted: Arc<Mutex<HashMap<Uuid, u32>>> = Arc::default();
+
+    // Chaos: four workers, a janitor, and a fate for every job they claim.
+    let mut workers = Vec::new();
+    for seed in 1..=4u64 {
+        let (pool, nodes) = (pool.clone(), nodes.clone());
+        let (ran, accepted) = (ran.clone(), accepted.clone());
+        workers.push(tokio::spawn(async move {
+            let mut rng = Rng(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15));
+            for round in 0..40 {
+                for op in ledger::claim_due(&pool, &nodes, 5).await.unwrap() {
+                    match rng.next() % 6 {
+                        // The node is unreachable: nothing was sent.
+                        0 => {
+                            ledger::release_undelivered(&pool, op.id).await.unwrap();
+                        }
+                        // Sent, and the node died before it did anything.
+                        1 => {}
+                        // The node did it and the answer arrived.
+                        2 => {
+                            *ran.lock().unwrap().entry(op.id).or_default() += 1;
+                            if ledger::succeed(&pool, op.id, &json!({"ok": true}))
+                                .await
+                                .unwrap()
+                            {
+                                *accepted.lock().unwrap().entry(op.id).or_default() += 1;
+                            }
+                        }
+                        // The node did it, and the answer was lost on the way.
+                        3 => *ran.lock().unwrap().entry(op.id).or_default() += 1,
+                        // The node tried and said "not now".
+                        4 => {
+                            let error =
+                                json!({"code": "busy", "message": "later", "retryable": true});
+                            ledger::fail(&pool, op.id, &error, Some(0)).await.unwrap();
+                        }
+                        // The node did it, but the answer came after the janitor gave up.
+                        _ => {
+                            *ran.lock().unwrap().entry(op.id).or_default() += 1;
+                            tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+                            if ledger::succeed(&pool, op.id, &json!({"ok": true, "late": true}))
+                                .await
+                                .unwrap()
+                            {
+                                *accepted.lock().unwrap().entry(op.id).or_default() += 1;
+                            }
+                        }
+                    }
+                }
+                if round % 3 == 0 {
+                    // Dispatched and never answered: back in the queue.
+                    ledger::time_out_dispatched(&pool, 0, 0).await.unwrap();
+                }
+            }
+        }));
+    }
+    for worker in workers {
+        worker.await.unwrap();
+    }
+
+    // Calm: the nodes are back and answer everything; the janitor still runs.
+    for _ in 0..300 {
+        let open: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM operations WHERE status NOT IN ('succeeded', 'failed')",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        if open == 0 {
+            break;
+        }
+        for op in ledger::claim_due(&pool, &nodes, 50).await.unwrap() {
+            *ran.lock().unwrap().entry(op.id).or_default() += 1;
+            if ledger::succeed(&pool, op.id, &json!({"ok": true}))
+                .await
+                .unwrap()
+            {
+                *accepted.lock().unwrap().entry(op.id).or_default() += 1;
+            }
+        }
+        ledger::time_out_dispatched(&pool, 0, 0).await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+
+    // Nothing was lost: every job is finished, none failed, none still waiting.
+    let by_status: Vec<(String, i64)> =
+        sqlx::query_as("SELECT status::text, count(*) FROM operations GROUP BY 1")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        by_status,
+        vec![("succeeded".to_owned(), total as i64)],
+        "{by_status:?}"
+    );
+    // Each job was accepted exactly once, however many times it ran or answered.
+    let accepted = accepted.lock().unwrap();
+    let ran = ran.lock().unwrap();
+    assert_eq!(accepted.len() as u64, total);
+    assert!(accepted.values().all(|n| *n == 1), "{accepted:?}");
+    // And every accepted job really was run by a node.
+    assert!(accepted.keys().all(|id| ran.contains_key(id)));
+    let reruns = ran.values().filter(|n| **n > 1).count();
+    eprintln!("{reruns} of {total} jobs ran more than once (at-least-once delivery)");
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs PostgreSQL"]
+async fn a_job_nobody_can_deliver_in_time_fails_visibly_instead_of_hanging(pool: PgPool) {
+    let node: Uuid = sqlx::query_scalar("INSERT INTO nodes (name) VALUES ('chaos-c') RETURNING id")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let ops = Operations::new(pool.clone());
+    let mut request = Request::new(node, Operation::Ping { nonce: 1 }, "doomed");
+    request.ttl = std::time::Duration::from_secs(1);
+    ops.enqueue(&request).await.unwrap();
+    // The node stays away until the job is past its time.
+    tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+    assert!(
+        ledger::claim_due(&pool, &[node], 10)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(ledger::expire_overdue(&pool).await.unwrap(), 1);
+    let (status, error): (String, serde_json::Value) =
+        sqlx::query_as("SELECT status::text, error FROM operations")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(status, "failed");
+    assert_eq!(error["code"], "expired");
+}
