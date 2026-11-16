@@ -324,6 +324,37 @@ async fn accounts_see_only_their_own_files_over_sftp_and_ftps() {
         "{none:?}"
     );
 
+    // Brute-force protection (T11.07): ten failed logins from one address ban that address
+    // only. The loopback address and the machine's own public address are two different
+    // clients to SFTPGo, provided the real source address reaches the container.
+    let public = String::from_utf8(Command::new("hostname").arg("-I").output().unwrap().stdout)
+        .unwrap()
+        .split_whitespace()
+        .find(|ip| ip.contains('.') && !ip.starts_with("127.") && !ip.starts_with("172."))
+        .map(str::to_owned);
+    if let Some(public) = public {
+        let url =
+            |host: &str, pass: &str| format!("sftp://bob_site:{pass}@{host}:{}/", sftp_port());
+        let (code, _) = curl(&["--list-only", &url("127.0.0.1", pw)]);
+        assert_eq!(code, 0, "a good login works before the failures");
+        for _ in 0..12 {
+            let (code, _) = curl(&["--list-only", &url("127.0.0.1", "wrong-password")]);
+            assert_ne!(code, 0);
+        }
+        let (code, _) = curl(&["--list-only", &url("127.0.0.1", pw)]);
+        assert_ne!(
+            code, 0,
+            "the address with ten failures is banned, even with the right password"
+        );
+        let (code, listing) = curl(&["--list-only", &url(&public, pw)]);
+        assert_eq!(
+            code, 0,
+            "another address is not affected by that ban: {listing}"
+        );
+    } else {
+        eprintln!("brute-force check skipped: no public address on this machine");
+    }
+
     let _ = docker.remove(&Name::parse(CONTAINER).unwrap(), true).await;
     for v in ["dh-sftpgo-data", "dh-sftpgo-certs", "dh-sftpgo-tenants"] {
         let _ = docker.remove_volume(&Name::parse(v).unwrap()).await;

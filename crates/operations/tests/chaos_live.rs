@@ -117,7 +117,9 @@ async fn no_operation_is_lost_when_nodes_and_answers_go_missing(pool: PgPool) {
     }
 
     // Calm: the nodes are back and answer everything; the janitor still runs.
-    for _ in 0..300 {
+    // Bounded by time, not by rounds: on a busy machine a round takes far longer.
+    let calm_until = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while std::time::Instant::now() < calm_until {
         let open: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM operations WHERE status NOT IN ('succeeded', 'failed')",
         )

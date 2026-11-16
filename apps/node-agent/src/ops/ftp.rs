@@ -265,6 +265,25 @@ async fn ensure_container(context: &TenantContext) -> Result<(), AgentError> {
             );
             env.insert("SFTPGO_WEBDAVD__BINDINGS__0__PORT".into(), "0".into());
             env.insert("SFTPGO_TELEMETRY__BIND_PORT".into(), "0".into());
+            // Brute-force protection (T11.07): ten failed logins from one address ban that
+            // address for an hour. This only counts correctly when the real client address
+            // reaches the container, which the installer arranges for the agent's rootless
+            // Docker (port driver slirp4netns); with another driver every client would look
+            // like the bridge gateway and one bad actor would lock everybody out.
+            for (key, value) in [
+                ("ENABLED", "true"),
+                ("DRIVER", "memory"),
+                ("BAN_TIME", "60"),
+                ("BAN_TIME_INCREMENT", "100"),
+                ("THRESHOLD", "10"),
+                ("OBSERVATION_TIME", "60"),
+                ("SCORE_VALID", "1"),
+                ("SCORE_INVALID", "1"),
+                ("SCORE_NO_AUTH", "0"),
+                ("SCORE_LIMIT_EXCEEDED", "1"),
+            ] {
+                env.insert(format!("SFTPGO_COMMON__DEFENDER__{key}"), value.into());
+            }
             spec.memory_bytes = 512 * MIB;
             spec.cpu_millis = 1000;
             spec.pids_limit = 512;

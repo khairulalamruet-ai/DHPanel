@@ -177,6 +177,20 @@ if [ "$rootless" -eq 1 ]; then
   }
   say "setting up rootless Docker for $AGENT_USER"
   as_agent dockerd-rootless-setuptool.sh install >/dev/null
+  # The real address of a visitor must reach the containers (the SFTP server counts failed
+  # logins per address, T11.07). Rootless Docker's default port driver (builtin) shows every
+  # container the bridge gateway instead; slirp4netns passes the true source address on.
+  dropin="$STATE_DIR/home/.config/systemd/user/docker.service.d"
+  want=$'[Service]\nEnvironment=DOCKERD_ROOTLESS_ROOTLESSKIT_PORT_DRIVER=slirp4netns\n'
+  if [ "$(cat "$dropin/port-driver.conf" 2>/dev/null)" != "${want%$'\n'}" ]; then
+    say "using the slirp4netns port driver so containers see real client addresses"
+    as_agent mkdir -p "$dropin"
+    printf '%s' "$want" | as_agent tee "$dropin/port-driver.conf" >/dev/null
+    as_agent systemctl --user daemon-reload >/dev/null 2>&1 || true
+    # A running daemon picks the driver up only on a restart (its containers are recreated
+    # by the agent's next convergence); a fresh install is started below.
+    as_agent systemctl --user is-active --quiet docker && as_agent systemctl --user restart docker >/dev/null 2>&1 || true
+  fi
   as_agent systemctl --user enable --now docker >/dev/null 2>&1 || true
   for _ in $(seq 1 30); do
     [ -S "/run/user/${AGENT_UID}/docker.sock" ] && break
