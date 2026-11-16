@@ -1,0 +1,41 @@
+[package]
+name = "dhpanel-license-authority"
+description = "DHPanel license authority: customers, licenses, activations and signed entitlements."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "dhpanel_license_authority"
+path = "src/lib.rs"
+
+[[bin]]
+name = "dhpanel-license-authority"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+dhpanel-auth-core.workspace = true
+dhpanel-http-kit.workspace = true
+dhpanel-license.workspace = true
+dhpanel-observability.workspace = true
+axum = "0.8"
+base64 = "0.23"
+figment = { version = "0.10", features = ["toml", "env"] }
+secrecy = { version = "0.10", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11"
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "postgres", "uuid", "json", "migrate", "macros"] }
+thiserror = "2.0.21"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "net", "time"] }
+tracing = "0.1.44"
+uuid = { version = "1", features = ["serde", "v4", "v7"] }
+
+[dev-dependencies]
+figment = { version = "0.10", features = ["toml", "env", "test"] }
+tower = { version = "0.5", features = ["util"] }

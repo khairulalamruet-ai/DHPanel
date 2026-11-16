@@ -1,0 +1,835 @@
+//! The license authority over HTTP against a real PostgreSQL (T17.01-T17.05, T17.08).
+//! Ignored by default; run with DATABASE_URL and `--include-ignored`.
+#![allow(clippy::expect_used, clippy::unwrap_used)]
+
+use std::sync::Arc;
+
+use axum::{
+    Router,
+    body::Body,
+    http::{Request, StatusCode, header},
+};
+use base64::{
+    Engine as _,
+    engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
+};
+use dhpanel_auth_core::password::{Argon2Params, PasswordHasher};
+use dhpanel_license::{Document, Expect, FileSigningKey, PublicKeys, SigningKey as _};
+use dhpanel_license_authority::{
+    LaState, Settings, config::LaConfig, public::proof_message, register_key, router,
+};
+use secrecy::SecretString;
+use serde_json::{Value, json};
+use sqlx::PgPool;
+use tower::ServiceExt as _;
+use uuid::Uuid;
+
+struct Env {
+    app: Router,
+    key_dir: std::path::PathBuf,
+}
+
+async fn env(pool: &PgPool) -> Env {
+    let key_dir = std::env::temp_dir().join(format!("dh-la-{}", Uuid::new_v4().simple()));
+    std::fs::create_dir_all(&key_dir).unwrap();
+    let key =
+        FileSigningKey::generate_to_file(&key_dir.join("license-1.key"), "license-1").unwrap();
+    register_key(pool, &key).await.unwrap();
+    let config = LaConfig {
+        signing_key_file: key_dir.join("license-1.key"),
+        ..LaConfig::default()
+    };
+    let state = LaState {
+        db: pool.clone(),
+        signer: Arc::new(std::sync::RwLock::new(Arc::new(key))),
+        settings: Settings::from_config(&config),
+        hasher: Arc::new(
+            PasswordHasher::new(Argon2Params {
+                memory_kib: 19 * 1024,
+                iterations: 2,
+                parallelism: 1,
+            })
+            .unwrap(),
+        ),
+    };
+    Env {
+        app: router(state),
+        key_dir,
+    }
+}
+
+async fn call(
+    app: &Router,
+    method: &str,
+    path: &str,
+    token: Option<&str>,
+    body: Option<Value>,
+) -> (StatusCode, Value) {
+    call_with(app, method, path, token, body, &[]).await
+}
+
+async fn call_with(
+    app: &Router,
+    method: &str,
+    path: &str,
+    token: Option<&str>,
+    body: Option<Value>,
+    headers: &[(&str, &str)],
+) -> (StatusCode, Value) {
+    let mut req = Request::builder().method(method).uri(path);
+    if let Some(t) = token {
+        req = req.header(header::AUTHORIZATION, format!("Bearer {t}"));
+    }
+    for (k, v) in headers {
+        req = req.header(*k, *v);
+    }
+    let req = match body {
+        Some(v) => req
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(v.to_string()))
+            .unwrap(),
+        None => req.body(Body::empty()).unwrap(),
+    };
+    let res = app.clone().oneshot(req).await.unwrap();
+    let status = res.status();
+    let bytes = axum::body::to_bytes(res.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    (
+        status,
+        serde_json::from_slice(&bytes)
+            .unwrap_or_else(|_| Value::String(String::from_utf8_lossy(&bytes).into_owned())),
+    )
+}
+
+async fn admin(pool: &PgPool, env: &Env, email: &str, role: &str) -> String {
+    let hasher = PasswordHasher::new(Argon2Params {
+        memory_kib: 19 * 1024,
+        iterations: 2,
+        parallelism: 1,
+    })
+    .unwrap();
+    let hash = hasher
+        .hash(&SecretString::from("a-long-admin-password".to_owned()))
+        .unwrap();
+    sqlx::query("INSERT INTO admin_users (email, password_hash, role) VALUES ($1, $2, $3)")
+        .bind(email)
+        .bind(hash)
+        .bind(role)
+        .execute(pool)
+        .await
+        .unwrap();
+    let (status, session) = call(
+        &env.app,
+        "POST",
+        "/api/v1/admin/login",
+        None,
+        Some(json!({"email": email, "password": "a-long-admin-password"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{session}");
+    session["token"].as_str().unwrap().to_owned()
+}
+
+/// A license of a plan allowing `max` installations.
+async fn license(env: &Env, token: &str, max: i32, features: &[&str]) -> (String, String) {
+    let (_, customer) = call(
+        &env.app,
+        "POST",
+        "/api/v1/admin/customers",
+        Some(token),
+        Some(json!({"name": "Acme", "email": format!("{}@acme.example", Uuid::new_v4().simple())})),
+    )
+    .await;
+    let (_, product) = call(&env.app, "POST", "/api/v1/admin/products", Some(token), Some(json!({"slug": format!("p{}", &Uuid::new_v4().simple().to_string()[..8]), "name": "DHPanel"}))).await;
+    let (status, plan) = call(
+        &env.app,
+        "POST",
+        "/api/v1/admin/plans",
+        Some(token),
+        Some(json!({"product_id": product["id"], "name": "Pro", "features": features, "limits": {"max_nodes": 3, "max_tenants": -1}, "max_activations": max, "valid_days": 365})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{plan}");
+    let (status, made) = call(
+        &env.app,
+        "POST",
+        "/api/v1/admin/licenses",
+        Some(token),
+        Some(json!({"customer_id": customer["id"], "plan_id": plan["id"]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{made}");
+    (
+        made["license"]["id"].as_str().unwrap().to_owned(),
+        made["key"].as_str().unwrap().to_owned(),
+    )
+}
+
+/// An installation: an identity key pair that signs what the authority asks for.
+struct Installation {
+    id: Uuid,
+    key: FileSigningKey,
+}
+
+impl Installation {
+    fn new(dir: &std::path::Path) -> Self {
+        let id = Uuid::new_v4();
+        Self {
+            id,
+            key: FileSigningKey::generate_to_file(&dir.join(format!("{id}.key")), "installation")
+                .unwrap(),
+        }
+    }
+
+    async fn nonce(&self, env: &Env) -> String {
+        let (status, c) = call(
+            &env.app,
+            "POST",
+            "/api/v1/licenses/challenge",
+            None,
+            Some(json!({"installation_id": self.id})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{c}");
+        c["nonce"].as_str().unwrap().to_owned()
+    }
+
+    fn sign(&self, purpose: &str, nonce: &str, extra: Option<&str>) -> String {
+        URL_SAFE_NO_PAD.encode(
+            self.key
+                .sign(&proof_message(purpose, nonce, self.id, extra))
+                .unwrap(),
+        )
+    }
+
+    async fn activate(&self, env: &Env, key: &str) -> (StatusCode, Value) {
+        let nonce = self.nonce(env).await;
+        let hash: String = dhpanel_license_authority::sha256(key.trim())
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        call(
+            &env.app,
+            "POST",
+            "/api/v1/licenses/activate",
+            None,
+            Some(json!({"license_key": key, "installation_id": self.id, "public_key": STANDARD.encode(self.key.public_key()),
+                        "nonce": nonce, "signature": self.sign("activate", &nonce, Some(&hash)), "hostname": "panel.example"})),
+        )
+        .await
+    }
+
+    async fn ask(&self, env: &Env, what: &str) -> (StatusCode, Value) {
+        let nonce = self.nonce(env).await;
+        call(
+            &env.app,
+            "POST",
+            &format!("/api/v1/licenses/{what}"),
+            None,
+            Some(json!({"installation_id": self.id, "nonce": nonce, "signature": self.sign(what, &nonce, None)})),
+        )
+        .await
+    }
+}
+
+async fn bundle(env: &Env) -> PublicKeys {
+    let (status, text) = call(&env.app, "GET", "/api/v1/public-keys", None, None).await;
+    assert_eq!(status, StatusCode::OK);
+    PublicKeys::parse(text.as_str().unwrap()).unwrap()
+}
+
+fn expect(inst: Uuid) -> Expect<'static> {
+    Expect {
+        issuer: "dhpanel-la",
+        audience: "dhpanel",
+        installation_id: inst,
+        clock_skew: 120,
+    }
+}
+
+fn now() -> i64 {
+    i64::try_from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs(),
+    )
+    .unwrap()
+}
+
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "needs PostgreSQL"]
+async fn administrators_sign_in_and_manage_customers_plans_and_licenses(pool: PgPool) {
+    let e = env(&pool).await;
+    let (status, _) = call(
+        &e.app,
+        "POST",
+        "/api/v1/admin/login",
+        None,
+        Some(json!({"email": "nobody@example.com", "password": "whatever-whatever"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        call(&e.app, "GET", "/api/v1/admin/customers", None, None)
+            .await
+            .0,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        call(
+            &e.app,
+            "GET",
+            "/api/v1/admin/customers",
+            Some("not-a-token"),
+            None
+        )
+        .await
+        .0,
+        StatusCode::UNAUTHORIZED
+    );
+    let root = admin(&pool, &e, "root@example.com", "admin").await;
+    let viewer = admin(&pool, &e, "look@example.com", "viewer").await;
+    let (id, key) = license(&e, &root, 2, &["resellers"]).await;
+    // The key is shown once, in its form; only a hash is kept.
+    assert!(
+        key.starts_with("DHP-") && key.len() == 4 + 5 * 4 + 3,
+        "{key}"
+    );
+    let stored: i64 = sqlx::query_scalar("SELECT count(*) FROM licenses WHERE key_hint = $1")
+        .bind(key.rsplit('-').next().unwrap())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(stored, 1);
+    let leaked: i64 = sqlx::query_scalar("SELECT count(*) FROM (SELECT row_to_json(l)::text t FROM licenses l) x WHERE t LIKE '%' || $1 || '%'").bind(&key).fetch_one(&pool).await.unwrap();
+    assert_eq!(leaked, 0, "the key itself is not stored");
+    let (_, detail) = call(
+        &e.app,
+        "GET",
+        &format!("/api/v1/admin/licenses/{id}"),
+        Some(&root),
+        None,
+    )
+    .await;
+    assert_eq!(detail["license"]["status"], "active");
+    assert!(detail["license"]["expires_at"].as_i64().unwrap() > now() + 300 * 86_400);
+    // A viewer reads but changes nothing.
+    assert_eq!(
+        call(&e.app, "GET", "/api/v1/admin/licenses", Some(&viewer), None)
+            .await
+            .0,
+        StatusCode::OK
+    );
+    let (status, got) = call(
+        &e.app,
+        "POST",
+        &format!("/api/v1/admin/licenses/{id}/suspend"),
+        Some(&viewer),
+        None,
+    )
+    .await;
+    assert_eq!(
+        (status, got["code"].as_str()),
+        (StatusCode::FORBIDDEN, Some("viewer_cannot_change"))
+    );
+    // suspend, resume, revoke, renew.
+    let (status, s) = call(
+        &e.app,
+        "POST",
+        &format!("/api/v1/admin/licenses/{id}/suspend"),
+        Some(&root),
+        Some(json!({"note": "unpaid"})),
+    )
+    .await;
+    assert_eq!(
+        (status, s["status"].as_str(), s["status_note"].as_str()),
+        (StatusCode::OK, Some("suspended"), Some("unpaid")),
+        "{s}"
+    );
+    assert_eq!(
+        call(
+            &e.app,
+            "POST",
+            &format!("/api/v1/admin/licenses/{id}/suspend"),
+            Some(&root),
+            None
+        )
+        .await
+        .0,
+        StatusCode::CONFLICT
+    );
+    assert_eq!(
+        call(
+            &e.app,
+            "POST",
+            &format!("/api/v1/admin/licenses/{id}/resume"),
+            Some(&root),
+            None
+        )
+        .await
+        .1["status"],
+        "active"
+    );
+    let (_, before) = call(
+        &e.app,
+        "GET",
+        &format!("/api/v1/admin/licenses/{id}"),
+        Some(&root),
+        None,
+    )
+    .await;
+    let (_, renewed) = call(
+        &e.app,
+        "POST",
+        &format!("/api/v1/admin/licenses/{id}/renew"),
+        Some(&root),
+        Some(json!({"days": 30})),
+    )
+    .await;
+    assert_eq!(
+        renewed["expires_at"].as_i64().unwrap() - before["license"]["expires_at"].as_i64().unwrap(),
+        30 * 86_400
+    );
+    assert_eq!(
+        call(
+            &e.app,
+            "POST",
+            &format!("/api/v1/admin/licenses/{id}/renew"),
+            Some(&root),
+            Some(json!({"days": 30, "expires_at": 5}))
+        )
+        .await
+        .0,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    let (status, r) = call(
+        &e.app,
+        "POST",
+        &format!("/api/v1/admin/licenses/{id}/revoke"),
+        Some(&root),
+        Some(json!({"note": "chargeback"})),
+    )
+    .await;
+    assert_eq!(
+        (status, r["status"].as_str()),
+        (StatusCode::OK, Some("revoked"))
+    );
+    assert_eq!(
+        call(
+            &e.app,
+            "POST",
+            &format!("/api/v1/admin/licenses/{id}/renew"),
+            Some(&root),
+            Some(json!({"days": 30}))
+        )
+        .await
+        .0,
+        StatusCode::CONFLICT,
+        "a revoked license stays revoked"
+    );
+    let revocations: i64 = sqlx::query_scalar("SELECT count(*) FROM revocations")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(revocations, 1);
+    // Bad input, a duplicate, the audit trail.
+    assert_eq!(
+        call(
+            &e.app,
+            "POST",
+            "/api/v1/admin/customers",
+            Some(&root),
+            Some(json!({"name": "", "email": "x@y.z"}))
+        )
+        .await
+        .0,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    let (_, c) = call(
+        &e.app,
+        "POST",
+        "/api/v1/admin/customers",
+        Some(&root),
+        Some(json!({"name": "A", "email": "dup@acme.example"})),
+    )
+    .await;
+    assert!(c["id"].is_string());
+    assert_eq!(
+        call(
+            &e.app,
+            "POST",
+            "/api/v1/admin/customers",
+            Some(&root),
+            Some(json!({"name": "B", "email": "DUP@acme.example"}))
+        )
+        .await
+        .0,
+        StatusCode::CONFLICT
+    );
+    let (_, audit) = call(&e.app, "GET", "/api/v1/admin/audit", Some(&root), None).await;
+    let actions: Vec<&str> = audit
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a["action"].as_str().unwrap())
+        .collect();
+    for wanted in [
+        "license.issued",
+        "license.suspended",
+        "license.revoked",
+        "license.renewed",
+        "admin.login",
+    ] {
+        assert!(actions.contains(&wanted), "{wanted} in {actions:?}");
+    }
+    // Signed out, the token stops working.
+    assert_eq!(
+        call(&e.app, "POST", "/api/v1/admin/logout", Some(&viewer), None)
+            .await
+            .0,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        call(
+            &e.app,
+            "GET",
+            "/api/v1/admin/customers",
+            Some(&viewer),
+            None
+        )
+        .await
+        .0,
+        StatusCode::UNAUTHORIZED
+    );
+}
+
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "needs PostgreSQL"]
+async fn an_installation_that_proves_its_key_gets_a_signed_entitlement_within_its_limit(
+    pool: PgPool,
+) {
+    let e = env(&pool).await;
+    let root = admin(&pool, &e, "root@example.com", "admin").await;
+    let (license_id, key) = license(&e, &root, 1, &["resellers", "mail"]).await;
+    let first = Installation::new(&e.key_dir);
+    let (status, granted) = first.activate(&e, &key).await;
+    assert_eq!(status, StatusCode::OK, "{granted}");
+    let doc: Document = serde_json::from_value(granted["entitlement"].clone()).unwrap();
+    let claims = doc
+        .verify(&bundle(&e).await, &expect(first.id), now())
+        .unwrap();
+    assert_eq!(
+        (
+            claims.features.as_slice(),
+            claims.limits["max_nodes"],
+            claims.limits["max_tenants"]
+        ),
+        (
+            ["resellers".to_owned(), "mail".to_owned()].as_slice(),
+            3,
+            -1
+        )
+    );
+    assert_eq!(claims.license_id.to_string(), license_id);
+    // For another installation it does not verify.
+    assert!(
+        doc.verify(&bundle(&e).await, &expect(Uuid::new_v4()), now())
+            .is_err()
+    );
+    // The limit: a second installation is refused, the first may ask again (nothing changes).
+    let second = Installation::new(&e.key_dir);
+    let (status, refused) = second.activate(&e, &key).await;
+    assert_eq!(
+        (status, refused["code"].as_str()),
+        (StatusCode::CONFLICT, Some("activation_limit")),
+        "{refused}"
+    );
+    assert_eq!(first.activate(&e, &key).await.0, StatusCode::OK);
+    let holders: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM activations WHERE deactivated_at IS NULL")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(holders, 1);
+    // A wrong key, a wrong proof, a used or invented nonce.
+    let (status, bad) = first.activate(&e, "DHP-AAAAA-BBBBB-CCCCC-DDDDD").await;
+    assert_eq!(
+        (status, bad["code"].as_str()),
+        (StatusCode::FORBIDDEN, Some("invalid_license_key"))
+    );
+    let nonce = second.nonce(&e).await;
+    let (status, bad) = call(&e.app, "POST", "/api/v1/licenses/activate", None, Some(json!({"license_key": key, "installation_id": second.id,
+        "public_key": STANDARD.encode(second.key.public_key()), "nonce": nonce, "signature": first.sign("activate", &nonce, None)}))).await;
+    assert_eq!(
+        (status, bad["code"].as_str()),
+        (StatusCode::UNAUTHORIZED, Some("bad_signature")),
+        "{bad}"
+    );
+    let (status, bad) = call(&e.app, "POST", "/api/v1/licenses/activate", None, Some(json!({"license_key": key, "installation_id": second.id,
+        "public_key": STANDARD.encode(second.key.public_key()), "nonce": nonce, "signature": second.sign("activate", &nonce, None)}))).await;
+    assert_eq!(
+        (status, bad["code"].as_str()),
+        (StatusCode::UNAUTHORIZED, Some("bad_nonce")),
+        "the nonce was spent: {bad}"
+    );
+    // Somebody else's id with their own key is not allowed to take over an installation.
+    let thief = Installation {
+        id: first.id,
+        key: FileSigningKey::generate_to_file(&e.key_dir.join("thief.key"), "x").unwrap(),
+    };
+    let (status, bad) = thief.activate(&e, &key).await;
+    assert_eq!(
+        (status, bad["code"].as_str()),
+        (StatusCode::CONFLICT, Some("installation_key_mismatch")),
+        "{bad}"
+    );
+    // Refresh, heartbeat and status work for the holder and not for a stranger.
+    let (status, again) = first.ask(&e, "refresh").await;
+    assert_eq!(status, StatusCode::OK, "{again}");
+    let newer: Document = serde_json::from_value(again["entitlement"].clone()).unwrap();
+    assert!(
+        newer
+            .verify(&bundle(&e).await, &expect(first.id), now())
+            .is_ok()
+    );
+    assert_ne!(newer.payload, doc.payload, "a new jti every time");
+    let (status, beat) = first.ask(&e, "heartbeat").await;
+    assert_eq!(
+        (status, beat["license_status"].as_str()),
+        (StatusCode::OK, Some("active")),
+        "{beat}"
+    );
+    let (status, state) = first.ask(&e, "status").await;
+    assert_eq!(
+        (status, state["activated"].as_bool()),
+        (StatusCode::OK, Some(true))
+    );
+    let stranger = Installation::new(&e.key_dir);
+    assert_eq!(
+        stranger.ask(&e, "refresh").await.0,
+        StatusCode::UNAUTHORIZED
+    );
+    // A proof made for one purpose is not good for another.
+    let nonce = first.nonce(&e).await;
+    let (status, bad) = call(&e.app, "POST", "/api/v1/licenses/refresh", None, Some(json!({"installation_id": first.id, "nonce": nonce, "signature": first.sign("heartbeat", &nonce, None)}))).await;
+    assert_eq!(
+        (status, bad["code"].as_str()),
+        (StatusCode::UNAUTHORIZED, Some("bad_signature"))
+    );
+    // Letting go frees the place for the other installation.
+    assert_eq!(first.ask(&e, "deactivate").await.0, StatusCode::NO_CONTENT);
+    assert_eq!(first.ask(&e, "refresh").await.1["code"], "not_activated");
+    assert_eq!(second.activate(&e, &key).await.0, StatusCode::OK);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "needs PostgreSQL"]
+async fn a_revoked_suspended_or_expired_license_is_refused_and_two_racing_installations_cannot_both_win(
+    pool: PgPool,
+) {
+    let e = env(&pool).await;
+    let root = admin(&pool, &e, "root@example.com", "admin").await;
+    let (id, key) = license(&e, &root, 1, &["x"]).await;
+    let holder = Installation::new(&e.key_dir);
+    assert_eq!(holder.activate(&e, &key).await.0, StatusCode::OK);
+    call(
+        &e.app,
+        "POST",
+        &format!("/api/v1/admin/licenses/{id}/suspend"),
+        Some(&root),
+        None,
+    )
+    .await;
+    let (status, got) = holder.ask(&e, "refresh").await;
+    assert_eq!(
+        (status, got["code"].as_str()),
+        (StatusCode::FORBIDDEN, Some("license_suspended"))
+    );
+    let (_, beat) = holder.ask(&e, "heartbeat").await;
+    assert_eq!(beat["license_status"], "suspended");
+    call(
+        &e.app,
+        "POST",
+        &format!("/api/v1/admin/licenses/{id}/resume"),
+        Some(&root),
+        None,
+    )
+    .await;
+    assert_eq!(holder.ask(&e, "refresh").await.0, StatusCode::OK);
+    call(
+        &e.app,
+        "POST",
+        &format!("/api/v1/admin/licenses/{id}/revoke"),
+        Some(&root),
+        None,
+    )
+    .await;
+    assert_eq!(holder.ask(&e, "refresh").await.1["code"], "license_revoked");
+    // Expired: set the end in the past.
+    let (id2, key2) = license(&e, &root, 1, &["x"]).await;
+    sqlx::query("UPDATE licenses SET expires_at = now() - interval '1 day' WHERE id = $1::uuid")
+        .bind(&id2)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let other = Installation::new(&e.key_dir);
+    let (status, got) = other.activate(&e, &key2).await;
+    assert_eq!(
+        (status, got["code"].as_str()),
+        (StatusCode::FORBIDDEN, Some("license_expired"))
+    );
+    // An entitlement never outlives its license: with two hours left it lasts two hours.
+    sqlx::query("UPDATE licenses SET expires_at = now() + interval '2 hours' WHERE id = $1::uuid")
+        .bind(&id2)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, granted) = other.activate(&e, &key2).await;
+    assert_eq!(status, StatusCode::OK, "{granted}");
+    let doc: Document = serde_json::from_value(granted["entitlement"].clone()).unwrap();
+    let claims = doc
+        .verify(&bundle(&e).await, &expect(other.id), now())
+        .unwrap();
+    assert!(claims.exp - now() <= 2 * 3600 + 5, "{}", claims.exp - now());
+    // Two installations race for the one place: exactly one gets it.
+    let (_, key3) = license(&e, &root, 1, &["x"]).await;
+    let (a, b) = (Installation::new(&e.key_dir), Installation::new(&e.key_dir));
+    let (ra, rb) = tokio::join!(a.activate(&e, &key3), b.activate(&e, &key3));
+    let mut statuses = [ra.0, rb.0];
+    statuses.sort();
+    assert_eq!(
+        statuses,
+        [StatusCode::OK, StatusCode::CONFLICT],
+        "{ra:?} {rb:?}"
+    );
+}
+
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "needs PostgreSQL"]
+async fn the_private_key_is_never_in_the_database_and_a_replayed_activation_gets_the_same_answer(
+    pool: PgPool,
+) {
+    let e = env(&pool).await;
+    let root = admin(&pool, &e, "root@example.com", "admin").await;
+    // A rotation makes a new key file; the database learns the public half only.
+    let (status, info) = call(
+        &e.app,
+        "POST",
+        "/api/v1/admin/keys/rotate",
+        Some(&root),
+        Some(json!({"kid": "license-2"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{info}");
+    assert_eq!(
+        call(
+            &e.app,
+            "POST",
+            "/api/v1/admin/keys/rotate",
+            Some(&root),
+            Some(json!({"kid": "license-2"}))
+        )
+        .await
+        .0,
+        StatusCode::CONFLICT
+    );
+    let (_, keys) = call(&e.app, "GET", "/api/v1/admin/keys", Some(&root), None).await;
+    let active: Vec<&str> = keys
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|k| k["status"] == "active")
+        .map(|k| k["kid"].as_str().unwrap())
+        .collect();
+    assert_eq!(active, ["license-2"], "one active key, the new one");
+    for file in ["license-1.key", "license-2.key"] {
+        let private = std::fs::read_to_string(e.key_dir.join(file)).unwrap();
+        let private = private.trim();
+        let der = STANDARD.decode(private).unwrap();
+        // Look in every table, as text, for the private key in any form it might be written.
+        let tables: Vec<String> =
+            sqlx::query_scalar("SELECT tablename::text FROM pg_tables WHERE schemaname = 'public'")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert!(tables.len() > 20, "{tables:?}");
+        let seed = &der[16..48];
+        let forms = [
+            private.to_owned(),
+            STANDARD.encode(seed),
+            URL_SAFE_NO_PAD.encode(seed),
+            seed.iter().map(|b| format!("{b:02x}")).collect::<String>(),
+        ];
+        for table in &tables {
+            let dump: String = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+                "SELECT COALESCE(string_agg(row_to_json(t)::text, ' '), '') FROM \"{table}\" t"
+            )))
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+            for form in &forms {
+                assert!(
+                    !dump.contains(form.as_str()),
+                    "the private key of {file} is in {table}"
+                );
+            }
+        }
+    }
+    // A documents signed after the rotation verify with the bundle (which has both keys).
+    let (_, key) = license(&e, &root, 1, &["x"]).await;
+    let inst = Installation::new(&e.key_dir);
+    let (status, granted) = inst.activate(&e, &key).await;
+    assert_eq!(status, StatusCode::OK, "{granted}");
+    let doc: Document = serde_json::from_value(granted["entitlement"].clone()).unwrap();
+    assert_eq!(doc.kid, "license-2");
+    assert!(
+        doc.verify(&bundle(&e).await, &expect(inst.id), now())
+            .is_ok()
+    );
+    // The same activation sent twice with one Idempotency-Key is the same answer, the same document.
+    let (_, key2) = license(&e, &root, 1, &["x"]).await;
+    let other = Installation::new(&e.key_dir);
+    let send = |nonce: String| {
+        let hash: String = dhpanel_license_authority::sha256(&key2)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        let body = json!({"license_key": key2, "installation_id": other.id, "public_key": STANDARD.encode(other.key.public_key()),
+                          "nonce": nonce, "signature": other.sign("activate", &nonce, Some(&hash))});
+        let app = e.app.clone();
+        async move {
+            call_with(
+                &app,
+                "POST",
+                "/api/v1/licenses/activate",
+                None,
+                Some(body),
+                &[("idempotency-key", "retry-key-0001")],
+            )
+            .await
+        }
+    };
+    let (s1, r1) = send(other.nonce(&e).await).await;
+    let (s2, r2) = send(other.nonce(&e).await).await;
+    assert_eq!((s1, s2), (StatusCode::OK, StatusCode::OK));
+    assert_eq!(r1, r2, "the replay is answered from the first");
+    // The same key for a different request is refused.
+    let third = Installation::new(&e.key_dir);
+    let nonce = third.nonce(&e).await;
+    let body = json!({"license_key": key2, "installation_id": third.id, "public_key": STANDARD.encode(third.key.public_key()), "nonce": nonce, "signature": third.sign("activate", &nonce, None)});
+    let (status, got) = call_with(
+        &e.app,
+        "POST",
+        "/api/v1/licenses/activate",
+        None,
+        Some(body),
+        &[("idempotency-key", "retry-key-0001")],
+    )
+    .await;
+    assert_eq!(
+        (status, got["code"].as_str()),
+        (StatusCode::CONFLICT, Some("idempotency_key_reused"))
+    );
+}

@@ -6,10 +6,12 @@ members = [
     "apps/node-agent",
     "apps/priv-helper",
     "apps/dhctl",
+    "apps/license-authority",
     "crates/kernel",
     "crates/safe-fs",
     "crates/backup",
     "crates/catalog",
+    "crates/license",
     "crates/backup-dest",
     "crates/system-backup",
     "crates/fileops",
@@ -95,6 +97,7 @@ dhpanel-mod-databases = { path = "crates/modules/databases" }
 dhpanel-mod-files = { path = "crates/modules/files" }
 dhpanel-mod-backups = { path = "crates/modules/backups" }
 dhpanel-catalog = { path = "crates/catalog" }
+dhpanel-license = { path = "crates/license" }
 dhpanel-mod-apps = { path = "crates/modules/apps" }
 dhpanel-mod-cron = { path = "crates/modules/cron" }
 dhpanel-mod-logs = { path = "crates/modules/logs" }
