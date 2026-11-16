@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE license_state SET last_error = $1, updated_at = now() WHERE id",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "837bdaf8703c2792b8627275254cf260e21bffc23a4ce7b7db4f668590549cd4"
+}

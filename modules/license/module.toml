@@ -1,0 +1,14 @@
+# License: this installation's license and what it allows (crates/modules/license).
+[module]
+name       = "license"
+version    = "0.1.0"
+title      = { en = "License", bn = "লাইসেন্স" }
+category   = "core"
+core       = true
+depends_on = ["auth", "rbac", "audit", "system"]
+
+[permissions]
+keys = ["admin.license.read", "admin.license.manage"]
+
+[ui]
+admin_nav  = { group = "System", order = 90, icon = "key" }

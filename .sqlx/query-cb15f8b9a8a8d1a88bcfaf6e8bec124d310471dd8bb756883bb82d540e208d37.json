@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE license_state SET enforced = $1, mode = $2, reason = $3, features = $4, limits = $5,\n                entitlement_expires_at = to_timestamp($6::bigint), grace_ends_at = to_timestamp($7::bigint),\n                evaluated_at = now() WHERE id",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bool",
+        "Text",
+        "Text",
+        "TextArray",
+        "Jsonb",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "cb15f8b9a8a8d1a88bcfaf6e8bec124d310471dd8bb756883bb82d540e208d37"
+}

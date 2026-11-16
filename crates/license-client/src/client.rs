@@ -1,0 +1,338 @@
+//! Talking to the license authority (T17.09). Blocking (run it on a blocking thread).
+//!
+//! Every answer that carries an entitlement is checked against the trusted public keys before
+//! it is handed back: what the authority's server says is not trusted on its own, the
+//! signature is.
+
+use std::time::Duration;
+
+use dhpanel_license::{Claims, Document, DocumentError, Expect, PublicKeys};
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+use crate::identity::{Identity, IdentityError};
+
+/// The authority's answer to an activation or a refresh, checked.
+#[derive(Debug, Clone)]
+pub struct Received {
+    /// The signed document, to keep.
+    pub document: Document,
+    /// Its claims, verified.
+    pub claims: Claims,
+    /// The license in short.
+    pub license: LicenseSummary,
+    /// The authority's clock (Unix seconds).
+    pub server_time: i64,
+}
+
+/// A license in short, as the authority describes it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LicenseSummary {
+    /// Id.
+    pub id: Uuid,
+    /// The plan's name.
+    pub plan: String,
+    /// `active`, `suspended` or `revoked`.
+    pub status: String,
+    /// When it ends (Unix seconds).
+    pub expires_at: Option<i64>,
+}
+
+/// Why a call failed.
+#[derive(Debug, thiserror::Error)]
+pub enum ClientError {
+    /// The authority could not be reached, or had a server error: try again later.
+    #[error("the license authority cannot be reached: {0}")]
+    Unreachable(String),
+    /// The authority said no, with a code (`license_revoked`, `activation_limit`, ...).
+    #[error("the license authority refused: {code}")]
+    Refused {
+        /// The HTTP status.
+        status: u16,
+        /// The problem code.
+        code: String,
+    },
+    /// The authority's answer is not what it should be (not JSON, or not for this
+    /// installation, or not signed by a trusted key).
+    #[error("the answer is not valid: {0}")]
+    Invalid(String),
+    /// The installation's own identity is unusable.
+    #[error(transparent)]
+    Identity(#[from] IdentityError),
+}
+
+impl ClientError {
+    /// Whether this is the authority saying the license is no longer good (as opposed to
+    /// trouble reaching it).
+    #[must_use]
+    pub fn is_license_refusal(&self) -> bool {
+        matches!(self, Self::Refused { code, .. }
+            if matches!(code.as_str(), "license_revoked" | "license_suspended" | "license_expired"))
+    }
+}
+
+/// A client of one authority, for one installation.
+pub struct LicenseClient {
+    base: String,
+    keys: PublicKeys,
+    identity: Identity,
+    issuer: String,
+    audience: String,
+    agent: ureq::Agent,
+}
+
+impl std::fmt::Debug for LicenseClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LicenseClient")
+            .field("base", &self.base)
+            .field("installation", &self.identity.installation_id)
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Deserialize)]
+struct Challenge {
+    nonce: String,
+}
+
+#[derive(Deserialize)]
+struct Granted {
+    entitlement: Document,
+    license: LicenseSummary,
+    server_time: i64,
+}
+
+/// What a heartbeat answers.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct Beat {
+    /// `active`, `suspended`, `revoked` or `expired`.
+    pub license_status: String,
+    /// The authority's clock.
+    pub server_time: i64,
+}
+
+#[derive(Deserialize)]
+struct Problem {
+    #[serde(default)]
+    code: String,
+}
+
+fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
+}
+
+impl LicenseClient {
+    /// A client for the authority at `base` (an `https://` address; `http://` only for
+    /// loopback, which is what tests use).
+    ///
+    /// # Errors
+    /// [`ClientError::Invalid`] for an address that is neither.
+    pub fn new(
+        base: &str,
+        keys: PublicKeys,
+        identity: Identity,
+        issuer: &str,
+        audience: &str,
+    ) -> Result<Self, ClientError> {
+        let base = base.trim_end_matches('/').to_owned();
+        let loopback = base.starts_with("http://127.0.0.1")
+            || base.starts_with("http://localhost")
+            || base.starts_with("http://[::1]");
+        if !(base.starts_with("https://") || loopback) {
+            return Err(ClientError::Invalid(
+                "the authority's address must be https".into(),
+            ));
+        }
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .timeout_connect(Some(Duration::from_secs(5)))
+            .timeout_global(Some(Duration::from_secs(20)))
+            .http_status_as_error(false)
+            .build()
+            .into();
+        Ok(Self {
+            base,
+            keys,
+            identity,
+            issuer: issuer.to_owned(),
+            audience: audience.to_owned(),
+            agent,
+        })
+    }
+
+    /// This installation's id.
+    #[must_use]
+    pub fn installation_id(&self) -> Uuid {
+        self.identity.installation_id
+    }
+
+    fn post(&self, path: &str, body: &serde_json::Value) -> Result<(u16, String), ClientError> {
+        let url = format!("{}{path}", self.base);
+        let mut response = self
+            .agent
+            .post(&url)
+            .send_json(body)
+            .map_err(|e| ClientError::Unreachable(e.to_string()))?;
+        let status = response.status().as_u16();
+        let text = response
+            .body_mut()
+            .read_to_string()
+            .map_err(|e| ClientError::Unreachable(e.to_string()))?;
+        if status >= 500 {
+            return Err(ClientError::Unreachable(format!(
+                "the authority answered {status}"
+            )));
+        }
+        if status >= 400 {
+            let code = serde_json::from_str::<Problem>(&text)
+                .map(|p| p.code)
+                .unwrap_or_default();
+            return Err(ClientError::Refused { status, code });
+        }
+        Ok((status, text))
+    }
+
+    fn challenge(&self) -> Result<String, ClientError> {
+        let (_, text) = self.post(
+            "/api/v1/licenses/challenge",
+            &serde_json::json!({ "installation_id": self.identity.installation_id }),
+        )?;
+        serde_json::from_str::<Challenge>(&text)
+            .map(|c| c.nonce)
+            .map_err(|_| ClientError::Invalid("the challenge is unreadable".into()))
+    }
+
+    fn proof(&self, purpose: &str) -> Result<serde_json::Value, ClientError> {
+        let nonce = self.challenge()?;
+        let signature = self.identity.prove(purpose, &nonce, None)?;
+        Ok(serde_json::json!({
+            "installation_id": self.identity.installation_id,
+            "nonce": nonce,
+            "signature": signature,
+        }))
+    }
+
+    fn received(&self, text: &str) -> Result<Received, ClientError> {
+        let granted: Granted = serde_json::from_str(text)
+            .map_err(|_| ClientError::Invalid("the answer is unreadable".into()))?;
+        let expect = Expect {
+            issuer: &self.issuer,
+            audience: &self.audience,
+            installation_id: self.identity.installation_id,
+            clock_skew: 300,
+        };
+        let claims = granted
+            .entitlement
+            .verify(&self.keys, &expect, unix_now())
+            .map_err(|e: DocumentError| ClientError::Invalid(e.to_string()))?;
+        Ok(Received {
+            document: granted.entitlement,
+            claims,
+            license: granted.license,
+            server_time: granted.server_time,
+        })
+    }
+
+    /// Activates this installation with a license key.
+    ///
+    /// # Errors
+    /// [`ClientError`].
+    pub fn activate(
+        &self,
+        license_key: &str,
+        hostname: Option<&str>,
+    ) -> Result<Received, ClientError> {
+        use sha2_hex::hex_sha256;
+        let nonce = self.challenge()?;
+        let key = license_key.trim();
+        let signature = self
+            .identity
+            .prove("activate", &nonce, Some(&hex_sha256(key)))?;
+        let mut body = serde_json::json!({
+            "license_key": key,
+            "installation_id": self.identity.installation_id,
+            "public_key": self.identity.public_key(),
+            "nonce": nonce,
+            "signature": signature,
+        });
+        if let Some(h) = hostname {
+            body["hostname"] = h.into();
+        }
+        let (_, text) = self.post("/api/v1/licenses/activate", &body)?;
+        self.received(&text)
+    }
+
+    /// Asks for a fresh entitlement.
+    ///
+    /// # Errors
+    /// [`ClientError`].
+    pub fn refresh(&self) -> Result<Received, ClientError> {
+        let (_, text) = self.post("/api/v1/licenses/refresh", &self.proof("refresh")?)?;
+        self.received(&text)
+    }
+
+    /// Tells the authority this installation is alive (with a little about itself).
+    ///
+    /// # Errors
+    /// [`ClientError`].
+    pub fn heartbeat(&self, info: &serde_json::Value) -> Result<Beat, ClientError> {
+        let mut body = self.proof("heartbeat")?;
+        body["info"] = info.clone();
+        let (_, text) = self.post("/api/v1/licenses/heartbeat", &body)?;
+        serde_json::from_str(&text)
+            .map_err(|_| ClientError::Invalid("the answer is unreadable".into()))
+    }
+
+    /// Lets go of the license (freeing its place).
+    ///
+    /// # Errors
+    /// [`ClientError`].
+    pub fn deactivate(&self) -> Result<(), ClientError> {
+        let url = format!("{}/api/v1/licenses/deactivate", self.base);
+        let mut response = self
+            .agent
+            .post(&url)
+            .send_json(self.proof("deactivate")?)
+            .map_err(|e| ClientError::Unreachable(e.to_string()))?;
+        let status = response.status().as_u16();
+        if status >= 500 {
+            return Err(ClientError::Unreachable(format!(
+                "the authority answered {status}"
+            )));
+        }
+        if status >= 400 {
+            let text = response.body_mut().read_to_string().unwrap_or_default();
+            let code = serde_json::from_str::<Problem>(&text)
+                .map(|p| p.code)
+                .unwrap_or_default();
+            return Err(ClientError::Refused { status, code });
+        }
+        Ok(())
+    }
+
+    /// Asks for help after a failed integrity check or a lost machine (a person reads it).
+    ///
+    /// # Errors
+    /// [`ClientError`].
+    pub fn recovery_request(&self, note: &str) -> Result<(), ClientError> {
+        let mut body = self.proof("recovery")?;
+        body["note"] = note.chars().take(2000).collect::<String>().into();
+        self.post("/api/v1/licenses/recovery-request", &body)
+            .map(|_| ())
+    }
+}
+
+mod sha2_hex {
+    //! The hex SHA-256 the activation proof covers (the authority computes the same).
+    use std::fmt::Write as _;
+
+    /// `text`'s SHA-256 in lower-case hex.
+    pub fn hex_sha256(text: &str) -> String {
+        let digest = dhpanel_license::sha256(text.as_bytes());
+        digest.iter().fold(String::new(), |mut s, b| {
+            let _ = write!(s, "{b:02x}");
+            s
+        })
+    }
+}

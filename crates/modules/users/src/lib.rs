@@ -612,6 +612,26 @@ pub async fn create_user(
         AssignRole::Assigned | AssignRole::AlreadyAssigned => {}
         AssignRole::UnknownRole => return Err(internal(std::io::Error::other("no client role"))),
     }
+    // The license's limit on hosting accounts.
+    let hosting_accounts = dhpanel_database::sqlx::query_scalar::<_, i64>(
+        "SELECT count(*) FROM tenants WHERE status <> 'deleting'",
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(internal)?;
+    if let Some(reached) =
+        dhpanel_database::license::check_limit(&mut tx, "max_tenants", hosting_accounts + 1)
+            .await
+            .map_err(internal)?
+    {
+        return Err(AppError::conflict(
+            "license_limit",
+            format!(
+                "This license allows {} hosting account(s). Remove one or upgrade the license.",
+                reached.limit
+            ),
+        ));
+    }
     let tenant = tenants::insert(
         &mut tx,
         &tenants::NewTenant {

@@ -31,6 +31,7 @@ const EMBEDDED: &[(&str, &str)] = &[
     ("services", dhpanel_mod_services::MANIFEST),
     ("security", dhpanel_mod_security::MANIFEST),
     ("apps", dhpanel_mod_apps::MANIFEST),
+    ("license", dhpanel_mod_license::MANIFEST),
 ];
 
 /// Days the data of a deleted user is kept before it is purged.
@@ -106,6 +107,8 @@ pub struct States {
     pub nodes: dhpanel_mod_nodes::NodesState,
     /// Where uploaded SQL dumps wait for the node.
     pub spool_dir: std::path::PathBuf,
+    /// This installation's license.
+    pub license: Arc<dhpanel_mod_license::service::LicenseService>,
 }
 
 /// Builds the registry of this binary with every module's routes attached,
@@ -150,6 +153,7 @@ pub fn mount(
         admin,
         nodes,
         spool_dir,
+        license,
     } = states;
     let agent_url: Option<String> = nodes.public_url.as_deref().map(str::to_owned);
     let modules = manifests
@@ -464,6 +468,19 @@ pub fn mount(
                         }
                     })
                 }
+                "license" => {
+                    let (db, sessions, service) = (db.clone(), sessions.clone(), license.clone());
+                    Box::new(move || ModuleRoutes {
+                        admin: Some(dhpanel_mod_license::admin_router().with_state(
+                            dhpanel_mod_license::LicenseState {
+                                db: db.clone(),
+                                sessions: sessions.clone(),
+                                service: service.clone(),
+                            },
+                        )),
+                        ..ModuleRoutes::none()
+                    })
+                }
                 "apps" => {
                     let (db, sessions, master_key) =
                         (db.clone(), sessions.clone(), master_key.clone());
@@ -726,7 +743,8 @@ mod tests {
                 "usage",
                 "services",
                 "security",
-                "apps"
+                "apps",
+                "license"
             ]
         );
         // And they fit together: dependencies first.
@@ -739,6 +757,7 @@ mod tests {
                 "audit",
                 "nodes",
                 "system",
+                "license",
                 "plans",
                 "users",
                 "backups",
@@ -759,6 +778,7 @@ mod tests {
                 "audit",
                 "nodes",
                 "system",
+                "license",
                 "plans",
                 "users",
                 "backups",
@@ -822,12 +842,14 @@ mod tests {
             p::SecurityRead::KEY,
             p::SecurityManage::KEY,
             p::AppsRead::KEY,
+            p::LicenseRead::KEY,
+            p::LicenseManage::KEY,
         ] {
             assert!(declared.iter().any(|d| d == key), "{key} is in no manifest");
         }
         assert_eq!(
             declared.len(),
-            28,
+            30,
             "a manifest declares a key the code does not know: {declared:?}"
         );
     }

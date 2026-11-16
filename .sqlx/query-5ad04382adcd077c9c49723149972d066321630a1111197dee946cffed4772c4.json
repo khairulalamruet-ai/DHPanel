@@ -1,0 +1,162 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT enforced, stored, mode, reason, features, limits, license_id, plan, license_status,\n                  extract(epoch FROM license_expires_at)::bigint AS license_expires_at,\n                  extract(epoch FROM entitlement_expires_at)::bigint AS entitlement_expires_at,\n                  extract(epoch FROM grace_ends_at)::bigint AS grace_ends_at,\n                  last_error, extract(epoch FROM evaluated_at)::bigint AS \"evaluated_at!\"\n           FROM license_state WHERE id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "enforced",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "license_state",
+            "name": "enforced"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "stored",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "license_state",
+            "name": "stored"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "mode",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "license_state",
+            "name": "mode"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "reason",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "license_state",
+            "name": "reason"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "features",
+        "type_info": "TextArray",
+        "origin": {
+          "Table": {
+            "table": "license_state",
+            "name": "features"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "limits",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "license_state",
+            "name": "limits"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "license_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "license_state",
+            "name": "license_id"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "plan",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "license_state",
+            "name": "plan"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "license_status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "license_state",
+            "name": "license_status"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "license_expires_at",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 10,
+        "name": "entitlement_expires_at",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 11,
+        "name": "grace_ends_at",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 12,
+        "name": "last_error",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "license_state",
+            "name": "last_error"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "evaluated_at!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      true,
+      true,
+      null,
+      null,
+      null,
+      true,
+      null
+    ]
+  },
+  "hash": "5ad04382adcd077c9c49723149972d066321630a1111197dee946cffed4772c4"
+}

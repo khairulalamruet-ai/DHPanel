@@ -1026,6 +1026,7 @@ dependencies = [
  "dhpanel-mod-databases",
  "dhpanel-mod-domains",
  "dhpanel-mod-files",
+ "dhpanel-mod-license",
  "dhpanel-mod-logs",
  "dhpanel-mod-nodes",
  "dhpanel-mod-plans",
@@ -1257,6 +1258,7 @@ dependencies = [
  "dhpanel-auth-core",
  "dhpanel-http-kit",
  "dhpanel-license",
+ "dhpanel-license-client",
  "dhpanel-observability",
  "figment",
  "secrecy",
@@ -1268,6 +1270,20 @@ dependencies = [
  "tokio",
  "tower",
  "tracing",
+ "ureq",
+ "uuid",
+]
+
+[[package]]
+name = "dhpanel-license-client"
+version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "dhpanel-license",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "ureq",
  "uuid",
 ]
 
@@ -1497,6 +1513,37 @@ dependencies = [
  "utoipa",
  "uuid",
  "zip",
+]
+
+[[package]]
+name = "dhpanel-mod-license"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "base64 0.23.1",
+ "dhpanel-audit",
+ "dhpanel-auth-core",
+ "dhpanel-cache",
+ "dhpanel-config",
+ "dhpanel-database",
+ "dhpanel-http-kit",
+ "dhpanel-kernel",
+ "dhpanel-license",
+ "dhpanel-license-authority",
+ "dhpanel-license-client",
+ "dhpanel-rbac",
+ "dhpanel-session",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "tower",
+ "tracing",
+ "ureq",
+ "utoipa",
+ "uuid",
 ]
 
 [[package]]

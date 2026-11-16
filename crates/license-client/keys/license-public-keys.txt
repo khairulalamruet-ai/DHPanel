@@ -1,0 +1,3 @@
+# The license authority's public keys, one `kid base64-public-key` per line. The release build
+# puts the real ones here (T17.14); an installation can read others from the file named by
+# `license.public_keys_file`. With none, no entitlement can be verified.

@@ -149,6 +149,14 @@ pub mod permissions {
         pub SecurityManage = "admin.security.manage"
     );
     crate::permission!(
+        /// See this installation's license.
+        pub LicenseRead = "admin.license.read"
+    );
+    crate::permission!(
+        /// Enter, refresh and give back the license, and ask the authority for help.
+        pub LicenseManage = "admin.license.manage"
+    );
+    crate::permission!(
         /// See the applications of every hosting account.
         pub AppsRead = "admin.apps.read"
     );

@@ -53,6 +53,9 @@ pub struct ControlConfig {
     pub pki: PkiConfig,
     /// The DNS server that hosts the zones of hosted domains.
     pub dns: DnsConfig,
+    /// Licensing (T17): the license authority this installation answers to.
+    #[serde(default)]
+    pub license: LicenseConfig,
     /// Where uploaded SQL dumps wait for the node to fetch them.
     #[serde(default)]
     pub imports: ImportsConfig,
@@ -108,6 +111,46 @@ pub struct DnsConfig {
     pub powerdns_server_id: String,
     /// Seconds between passes that push changed zones (5..=3600).
     pub sync_seconds: u32,
+}
+
+/// Licensing settings (T17.07, T17.10). Without `authority_url` the installation is not
+/// licensed: nothing is checked and nothing is restricted.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct LicenseConfig {
+    /// The license authority's address (`https://license.example.com`).
+    pub authority_url: Option<String>,
+    /// Where the installation's identity (id and private key) is kept. It is part of the
+    /// system backup.
+    pub identity_dir: PathBuf,
+    /// A file of trusted authority public keys (`kid base64-key` per line), instead of the
+    /// ones built into the program.
+    pub public_keys_file: Option<PathBuf>,
+    /// The `iss` the authority writes into entitlements.
+    pub issuer: String,
+    /// The `aud` it writes.
+    pub audience: String,
+    /// Hours between heartbeats (1..=168).
+    pub heartbeat_hours: u32,
+    /// Hours between entitlement refreshes (1..=168).
+    pub refresh_hours: u32,
+    /// Hours the license keeps working without the authority's confirmation (1..=720).
+    pub grace_hours: u32,
+}
+
+impl Default for LicenseConfig {
+    fn default() -> Self {
+        Self {
+            authority_url: None,
+            identity_dir: PathBuf::from("/var/lib/dhpanel/license"),
+            public_keys_file: None,
+            issuer: "dhpanel-la".to_owned(),
+            audience: "dhpanel".to_owned(),
+            heartbeat_hours: 6,
+            refresh_hours: 12,
+            grace_hours: 72,
+        }
+    }
 }
 
 /// Internal certificate authority settings.
@@ -304,6 +347,7 @@ impl Default for ControlConfig {
             pki: PkiConfig {
                 ca_dir: PathBuf::from("/etc/dhpanel/secrets"),
             },
+            license: LicenseConfig::default(),
             dns: DnsConfig {
                 powerdns_url: None,
                 powerdns_api_key: None,
@@ -474,7 +518,7 @@ impl ControlConfig {
                 reason: "must not exceed session_absolute_hours".to_owned(),
             });
         }
-        let range_checks: [(&'static str, u32, std::ops::RangeInclusive<u32>); 7] = [
+        let range_checks: [(&'static str, u32, std::ops::RangeInclusive<u32>); 10] = [
             ("auth.sudo_minutes", self.auth.sudo_minutes, 1..=60),
             (
                 "agent.enrollment_token_minutes",
@@ -492,6 +536,13 @@ impl ControlConfig {
                 1..=1440,
             ),
             ("auth.lockout_minutes", self.auth.lockout_minutes, 1..=1440),
+            (
+                "license.heartbeat_hours",
+                self.license.heartbeat_hours,
+                1..=168,
+            ),
+            ("license.refresh_hours", self.license.refresh_hours, 1..=168),
+            ("license.grace_hours", self.license.grace_hours, 1..=720),
             (
                 "auth.ip_lockout_minutes",
                 self.auth.ip_lockout_minutes,

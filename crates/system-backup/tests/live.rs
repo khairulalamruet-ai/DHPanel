@@ -67,6 +67,7 @@ fn a_system_backup_is_stored_opened_and_restored_into_a_new_database() {
         config_file: Some(dir.join("control.toml")),
         secret_files: vec![],
         ca_dir: Some(dir.join("ca")),
+        license_dir: None,
         scratch: dir.join("scratch"),
         key: derive_key(master),
         version: "0.1.0".into(),

@@ -27,6 +27,7 @@ pub mod file_transfers;
 pub mod ftp_accounts;
 pub mod images;
 pub mod imports;
+pub mod license;
 pub mod malware;
 pub mod mfa;
 pub mod modules;

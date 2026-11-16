@@ -37,5 +37,7 @@ tracing = "0.1.44"
 uuid = { version = "1", features = ["serde", "v4", "v7"] }
 
 [dev-dependencies]
+ureq = { version = "3", default-features = false, features = ["json"] }
+dhpanel-license-client.workspace = true
 figment = { version = "0.10", features = ["toml", "env", "test"] }
 tower = { version = "0.5", features = ["util"] }

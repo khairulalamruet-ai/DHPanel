@@ -40,6 +40,7 @@ dhpanel-mod-files.workspace = true
 dhpanel-mod-backups.workspace = true
 dhpanel-catalog.workspace = true
 dhpanel-mod-apps.workspace = true
+dhpanel-mod-license.workspace = true
 dhpanel-mod-cron.workspace = true
 dhpanel-mod-logs.workspace = true
 dhpanel-mod-usage.workspace = true

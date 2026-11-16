@@ -36,6 +36,7 @@ pub fn router() -> Router<LaState> {
         .route("/api/v1/licenses/heartbeat", post(heartbeat))
         .route("/api/v1/licenses/deactivate", post(deactivate))
         .route("/api/v1/licenses/status", post(status))
+        .route("/api/v1/licenses/recovery-request", post(recovery_request))
         .route("/api/v1/public-keys", get(public_keys))
 }
 
@@ -697,4 +698,62 @@ async fn public_keys(State(state): State<LaState>) -> Result<String, AppError> {
         .into_iter()
         .map(|(k, v)| format!("{k} {v}\n"))
         .collect())
+}
+
+/// A request for help.
+#[derive(Deserialize)]
+pub struct RecoveryRequest {
+    /// The proof.
+    #[serde(flatten)]
+    pub proof: Proof,
+    /// What happened, in the customer's words.
+    #[serde(default)]
+    pub note: String,
+}
+
+async fn recovery_request(
+    State(state): State<LaState>,
+    Json(req): Json<RecoveryRequest>,
+) -> Result<StatusCode, AppError> {
+    if req.note.chars().count() > 2000 || req.note.chars().any(|c| c.is_control() && c != '\n') {
+        return Err(bad("note", "At most 2000 characters."));
+    }
+    let mut tx = state.db.begin().await.map_err(db)?;
+    prove(&state, &mut tx, "recovery", &req.proof).await?;
+    // One open request per installation: asking again adds to it, not to the queue.
+    let open: Option<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM recovery_requests WHERE installation_id = $1 AND state = 'requested' LIMIT 1",
+    )
+    .bind(req.proof.installation_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(db)?;
+    match open {
+        Some(id) => {
+            sqlx::query("UPDATE recovery_requests SET note = $2, updated_at = now() WHERE id = $1")
+                .bind(id)
+                .bind(&req.note)
+                .execute(&mut *tx)
+                .await
+                .map_err(db)?;
+        }
+        None => {
+            sqlx::query("INSERT INTO recovery_requests (installation_id, note) VALUES ($1, $2)")
+                .bind(req.proof.installation_id)
+                .bind(&req.note)
+                .execute(&mut *tx)
+                .await
+                .map_err(db)?;
+        }
+    }
+    audit(
+        &mut *tx,
+        "installation",
+        "recovery.requested",
+        Some(&req.proof.installation_id.to_string()),
+        serde_json::json!({}),
+    )
+    .await?;
+    tx.commit().await.map_err(db)?;
+    Ok(StatusCode::ACCEPTED)
 }

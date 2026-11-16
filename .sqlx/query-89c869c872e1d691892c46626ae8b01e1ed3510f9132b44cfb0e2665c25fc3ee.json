@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE license_state SET stored = $1, license_id = $2, plan = $3, license_status = $4,\n                license_expires_at = to_timestamp($5::bigint), last_error = NULL, updated_at = now()\n         WHERE id",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Jsonb",
+        "Uuid",
+        "Text",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "89c869c872e1d691892c46626ae8b01e1ed3510f9132b44cfb0e2665c25fc3ee"
+}

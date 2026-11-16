@@ -21,6 +21,7 @@
 //! | `config/control.toml` | the control plane's configuration file |
 //! | `secrets/<name>` | the files the configuration names (database URL, Redis URL, DNS key) |
 //! | `pki/node_ca.crt`, `pki/node_ca.key` | the node CA |
+//! | `license/installation.id`, `license/installation.key` | the installation's licensing identity |
 //!
 //! [`unpack`] writes the entries back to a folder (mode 0600), refusing any name that is not
 //! one of these.
@@ -213,6 +214,10 @@ pub struct Inputs {
     pub secrets: Vec<(String, PathBuf)>,
     /// The node CA's folder (`node_ca.crt` and `node_ca.key` are taken from it).
     pub ca_dir: Option<PathBuf>,
+    /// The installation's identity folder for licensing (`installation.id` and
+    /// `installation.key`), so that a restore is the same installation and does not use
+    /// another activation.
+    pub license_dir: Option<PathBuf>,
     /// When it is made (Unix seconds).
     pub created_at: i64,
     /// The panel's version.
@@ -291,6 +296,14 @@ pub fn pack(inputs: &Inputs, key: &[u8; KEY_LEN], out: impl Write) -> Result<Pac
             }
         }
     }
+    if let Some(dir) = &inputs.license_dir {
+        for name in ["installation.id", "installation.key"] {
+            let path = dir.join(name);
+            if path.is_file() {
+                files.push((format!("license/{name}"), path));
+            }
+        }
+    }
     let info = serde_json::json!({
         "format": 1,
         "created_at": inputs.created_at,
@@ -321,7 +334,9 @@ fn allowed_entry(name: &str) -> bool {
         | "database.dump"
         | "config/control.toml"
         | "pki/node_ca.crt"
-        | "pki/node_ca.key" => true,
+        | "pki/node_ca.key"
+        | "license/installation.id"
+        | "license/installation.key" => true,
         _ => name.strip_prefix("secrets/").is_some_and(plain_name),
     }
 }
@@ -393,6 +408,8 @@ pub struct Job {
     pub secret_files: Vec<(String, PathBuf)>,
     /// The CA folder.
     pub ca_dir: Option<PathBuf>,
+    /// The licensing identity folder.
+    pub license_dir: Option<PathBuf>,
     /// A private folder for the dump and the archive while they are made.
     pub scratch: PathBuf,
     /// The key ([`derive_key`]).
@@ -454,6 +471,7 @@ pub fn run_job(job: &Job) -> Result<Done, String> {
             config_file: job.config_file.clone(),
             secrets: job.secret_files.clone(),
             ca_dir: job.ca_dir.clone(),
+            license_dir: job.license_dir.clone(),
             created_at: job.created_at,
             version: job.version.clone(),
         };
@@ -571,11 +589,17 @@ mod tests {
         std::fs::write(dir.join("ca/node_ca.key"), "KEY").unwrap();
         // Not part of the backup, even though it lies in the CA folder.
         std::fs::write(dir.join("ca/master.key"), "MASTER").unwrap();
+        // The licensing identity: both files are kept; anything else in the folder is not.
+        std::fs::create_dir_all(dir.join("lic")).unwrap();
+        std::fs::write(dir.join("lic/installation.id"), "ID").unwrap();
+        std::fs::write(dir.join("lic/installation.key"), "LICENSE-PRIVATE").unwrap();
+        std::fs::write(dir.join("lic/other.txt"), "OTHER").unwrap();
         let inputs = Inputs {
             dump: dir.join("dump"),
             config_file: Some(dir.join("control.toml")),
             secrets: vec![("database_url".into(), dir.join("db.url"))],
             ca_dir: Some(dir.join("ca")),
+            license_dir: Some(dir.join("lic")),
             created_at: 1_700_000_000,
             version: "0.1.0".into(),
         };
@@ -583,7 +607,11 @@ mod tests {
         let mut stored = Vec::new();
         let packed = pack(&inputs, &key, &mut stored).unwrap();
         assert!(!stored.windows(4).any(|w| w == b"CERT" || w == b"KEY\0"));
-        assert_eq!(packed.entries.len(), 6, "{packed:?}");
+        assert!(
+            !stored.windows(15).any(|w| w == b"LICENSE-PRIVATE"),
+            "encrypted"
+        );
+        assert_eq!(packed.entries.len(), 8, "{packed:?}");
         let out = dir.join("out");
         let names = unpack(&key, &stored[..], &out).unwrap();
         assert!(
@@ -599,6 +627,15 @@ mod tests {
             "postgres://secret"
         );
         assert!(!out.join("pki/master.key").exists());
+        assert_eq!(
+            std::fs::read_to_string(out.join("license/installation.id")).unwrap(),
+            "ID"
+        );
+        assert_eq!(
+            std::fs::read_to_string(out.join("license/installation.key")).unwrap(),
+            "LICENSE-PRIVATE"
+        );
+        assert!(!out.join("license/other.txt").exists());
         // Another key opens nothing.
         assert!(unpack(&derive_key("other"), &stored[..], &dir.join("out2")).is_err());
         // A secret named like a path is refused.

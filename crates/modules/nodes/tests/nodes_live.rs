@@ -857,3 +857,51 @@ async fn operations_can_be_listed_pinged_and_retried_over_http(pool: PgPool) {
         .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn the_license_limits_how_many_nodes_can_be_added(pool: PgPool) {
+    let e = env(&pool, None, 600);
+    let root = account(&pool, "rootuser", &["super_admin"]).await;
+    let r = e.sign_in(root).await;
+    // No license in force: no limit.
+    assert_eq!(e.create(&r, "node-a").await.0, StatusCode::CREATED);
+    // A license for two nodes (one is there as a token already).
+    sqlx::query(
+        "UPDATE license_state SET enforced = true, mode = 'active', limits = '{\"max_nodes\": 2, \"max_tenants\": -1}'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert_eq!(e.create(&r, "node-b").await.0, StatusCode::CREATED);
+    let (status, body) = e.create(&r, "node-c").await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "license_limit"),
+        "{body}"
+    );
+    // A cancelled token gives its place back; so does a revoked node.
+    let id: Uuid =
+        sqlx::query_scalar("SELECT id FROM node_enrollment_tokens WHERE name = 'node-b'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    sqlx::query("UPDATE node_enrollment_tokens SET revoked_at = now() WHERE id = $1")
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(e.create(&r, "node-c").await.0, StatusCode::CREATED);
+    // Restricted or unconfirmed licenses are the middleware's business; a limit of -1 means none.
+    sqlx::query("UPDATE license_state SET limits = '{\"max_nodes\": -1}'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(e.create(&r, "node-d").await.0, StatusCode::CREATED);
+    // Licensing off again: whatever the old limits said, there is none.
+    sqlx::query("UPDATE license_state SET enforced = false, limits = '{\"max_nodes\": 1}'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(e.create(&r, "node-e").await.0, StatusCode::CREATED);
+}

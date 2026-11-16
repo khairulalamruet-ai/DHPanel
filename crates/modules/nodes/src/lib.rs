@@ -338,6 +338,27 @@ pub async fn create_enrollment(
     let ttl_secs = i64::try_from(state.token_ttl.as_secs()).map_err(internal)?;
 
     let mut tx = state.db.begin().await.map_err(internal)?;
+    // The license's node limit: the nodes there are, and the tokens waiting to become nodes.
+    let counted = dhpanel_database::sqlx::query_scalar::<_, i64>(
+        "SELECT (SELECT count(*) FROM nodes WHERE status <> 'revoked')
+              + (SELECT count(*) FROM node_enrollment_tokens
+                 WHERE consumed_at IS NULL AND revoked_at IS NULL AND expires_at > now())",
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(internal)?;
+    if let Some(reached) = dhpanel_database::license::check_limit(&mut tx, "max_nodes", counted + 1)
+        .await
+        .map_err(internal)?
+    {
+        return Err(AppError::conflict(
+            "license_limit",
+            format!(
+                "This license allows {} node(s). Remove one or upgrade the license.",
+                reached.limit
+            ),
+        ));
+    }
     if node_enrollments::name_in_use(&mut tx, &name)
         .await
         .map_err(internal)?

@@ -151,6 +151,7 @@ impl Executor {
             config_file: config_file.is_file().then_some(config_file),
             secret_files,
             ca_dir: Some(config.pki.ca_dir.clone()),
+            license_dir: Some(config.license.identity_dir.clone()),
             scratch: self.scratch.clone(),
             key,
             version: env!("CARGO_PKG_VERSION").to_owned(),

@@ -301,12 +301,26 @@ async fn main() -> ExitCode {
     });
     // Module routes: core modules at once, the others as soon as the modules
     // table can be read, and again whenever an administrator switches one.
+    // The license: without an authority in the configuration nothing is checked.
+    let license =
+        match dhpanel_mod_license::service::LicenseService::new(db.clone(), &config.license) {
+            Ok(l) => Arc::new(l),
+            Err(message) => {
+                tracing::error!(%message, "the license settings cannot be used");
+                telemetry.shutdown();
+                return ExitCode::from(EXIT_CONFIG);
+            }
+        };
+    if license.enabled() {
+        tracing::info!(installation = ?license.installation_id(), "licensing is on");
+    }
     let (mount, settings) = match modules::mount(
         modules::States {
             auth,
             admin,
             nodes,
             spool_dir: config.imports.spool_dir.clone(),
+            license: license.clone(),
         },
         base,
     ) {
@@ -400,7 +414,14 @@ async fn main() -> ExitCode {
         mount.clone(),
         std::time::Duration::from_secs(15),
     ));
-    let app = app::router(mount.service(), trusted_proxies);
+    // While the license is not good, changes are closed (reading and the license page stay).
+    let app = app::router(
+        mount.service().layer(axum::middleware::from_fn_with_state(
+            dhpanel_mod_license::Restrictor::new(db.clone()),
+            dhpanel_mod_license::restrict,
+        )),
+        trusted_proxies,
+    );
     // The event relay: hands outbox events to the enabled modules.
     let relay = dhpanel_events::Relay::new(
         db.clone(),
@@ -430,6 +451,7 @@ async fn main() -> ExitCode {
         Some(tokio::spawn(dispatcher.run(results, stopped.clone())))
     });
     let relay_task = tokio::spawn(relay.run(stopped.clone()));
+    let license_task = tokio::spawn(license.clone().run(stopped.clone()));
     // Zones kept in the panel are pushed to the DNS server, when there is one.
     let dns_task = match config.dns.powerdns_url.clone() {
         None => {
@@ -496,6 +518,7 @@ async fn main() -> ExitCode {
         let _ = task.await;
     }
     let _ = relay_task.await;
+    let _ = license_task.await;
     if let Some(task) = dns_task {
         let _ = task.await;
     }

@@ -4325,6 +4325,283 @@
         ]
       }
     },
+    "/api/v1/admin/license": {
+      "get": {
+        "tags": [
+          "license"
+        ],
+        "summary": "This installation's license: its state, plan, features, limits and dates.",
+        "operationId": "adminShowLicense",
+        "responses": {
+          "200": {
+            "description": "The license",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LicenseView"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/license/activate": {
+      "post": {
+        "tags": [
+          "license"
+        ],
+        "summary": "Enter a license key: this installation takes one place of the license.",
+        "operationId": "adminActivateLicense",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActivateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Activated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LicenseView"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`license_refused` or `licensing_off`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Not a license key",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The authority could not be reached",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/license/deactivate": {
+      "post": {
+        "tags": [
+          "license"
+        ],
+        "summary": "Give the place back (to use the license on another installation).",
+        "operationId": "adminDeactivateLicense",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Let go",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LicenseView"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`licensing_off`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The authority could not be reached",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/license/recovery-request": {
+      "post": {
+        "tags": [
+          "license"
+        ],
+        "summary": "Ask the license authority's people for help (a failed update, a lost machine).",
+        "operationId": "adminLicenseRecoveryRequest",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecoveryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Sent"
+          },
+          "409": {
+            "description": "`licensing_off`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The authority could not be reached",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/license/refresh": {
+      "post": {
+        "tags": [
+          "license"
+        ],
+        "summary": "Ask the authority again now (when the license was changed there, or to check it).",
+        "operationId": "adminRefreshLicense",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Confirmed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LicenseView"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`license_refused` (the license is no longer good) or `licensing_off`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The authority could not be reached",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/modules": {
       "get": {
         "tags": [
@@ -19236,6 +19513,20 @@
   },
   "components": {
     "schemas": {
+      "ActivateRequest": {
+        "type": "object",
+        "description": "A license key to use.",
+        "required": [
+          "license_key"
+        ],
+        "properties": {
+          "license_key": {
+            "type": "string",
+            "description": "The key the license came with (`DHP-XXXXX-XXXXX-XXXXX-XXXXX`)."
+          }
+        },
+        "additionalProperties": false
+      },
       "AddAdvisory": {
         "type": "object",
         "description": "An advisory to add.",
@@ -22836,6 +23127,104 @@
           }
         }
       },
+      "LicenseView": {
+        "type": "object",
+        "description": "The license, as the license page shows it.",
+        "required": [
+          "enforced",
+          "mode",
+          "features",
+          "limits"
+        ],
+        "properties": {
+          "enforced": {
+            "type": "boolean",
+            "description": "Licensing is on (an authority is configured); when it is not nothing is checked."
+          },
+          "entitlement_expires_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "When the entitlement in hand ends (Unix seconds)."
+          },
+          "features": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "What the license switches on."
+          },
+          "grace_ends_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "When the offline grace ends (Unix seconds), while it runs."
+          },
+          "installation_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "This installation's id (what the authority knows it by)."
+          },
+          "last_confirmed_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "When it was last confirmed by the authority (Unix seconds)."
+          },
+          "last_error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What went wrong the last time the authority was asked."
+          },
+          "license_expires_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "When the license ends (Unix seconds)."
+          },
+          "license_status": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`active`, `suspended` or `revoked`, as the authority last said."
+          },
+          "limits": {
+            "description": "Its numeric limits (`-1`: none)."
+          },
+          "mode": {
+            "type": "string",
+            "description": "`unlicensed`, `active`, `grace` (works, but has not been confirmed for a while) or\n`restricted`."
+          },
+          "plan": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The license's plan."
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it is not `active` (a short code such as `offline_grace_exceeded`,\n`license_revoked`, `entitlement_invalid`)."
+          }
+        }
+      },
       "LimitList": {
         "type": "object",
         "description": "Every limit of the installed modules.",
@@ -24584,6 +24973,20 @@
             "example": "A"
           }
         }
+      },
+      "RecoveryRequest": {
+        "type": "object",
+        "description": "What to tell the authority.",
+        "required": [
+          "note"
+        ],
+        "properties": {
+          "note": {
+            "type": "string",
+            "description": "What happened (at most 2000 characters)."
+          }
+        },
+        "additionalProperties": false
       },
       "RedeemRequest": {
         "type": "object",
@@ -27460,6 +27863,10 @@
     {
       "name": "apps",
       "description": "Applications on domains and paths"
+    },
+    {
+      "name": "license",
+      "description": "This installation's license"
     },
     {
       "name": "cron",
