@@ -71,13 +71,13 @@ note      = "phpMyAdmin 5.2.3 (Apache), the node's one database browser; clients
 
 [[image]]
 role      = "sftp"
-reference = "drakkan/sftpgo@sha256:1edd28d80de2a008863fbfc58c8ff7db47b1b410bae48d4e6076192337809b11"
+reference = "drakkan/sftpgo@sha256:484f430b2115ec8e015644b1a5e54a5f5b8568f883cb5146e9043885f691d8f7"
 tag       = "v2.7-alpine"
 note      = "SFTPGo 2.7.6, the node's SFTP and FTPS server (virtual users, one per account, confined to a folder of the tenant's files)"
 
 [[image]]
 role      = "clamav"
-reference = "clamav/clamav@sha256:64ca916618842ba469ef38a501e6c2f42a68281c064c03749b0126c0fb085ce5"
+reference = "clamav/clamav@sha256:187c76a552c21b8924e08370655c4007eb642baaace9748c5eb46a32672d8d8e"
 tag       = "stable_base"
 note      = "ClamAV 1.5.4 (stable_base, no signatures inside): run once per scan (clamscan) and once per signature update (freshclam), never as a service"
 
@@ -89,7 +89,7 @@ note      = "Trivy 0.76.2: run once per image scan, reads images straight from t
 
 [[image]]
 role      = "wpcli"
-reference = "wordpress@sha256:a4fff017eb08c03187e90fe52d4bff8d3a4d4a5103de05829a6e747c4ca3056e"
+reference = "wordpress@sha256:e4980e3ef763ce7535049c05a54e906d95b16370f28ca02fa329a079eebf3f65"
 tag       = "cli"
 note      = "WP-CLI 2.x with PHP 8.3 and mysqli, gd, zip, intl: run once per WordPress install or change (T12.02), as the tenant's own user, never as a service"
 

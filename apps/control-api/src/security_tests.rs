@@ -486,7 +486,7 @@ async fn ids_of(pool: &PgPool, tenant: Uuid) -> Vec<String> {
 /// Gives the first client one of what the panel has many of, so that there is something to
 /// reach for.
 async fn furnish(a: &App, tenant: Uuid) {
-    let tag = &tenant.simple().to_string()[..8];
+    let tag = &tenant.simple().to_string()[20..];
     let domain: Uuid = sqlx::query_scalar(
         "INSERT INTO domains (tenant_id, fqdn, kind) VALUES ($1, $2, 'primary') RETURNING id",
     )
