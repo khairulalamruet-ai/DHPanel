@@ -32,6 +32,7 @@ const EMBEDDED: &[(&str, &str)] = &[
     ("security", dhpanel_mod_security::MANIFEST),
     ("apps", dhpanel_mod_apps::MANIFEST),
     ("license", dhpanel_mod_license::MANIFEST),
+    ("notifications", dhpanel_mod_notifications::MANIFEST),
 ];
 
 /// Days the data of a deleted user is kept before it is purged.
@@ -44,6 +45,8 @@ const PURGE_AFTER_DAYS: i32 = 7;
 struct Wired {
     manifest: Manifest,
     routes: Box<dyn Fn() -> ModuleRoutes + Send + Sync>,
+    /// The notifications module turns events into notifications.
+    notifications: Option<dhpanel_mod_notifications::NotificationsState>,
 }
 
 impl Module for Wired {
@@ -53,6 +56,16 @@ impl Module for Wired {
 
     fn routes(&self) -> ModuleRoutes {
         (self.routes)()
+    }
+
+    fn on_event<'a>(
+        &'a self,
+        event: &'a dhpanel_kernel::Event,
+    ) -> dhpanel_kernel::module::BoxFuture<'a, Result<(), dhpanel_kernel::module::EventError>> {
+        match &self.notifications {
+            Some(state) => Box::pin(dhpanel_mod_notifications::handle_event(state, event)),
+            None => Box::pin(async { Ok(()) }),
+        }
     }
 
     fn settings_schema(&self) -> Option<serde_json::Value> {
@@ -156,6 +169,12 @@ pub fn mount(
         license,
     } = states;
     let agent_url: Option<String> = nodes.public_url.as_deref().map(str::to_owned);
+    let notifications_state = dhpanel_mod_notifications::NotificationsState {
+        db: db.clone(),
+        sessions: sessions.clone(),
+        settings: late_settings.clone(),
+        master_key: master_key.clone(),
+    };
     let modules = manifests
         .into_iter()
         .map(|manifest| {
@@ -419,6 +438,18 @@ pub fn mount(
                         ..ModuleRoutes::none()
                     })
                 }
+                "notifications" => {
+                    let state = notifications_state.clone();
+                    Box::new(move || ModuleRoutes {
+                        admin: Some(
+                            dhpanel_mod_notifications::admin_router().with_state(state.clone()),
+                        ),
+                        client: Some(
+                            dhpanel_mod_notifications::client_router().with_state(state.clone()),
+                        ),
+                        ..ModuleRoutes::none()
+                    })
+                }
                 "usage" => {
                     let (db, sessions) = (db.clone(), sessions.clone());
                     Box::new(move || {
@@ -513,7 +544,13 @@ pub fn mount(
                 // A manifest without code behind it has no routes.
                 _ => Box::new(ModuleRoutes::none),
             };
-            Arc::new(Wired { manifest, routes }) as Arc<dyn Module>
+            let notifications =
+                (manifest.module.name == "notifications").then(|| notifications_state.clone());
+            Arc::new(Wired {
+                manifest,
+                routes,
+                notifications,
+            }) as Arc<dyn Module>
         })
         .collect();
     let registry = Registry::build(modules).map_err(|err| vec![err.to_string()])?;

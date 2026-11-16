@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT c.id FROM notification_channels c\n         JOIN notification_rules r ON r.channel_id = c.id\n         WHERE c.account_id = $1 AND c.enabled AND r.event_type = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "notification_channels",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "7ab6f0d847da6367c1082048b5da7d485b858be48506fa024dfa4c1fbd29b39b"
+}

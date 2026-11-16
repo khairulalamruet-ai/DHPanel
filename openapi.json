@@ -5926,6 +5926,145 @@
         ]
       }
     },
+    "/api/v1/admin/notifications/smtp": {
+      "get": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "The panel's mail server.",
+        "operationId": "getNotificationSmtp",
+        "responses": {
+          "200": {
+            "description": "The mail server (`null` when none is set)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/SmtpView"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied` (needs admin.settings.read)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "Sets the panel's mail server.",
+        "operationId": "putNotificationSmtp",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SmtpRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Set"
+          },
+          "403": {
+            "description": "`permission_denied` (needs admin.settings.manage)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A host, port, security or address that is not usable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/notifications/smtp/test": {
+      "post": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "Sends a test mail through the mail server that is set.",
+        "operationId": "testNotificationSmtp",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SmtpTest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Sent"
+          },
+          "409": {
+            "description": "`smtp_failed` (the reason is in the message) or `smtp_not_set`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "An address that is not usable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/operations": {
       "get": {
         "tags": [
@@ -18261,6 +18400,384 @@
         ]
       }
     },
+    "/api/v1/client/notifications": {
+      "get": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "The newest notifications of the signed-in account.",
+        "operationId": "listNotifications",
+        "parameters": [
+          {
+            "name": "unread",
+            "in": "path",
+            "description": "Only the ones not read.",
+            "required": true,
+            "schema": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "path",
+            "description": "How many (1 to 100, default 30).",
+            "required": true,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The inbox",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationList"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A limit that is not usable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/notifications/channels": {
+      "get": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "The channels of the signed-in account.",
+        "operationId": "listNotificationChannels",
+        "responses": {
+          "200": {
+            "description": "The channels",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ChannelView"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "Makes a channel.",
+        "operationId": "createNotificationChannel",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewChannel"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Made",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedChannel"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`channel_exists` or `too_many_channels`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A kind, name, target or event that is not usable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/notifications/channels/{id}": {
+      "delete": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "Removes a channel.",
+        "operationId": "deleteNotificationChannel",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The channel",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed"
+          },
+          "404": {
+            "description": "No such channel",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "Changes a channel.",
+        "operationId": "updateNotificationChannel",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The channel",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChannelChange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Changed"
+          },
+          "404": {
+            "description": "No such channel",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "An event that is not usable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/notifications/events": {
+      "get": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "The events the signed-in account may send to a channel.",
+        "operationId": "listNotificationEvents",
+        "responses": {
+          "200": {
+            "description": "The events",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventList"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/notifications/quiet": {
+      "get": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "The signed-in account's pause and snooze.",
+        "operationId": "getNotificationQuiet",
+        "responses": {
+          "200": {
+            "description": "Pause and snooze",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuietView"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "Pauses or snoozes (or ends it).",
+        "operationId": "putNotificationQuiet",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuietRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Pause and snooze",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuietView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A snooze that is too long",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/notifications/read": {
+      "post": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "Marks notifications as read.",
+        "operationId": "readNotifications",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReadRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Done",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Updated"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/client/php": {
       "get": {
         "tags": [
@@ -20900,6 +21417,72 @@
           }
         }
       },
+      "ChannelChange": {
+        "type": "object",
+        "description": "What to change in a channel.",
+        "properties": {
+          "enabled": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Switch it on or off."
+          },
+          "events": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "The events that go to it (replaces the list)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ChannelView": {
+        "type": "object",
+        "description": "A channel.",
+        "required": [
+          "id",
+          "kind",
+          "name",
+          "target",
+          "enabled",
+          "events"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether it is used."
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The events that go to it."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Id."
+          },
+          "kind": {
+            "type": "string",
+            "description": "`email` or `webhook`."
+          },
+          "name": {
+            "type": "string",
+            "description": "Its name."
+          },
+          "target": {
+            "type": "string",
+            "description": "The address or the URL."
+          }
+        }
+      },
       "CheckResult": {
         "type": "object",
         "description": "Public result for one probe.",
@@ -21060,6 +21643,26 @@
           }
         },
         "additionalProperties": false
+      },
+      "CreatedChannel": {
+        "type": "object",
+        "description": "A channel that was made.",
+        "required": [
+          "channel"
+        ],
+        "properties": {
+          "channel": {
+            "$ref": "#/components/schemas/ChannelView",
+            "description": "The channel."
+          },
+          "secret": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A webhook's signing secret: shown this once (the calls carry `X-DHPanel-Signature`, the\nHMAC-SHA256 of the body under it)."
+          }
+        }
       },
       "CreatedEnrollment": {
         "type": "object",
@@ -21959,6 +22562,22 @@
             "format": "int64",
             "description": "Size in bytes.",
             "minimum": 0
+          }
+        }
+      },
+      "EventList": {
+        "type": "object",
+        "description": "The events that can be sent to a channel.",
+        "required": [
+          "events"
+        ],
+        "properties": {
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Their names."
           }
         }
       },
@@ -23630,6 +24249,37 @@
           }
         }
       },
+      "NewChannel": {
+        "type": "object",
+        "description": "A channel to make.",
+        "required": [
+          "kind",
+          "name",
+          "target"
+        ],
+        "properties": {
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The events that go to it."
+          },
+          "kind": {
+            "type": "string",
+            "description": "`email` or `webhook`."
+          },
+          "name": {
+            "type": "string",
+            "description": "A name (1 to 64 characters)."
+          },
+          "target": {
+            "type": "string",
+            "description": "An email address, or an `https` URL."
+          }
+        },
+        "additionalProperties": false
+      },
       "NewFtpPassword": {
         "type": "object",
         "description": "A new password.",
@@ -23935,6 +24585,77 @@
             "type": "string",
             "description": "`online`, `offline`, `draining` or `revoked`. `online` means the agent\nanswered a heartbeat within the last 45 seconds.",
             "example": "online"
+          }
+        }
+      },
+      "NotificationList": {
+        "type": "object",
+        "description": "The inbox.",
+        "required": [
+          "unread",
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NotificationView"
+            },
+            "description": "The newest first."
+          },
+          "unread": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How many are not read (all of them, not only these)."
+          }
+        }
+      },
+      "NotificationView": {
+        "type": "object",
+        "description": "A notification.",
+        "required": [
+          "id",
+          "event_type",
+          "severity",
+          "subject",
+          "body",
+          "data",
+          "created_at",
+          "read"
+        ],
+        "properties": {
+          "body": {
+            "type": "string",
+            "description": "The text."
+          },
+          "created_at": {
+            "type": "integer",
+            "format": "int64",
+            "description": "When (Unix seconds)."
+          },
+          "data": {
+            "description": "The ids it is about."
+          },
+          "event_type": {
+            "type": "string",
+            "description": "The event it comes from."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Id."
+          },
+          "read": {
+            "type": "boolean",
+            "description": "Whether it was read."
+          },
+          "severity": {
+            "type": "string",
+            "description": "`info`, `warning` or `critical`."
+          },
+          "subject": {
+            "type": "string",
+            "description": "One line."
           }
         }
       },
@@ -24834,6 +25555,50 @@
         },
         "additionalProperties": false
       },
+      "QuietRequest": {
+        "type": "object",
+        "description": "Pause and snooze, to set.",
+        "required": [
+          "paused"
+        ],
+        "properties": {
+          "paused": {
+            "type": "boolean",
+            "description": "Pause everything outside the inbox."
+          },
+          "snooze_minutes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Or for this many minutes (1 to 43200: thirty days); `null` or 0 ends a snooze.",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "QuietView": {
+        "type": "object",
+        "description": "Pause and snooze.",
+        "required": [
+          "paused"
+        ],
+        "properties": {
+          "paused": {
+            "type": "boolean",
+            "description": "Nothing leaves the inbox until this is turned off."
+          },
+          "snoozed_until": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Nothing leaves the inbox until this time (Unix seconds)."
+          }
+        }
+      },
       "RateLimit": {
         "type": "object",
         "description": "A limit on new connections.",
@@ -24858,6 +25623,24 @@
           "proto": {
             "type": "string",
             "description": "`tcp` or `udp`."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ReadRequest": {
+        "type": "object",
+        "description": "Which notifications to mark read.",
+        "properties": {
+          "ids": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "These ones; all of them when it is left out."
           }
         },
         "additionalProperties": false
@@ -26021,6 +26804,131 @@
           }
         }
       },
+      "SmtpRequest": {
+        "type": "object",
+        "description": "The mail server, to set.",
+        "required": [
+          "host",
+          "port",
+          "security",
+          "from_address",
+          "enabled"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether mail is sent."
+          },
+          "from_address": {
+            "type": "string",
+            "description": "The address mail comes from."
+          },
+          "from_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The name mail comes from."
+          },
+          "host": {
+            "type": "string",
+            "description": "Host name."
+          },
+          "password": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The password; left out, the one there is stays."
+          },
+          "port": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Port.",
+            "minimum": 0
+          },
+          "security": {
+            "type": "string",
+            "description": "`starttls`, `tls` or `none`."
+          },
+          "username": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The login, if any."
+          }
+        },
+        "additionalProperties": false
+      },
+      "SmtpTest": {
+        "type": "object",
+        "description": "Where to send a test mail.",
+        "required": [
+          "to"
+        ],
+        "properties": {
+          "to": {
+            "type": "string",
+            "description": "The address."
+          }
+        },
+        "additionalProperties": false
+      },
+      "SmtpView": {
+        "type": "object",
+        "description": "The mail server (without its password).",
+        "required": [
+          "host",
+          "port",
+          "security",
+          "has_password",
+          "from_address",
+          "enabled"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether mail is sent."
+          },
+          "from_address": {
+            "type": "string",
+            "description": "The address mail comes from."
+          },
+          "from_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The name mail comes from."
+          },
+          "has_password": {
+            "type": "boolean",
+            "description": "Whether a password is set."
+          },
+          "host": {
+            "type": "string",
+            "description": "Host name."
+          },
+          "port": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Port.",
+            "minimum": 0
+          },
+          "security": {
+            "type": "string",
+            "description": "`starttls`, `tls` or `none`."
+          },
+          "username": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The login, if any."
+          }
+        }
+      },
       "SshSetting": {
         "type": "object",
         "description": "One SSH server setting.",
@@ -26944,6 +27852,21 @@
           }
         },
         "additionalProperties": false
+      },
+      "Updated": {
+        "type": "object",
+        "description": "How many changed.",
+        "required": [
+          "updated"
+        ],
+        "properties": {
+          "updated": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How many.",
+            "minimum": 0
+          }
+        }
       },
       "UploadCertificate": {
         "type": "object",
@@ -27887,6 +28810,10 @@
     {
       "name": "logs",
       "description": "Logs"
+    },
+    {
+      "name": "notifications",
+      "description": "Notifications"
     },
     {
       "name": "usage",

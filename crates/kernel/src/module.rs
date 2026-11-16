@@ -148,6 +148,23 @@ pub enum Event {
         /// The service.
         service: String,
     },
+    /// A node that was online is not (its session ended, or it fell silent). Written by a
+    /// database trigger on the change itself.
+    NodeOffline {
+        /// The node.
+        node_id: Uuid,
+        /// Its name.
+        name: String,
+    },
+    /// A backup failed. Written by a database trigger on the change itself.
+    BackupFailed {
+        /// The backup.
+        backup_id: Uuid,
+        /// The hosting account it belongs to (none for the panel's own backup).
+        tenant_id: Option<Uuid>,
+        /// What went wrong, shortened.
+        error: String,
+    },
 }
 
 impl Event {
@@ -165,6 +182,8 @@ impl Event {
             Self::CertificateExpiring { .. } => "certificate_expiring",
             Self::NodeServiceDown { .. } => "node_service_down",
             Self::NodeServiceRecovered { .. } => "node_service_recovered",
+            Self::NodeOffline { .. } => "node_offline",
+            Self::BackupFailed { .. } => "backup_failed",
         }
     }
 }

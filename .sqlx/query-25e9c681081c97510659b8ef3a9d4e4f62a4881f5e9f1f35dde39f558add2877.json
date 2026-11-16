@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO notification_rules (channel_id, event_type)\n             SELECT $1, e FROM unnest($2::text[]) AS e ON CONFLICT DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "25e9c681081c97510659b8ef3a9d4e4f62a4881f5e9f1f35dde39f558add2877"
+}

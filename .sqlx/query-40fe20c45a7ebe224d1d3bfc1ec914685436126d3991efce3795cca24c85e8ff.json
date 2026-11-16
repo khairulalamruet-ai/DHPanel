@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM notification_deliveries WHERE status <> 'pending' AND created_at < now() - interval '30 days'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "40fe20c45a7ebe224d1d3bfc1ec914685436126d3991efce3795cca24c85e8ff"
+}

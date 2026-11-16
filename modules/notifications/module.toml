@@ -1,0 +1,15 @@
+# Notifications: an inbox for what matters, and email and webhook channels (crates/modules/notifications).
+[module]
+name       = "notifications"
+version    = "0.1.0"
+title      = { en = "Notifications", bn = "বিজ্ঞপ্তি" }
+category   = "system"
+core       = false
+depends_on = ["auth", "rbac", "audit", "system", "users"]
+
+[permissions]
+keys = []
+
+[ui]
+admin_nav  = { group = "System", order = 70, icon = "bell" }
+client_nav = { group = "Account", order = 90, icon = "bell" }

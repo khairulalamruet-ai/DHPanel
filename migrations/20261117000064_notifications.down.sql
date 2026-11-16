@@ -1,0 +1,10 @@
+DROP TRIGGER IF EXISTS nodes_offline ON nodes;
+DROP FUNCTION IF EXISTS announce_node_offline();
+DROP TRIGGER IF EXISTS backups_failed ON backups;
+DROP FUNCTION IF EXISTS announce_backup_failed();
+DROP TABLE IF EXISTS notification_smtp;
+DROP TABLE IF EXISTS notification_deliveries;
+DROP TABLE IF EXISTS notification_rules;
+DROP TABLE IF EXISTS notification_channels;
+DROP TABLE IF EXISTS notification_settings;
+DROP TABLE IF EXISTS notifications;

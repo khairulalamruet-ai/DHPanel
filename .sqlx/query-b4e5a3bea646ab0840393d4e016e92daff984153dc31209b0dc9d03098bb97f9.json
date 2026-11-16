@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO notification_settings (account_id, paused, snoozed_until)\n         VALUES ($1, $2, to_timestamp($3::bigint))\n         ON CONFLICT (account_id) DO UPDATE\n             SET paused = EXCLUDED.paused, snoozed_until = EXCLUDED.snoozed_until, updated_at = now()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bool",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b4e5a3bea646ab0840393d4e016e92daff984153dc31209b0dc9d03098bb97f9"
+}

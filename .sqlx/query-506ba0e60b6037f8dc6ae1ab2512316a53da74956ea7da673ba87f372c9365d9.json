@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COALESCE(paused OR COALESCE(snoozed_until > now(), false), false) AS \"quiet!\"\n           FROM notification_settings WHERE account_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "quiet!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "506ba0e60b6037f8dc6ae1ab2512316a53da74956ea7da673ba87f372c9365d9"
+}

@@ -26,6 +26,8 @@ allow = [
     "CC0-1.0",
     "CDLA-Permissive-2.0",
     "BSL-1.0",
+    # The zero-clause BSD: as permissive as a license gets (quoted_printable, which lettre needs).
+    "0BSD",
 ]
 # Our own crates are unpublished (publish = false) and proprietary.
 private = { ignore = true }

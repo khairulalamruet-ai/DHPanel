@@ -1,0 +1,180 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH due AS (\n               SELECT id FROM notification_deliveries\n               WHERE status = 'pending' AND next_attempt_at <= now()\n               ORDER BY next_attempt_at, id LIMIT $1\n               FOR UPDATE SKIP LOCKED\n           ), taken AS (\n               UPDATE notification_deliveries d\n               SET attempts = d.attempts + 1, next_attempt_at = now() + make_interval(secs => $2::int)\n               FROM due WHERE d.id = due.id\n               RETURNING d.id, d.attempts, d.notification_id, d.channel_id\n           )\n           SELECT t.id AS \"id!\", t.attempts AS \"attempts!\", n.id AS \"notification_id!\", n.event_type AS \"event_type!\",\n                  n.severity AS \"severity!\", n.subject AS \"subject!\", n.body AS \"body!\", n.data AS \"data!\",\n                  extract(epoch FROM n.created_at)::bigint AS \"created_at!\",\n                  c.kind AS \"kind!\", c.target AS \"target!\", c.sealed_secret AS sealed_secret,\n                  a.locale AS \"locale!\", a.id AS \"account_id!\"\n           FROM taken t\n           JOIN notifications n ON n.id = t.notification_id\n           JOIN notification_channels c ON c.id = t.channel_id\n           JOIN accounts a ON a.id = c.account_id\n           ORDER BY t.id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "notification_deliveries",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "attempts!",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "notification_deliveries",
+            "name": "attempts"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "notification_id!",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "notifications",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "event_type!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "notifications",
+            "name": "event_type"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "severity!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "notifications",
+            "name": "severity"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "subject!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "notifications",
+            "name": "subject"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "body!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "notifications",
+            "name": "body"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "data!",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "notifications",
+            "name": "data"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "created_at!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 9,
+        "name": "kind!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "notification_channels",
+            "name": "kind"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "target!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "notification_channels",
+            "name": "target"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "sealed_secret",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "notification_channels",
+            "name": "sealed_secret"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "locale!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "accounts",
+            "name": "locale"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "account_id!",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "accounts",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      null,
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "09a61443992756bd827d7e9169e71664c72466e07d92897bd0fef8190f2292d7"
+}

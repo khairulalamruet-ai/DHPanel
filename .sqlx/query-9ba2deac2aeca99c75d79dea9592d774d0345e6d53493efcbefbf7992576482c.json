@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO notification_smtp (id, host, port, security, username, sealed_password, from_address, from_name, enabled)\n         VALUES (true, $1, $2, $3, $4, $5, $6, $7, $8)\n         ON CONFLICT (id) DO UPDATE SET\n             host = EXCLUDED.host, port = EXCLUDED.port, security = EXCLUDED.security,\n             username = EXCLUDED.username,\n             sealed_password = COALESCE(EXCLUDED.sealed_password, notification_smtp.sealed_password),\n             from_address = EXCLUDED.from_address, from_name = EXCLUDED.from_name,\n             enabled = EXCLUDED.enabled, updated_at = now()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int4",
+        "Text",
+        "Text",
+        "Bytea",
+        "Text",
+        "Text",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9ba2deac2aeca99c75d79dea9592d774d0345e6d53493efcbefbf7992576482c"
+}

@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE notification_deliveries\n         SET last_error = left($2, 500),\n             status = CASE WHEN attempts >= $4 THEN 'failed' ELSE 'pending' END,\n             next_attempt_at = now() + make_interval(secs => $3::int)\n         WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "397beb45679f9466358a7c001f6254912c95cfd45820f7e5f3fa7fd2bf53d4ce"
+}

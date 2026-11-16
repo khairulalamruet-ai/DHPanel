@@ -176,6 +176,8 @@ async fn main() -> ExitCode {
     let operation_secrets = secrets::operation_secrets(db.clone(), master_key.clone());
     let runner_key = master_key.clone();
     let system_key = master_key.clone();
+    let notify_key = master_key.clone();
+    let notify_sessions = sessions.clone();
     let minutes = |m: u32| std::time::Duration::from_secs(u64::from(m) * 60);
     let lockout = |threshold, lock_minutes| dhpanel_cache::lockout::LockoutPolicy {
         threshold,
@@ -339,6 +341,31 @@ async fn main() -> ExitCode {
         modules = %settings.modules().map(|m| m.module.as_str()).collect::<Vec<_>>().join(", "),
         "settings schemas valid"
     );
+    // What the notification channels are to get is sent every half minute (and the inboxes of what
+    // is old are cleared once a day).
+    tokio::spawn({
+        let state = dhpanel_mod_notifications::NotificationsState {
+            db: db.clone(),
+            sessions: notify_sessions,
+            settings: Arc::new(std::sync::OnceLock::from(settings.clone())),
+            master_key: notify_key,
+        };
+        async move {
+            let mut every = tokio::time::interval(std::time::Duration::from_secs(30));
+            every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            let mut rounds = 0_u32;
+            loop {
+                every.tick().await;
+                dhpanel_mod_notifications::deliver_due(&state).await;
+                rounds = rounds.wrapping_add(1);
+                if rounds % 2880 == 1
+                    && let Err(error) = dhpanel_database::notifications::prune(&state.db, 90).await
+                {
+                    tracing::warn!(%error, "could not clear the old notifications");
+                }
+            }
+        }
+    });
     // Uploaded dumps nobody needs any more are removed; forgotten uploads are cancelled.
     tokio::spawn({
         let (db, spool_dir) = (db.clone(), config.imports.spool_dir.clone());
