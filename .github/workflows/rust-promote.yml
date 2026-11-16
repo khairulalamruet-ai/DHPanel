@@ -1,0 +1,76 @@
+# Deploys a published release to production, started by a person (Actions > rust-promote > Run
+# workflow). It takes the release's files from the GitHub release, checks the manifest's
+# keyless cosign signature (made by rust-release.yml for this very tag) and the archive's hash
+# against it, and only then deploys and runs the smoke test. Typing the version twice is the
+# guard against promoting the wrong one.
+name: rust-promote
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "The release to deploy, without the v (for example 0.9.0)"
+        required: true
+      confirm:
+        description: "Type the version again"
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production
+  cancel-in-progress: false
+
+jobs:
+  production:
+    name: deploy ${{ inputs.version }} to production + smoke test
+    runs-on: ubuntu-24.04
+    environment: production
+    steps:
+      - name: The version is typed twice and looks like a version
+        env:
+          VERSION: ${{ inputs.version }}
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          [ "$VERSION" = "$CONFIRM" ] || { echo "the two versions differ"; exit 1; }
+          echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "not a version: $VERSION"; exit 1; }
+      - uses: actions/checkout@v7
+        with:
+          ref: v${{ inputs.version }}
+      - uses: sigstore/cosign-installer@v4
+      - name: Fetch the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          mkdir out
+          gh release download "v$VERSION" --dir out --pattern "dhpanel-$VERSION-linux-x86_64.tar.gz" --pattern manifest.json --pattern manifest.json.sigstore
+      - name: The manifest was signed by the release workflow of this tag, and the archive is in it
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          cd out
+          cosign verify-blob --bundle manifest.json.sigstore \
+            --certificate-identity "https://github.com/${GITHUB_REPOSITORY}/.github/workflows/rust-release.yml@refs/tags/v${VERSION}" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com manifest.json
+          python3 - "$VERSION" <<'PY'
+          import hashlib, json, sys
+          version = sys.argv[1]
+          name = f"dhpanel-{version}-linux-x86_64.tar.gz"
+          manifest = json.load(open("manifest.json"))
+          entry = next((f for f in manifest["files"] if f["name"] == name), None)
+          assert entry, f"{name} is not in the signed manifest"
+          assert manifest["version"] == version, "the manifest is for another version"
+          digest = hashlib.sha256(open(name, "rb").read()).hexdigest()
+          assert digest == entry["sha256"], "the archive is not what the manifest says"
+          print(f"{name} matches the signed manifest")
+          PY
+      - name: Deploy
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: deploy/release/remote-deploy.sh "out/dhpanel-${{ inputs.version }}-linux-x86_64.tar.gz"
+      - name: Smoke test
+        run: deploy/release/smoke.sh "${{ vars.PANEL_URL }}"

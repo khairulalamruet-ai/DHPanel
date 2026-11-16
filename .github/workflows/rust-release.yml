@@ -1,11 +1,15 @@
 # Release pipeline (T19.11): a tag vX.Y.Z builds the release, checks that the build is
 # reproducible, signs a manifest, publishes the artifacts with the changelog, deploys to staging,
-# runs the smoke test there and, after a person approves, deploys to production.
+# and runs the smoke test there. Production is a separate step that a person starts by hand:
+# the workflow rust-promote.yml (Actions > rust-promote > Run workflow), which checks the signed
+# manifest before it deploys. (GitHub's "required reviewers" for an environment is not available
+# on a free plan for a private repository; starting the workflow is the approval.)
 #
-# One-time setup by a human (repository settings), none of it is in the repository:
-#   Environments `staging` and `production` (production: required reviewers).
+# One-time setup (repository settings), none of it is in the repository:
+#   Environments `staging` and `production`.
 #   Per environment: variable PANEL_URL; secrets DEPLOY_HOST (user@host), DEPLOY_SSH_KEY
 #   (private key of a user that may `sudo` the deploy script), DEPLOY_KNOWN_HOSTS.
+#   Repository: secret RELEASE_SIGNING_KEY and variable RELEASE_KID (the release key).
 name: rust-release
 
 on:
@@ -177,26 +181,6 @@ jobs:
     needs: release
     runs-on: ubuntu-24.04
     environment: staging
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v7
-        with:
-          name: published
-          path: out
-      - name: Deploy
-        env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
-        run: deploy/release/remote-deploy.sh "out/dhpanel-${GITHUB_REF_NAME#v}-linux-x86_64.tar.gz"
-      - name: Smoke test
-        run: deploy/release/smoke.sh "${{ vars.PANEL_URL }}"
-
-  production:
-    name: deploy to production + smoke test
-    needs: staging
-    runs-on: ubuntu-24.04
-    environment: production # required reviewers: a person approves here
     steps:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v7
