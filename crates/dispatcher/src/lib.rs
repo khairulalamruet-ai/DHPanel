@@ -184,7 +184,7 @@ impl Dispatcher {
                 _ = tick.tick() => { self.tick().await; }
                 _ = capabilities.tick() => { self.request_capabilities().await; }
                 _ = purges.tick() => { self.request_purges().await; }
-                _ = routes.tick() => { self.expire_previews().await; self.request_route_syncs().await; self.request_error_pages().await; self.request_user_agents().await; self.request_firewalls().await; self.request_scans().await; self.request_signature_updates().await; self.request_image_checks().await; self.request_app_installs().await; self.request_import_progress().await; self.request_cron_runs().await; self.request_metrics().await; self.request_services().await; }
+                _ = routes.tick() => { self.expire_previews().await; self.request_route_syncs().await; self.request_error_pages().await; self.request_user_agents().await; self.request_firewalls().await; self.request_scans().await; self.request_signature_updates().await; self.request_image_checks().await; self.request_app_installs().await; self.settle_cache_instances().await; self.request_import_progress().await; self.request_cron_runs().await; self.request_metrics().await; self.request_services().await; }
                 _ = certificates.tick() => { self.request_certificates().await; self.request_db_sizes().await; }
                 _ = expiry.tick() => { self.announce_expiring().await; }
                 Some(report) = results.recv() => self.handle_result(report).await,
@@ -932,6 +932,73 @@ impl Dispatcher {
             }
             _ => {}
         }
+    }
+
+    /// Writes down what the nodes answered about cache servers (T12.10): a server that is up
+    /// is `ready` with the name to reach it by, one that could not be made is `failed`, one
+    /// that was removed leaves the table. Returns how many rows moved.
+    pub async fn settle_cache_instances(&self) -> usize {
+        let db = self.ops.db();
+        let rows = match dhpanel_database::cache_instances::awaiting(db).await {
+            Ok(r) => r,
+            Err(err) => {
+                tracing::warn!(error = %err, "could not look for cache servers under way");
+                return 0;
+            }
+        };
+        let mut moved = 0;
+        for row in rows {
+            let Some(op_id) = row.op_id else { continue };
+            let Ok(Some(op)) = self.ops.get(op_id).await else {
+                continue;
+            };
+            let result = match op.status {
+                dhpanel_database::operations::Status::Succeeded if row.status == "removing" => {
+                    dhpanel_database::cache_instances::forget(db, row.id).await
+                }
+                dhpanel_database::operations::Status::Succeeded => {
+                    let answer = op.output.and_then(|o| {
+                        serde_json::from_value::<dhpanel_node_protocol::Output>(o).ok()
+                    });
+                    match answer {
+                        Some(dhpanel_node_protocol::Output::CacheInstanceSet { host, port }) => {
+                            dhpanel_database::cache_instances::ready(
+                                db,
+                                row.id,
+                                &host,
+                                i32::from(port),
+                            )
+                            .await
+                        }
+                        _ => {
+                            dhpanel_database::cache_instances::failed(
+                                db,
+                                row.id,
+                                "the node's answer is unreadable",
+                            )
+                            .await
+                        }
+                    }
+                }
+                dhpanel_database::operations::Status::Failed => {
+                    let message = op
+                        .error
+                        .as_ref()
+                        .and_then(|e| e.get("message"))
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("the node could not do it")
+                        .to_owned();
+                    // (A removal that failed leaves the row, with the reason, to try again.)
+                    dhpanel_database::cache_instances::failed(db, row.id, &message).await
+                }
+                _ => continue,
+            };
+            match result {
+                Ok(()) => moved += 1,
+                Err(err) => tracing::warn!(error = %err, "could not keep a cache server's state"),
+            }
+        }
+        moved
     }
 
     /// Moves the installs of applications along (T12.02): once the database and its user

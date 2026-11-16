@@ -1953,6 +1953,36 @@ pub enum Operation {
         #[serde(default)]
         plugins: Vec<String>,
     },
+    /// Makes (or changes) a tenant's own cache server: a Redis or Memcached container on the
+    /// tenant's network only, reachable by its container name (`dh-<account>-redis`), with a memory limit; Redis
+    /// also has a password. Safe to repeat. Answered with [`Output::CacheInstanceSet`].
+    SetCacheInstance {
+        /// The instance's id (the control plane finds the password by it).
+        instance_id: Uuid,
+        /// The tenant.
+        tenant_id: Uuid,
+        /// The tenant's system name.
+        username: String,
+        /// The tenant's numeric user id.
+        uid: u32,
+        /// `redis` or `memcached`.
+        kind: String,
+        /// Memory it may use, in MiB (1 to 4096).
+        memory_mb: u32,
+        /// Redis's password; absent in the ledger, present on the wire.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        password: Option<DbPassword>,
+    },
+    /// Removes a tenant's cache server (and what it kept). Safe to repeat. Answered with
+    /// [`Output::CacheInstanceRemoved`].
+    RemoveCacheInstance {
+        /// The tenant.
+        tenant_id: Uuid,
+        /// The tenant's system name.
+        username: String,
+        /// `redis` or `memcached`.
+        kind: String,
+    },
     /// Installs an application of the catalog (see [`AppDefinition`]) in a folder of a tenant's
     /// files: the archive is downloaded and its checksum verified, then the definition's steps
     /// run, in a one-off container as the tenant's user on the tenant's network. The steps are
@@ -2165,6 +2195,8 @@ impl Operation {
         "install_wordpress",
         "run_wp_cli",
         "install_app",
+        "set_cache_instance",
+        "remove_cache_instance",
         "scan_image",
         "check_image_updates",
         "inventory_wordpress",
@@ -2245,6 +2277,8 @@ impl Operation {
             Self::InstallWordPress { .. } => "install_wordpress",
             Self::RunWpCli { .. } => "run_wp_cli",
             Self::InstallApp { .. } => "install_app",
+            Self::SetCacheInstance { .. } => "set_cache_instance",
+            Self::RemoveCacheInstance { .. } => "remove_cache_instance",
             Self::ScanImage { .. } => "scan_image",
             Self::CheckImageUpdates { .. } => "check_image_updates",
             Self::InventoryWordPress { .. } => "inventory_wordpress",
@@ -2446,6 +2480,18 @@ pub enum Output {
     WordPressInventory {
         /// The installations found (at most 20).
         installs: Vec<WpInstall>,
+    },
+    /// Answer to [`Operation::SetCacheInstance`].
+    CacheInstanceSet {
+        /// The name the tenant's sites reach it by.
+        host: String,
+        /// Its port.
+        port: u16,
+    },
+    /// Answer to [`Operation::RemoveCacheInstance`].
+    CacheInstanceRemoved {
+        /// Whether there was one.
+        existed: bool,
     },
     /// Answer to [`Operation::InstallApp`].
     AppInstalled {
@@ -3732,7 +3778,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            74,
+            76,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }

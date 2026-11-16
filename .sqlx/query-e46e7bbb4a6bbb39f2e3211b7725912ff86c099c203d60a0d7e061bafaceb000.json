@@ -1,0 +1,137 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, tenant_id, kind, memory_mb, status, op_id, sealed_password, host, port, error\n         FROM cache_instances WHERE tenant_id = $1 AND kind = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "cache_instances",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "cache_instances",
+            "name": "tenant_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "kind",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "cache_instances",
+            "name": "kind"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "memory_mb",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "cache_instances",
+            "name": "memory_mb"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "cache_instances",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "op_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "cache_instances",
+            "name": "op_id"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "sealed_password",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "cache_instances",
+            "name": "sealed_password"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "host",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "cache_instances",
+            "name": "host"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "port",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "cache_instances",
+            "name": "port"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "error",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "cache_instances",
+            "name": "error"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "e46e7bbb4a6bbb39f2e3211b7725912ff86c099c203d60a0d7e061bafaceb000"
+}

@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE cache_instances SET status = 'ready', op_id = NULL, host = $2, port = $3, error = NULL, updated_at = now()\n         WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "811bb794fad6631bee3f07fd2de9469843d4dd0e6f917431fff961f7116db426"
+}

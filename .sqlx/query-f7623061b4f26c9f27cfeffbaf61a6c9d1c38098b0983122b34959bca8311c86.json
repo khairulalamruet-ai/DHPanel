@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COALESCE(sum(memory_mb), 0)::bigint AS \"n!\" FROM cache_instances\n           WHERE tenant_id = $1 AND kind <> $2 AND status <> 'removing'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "n!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "f7623061b4f26c9f27cfeffbaf61a6c9d1c38098b0983122b34959bca8311c86"
+}

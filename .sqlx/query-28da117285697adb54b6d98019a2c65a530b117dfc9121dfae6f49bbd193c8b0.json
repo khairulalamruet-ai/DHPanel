@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO cache_instances (tenant_id, kind, memory_mb, sealed_password)\n         VALUES ($1, $2, $3, $4)\n         ON CONFLICT (tenant_id, kind) DO UPDATE\n           SET memory_mb = $3, status = 'pending', error = NULL, updated_at = now(),\n               sealed_password = COALESCE(cache_instances.sealed_password, $4)\n         RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "cache_instances",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Int4",
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "28da117285697adb54b6d98019a2c65a530b117dfc9121dfae6f49bbd193c8b0"
+}

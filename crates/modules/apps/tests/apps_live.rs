@@ -763,3 +763,150 @@ async fn the_catalog_is_listed_and_any_of_its_applications_can_be_asked_for(pool
         "{wp}"
     );
 }
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn a_cache_server_is_asked_for_with_a_sealed_password_and_within_the_plans_memory(
+    pool: PgPool,
+) {
+    use dhpanel_database::cache_instances as store;
+    let e = env(&pool).await;
+    let (alice_account, alice) = client(&pool, "alice", 10_000).await;
+    let a = e.sign_in(alice_account).await;
+    let path = "/api/v1/client/cache";
+    let (status, none) = e.call(&a, "GET", path, None).await;
+    assert_eq!(status, StatusCode::OK, "{none}");
+    assert_eq!(
+        (
+            none["items"].as_array().unwrap().len(),
+            none["limit_mb"].as_i64()
+        ),
+        (0, Some(64))
+    );
+    // A Redis: pending, with a password only the owner sees once it is there.
+    let (status, made) = e
+        .call(
+            &a,
+            "POST",
+            path,
+            Some(json!({"kind": "redis", "memory_mb": 48})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{made}");
+    assert_eq!(
+        (
+            made["kind"].as_str(),
+            made["status"].as_str(),
+            made["memory_mb"].as_i64()
+        ),
+        (Some("redis"), Some("pending"), Some(48))
+    );
+    let password = made["password"]
+        .as_str()
+        .expect("the owner sees the password")
+        .to_owned();
+    assert!(password.len() >= 20);
+    let ledger: String =
+        sqlx::query_scalar("SELECT string_agg(payload::text, ' ') FROM operations")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(!ledger.contains(&password), "{ledger}");
+    let kind: String = sqlx::query_scalar("SELECT kind FROM operations WHERE tenant_id = $1")
+        .bind(alice)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(kind, "set_cache_instance");
+    // 48 + 32 > 64: the plan's memory is for all of them together.
+    let (status, got) = e
+        .call(
+            &a,
+            "POST",
+            path,
+            Some(json!({"kind": "memcached", "memory_mb": 32})),
+        )
+        .await;
+    assert_eq!(
+        (status, got["code"].as_str()),
+        (StatusCode::CONFLICT, Some("limit_reached")),
+        "{got}"
+    );
+    let (status, _) = e
+        .call(
+            &a,
+            "POST",
+            path,
+            Some(json!({"kind": "memcached", "memory_mb": 16})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    for bad in [
+        json!({"kind": "etcd"}),
+        json!({"kind": "redis", "memory_mb": 0}),
+        json!({"kind": "redis", "memory_mb": 99999}),
+    ] {
+        assert_eq!(
+            e.call(&a, "POST", path, Some(bad)).await.0,
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+    }
+    // The node answers; the owner sees how to reach it. A second change keeps the password.
+    let row = store::get(&pool, alice, "redis").await.unwrap().unwrap();
+    store::ready(&pool, row.id, "dh-alice-redis", 6379)
+        .await
+        .unwrap();
+    let (_, list) = e.call(&a, "GET", path, None).await;
+    let redis = list["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["kind"] == "redis")
+        .unwrap();
+    assert_eq!(
+        (
+            redis["status"].as_str(),
+            redis["host"].as_str(),
+            redis["port"].as_i64()
+        ),
+        (Some("ready"), Some("dh-alice-redis"), Some(6379))
+    );
+    assert_eq!(redis["password"].as_str(), Some(password.as_str()));
+    let (status, again) = e
+        .call(
+            &a,
+            "POST",
+            path,
+            Some(json!({"kind": "redis", "memory_mb": 40})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    assert_eq!(
+        (again["password"].as_str(), again["memory_mb"].as_i64()),
+        (Some(password.as_str()), Some(40))
+    );
+    // Removing goes through the node too; nobody else's.
+    assert_eq!(
+        e.call(&a, "DELETE", &format!("{path}/etcd"), None).await.0,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        e.call(&a, "DELETE", &format!("{path}/redis"), None).await.0,
+        StatusCode::ACCEPTED
+    );
+    let (_, list) = e.call(&a, "GET", path, None).await;
+    let redis = list["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["kind"] == "redis")
+        .unwrap();
+    assert_eq!(redis["status"], "removing");
+    // A plan without the feature has none.
+    sqlx::query("UPDATE feature_sets SET all_features = false, features = ARRAY['files']::feature_key[] WHERE id = (SELECT feature_set_id FROM plans WHERE is_default)").execute(&pool).await.unwrap();
+    let (status, got) = e.call(&a, "GET", path, None).await;
+    assert_eq!(
+        (status, got["code"].as_str()),
+        (StatusCode::FORBIDDEN, Some("feature_disabled"))
+    );
+}

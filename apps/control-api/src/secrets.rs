@@ -154,6 +154,46 @@ pub fn operation_secrets(
                         admin_password,
                     });
                 }
+                // A cache server's password: sealed by the API, opened here for this one
+                // message.
+                Operation::SetCacheInstance {
+                    instance_id,
+                    tenant_id,
+                    username,
+                    uid,
+                    kind,
+                    memory_mb,
+                    password: None,
+                } => {
+                    let password = if kind == "redis" {
+                        let sealed =
+                            dhpanel_database::cache_instances::sealed_password(&db, instance_id)
+                                .await
+                                .map_err(|_| "could not read a cache password".to_owned())?
+                                .ok_or_else(|| "this cache server has no password".to_owned())?;
+                        let bytes = master_key
+                            .open(
+                                &dhpanel_database::cache_instances::password_context(instance_id),
+                                &sealed,
+                            )
+                            .map_err(|_| "a cache password does not open".to_owned())?;
+                        Some(dhpanel_node_protocol::DbPassword(
+                            String::from_utf8(bytes)
+                                .map_err(|_| "a cache password is not text".to_owned())?,
+                        ))
+                    } else {
+                        None
+                    };
+                    return Ok(Operation::SetCacheInstance {
+                        instance_id,
+                        tenant_id,
+                        username,
+                        uid,
+                        kind,
+                        memory_mb,
+                        password,
+                    });
+                }
                 // A WordPress user's new password: sealed by the API, opened here for this
                 // one message.
                 Operation::RunWpCli {

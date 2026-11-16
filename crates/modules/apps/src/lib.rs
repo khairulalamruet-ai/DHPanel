@@ -7,6 +7,8 @@
 //! | POST | `/api/v1/client/apps/wordpress` | the owner; the `databases` feature |
 //! | GET | `/api/v1/client/apps/catalog` | the owner |
 //! | POST | `/api/v1/client/apps/install` | the owner (any application of the catalog) |
+//! | GET, POST | `/api/v1/client/cache` | the owner; the `cache` feature |
+//! | DELETE | `/api/v1/client/cache/{kind}` | the owner |
 //! | GET | `/api/v1/client/apps/{id}/wordpress` | the owner (versions, updates) |
 //! | POST | `/api/v1/client/apps/{id}/wordpress/{plugins,themes,core}/update` | the owner |
 //! | POST | `/api/v1/client/apps/{id}/wordpress/{maintenance,admin-password}` | the owner |
@@ -90,6 +92,11 @@ pub fn client_router() -> Router<AppsState> {
             axum::routing::post(install_wordpress),
         )
         .route("/api/v1/client/apps/catalog", get(catalog_list))
+        .route("/api/v1/client/cache", get(cache_list).post(cache_set))
+        .route(
+            "/api/v1/client/cache/{kind}",
+            axum::routing::delete(cache_remove),
+        )
         .route(
             "/api/v1/client/apps/install",
             axum::routing::post(install_app),
@@ -1441,16 +1448,328 @@ pub async fn wp_operation(
     })))
 }
 
+// ------------------------------------------------------------------ cache servers
+
+/// A cache server of the account, with what its sites need to reach it.
+#[derive(Serialize, ToSchema)]
+pub struct CacheView {
+    /// `redis` or `memcached`.
+    pub kind: String,
+    /// Memory it may use (MiB).
+    pub memory_mb: i32,
+    /// `pending`, `ready`, `failed` or `removing`.
+    pub status: String,
+    /// The name the account's sites reach it by (inside the account's own network).
+    pub host: Option<String>,
+    /// Its port.
+    pub port: Option<i32>,
+    /// Redis's password (Memcached has none: only the account's own network reaches it).
+    pub password: Option<String>,
+    /// Why it failed.
+    pub error: Option<String>,
+}
+
+impl std::fmt::Debug for CacheView {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CacheView")
+            .field("kind", &self.kind)
+            .field("status", &self.status)
+            .finish_non_exhaustive()
+    }
+}
+
+/// The account's cache servers.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct CacheList {
+    /// `memcached` before `redis`.
+    pub items: Vec<CacheView>,
+    /// Memory all of them together may use (MiB; `null`: no limit).
+    pub limit_mb: Option<i64>,
+}
+
+/// A cache server to make (or to change the memory of).
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetCache {
+    /// `redis` or `memcached`.
+    pub kind: String,
+    /// Memory it may use, in MiB (64 when absent).
+    #[serde(default)]
+    pub memory_mb: Option<i32>,
+}
+
+fn cache_limit(plan: &plans::Plan) -> Option<i64> {
+    let value = plan
+        .limits
+        .get("cache_memory_mb")
+        .and_then(serde_json::Value::as_i64)
+        .unwrap_or(64);
+    (value >= 0).then_some(value)
+}
+
+fn cache_view(state: &AppsState, i: dhpanel_database::cache_instances::Instance) -> CacheView {
+    let password = i.sealed_password.as_ref().and_then(|sealed| {
+        state
+            .master_key
+            .open(
+                &dhpanel_database::cache_instances::password_context(i.id),
+                sealed,
+            )
+            .ok()
+            .and_then(|b| String::from_utf8(b).ok())
+    });
+    CacheView {
+        kind: i.kind,
+        memory_mb: i.memory_mb,
+        status: i.status,
+        host: i.host,
+        port: i.port,
+        password,
+        error: i.error,
+    }
+}
+
+async fn cache_feature(
+    state: &AppsState,
+    who: &Principal,
+) -> Result<(tenants::Tenant, plans::Plan), AppError> {
+    let tenant = client_tenant(state, who).await?;
+    let plan = plans::get(&state.db, tenant.plan_id)
+        .await
+        .map_err(internal)?
+        .ok_or_else(|| internal(std::io::Error::other("the plan of a tenant vanished")))?;
+    if !plans::includes_feature(&state.db, plan.id, "cache")
+        .await
+        .map_err(internal)?
+    {
+        return Err(AppError::forbidden(
+            "feature_disabled",
+            "A cache server is not included in this plan.",
+        ));
+    }
+    Ok((tenant, plan))
+}
+
+/// The account's cache servers and how to reach them.
+#[utoipa::path(get, path = "/api/v1/client/cache", tag = "apps", operation_id = "clientListCache",
+    security(("session" = [])),
+    responses((status = 200, description = "The cache servers", body = CacheList),
+              (status = 403, description = "`client_only` or `feature_disabled`", body = ProblemDetails, content_type = "application/problem+json")))]
+pub async fn cache_list(
+    State(state): State<AppsState>,
+    who: Principal,
+) -> Result<Json<CacheList>, AppError> {
+    let (tenant, plan) = cache_feature(&state, &who).await?;
+    let items = dhpanel_database::cache_instances::list(&state.db, tenant.id)
+        .await
+        .map_err(internal)?
+        .into_iter()
+        .map(|i| cache_view(&state, i))
+        .collect();
+    Ok(Json(CacheList {
+        items,
+        limit_mb: cache_limit(&plan),
+    }))
+}
+
+/// Make a cache server of your own (Redis or Memcached), or change its memory. It is
+/// reachable from the account's own sites only, by the name the answer shows.
+#[utoipa::path(post, path = "/api/v1/client/cache", tag = "apps", operation_id = "clientSetCache",
+    security(("session" = [])), params(("X-CSRF-Token" = String, Header, description = "The session's csrf_token")),
+    request_body = SetCache,
+    responses((status = 202, description = "Queued", body = CacheView),
+              (status = 403, description = "`client_only` or `feature_disabled`", body = ProblemDetails, content_type = "application/problem+json"),
+              (status = 409, description = "`limit_reached` or `tenant_not_running`", body = ProblemDetails, content_type = "application/problem+json"),
+              (status = 422, description = "A kind or memory that is not valid", body = ProblemDetails, content_type = "application/problem+json")))]
+pub async fn cache_set(
+    State(state): State<AppsState>,
+    who: Principal,
+    Json(req): Json<SetCache>,
+) -> Result<(StatusCode, Json<CacheView>), AppError> {
+    let (tenant, plan) = cache_feature(&state, &who).await?;
+    if tenant.status.as_str() != "active" {
+        return Err(AppError::conflict(
+            "tenant_not_running",
+            "Only a running account can change its cache servers.",
+        ));
+    }
+    if !["redis", "memcached"].contains(&req.kind.as_str()) {
+        return Err(bad("kind", "redis or memcached."));
+    }
+    let memory = req.memory_mb.unwrap_or(64);
+    if !(1..=4096).contains(&memory) {
+        return Err(bad("memory_mb", "1 to 4096 MiB."));
+    }
+    let mut tx = state.db.begin().await.map_err(internal)?;
+    dhpanel_database::domains::lock_tenant(&mut tx, tenant.id)
+        .await
+        .map_err(internal)?;
+    if let Some(limit) = cache_limit(&plan) {
+        let others =
+            dhpanel_database::cache_instances::memory_used(&state.db, tenant.id, &req.kind)
+                .await
+                .map_err(internal)?;
+        if others + i64::from(memory) > limit {
+            return Err(AppError::conflict(
+                "limit_reached",
+                format!("This plan allows {limit} MiB of cache memory in all."),
+            ));
+        }
+    }
+    let password = (req.kind == "redis").then(generate_password);
+    // A new row needs its id to seal the password to it: make it, then seal.
+    let id = dhpanel_database::cache_instances::upsert(&mut tx, tenant.id, &req.kind, memory, None)
+        .await
+        .map_err(internal)?;
+    if let Some(password) = &password {
+        let sealed = state
+            .master_key
+            .seal(
+                &dhpanel_database::cache_instances::password_context(id),
+                password.as_bytes(),
+            )
+            .map_err(internal)?;
+        // (An existing password stays: the first one made is kept.)
+        dhpanel_database::sqlx::query(
+            "UPDATE cache_instances SET sealed_password = COALESCE(sealed_password, $2) WHERE id = $1",
+        )
+        .bind(id)
+        .bind(&sealed)
+        .execute(&mut *tx)
+        .await
+        .map_err(internal)?;
+    }
+    let op = Operation::SetCacheInstance {
+        instance_id: id,
+        tenant_id: tenant.id,
+        username: tenant.username.clone(),
+        uid: u32::try_from(tenant.uid).unwrap_or_default(),
+        kind: req.kind.clone(),
+        memory_mb: u32::try_from(memory).unwrap_or(64),
+        password: None::<DbPassword>,
+    };
+    let payload = serde_json::to_value(&op).map_err(internal)?;
+    let queued = operations::enqueue_in(
+        &mut tx,
+        &NewOperation {
+            node_id: tenant.node_id,
+            kind: op.type_name(),
+            tenant_id: Some(tenant.id),
+            payload: &payload,
+            idempotency_key: &format!("cache:{}:{}", id.simple(), Uuid::now_v7().simple()),
+            created_by: Some(who.account_id()),
+            ttl_secs: OPERATION_TTL_SECS,
+            max_attempts: OPERATION_ATTEMPTS,
+        },
+    )
+    .await
+    .map_err(|e| match e {
+        EnqueueError::UnknownNode => AppError::conflict(
+            "node_unavailable",
+            "The node of this account no longer exists.",
+        ),
+        other => internal(other),
+    })?;
+    dhpanel_database::sqlx::query(
+        "UPDATE cache_instances SET op_id = $2, status = 'pending' WHERE id = $1",
+    )
+    .bind(id)
+    .bind(queued.operation().id)
+    .execute(&mut *tx)
+    .await
+    .map_err(internal)?;
+    dhpanel_audit::insert(
+        &mut *tx,
+        &AuditEntry::new("cache.set", Outcome::Success)
+            .actor(who.account_id())
+            .tenant(tenant.id)
+            .target("cache_instance", id)
+            .metadata(serde_json::json!({ "kind": req.kind, "memory_mb": memory })),
+    )
+    .await
+    .map_err(internal)?;
+    tx.commit().await.map_err(internal)?;
+    let row = dhpanel_database::cache_instances::get(&state.db, tenant.id, &req.kind)
+        .await
+        .map_err(internal)?
+        .ok_or_else(|| AppError::not_found("cache"))?;
+    Ok((StatusCode::ACCEPTED, Json(cache_view(&state, row))))
+}
+
+/// Remove a cache server (what it holds is gone).
+#[utoipa::path(delete, path = "/api/v1/client/cache/{kind}", tag = "apps", operation_id = "clientRemoveCache",
+    security(("session" = [])), params(("kind" = String, Path, description = "redis or memcached"), ("X-CSRF-Token" = String, Header, description = "The session's csrf_token")),
+    responses((status = 202, description = "Queued"),
+              (status = 404, description = "There is none", body = ProblemDetails, content_type = "application/problem+json")))]
+pub async fn cache_remove(
+    State(state): State<AppsState>,
+    who: Principal,
+    Path(kind): Path<String>,
+) -> Result<StatusCode, AppError> {
+    let tenant = client_tenant(&state, &who).await?;
+    let row = dhpanel_database::cache_instances::get(&state.db, tenant.id, &kind)
+        .await
+        .map_err(internal)?
+        .ok_or_else(|| AppError::not_found("cache"))?;
+    let op = Operation::RemoveCacheInstance {
+        tenant_id: tenant.id,
+        username: tenant.username.clone(),
+        kind: kind.clone(),
+    };
+    let payload = serde_json::to_value(&op).map_err(internal)?;
+    let queued = operations::enqueue(
+        &state.db,
+        &NewOperation {
+            node_id: tenant.node_id,
+            kind: op.type_name(),
+            tenant_id: Some(tenant.id),
+            payload: &payload,
+            idempotency_key: &format!("cacherm:{}:{}", row.id.simple(), Uuid::now_v7().simple()),
+            created_by: Some(who.account_id()),
+            ttl_secs: OPERATION_TTL_SECS,
+            max_attempts: OPERATION_ATTEMPTS,
+        },
+    )
+    .await
+    .map_err(|e| match e {
+        EnqueueError::UnknownNode => AppError::conflict(
+            "node_unavailable",
+            "The node of this account no longer exists.",
+        ),
+        other => internal(other),
+    })?;
+    dhpanel_database::cache_instances::waiting_for(
+        &state.db,
+        row.id,
+        queued.operation().id,
+        "removing",
+    )
+    .await
+    .map_err(internal)?;
+    dhpanel_audit::insert(
+        &state.db,
+        &AuditEntry::new("cache.removed", Outcome::Success)
+            .actor(who.account_id())
+            .tenant(tenant.id)
+            .target("cache_instance", row.id)
+            .metadata(serde_json::json!({ "kind": kind })),
+    )
+    .await
+    .map_err(internal)?;
+    Ok(StatusCode::ACCEPTED)
+}
+
 /// The module's OpenAPI document.
 #[derive(OpenApi)]
 #[openapi(
     paths(
-        client_list, client_get, admin_list, install_wordpress, catalog_list, install_app, wp_overview, wp_update_plugins,
+        client_list, client_get, admin_list, install_wordpress, catalog_list, install_app,
+        cache_list, cache_set, cache_remove, wp_overview, wp_update_plugins,
         wp_update_themes, wp_update_core, wp_maintenance, wp_admin_password, wp_operation, wp_scan,
         wp_harden
     ),
     components(schemas(
-        AppView, AppList, InstallWordPress, CatalogEntry, CatalogList, InstallApp, WpAnswer, WpSlug, WpVersion, WpMaintenance,
+        AppView, AppList, InstallWordPress, CacheView, CacheList, SetCache, CatalogEntry, CatalogList, InstallApp, WpAnswer, WpSlug, WpVersion, WpMaintenance,
         WpNewPassword, Pending, WpHarden, dhpanel_node_protocol::WpOverview,
         dhpanel_node_protocol::WpItem, dhpanel_node_protocol::WpScan
     )),

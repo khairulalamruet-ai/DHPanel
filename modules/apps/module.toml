@@ -13,3 +13,11 @@ keys = ["admin.apps.read"]
 [ui]
 admin_nav  = { group = "Hosting", order = 40, icon = "layers" }
 client_nav = { group = "Apps", order = 10, icon = "layers" }
+
+[features]
+keys = ["cache"]
+
+# Memory all of an account's cache servers together may use, in MiB (a plan without this key
+# gets the default).
+[limits]
+cache_memory_mb = { type = "int", default = 64, unlimited = -1 }

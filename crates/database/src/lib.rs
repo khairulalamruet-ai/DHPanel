@@ -13,6 +13,7 @@ pub mod accounts;
 pub mod admins;
 pub mod apps;
 pub mod backups;
+pub mod cache_instances;
 pub mod certificates;
 pub mod cron_jobs;
 pub mod databases;

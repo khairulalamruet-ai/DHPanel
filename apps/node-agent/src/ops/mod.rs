@@ -23,6 +23,7 @@
 pub mod appinstall;
 pub mod backup;
 pub mod cache;
+pub mod cacheaddon;
 pub mod capabilities;
 pub mod cron;
 pub mod db;
@@ -204,6 +205,14 @@ impl Registry {
                 move |op| nodeservices::read_service_log(context.clone(), op)
             });
             registry.register("report_server_info", server::report_server_info);
+            registry.register("set_cache_instance", {
+                let context = context.clone();
+                move |op| cacheaddon::set_cache_instance(context.clone(), op)
+            });
+            registry.register("remove_cache_instance", {
+                let context = context.clone();
+                move |op| cacheaddon::remove_cache_instance(context.clone(), op)
+            });
             registry.register("install_app", {
                 let context = context.clone();
                 move |op| appinstall::install_app(context.clone(), op)

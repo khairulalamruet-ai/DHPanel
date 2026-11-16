@@ -92,3 +92,15 @@ role      = "wpcli"
 reference = "wordpress@sha256:a4fff017eb08c03187e90fe52d4bff8d3a4d4a5103de05829a6e747c4ca3056e"
 tag       = "cli"
 note      = "WP-CLI 2.x with PHP 8.3 and mysqli, gd, zip, intl: run once per WordPress install or change (T12.02), as the tenant's own user, never as a service"
+
+[[image]]
+role      = "redis"
+reference = "redis@sha256:7958cfbb9d152f87dadfbc89f1b0b15938f0b81ff8982feb327476f4911935c3"
+tag       = "8-alpine"
+note      = "Redis 8.10.3 (Alpine): a tenant's own cache, on the tenant's network only, with a password and a memory limit (T12.10)"
+
+[[image]]
+role      = "memcached"
+reference = "memcached@sha256:084fb554292d1447bc2c68b80c2331b98834514f56c866bc21a61be3c2ee376d"
+tag       = "1.6-alpine"
+note      = "Memcached 1.6.45 (Alpine): a tenant's own cache, on the tenant's network only, with a memory limit (T12.10)"

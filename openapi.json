@@ -11779,6 +11779,166 @@
         ]
       }
     },
+    "/api/v1/client/cache": {
+      "get": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "The account's cache servers and how to reach them.",
+        "operationId": "clientListCache",
+        "responses": {
+          "200": {
+            "description": "The cache servers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CacheList"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only` or `feature_disabled`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "Make a cache server of your own (Redis or Memcached), or change its memory. It is\nreachable from the account's own sites only, by the name the answer shows.",
+        "operationId": "clientSetCache",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetCache"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CacheView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only` or `feature_disabled`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`limit_reached` or `tenant_not_running`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A kind or memory that is not valid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/cache/{kind}": {
+      "delete": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "Remove a cache server (what it holds is gone).",
+        "operationId": "clientRemoveCache",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "description": "redis or memcached",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Queued"
+          },
+          "404": {
+            "description": "There is none",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/client/cron-jobs": {
       "get": {
         "tags": [
@@ -20166,6 +20326,83 @@
           }
         }
       },
+      "CacheList": {
+        "type": "object",
+        "description": "The account's cache servers.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CacheView"
+            },
+            "description": "`memcached` before `redis`."
+          },
+          "limit_mb": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Memory all of them together may use (MiB; `null`: no limit)."
+          }
+        }
+      },
+      "CacheView": {
+        "type": "object",
+        "description": "A cache server of the account, with what its sites need to reach it.",
+        "required": [
+          "kind",
+          "memory_mb",
+          "status"
+        ],
+        "properties": {
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it failed."
+          },
+          "host": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The name the account's sites reach it by (inside the account's own network)."
+          },
+          "kind": {
+            "type": "string",
+            "description": "`redis` or `memcached`."
+          },
+          "memory_mb": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Memory it may use (MiB)."
+          },
+          "password": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Redis's password (Memcached has none: only the account's own network reaches it)."
+          },
+          "port": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Its port."
+          },
+          "status": {
+            "type": "string",
+            "description": "`pending`, `ready`, `failed` or `removing`."
+          }
+        }
+      },
       "CapsView": {
         "type": "object",
         "description": "The ceilings of the plan.",
@@ -25099,6 +25336,28 @@
             "type": "string",
             "description": "`read_only`, `read_write` or `all`.",
             "example": "read_write"
+          }
+        },
+        "additionalProperties": false
+      },
+      "SetCache": {
+        "type": "object",
+        "description": "A cache server to make (or to change the memory of).",
+        "required": [
+          "kind"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "description": "`redis` or `memcached`."
+          },
+          "memory_mb": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Memory it may use, in MiB (64 when absent)."
           }
         },
         "additionalProperties": false

@@ -188,7 +188,7 @@ const STEADY_FOR: Duration = Duration::from_secs(3);
 const POLL: Duration = Duration::from_millis(500);
 
 /// Waits until `name` has been running steadily for [`STEADY_FOR`].
-async fn wait_healthy(docker: &DockerManager, name: &Name) -> Result<(), AgentError> {
+pub(super) async fn wait_healthy(docker: &DockerManager, name: &Name) -> Result<(), AgentError> {
     let deadline = tokio::time::Instant::now() + START_TIMEOUT;
     let mut up_since: Option<tokio::time::Instant> = None;
     loop {

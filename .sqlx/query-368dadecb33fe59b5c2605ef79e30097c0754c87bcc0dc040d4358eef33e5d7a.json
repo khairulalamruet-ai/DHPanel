@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT sealed_password FROM cache_instances WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "sealed_password",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "cache_instances",
+            "name": "sealed_password"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "368dadecb33fe59b5c2605ef79e30097c0754c87bcc0dc040d4358eef33e5d7a"
+}

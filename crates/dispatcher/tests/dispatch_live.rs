@@ -2056,3 +2056,128 @@ async fn an_application_without_a_database_goes_straight_to_the_installer(pool: 
     agent_stop.send(true).unwrap();
     agent.await.unwrap();
 }
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs PostgreSQL"]
+async fn a_cache_server_is_ready_when_the_node_says_so_and_gone_when_it_is_removed(pool: PgPool) {
+    let p = plane(&pool).await;
+    let d = Dispatcher::new(p.ops.clone(), p.gateway.clone(), None, dispatch_settings());
+    let mut registry = Registry::new();
+    registry.register("set_cache_instance", |_| async move {
+        Ok(Output::CacheInstanceSet {
+            host: "dh-gus-redis".into(),
+            port: 6379,
+        })
+    });
+    registry.register("remove_cache_instance", |_| async move {
+        Ok(Output::CacheInstanceRemoved { existed: true })
+    });
+    let node = make_node_with(&p, &pool, "cache", registry).await;
+    let (agent_stop, agent) = node.start_agent(p.addr);
+    wait_connected(&p, node.id).await;
+    let results = p.gateway.take_results().expect("results taken once");
+    tokio::spawn(d.clone().run(results, p.stop.subscribe()));
+    let account: Uuid = sqlx::query_scalar(
+        "INSERT INTO accounts (kind, username, email, password_hash)
+         VALUES ('client', 'gus', 'gus@example.com',
+                 '$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHQ$aGFzaGhhc2hoYXNoaGFzaA') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let plan: Uuid = sqlx::query_scalar("SELECT id FROM plans WHERE is_default")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let tenant: Uuid = sqlx::query_scalar(
+        "INSERT INTO tenants (owner_account_id, node_id, plan_id, username, uid, status)
+         VALUES ($1, $2, $3, 'gus', 10007, 'active') RETURNING id",
+    )
+    .bind(account)
+    .bind(node.id)
+    .bind(plan)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let instance: Uuid = sqlx::query_scalar(
+        "INSERT INTO cache_instances (tenant_id, kind, memory_mb) VALUES ($1, 'redis', 32) RETURNING id",
+    )
+    .bind(tenant)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let ask = |op: Operation, key: &str| {
+        let request = Request::new(node.id, op, key.to_owned());
+        let ops = p.ops.clone();
+        async move {
+            match ops.enqueue(&request).await.unwrap() {
+                dhpanel_operations::Enqueued::Created(op)
+                | dhpanel_operations::Enqueued::Existing(op) => op.id,
+            }
+        }
+    };
+    let op = ask(
+        Operation::SetCacheInstance {
+            instance_id: instance,
+            tenant_id: tenant,
+            username: "gus".into(),
+            uid: 10_007,
+            kind: "redis".into(),
+            memory_mb: 32,
+            password: None,
+        },
+        "cache-test-1",
+    )
+    .await;
+    sqlx::query("UPDATE cache_instances SET op_id = $2 WHERE id = $1")
+        .bind(instance)
+        .bind(op)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let status = |pool: PgPool| async move {
+        sqlx::query_as::<_, (String, Option<String>)>(
+            "SELECT status, host FROM cache_instances WHERE kind = 'redis'",
+        )
+        .fetch_optional(&pool)
+        .await
+        .unwrap()
+    };
+    let mut now = None;
+    for _ in 0..100 {
+        d.settle_cache_instances().await;
+        now = status(pool.clone()).await;
+        if now.as_ref().is_some_and(|(s, _)| s == "ready") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert_eq!(now, Some(("ready".into(), Some("dh-gus-redis".into()))));
+    // Removing: the row goes when the node has removed the server.
+    let op = ask(
+        Operation::RemoveCacheInstance {
+            tenant_id: tenant,
+            username: "gus".into(),
+            kind: "redis".into(),
+        },
+        "cache-test-2",
+    )
+    .await;
+    sqlx::query("UPDATE cache_instances SET op_id = $2, status = 'removing' WHERE id = $1")
+        .bind(instance)
+        .bind(op)
+        .execute(&pool)
+        .await
+        .unwrap();
+    for _ in 0..100 {
+        d.settle_cache_instances().await;
+        now = status(pool.clone()).await;
+        if now.is_none() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert_eq!(now, None);
+    agent_stop.send(true).unwrap();
+    agent.await.unwrap();
+}

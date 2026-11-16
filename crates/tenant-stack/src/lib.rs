@@ -53,6 +53,10 @@ pub enum Role {
     Sftp,
     /// The node's malware scanner, run for one scan at a time (not part of a tenant's stack).
     Clamav,
+    /// A tenant's own Redis (a cache add-on, not part of the default stack).
+    Redis,
+    /// A tenant's own Memcached (a cache add-on, not part of the default stack).
+    Memcached,
     /// WP-CLI with the PHP extensions WordPress needs, run once per install or change of a
     /// WordPress site (not part of a tenant's stack).
     Wpcli,
@@ -74,6 +78,8 @@ impl Role {
             Self::Clamav => "clamav",
             Self::Trivy => "trivy",
             Self::Wpcli => "wpcli",
+            Self::Redis => "redis",
+            Self::Memcached => "memcached",
         }
     }
 }
@@ -672,7 +678,14 @@ pub fn render(tenant: &Tenant<'_>, allowlist: &Allowlist) -> Result<Stack, Stack
                 }
             }
             // The database server is the node's, not a tenant's.
-            Role::Db | Role::Pma | Role::Sftp | Role::Clamav | Role::Trivy | Role::Wpcli => {
+            Role::Db
+            | Role::Pma
+            | Role::Sftp
+            | Role::Clamav
+            | Role::Trivy
+            | Role::Wpcli
+            | Role::Redis
+            | Role::Memcached => {
                 continue;
             }
         }
