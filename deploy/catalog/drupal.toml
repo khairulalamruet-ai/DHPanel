@@ -1,0 +1,38 @@
+# Drupal made with Composer. The installer's own PHP has no PDO MySQL driver, so the site is not
+# installed here: the database is written into settings.php and Drupal's installer, which the
+# site's own PHP serves at /core/install.php, asks only for the site's name and administrator.
+# Serve it from its `web` folder.
+slug           = "drupal"
+name           = "Drupal"
+version        = "11"
+description    = "A content management system for large, structured sites. Open /core/install.php once to finish: the database is already set."
+category       = "cms"
+needs_database = true
+document_root  = "web"
+
+[[steps]]
+type = "composer"
+args = ["create-project", "drupal/recommended-project", ".", "--prefer-dist"]
+
+[[steps]]
+type = "composer"
+args = ["require", "drush/drush", "--no-interaction"]
+
+[[steps]]
+type    = "write_file"
+path    = "web/sites/default/settings.php"
+content = """<?php
+$databases['default']['default'] = [
+  'database' => '{{db_name}}',
+  'username' => '{{db_user}}',
+  'password' => '{{db_password}}',
+  'host' => '{{db_host}}',
+  'port' => '3306',
+  'driver' => 'mysql',
+  'prefix' => '',
+  'namespace' => 'Drupal\\\\mysql\\\\Driver\\\\Database\\\\mysql',
+  'autoload' => 'core/modules/mysql/src/Driver/Database/mysql/',
+];
+$settings['hash_salt'] = '{{app_key}}';
+$settings['config_sync_directory'] = '../config/sync';
+"""

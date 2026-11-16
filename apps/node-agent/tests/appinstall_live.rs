@@ -301,3 +301,32 @@ async fn laravel_is_made_with_composer_and_configured_for_its_database() {
     );
     rig.finish().await;
 }
+
+#[tokio::test]
+#[ignore = "needs rootless Docker and the network"]
+async fn drupal_is_made_with_composer_and_its_database_is_set_for_the_installer() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let rig = rig("drupal").await;
+    rig.database("alice_drupal", "dbpass-for-drupal-1").await;
+    let started = Instant::now();
+    let out = install_app_as(
+        rig.context.clone(),
+        rig.op("drupal", "cms", Some("alice_drupal"), "dbpass-for-drupal-1"),
+        (0, 0),
+    )
+    .await;
+    eprintln!("drupal in {:?}: {out:?}", started.elapsed());
+    out.unwrap();
+    let site = rig.www.join("cms");
+    let settings = std::fs::read_to_string(site.join("web/sites/default/settings.php")).unwrap();
+    assert!(
+        settings.contains("'database' => 'alice_drupal'")
+            && settings.contains("'password' => 'dbpass-for-drupal-1'")
+            && settings.contains(r"Drupal\\mysql\\Driver\\Database\\mysql"),
+        "{settings}"
+    );
+    assert!(site.join("web/index.php").is_file());
+    assert!(site.join("web/core/install.php").is_file());
+    assert!(site.join("vendor/bin/drush").exists());
+    rig.finish().await;
+}

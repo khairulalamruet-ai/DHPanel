@@ -133,12 +133,13 @@ mod tests {
     fn the_shipped_catalog_is_valid_and_has_the_first_applications() {
         let catalog = Catalog::embedded().unwrap();
         let slugs: Vec<&str> = catalog.all().map(|a| a.slug.as_str()).collect();
-        for wanted in ["wordpress", "joomla", "laravel", "static-site"] {
+        for wanted in ["wordpress", "joomla", "laravel", "drupal", "static-site"] {
             assert!(slugs.contains(&wanted), "{wanted} is missing: {slugs:?}");
         }
         assert!(catalog.get("joomla").unwrap().needs_admin());
         assert!(!catalog.get("static-site").unwrap().needs_database);
         assert_eq!(catalog.get("laravel").unwrap().document_root, "public");
+        assert_eq!(catalog.get("drupal").unwrap().document_root, "web");
     }
 
     #[test]
