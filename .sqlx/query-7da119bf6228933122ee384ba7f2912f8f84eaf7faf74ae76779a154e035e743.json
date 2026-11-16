@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH due AS (\n               SELECT id FROM operations\n               WHERE status IN ('pending', 'retryable') AND expires_at <= now()\n               ORDER BY id\n               FOR UPDATE SKIP LOCKED\n           )\n           UPDATE operations o\n           SET status = 'failed', finished_at = now(),\n               error = '{\"code\": \"expired\", \"message\": \"the operation expired before it could be delivered\", \"retryable\": false}'::jsonb\n           FROM due\n           WHERE o.id = due.id",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "7da119bf6228933122ee384ba7f2912f8f84eaf7faf74ae76779a154e035e743"
+}

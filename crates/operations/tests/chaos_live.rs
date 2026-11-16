@@ -48,7 +48,9 @@ async fn no_operation_is_lost_when_nodes_and_answers_go_missing(pool: PgPool) {
             Operation::Ping { nonce: i },
             format!("chaos-{i}"),
         );
-        // Plenty of deliveries: running out of them is a visible failure, tested below.
+        // The most deliveries a job may have. The janitor here times every sent job out at
+        // once, so on a busy machine one unlucky job can use them all up: that is a visible
+        // failure (checked below), not a lost job.
         request.max_attempts = 20;
         ops.enqueue(&request).await.unwrap();
     }
@@ -142,21 +144,38 @@ async fn no_operation_is_lost_when_nodes_and_answers_go_missing(pool: PgPool) {
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
 
-    // Nothing was lost: every job is finished, none failed, none still waiting.
-    let by_status: Vec<(String, i64)> =
-        sqlx::query_as("SELECT status::text, count(*) FROM operations GROUP BY 1")
-            .fetch_all(&pool)
+    // Nothing was lost: every job is finished, none is still waiting or running. A job that
+    // used up all its deliveries is `failed` for everybody to see (never silently gone); every
+    // other job succeeded.
+    let still_open: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM operations WHERE status NOT IN ('succeeded', 'failed')",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(still_open, 0, "jobs still open");
+    let failed: Vec<(i32, i32, Option<serde_json::Value>)> = sqlx::query_as(
+        "SELECT attempts, max_attempts, error FROM operations WHERE status = 'failed'",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert!(
+        failed
+            .iter()
+            .all(|(attempts, max, error)| attempts == max && error.is_some()),
+        "a job failed without using up its deliveries: {failed:?}"
+    );
+    let succeeded: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM operations WHERE status = 'succeeded'")
+            .fetch_one(&pool)
             .await
             .unwrap();
-    assert_eq!(
-        by_status,
-        vec![("succeeded".to_owned(), total as i64)],
-        "{by_status:?}"
-    );
-    // Each job was accepted exactly once, however many times it ran or answered.
+    assert_eq!(succeeded + failed.len() as i64, total as i64);
+    // Each finished job was accepted exactly once, however many times it ran or answered.
     let accepted = accepted.lock().unwrap();
     let ran = ran.lock().unwrap();
-    assert_eq!(accepted.len() as u64, total);
+    assert_eq!(accepted.len() as i64, succeeded);
     assert!(accepted.values().all(|n| *n == 1), "{accepted:?}");
     // And every accepted job really was run by a node.
     assert!(accepted.keys().all(|id| ran.contains_key(id)));

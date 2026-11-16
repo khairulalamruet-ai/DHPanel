@@ -417,10 +417,17 @@ pub async fn fail(
 /// Database errors.
 pub async fn expire_overdue(pool: &PgPool) -> Result<u64, sqlx::Error> {
     let done = sqlx::query!(
-        r#"UPDATE operations
+        r#"WITH due AS (
+               SELECT id FROM operations
+               WHERE status IN ('pending', 'retryable') AND expires_at <= now()
+               ORDER BY id
+               FOR UPDATE SKIP LOCKED
+           )
+           UPDATE operations o
            SET status = 'failed', finished_at = now(),
                error = '{"code": "expired", "message": "the operation expired before it could be delivered", "retryable": false}'::jsonb
-           WHERE status IN ('pending', 'retryable') AND expires_at <= now()"#,
+           FROM due
+           WHERE o.id = due.id"#,
     )
     .execute(pool)
     .await?;
@@ -480,26 +487,36 @@ pub async fn time_out_dispatched(
     timeout_secs: i32,
     retry_in_secs: i32,
 ) -> Result<Vec<(Uuid, Status)>, sqlx::Error> {
+    // The rows are taken in id order and the ones somebody else holds are left for the next
+    // round: two janitors (or a janitor and a node's answer) that touch the same rows never
+    // wait for each other, so they cannot deadlock.
     let rows = sqlx::query!(
-        r#"UPDATE operations
+        r#"WITH due AS (
+               SELECT id FROM operations
+               WHERE status = 'dispatched'
+                 AND dispatched_at < now() - make_interval(
+                         secs => CASE WHEN kind IN ('import_sql', 'export_sql', 'open_phpmyadmin', 'fetch_file', 'send_file',
+                                              'create_backup', 'restore_backup', 'delete_backup', 'scan_tenant', 'update_malware_signatures', 'inventory_wordpress', 'scan_image', 'install_wordpress', 'run_wp_cli', 'install_app', 'set_cache_instance')
+                                      OR (kind = 'file_op' AND payload #>> '{request,type}'
+                                          IN ('archive', 'extract', 'copy', 'fix_permissions', 'chmod', 'empty_trash', 'disk_usage'))
+                                  THEN $3::int ELSE $1::int END)
+               ORDER BY id
+               FOR UPDATE SKIP LOCKED
+           )
+           UPDATE operations o
            SET status = CASE
-                   WHEN attempts < max_attempts
-                        AND now() + make_interval(secs => $2::int) < expires_at
+                   WHEN o.attempts < o.max_attempts
+                        AND now() + make_interval(secs => $2::int) < o.expires_at
                    THEN 'retryable' ELSE 'failed' END,
                error = '{"code": "timeout", "message": "the node did not answer in time", "retryable": true}'::jsonb,
                next_attempt_at = now() + make_interval(secs => $2::int),
                finished_at = CASE
-                   WHEN attempts < max_attempts
-                        AND now() + make_interval(secs => $2::int) < expires_at
+                   WHEN o.attempts < o.max_attempts
+                        AND now() + make_interval(secs => $2::int) < o.expires_at
                    THEN NULL ELSE now() END
-           WHERE status = 'dispatched'
-             AND dispatched_at < now() - make_interval(
-                     secs => CASE WHEN kind IN ('import_sql', 'export_sql', 'open_phpmyadmin', 'fetch_file', 'send_file',
-                                          'create_backup', 'restore_backup', 'delete_backup', 'scan_tenant', 'update_malware_signatures', 'inventory_wordpress', 'scan_image', 'install_wordpress', 'run_wp_cli', 'install_app', 'set_cache_instance')
-                                  OR (kind = 'file_op' AND payload #>> '{request,type}'
-                                      IN ('archive', 'extract', 'copy', 'fix_permissions', 'chmod', 'empty_trash', 'disk_usage'))
-                              THEN $3::int ELSE $1::int END)
-           RETURNING id, status AS "status!""#,
+           FROM due
+           WHERE o.id = due.id
+           RETURNING o.id AS "id!", o.status AS "status!""#,
         timeout_secs,
         retry_in_secs,
         LONG_RUNNING_SECS,
