@@ -1,0 +1,191 @@
+# Release pipeline (T19.11): a tag vX.Y.Z builds the release, checks that the build is
+# reproducible, signs a manifest, publishes the artifacts with the changelog, deploys to staging,
+# runs the smoke test there and, after a person approves, deploys to production.
+#
+# One-time setup by a human (repository settings), none of it is in the repository:
+#   Environments `staging` and `production` (production: required reviewers).
+#   Per environment: variable PANEL_URL; secrets DEPLOY_HOST (user@host), DEPLOY_SSH_KEY
+#   (private key of a user that may `sudo` the deploy script), DEPLOY_KNOWN_HOSTS.
+name: rust-release
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  SQLX_OFFLINE: "true"
+
+jobs:
+  build:
+    name: build (${{ matrix.arch }})
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Toolchain from rust-toolchain.toml
+        run: rustup toolchain install && rustup show active-toolchain
+      - name: The tag matches the version in Cargo.toml
+        run: |
+          want="${GITHUB_REF_NAME#v}"
+          have="$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"]=="dhpanel-control-api"))')"
+          [ "$want" = "$have" ] || { echo "tag $GITHUB_REF_NAME but Cargo.toml says $have"; exit 1; }
+      - name: Build (locked, reproducible flags)
+        run: |
+          export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
+          export RUSTFLAGS="--remap-path-prefix=$PWD=/src --remap-path-prefix=$HOME/.cargo=/cargo -C strip=symbols"
+          cargo build --release --locked -p dhpanel-control-api -p dhpanel-dhctl -p dhpanel-node-agent -p dhpanel-priv-helper -p dhpanel-license-authority
+          mkdir -p dist/bin
+          for b in dhpanel-control-api dhctl dhpanel-agent dhpanel-priv-helper dhpanel-license-authority; do
+            install -m 0755 "target/release/$b" dist/bin/
+          done
+      - name: SBOM
+        run: |
+          cargo install --locked cargo-cyclonedx
+          cargo cyclonedx --format json --spec-version 1.5
+          mkdir -p dist/sbom
+          find . -name '*.cdx.json' -not -path './target/*' -not -path './dist/*' -exec cp {} dist/sbom/ \;
+      - name: Package
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          cp -r deploy/install.sh deploy/systemd deploy/agent deploy/config deploy/runbooks deploy/release dist/
+          cp openapi.json dist/
+          name="dhpanel-${v}-linux-${{ matrix.arch }}"
+          mkdir "$name" && cp -r dist/* "$name"/
+          # Deterministic archive: sorted names, fixed owner and time.
+          tar --sort=name --owner=0 --group=0 --numeric-owner --mtime="@$(git log -1 --format=%ct)" -cf - "$name" | gzip -n -9 > "$name.tar.gz"
+          sha256sum "$name.tar.gz" | tee "$name.tar.gz.sha256"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-${{ matrix.arch }}
+          path: dhpanel-*.tar.gz*
+
+  reproduce:
+    name: the build is reproducible
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - run: rustup toolchain install && rustup show active-toolchain
+      - name: Build again, from another path
+        run: |
+          mkdir /tmp/second && git archive HEAD | tar -x -C /tmp/second
+          cd /tmp/second
+          export SOURCE_DATE_EPOCH="$(git -C "$GITHUB_WORKSPACE" log -1 --format=%ct)"
+          export RUSTFLAGS="--remap-path-prefix=$PWD=/src --remap-path-prefix=$HOME/.cargo=/cargo -C strip=symbols"
+          cargo build --release --locked -p dhpanel-control-api -p dhpanel-dhctl
+          sha256sum target/release/dhpanel-control-api target/release/dhctl | awk '{print $1}' > /tmp/second.sha
+      - uses: actions/download-artifact@v7
+        with:
+          name: release-x86_64
+          path: first
+      - name: Same bytes
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          tar -xzf first/dhpanel-${v}-linux-x86_64.tar.gz -C first
+          sha256sum first/dhpanel-${v}-linux-x86_64/bin/dhpanel-control-api first/dhpanel-${v}-linux-x86_64/bin/dhctl | awk '{print $1}' > /tmp/first.sha
+          diff /tmp/first.sha /tmp/second.sha && echo "the two builds are identical"
+
+  release:
+    name: signed manifest and publish
+    needs: [build, reproduce]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      id-token: write # keyless signing with the workflow's identity
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: out
+      - uses: sigstore/cosign-installer@v4
+      - name: Manifest (files, sizes, hashes, commit) and its signature
+        run: |
+          cd out
+          python3 - <<'PY'
+          import hashlib, json, os, subprocess
+          files = sorted(f for f in os.listdir('.') if f.endswith('.tar.gz'))
+          manifest = {
+              'version': os.environ['GITHUB_REF_NAME'].lstrip('v'),
+              'commit': os.environ['GITHUB_SHA'],
+              'built_at': int(subprocess.check_output(['git', 'log', '-1', '--format=%ct']).decode()),
+              'files': [{'name': f, 'bytes': os.path.getsize(f), 'sha256': hashlib.sha256(open(f, 'rb').read()).hexdigest()} for f in files],
+          }
+          json.dump(manifest, open('manifest.json', 'w'), indent=2, sort_keys=True)
+          PY
+          cosign sign-blob --yes --bundle manifest.json.sigstore manifest.json
+      - name: Changelog
+        run: deploy/release/changelog.sh "$GITHUB_REF_NAME" > out/CHANGELOG.md
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" out/* --title "DHPanel ${GITHUB_REF_NAME#v}" --notes-file out/CHANGELOG.md --verify-tag
+      - uses: actions/upload-artifact@v7
+        with:
+          name: published
+          path: out
+
+  staging:
+    name: deploy to staging + smoke test
+    needs: release
+    runs-on: ubuntu-24.04
+    environment: staging
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v7
+        with:
+          name: published
+          path: out
+      - name: Deploy
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: deploy/release/remote-deploy.sh "out/dhpanel-${GITHUB_REF_NAME#v}-linux-x86_64.tar.gz"
+      - name: Smoke test
+        run: deploy/release/smoke.sh "${{ vars.PANEL_URL }}"
+
+  production:
+    name: deploy to production + smoke test
+    needs: staging
+    runs-on: ubuntu-24.04
+    environment: production # required reviewers: a person approves here
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v7
+        with:
+          name: published
+          path: out
+      - name: Deploy
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: deploy/release/remote-deploy.sh "out/dhpanel-${GITHUB_REF_NAME#v}-linux-x86_64.tar.gz"
+      - name: Smoke test
+        run: deploy/release/smoke.sh "${{ vars.PANEL_URL }}"

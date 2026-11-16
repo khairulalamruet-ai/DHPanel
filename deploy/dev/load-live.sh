@@ -78,6 +78,8 @@ PID=$!
 FAKE=$!
 for _ in $(seq 1 60); do curl -sf "http://127.0.0.1:$PORT/api/v1/public/ready" > /dev/null && break; sleep 0.5; done
 curl -sf "http://127.0.0.1:$PORT/api/v1/public/ready" > /dev/null || { echo "the panel did not start:"; tail -20 "$WORK/api.log"; exit 3; }
+# The release smoke test (T19.11) runs against this panel first.
+deploy/release/smoke.sh "http://127.0.0.1:$PORT" || exit 4
 "$HOME/bin/k6" run --quiet --summary-trend-stats 'avg,med,p(90),p(95),max' \
     -e BASE="http://127.0.0.1:$PORT" -e ACCOUNTS="$ACCOUNTS" -e PASSWORD="$PASSWORD" -e DURATION="${DURATION:-2m}" \
     tests/load/panel.js
