@@ -314,6 +314,11 @@ pub struct StartRestore {
     /// The databases to put back (their whole names).
     #[serde(default)]
     pub databases: Vec<String>,
+    /// Put the DNS records of the account's domains back: in each zone that is still the
+    /// account's, the present records are replaced by the ones in the backup (they are kept in
+    /// the restore's `dns_summary`). Default: false.
+    #[serde(default)]
+    pub dns: bool,
     /// Keep the present state first, so that the restore can be undone. Default: true.
     #[serde(default = "yes")]
     pub snapshot: bool,
@@ -341,6 +346,12 @@ pub struct RestoreView {
     pub folder: Option<String>,
     /// Databases put back.
     pub databases: Vec<String>,
+    /// Whether the DNS records were asked for.
+    pub dns: bool,
+    /// What putting the DNS records back did, once it was done: `zones_restored`,
+    /// `zones_missing`, `records_added`, `records_removed`, `records_skipped` and `replaced`
+    /// (every zone with the records it had before).
+    pub dns_summary: Option<serde_json::Value>,
     /// Whether it was only a check.
     pub verify_only: bool,
     /// What went wrong.
@@ -361,6 +372,8 @@ fn restore_view(r: Restore) -> RestoreView {
         files: r.files,
         folder: r.folder,
         databases: r.databases,
+        dns: r.dns,
+        dns_summary: r.dns_summary,
         verify_only: r.verify_only,
         error: r.error,
         verified_parts: r
@@ -415,11 +428,18 @@ pub async fn start_restore(
         ));
     }
     let view = backup_view(backup);
-    if !req.verify_only && !req.files && req.databases.is_empty() {
+    if !req.verify_only && !req.files && req.databases.is_empty() && !req.dns {
         return Err(bad(
             "files",
             "nothing_to_restore",
-            "Choose the files or a database.",
+            "Choose the files, a database or the DNS records.",
+        ));
+    }
+    if req.dns && !view.parts.iter().any(|p| p.kind == "dns") {
+        return Err(bad(
+            "dns",
+            "not_in_backup",
+            "This backup has no DNS records.",
         ));
     }
     if req.files && !view.parts.iter().any(|p| p.kind == "files") {
@@ -460,6 +480,7 @@ pub async fn start_restore(
             files: req.files,
             folder: folder.as_deref(),
             databases: &req.databases,
+            dns: req.dns,
             snapshot: req.snapshot,
             verify_only: req.verify_only,
             created_by: Some(who.account_id()),

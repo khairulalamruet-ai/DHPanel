@@ -382,6 +382,7 @@ async fn an_account_is_backed_up_encrypted_and_every_part_checks_out() {
             files,
             folder: folder.map(str::to_owned),
             databases: dbs.iter().map(|d| (*d).to_owned()).collect(),
+            dns: false,
             snapshot,
             verify_only,
         }
@@ -451,6 +452,25 @@ async fn an_account_is_backed_up_encrypted_and_every_part_checks_out() {
     assert!(read_file("www/index.php").await.contains("hello"));
     assert!(read_file("notes.txt").await.contains("changed"));
     assert!(read_file("www/new.txt").await.contains("made later"));
+    // The DNS records only: they come back in the answer and nothing on the node changes.
+    let mut dns_only = restore(backup_id, &key_text, false, None, &[], false, false);
+    if let Operation::RestoreBackup { dns, .. } = &mut dns_only {
+        *dns = true;
+    }
+    let answered = restore_backup(context.clone(), dns_only).await.unwrap();
+    let Output::BackupRestored {
+        dns: Some(records),
+        files_restored: false,
+        ..
+    } = answered
+    else {
+        panic!("no records: {answered:?}")
+    };
+    assert_eq!(
+        records,
+        serde_json::json!([{"name": "example.com", "type": "A", "value": "203.0.113.7"}])
+    );
+    assert!(read_file("www/index.php").await.contains("hello"));
     // Everything, with the snapshot of what is there now.
     let restored = restore_backup(
         context.clone(),
@@ -616,6 +636,7 @@ async fn an_account_is_backed_up_encrypted_and_every_part_checks_out() {
             files: false,
             folder: None,
             databases: vec![],
+            dns: false,
             snapshot: false,
             verify_only: true,
         },

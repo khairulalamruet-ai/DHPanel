@@ -1,6 +1,6 @@
 //! Backups, where they go and when they are made (T09.02).
 
-use sqlx::{PgPool, types::Uuid};
+use sqlx::{PgConnection, PgPool, types::Uuid};
 
 /// A place backups are stored.
 #[derive(Debug, Clone, PartialEq)]
@@ -725,6 +725,10 @@ pub struct Restore {
     pub folder: Option<String>,
     /// The databases to put back.
     pub databases: Vec<String>,
+    /// Put the DNS records of the account's domains back.
+    pub dns: bool,
+    /// What putting the DNS records back did (once it was done).
+    pub dns_summary: Option<serde_json::Value>,
     /// Keep the present state first.
     pub snapshot: bool,
     /// Only check.
@@ -754,6 +758,8 @@ pub struct NewRestore<'a> {
     pub folder: Option<&'a str>,
     /// The databases.
     pub databases: &'a [String],
+    /// Put the DNS records back.
+    pub dns: bool,
     /// Keep the present state first.
     pub snapshot: bool,
     /// Only check.
@@ -798,13 +804,14 @@ pub async fn new_restore(pool: &PgPool, new: &NewRestore<'_>) -> Result<Uuid, Re
     }
     let id = sqlx::query_scalar!(
         "INSERT INTO backup_restores
-             (backup_id, tenant_id, files, folder, databases, snapshot, verify_only, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id",
+             (backup_id, tenant_id, files, folder, databases, dns, snapshot, verify_only, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id",
         new.backup_id,
         new.tenant_id,
         new.files,
         new.folder,
         new.databases,
+        new.dns,
         new.snapshot,
         new.verify_only,
         new.created_by,
@@ -823,6 +830,8 @@ fn restore_of(r: RestoreRow) -> Restore {
         files: r.files,
         folder: r.folder,
         databases: r.databases,
+        dns: r.dns,
+        dns_summary: r.dns_summary,
         snapshot: r.snapshot,
         verify_only: r.verify_only,
         status: r.status,
@@ -840,6 +849,8 @@ struct RestoreRow {
     files: bool,
     folder: Option<String>,
     databases: Vec<String>,
+    dns: bool,
+    dns_summary: Option<serde_json::Value>,
     snapshot: bool,
     verify_only: bool,
     status: String,
@@ -856,7 +867,7 @@ struct RestoreRow {
 pub async fn restores_of(pool: &PgPool, tenant_id: Uuid) -> Result<Vec<Restore>, sqlx::Error> {
     let rows = sqlx::query_as!(
         RestoreRow,
-        r#"SELECT id, backup_id, tenant_id, files, folder, databases, snapshot, verify_only,
+        r#"SELECT id, backup_id, tenant_id, files, folder, databases, dns, dns_summary, snapshot, verify_only,
                   status, result, error,
                   extract(epoch FROM created_at)::bigint AS "created_at!",
                   extract(epoch FROM finished_at)::bigint AS finished_at
@@ -875,7 +886,7 @@ pub async fn restores_of(pool: &PgPool, tenant_id: Uuid) -> Result<Vec<Restore>,
 pub async fn queued_restores(pool: &PgPool, limit: i64) -> Result<Vec<Restore>, sqlx::Error> {
     let rows = sqlx::query_as!(
         RestoreRow,
-        r#"SELECT id, backup_id, tenant_id, files, folder, databases, snapshot, verify_only,
+        r#"SELECT id, backup_id, tenant_id, files, folder, databases, dns, dns_summary, snapshot, verify_only,
                   status, result, error,
                   extract(epoch FROM created_at)::bigint AS "created_at!",
                   extract(epoch FROM finished_at)::bigint AS finished_at
@@ -1452,4 +1463,64 @@ pub async fn queued_imports(pool: &PgPool, limit: i64) -> Result<Vec<Import>, sq
             object: r.object,
         })
         .collect())
+}
+
+/// A finished restore whose DNS records were asked for and are not yet put back.
+#[derive(Debug, Clone)]
+pub struct DnsToRestore {
+    /// The restore.
+    pub id: Uuid,
+    /// The account.
+    pub tenant_id: Uuid,
+    /// The records the node read out of the backup.
+    pub records: serde_json::Value,
+}
+
+/// Finished restores whose DNS records the node sent and the panel has not applied yet.
+///
+/// # Errors
+/// Database errors.
+pub async fn dns_to_restore(pool: &PgPool, limit: i64) -> Result<Vec<DnsToRestore>, sqlx::Error> {
+    let rows = sqlx::query!(
+        r#"SELECT id, tenant_id, result -> 'dns' AS records
+           FROM backup_restores
+           WHERE dns AND status = 'done' AND dns_applied_at IS NULL AND NOT verify_only
+           ORDER BY created_at LIMIT $1"#,
+        limit
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| DnsToRestore {
+            id: r.id,
+            tenant_id: r.tenant_id,
+            // A node that did not send the records leaves an empty list: nothing to put back.
+            records: r
+                .records
+                .unwrap_or_else(|| serde_json::Value::Array(Vec::new())),
+        })
+        .collect())
+}
+
+/// Notes that a restore's DNS records were put back, and keeps what that did. The records
+/// themselves leave the node's answer (they are in the backup).
+///
+/// # Errors
+/// Database errors.
+pub async fn dns_restored(
+    conn: &mut PgConnection,
+    id: Uuid,
+    summary: &serde_json::Value,
+) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        "UPDATE backup_restores
+            SET dns_applied_at = now(), dns_summary = $2, result = result - 'dns', updated_at = now()
+          WHERE id = $1",
+        id,
+        summary
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
 }

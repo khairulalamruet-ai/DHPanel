@@ -25181,6 +25181,7 @@
           "status",
           "files",
           "databases",
+          "dns",
           "verify_only",
           "created_at"
         ],
@@ -25200,6 +25201,13 @@
               "type": "string"
             },
             "description": "Databases put back."
+          },
+          "dns": {
+            "type": "boolean",
+            "description": "Whether the DNS records were asked for."
+          },
+          "dns_summary": {
+            "description": "What putting the DNS records back did, once it was done: `zones_restored`,\n`zones_missing`, `records_added`, `records_removed`, `records_skipped` and `replaced`\n(every zone with the records it had before)."
           },
           "error": {
             "type": [
@@ -26156,6 +26164,10 @@
               "type": "string"
             },
             "description": "The databases to put back (their whole names)."
+          },
+          "dns": {
+            "type": "boolean",
+            "description": "Put the DNS records of the account's domains back: in each zone that is still the\naccount's, the present records are replaced by the ones in the backup (they are kept in\nthe restore's `dns_summary`). Default: false."
           },
           "files": {
             "type": "boolean",

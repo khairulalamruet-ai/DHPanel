@@ -439,3 +439,161 @@ async fn the_panels_own_schedule_queues_system_backups_and_retention_removes_old
         2
     );
 }
+
+/// The DNS records of a backup come back through the panel: the zone's present records are
+/// replaced by the backup's, an invalid or clashing record and a zone that is gone are skipped,
+/// the old records are kept in the summary, and a second round changes nothing (T09.07 follow-up).
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL"]
+async fn the_dns_records_of_a_backup_are_put_back_once_and_the_old_ones_are_kept(pool: PgPool) {
+    let key = MasterKey::from_bytes(&[7u8; 32]);
+    let (tenant_id, _) = tenant(&pool, "delta", 10_004).await;
+    let (other_tenant, _) = tenant(&pool, "epsilon", 10_005).await;
+    let destination: Uuid = sqlx::query_scalar(
+        "INSERT INTO backup_destinations (name, kind, settings, is_default)
+         VALUES ('Disk', 'local', '{\"path\": \"/var/backups\"}', true) RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let mut zones = Vec::new();
+    for (owner, name) in [
+        (tenant_id, "delta.example"),
+        (other_tenant, "epsilon.example"),
+    ] {
+        let domain: Uuid = sqlx::query_scalar(
+            "INSERT INTO domains (tenant_id, fqdn, kind) VALUES ($1, $2, 'primary') RETURNING id",
+        )
+        .bind(owner)
+        .bind(name)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let zone: Uuid = sqlx::query_scalar(
+            "INSERT INTO dns_zones (domain_id, name) VALUES ($1, $2) RETURNING id",
+        )
+        .bind(domain)
+        .bind(name)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO dns_records (zone_id, name, rtype, content, ttl) VALUES ($1, '@', 'TXT', 'today', 300)")
+            .bind(zone)
+            .execute(&pool)
+            .await
+            .unwrap();
+        zones.push(zone);
+    }
+    // Both zones are in sync with the DNS server; a restore must make its zone pending again.
+    sqlx::query("UPDATE dns_zones SET status = 'active'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let backup: Uuid = sqlx::query_scalar(
+        "INSERT INTO backups (tenant_id, account_name, kind, trigger, destination_id, status)
+         VALUES ($1, 'delta', 'tenant', 'manual', $2, 'ready') RETURNING id",
+    )
+    .bind(tenant_id)
+    .bind(destination)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let restore: Uuid = sqlx::query_scalar(
+        "INSERT INTO backup_restores (backup_id, tenant_id, dns, status)
+         VALUES ($1, $2, true, 'running') RETURNING id",
+    )
+    .bind(backup)
+    .bind(tenant_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    // The node's answer: records of this tenant's zone, of a zone that is gone, of a zone that
+    // is another account's, and two that cannot be taken (a bad address, a clash).
+    let answer = json!({
+        "verified_parts": 4, "files_restored": false, "databases": [], "snapshot": [],
+        "dns": [
+            {"zone": "delta.example", "name": "@", "type": "A", "content": "203.0.113.7", "ttl": 300, "priority": null},
+            {"zone": "delta.example", "name": "@", "type": "MX", "content": "mail.delta.example", "ttl": 300, "priority": 10},
+            {"zone": "delta.example", "name": "www", "type": "CNAME", "content": "delta.example", "ttl": 300, "priority": null},
+            {"zone": "delta.example", "name": "www", "type": "A", "content": "203.0.113.8", "ttl": 300, "priority": null},
+            {"zone": "delta.example", "name": "bad", "type": "A", "content": "not-an-address", "ttl": 300, "priority": null},
+            {"zone": "gone.example", "name": "@", "type": "A", "content": "203.0.113.9", "ttl": 300, "priority": null},
+            {"zone": "epsilon.example", "name": "@", "type": "A", "content": "203.0.113.10", "ttl": 300, "priority": null}
+        ],
+    });
+    // Not applied before the node has answered.
+    tick(&pool, &key, NOW).await.unwrap();
+    assert_eq!(
+        count(
+            &pool,
+            "SELECT count(*) FROM dns_records WHERE content = 'today'"
+        )
+        .await,
+        2
+    );
+    sqlx::query("UPDATE backup_restores SET status = 'done', result = $2 WHERE id = $1")
+        .bind(restore)
+        .bind(&answer)
+        .execute(&pool)
+        .await
+        .unwrap();
+    tick(&pool, &key, NOW).await.unwrap();
+    let rows: Vec<(String, String, String)> = sqlx::query_as(
+        "SELECT name, rtype, content FROM dns_records WHERE zone_id = $1 ORDER BY name, rtype",
+    )
+    .bind(zones[0])
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        rows,
+        vec![
+            ("@".into(), "A".into(), "203.0.113.7".into()),
+            ("@".into(), "MX".into(), "mail.delta.example.".into()),
+            ("www".into(), "CNAME".into(), "delta.example.".into()),
+        ],
+        "the A next to the CNAME and the bad address are skipped"
+    );
+    // The other account's zone is not touched, whatever a backup says.
+    let other: Vec<String> =
+        sqlx::query_scalar("SELECT content FROM dns_records WHERE zone_id = $1")
+            .bind(zones[1])
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(other, vec!["today".to_owned()]);
+    let (summary, applied, result): (Value, bool, Value) = sqlx::query_as(
+        "SELECT dns_summary, dns_applied_at IS NOT NULL, result FROM backup_restores WHERE id = $1",
+    )
+    .bind(restore)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(applied);
+    assert_eq!(summary["zones_restored"], 1, "{summary}");
+    // A zone that is gone and one that is another account's look the same: not this account's.
+    assert_eq!(
+        summary["zones_missing"],
+        json!(["epsilon.example", "gone.example"])
+    );
+    assert_eq!(summary["records_added"], 3);
+    assert_eq!(summary["records_removed"], 1);
+    assert_eq!(summary["records_skipped"], 2, "{summary}");
+    assert_eq!(summary["replaced"][0]["previous"][0]["content"], "today");
+    assert!(result.get("dns").is_none(), "the records leave the answer");
+    // The zone is marked to be sent again.
+    assert_eq!(
+        count(
+            &pool,
+            "SELECT count(*) FROM dns_zones WHERE status = 'pending'"
+        )
+        .await,
+        1
+    );
+    // A second round changes nothing.
+    tick(&pool, &key, NOW + 60).await.unwrap();
+    assert_eq!(
+        count(&pool, "SELECT count(*) FROM dns_records WHERE zone_id IN (SELECT id FROM dns_zones WHERE name = 'delta.example')").await,
+        3
+    );
+}

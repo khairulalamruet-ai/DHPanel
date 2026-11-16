@@ -481,6 +481,110 @@ pub async fn backup_records(
     ))
 }
 
+/// How many records a zone may hold (the same limit as when records are added by hand).
+const MAX_RECORDS_PER_ZONE: usize = 1000;
+
+/// Puts the records of a backup (the JSON of [`backup_records`]) back into the zones of the
+/// tenant's domains: the records a zone has now are replaced by the ones in the backup. Only
+/// zones that still belong to the tenant are touched; a zone that is gone is skipped, and so is
+/// a record that is not valid today or clashes with one already taken. Each zone's records as
+/// they were are returned in the summary, so that nothing is lost for good.
+///
+/// Call inside a transaction (after [`crate::domains::lock_tenant`]).
+///
+/// # Errors
+/// Database errors.
+pub async fn restore_records(
+    conn: &mut PgConnection,
+    tenant_id: Uuid,
+    records: &serde_json::Value,
+) -> Result<serde_json::Value, sqlx::Error> {
+    let mut by_zone: std::collections::BTreeMap<String, Vec<&serde_json::Value>> =
+        std::collections::BTreeMap::new();
+    for record in records.as_array().map_or(&[][..], Vec::as_slice) {
+        if let Some(zone) = record.get("zone").and_then(serde_json::Value::as_str) {
+            by_zone.entry(zone.to_owned()).or_default().push(record);
+        }
+    }
+    let (mut missing, mut skipped, mut added, mut removed) = (Vec::new(), 0_u64, 0_u64, 0_u64);
+    let mut zones = Vec::new();
+    for (name, wanted) in by_zone {
+        let zone_id = sqlx::query_scalar!(
+            "SELECT z.id FROM dns_zones z JOIN domains d ON d.id = z.domain_id
+             WHERE z.name = $1 AND d.tenant_id = $2",
+            name,
+            tenant_id
+        )
+        .fetch_optional(&mut *conn)
+        .await?;
+        let Some(zone_id) = zone_id else {
+            missing.push(name);
+            continue;
+        };
+        let mut accepted: Vec<DnsRecord> = Vec::new();
+        for r in wanted {
+            let text = |key: &str| r.get(key).and_then(serde_json::Value::as_str);
+            let number = |key: &str| {
+                r.get(key)
+                    .and_then(serde_json::Value::as_u64)
+                    .and_then(|n| u32::try_from(n).ok())
+            };
+            let parsed = DnsRecord::parse(
+                text("name").unwrap_or_default(),
+                text("type").unwrap_or_default(),
+                text("content").unwrap_or_default(),
+                number("ttl"),
+                number("priority"),
+            );
+            match parsed {
+                Ok(record)
+                    if accepted.len() < MAX_RECORDS_PER_ZONE
+                        && dhpanel_domain::check_dns_conflicts(accepted.iter(), &record)
+                            .is_ok() =>
+                {
+                    accepted.push(record);
+                }
+                _ => skipped += 1,
+            }
+        }
+        let before = records_in(&mut *conn, zone_id).await?;
+        let previous: Vec<serde_json::Value> = before
+            .iter()
+            .map(|r| {
+                serde_json::json!({
+                    "name": r.record.name,
+                    "type": r.record.rtype.as_str(),
+                    "content": r.record.content,
+                    "ttl": r.record.ttl,
+                    "priority": r.record.priority,
+                })
+            })
+            .collect();
+        sqlx::query!("DELETE FROM dns_records WHERE zone_id = $1", zone_id)
+            .execute(&mut *conn)
+            .await?;
+        removed += before.len() as u64;
+        for record in &accepted {
+            // The records were checked against each other above, so a duplicate cannot be.
+            if add_record(&mut *conn, zone_id, record).await.is_ok() {
+                added += 1;
+            } else {
+                skipped += 1;
+            }
+        }
+        mark_changed(&mut *conn, zone_id).await?;
+        zones.push(serde_json::json!({"zone": name, "previous": previous}));
+    }
+    Ok(serde_json::json!({
+        "zones_restored": zones.len(),
+        "zones_missing": missing,
+        "records_added": added,
+        "records_removed": removed,
+        "records_skipped": skipped,
+        "replaced": zones,
+    }))
+}
+
 /// Removes the address records (`A`, `AAAA`) of one name in a zone: what was
 /// added for a subdomain that no longer exists.
 ///

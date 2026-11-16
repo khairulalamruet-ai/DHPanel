@@ -1591,6 +1591,10 @@ pub enum Operation {
         folder: Option<String>,
         /// The whole names of the databases to put back.
         databases: Vec<String>,
+        /// Read the DNS records out of the backup and answer with them (the panel puts
+        /// them back); nothing is changed on the node for this.
+        #[serde(default)]
+        dns: bool,
         /// Store the present state before replacing it.
         snapshot: bool,
         /// Only check the backup; change nothing.
@@ -2628,6 +2632,9 @@ pub enum Output {
         databases: Vec<String>,
         /// The parts of the snapshot taken before (its folder is `pre-<restore_id>`).
         snapshot: Vec<BackupPartInfo>,
+        /// The DNS records of the backup (`dns.json`), when they were asked for.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        dns: Option<serde_json::Value>,
     },
     /// Answer to [`Operation::ExportBackup`].
     BackupExported {

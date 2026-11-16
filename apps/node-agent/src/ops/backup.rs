@@ -530,6 +530,7 @@ pub async fn restore_backup(
         files,
         folder,
         databases,
+        dns,
         snapshot,
         verify_only,
     } = op
@@ -548,7 +549,7 @@ pub async fn restore_backup(
     {
         return Err(invalid("the folder is not usable"));
     }
-    if !files && databases.is_empty() && !verify_only {
+    if !files && databases.is_empty() && !dns && !verify_only {
         return Err(invalid("nothing to restore"));
     }
     let key_text = key.ok_or_else(|| invalid("no key"))?;
@@ -582,7 +583,8 @@ pub async fn restore_backup(
                                 .as_ref()
                                 .is_some_and(|d| databases.contains(d))
                     }
-                    PartKind::Dns | PartKind::Meta | PartKind::System => verify_only,
+                    PartKind::Dns => verify_only || dns,
+                    PartKind::Meta | PartKind::System => verify_only,
                 };
                 if wanted {
                     needed.push(part.name.clone());
@@ -590,6 +592,9 @@ pub async fn restore_backup(
             }
             if files && !manifest.parts.iter().any(|p| p.kind == PartKind::Files) {
                 return Err(invalid("the backup has no files"));
+            }
+            if dns && !manifest.parts.iter().any(|p| p.kind == PartKind::Dns) {
+                return Err(invalid("the backup has no DNS records"));
             }
             for d in &databases {
                 if !manifest
@@ -615,8 +620,27 @@ pub async fn restore_backup(
             files_restored: false,
             databases: Vec::new(),
             snapshot: Vec::new(),
+            dns: None,
         });
     }
+    // The DNS records, read now so that a part that cannot be read stops everything before
+    // anything is changed. The panel puts them back; the node holds no DNS.
+    let dns_records = if dns {
+        let name = manifest
+            .parts
+            .iter()
+            .find(|p| p.kind == PartKind::Dns)
+            .map(|p| p.name.clone())
+            .ok_or_else(|| invalid("the backup has no DNS records"))?;
+        let (dest, object) = (dest.clone(), format!("{id}/{name}"));
+        Some(
+            tokio::task::spawn_blocking(move || read_json_part(&dest, &object, &key))
+                .await
+                .map_err(|_| failed("the reading was cancelled"))??,
+        )
+    } else {
+        None
+    };
     // 2. The present state, kept (at the destination) so that a restore can be undone.
     let rid = restore_id.simple().to_string();
     let mut snap: Vec<BackupPartInfo> = Vec::new();
@@ -682,7 +706,35 @@ pub async fn restore_backup(
         files_restored: files,
         databases,
         snapshot: snap,
+        dns: dns_records,
     })
+}
+
+/// The most a stored JSON part may be when it is read back (the part is a few kilobytes).
+const JSON_PART_LIMIT: u64 = 16 * 1024 * 1024;
+
+/// Reads a stored JSON part (decrypted).
+fn read_json_part(
+    dest: &Shared,
+    object: &str,
+    key: &[u8; KEY_LEN],
+) -> Result<serde_json::Value, AgentError> {
+    use std::io::Read;
+    let guard = dest
+        .lock()
+        .map_err(|_| failed("the destination is not usable"))?;
+    let stored = guard
+        .get(object)
+        .map_err(|e| failed(&format!("cannot read a part: {e}")).retryable())?;
+    let mut text = Vec::new();
+    StreamReader::new(stored, key)
+        .take(JSON_PART_LIMIT + 1)
+        .read_to_end(&mut text)
+        .map_err(|_| invalid("the DNS part cannot be opened"))?;
+    if text.len() as u64 > JSON_PART_LIMIT {
+        return Err(invalid("the DNS part is too big"));
+    }
+    serde_json::from_slice(&text).map_err(|_| invalid("the DNS part is not good"))
 }
 
 #[allow(clippy::too_many_arguments)]

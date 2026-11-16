@@ -86,6 +86,7 @@ pub async fn tick(db: &PgPool, master_key: &MasterKey, now: i64) -> Result<(), T
     start_due(db, master_key, now).await?;
     send_queued(db).await?;
     send_restores(db).await?;
+    apply_dns_restores(db).await?;
     send_exports(db).await?;
     send_imports(db).await?;
     apply_retention(db).await?;
@@ -221,6 +222,7 @@ async fn send_restores(db: &PgPool) -> Result<(), TickError> {
             files: restore.files,
             folder: restore.folder.clone(),
             databases: restore.databases.clone(),
+            dns: restore.dns,
             snapshot: restore.snapshot,
             verify_only: restore.verify_only,
         };
@@ -233,6 +235,21 @@ async fn send_restores(db: &PgPool) -> Result<(), TickError> {
             RESTORE_TTL_SECS,
         )
         .await?;
+    }
+    Ok(())
+}
+
+/// The DNS records the node read out of a backup are put back by the panel, which owns the
+/// zones: the work of one restore is one transaction, so a restore is applied once or not at all.
+async fn apply_dns_restores(db: &PgPool) -> Result<(), TickError> {
+    for restore in store::dns_to_restore(db, BATCH).await? {
+        let mut tx = db.begin().await?;
+        dhpanel_database::domains::lock_tenant(&mut tx, restore.tenant_id).await?;
+        let summary =
+            dhpanel_database::dns::restore_records(&mut tx, restore.tenant_id, &restore.records)
+                .await?;
+        store::dns_restored(&mut tx, restore.id, &summary).await?;
+        tx.commit().await?;
     }
     Ok(())
 }
@@ -434,6 +451,7 @@ pub async fn fill(db: &PgPool, master_key: &MasterKey, op: Operation) -> Result<
             files,
             folder,
             databases,
+            dns,
             snapshot,
             verify_only,
             ..
@@ -449,6 +467,7 @@ pub async fn fill(db: &PgPool, master_key: &MasterKey, op: Operation) -> Result<
             files,
             folder,
             databases,
+            dns,
             snapshot,
             verify_only,
         }),
