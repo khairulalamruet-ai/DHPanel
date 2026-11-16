@@ -29,8 +29,42 @@ env:
   SQLX_OFFLINE: "true"
 
 jobs:
+  web:
+    name: the web interface
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.4.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: One archive for each app, the same bytes every time (sorted, fixed owner and time)
+        run: |
+          mkdir -p ../web-dist
+          for app in client admin; do
+            tar --sort=name --owner=0 --group=0 --numeric-owner --mtime="@$(git log -1 --format=%ct)" -cf - -C "apps/$app/dist" . | gzip -n -9 > "../web-dist/web-$app"
+          done
+          ls -l ../web-dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: web-dist
+          path: web-dist/
+
   build:
     name: build (${{ matrix.arch }})
+    needs: web
     strategy:
       fail-fast: true
       matrix:
@@ -75,6 +109,10 @@ jobs:
           cargo cyclonedx --format json --spec-version 1.5
           mkdir -p dist/sbom
           find . -name '*.cdx.json' -not -path './target/*' -not -path './dist/*' -exec cp {} dist/sbom/ \;
+      - uses: actions/download-artifact@v7
+        with:
+          name: web-dist
+          path: dist/web
       - name: Package
         run: |
           v="${GITHUB_REF_NAME#v}"
@@ -164,14 +202,15 @@ jobs:
             exit 0
           fi
           # The manifest lists the programs themselves (what an installation runs and what the
-          # daily integrity scan hashes), taken out of the x86_64 archive.
+          # daily integrity scan hashes) and the two web archives, taken out of the x86_64 archive.
           v="${GITHUB_REF_NAME#v}"
-          mkdir -p bin && tar -xzf out/dhpanel-${v}-linux-x86_64.tar.gz -C bin --strip-components=2 "dhpanel-${v}-linux-x86_64/bin"
+          mkdir -p bin web && tar -xzf out/dhpanel-${v}-linux-x86_64.tar.gz -C bin --strip-components=2 "dhpanel-${v}-linux-x86_64/bin"
+          tar -xzf out/dhpanel-${v}-linux-x86_64.tar.gz -C web --strip-components=2 "dhpanel-${v}-linux-x86_64/web"
           umask 077
           printf '%s' "$RELEASE_SIGNING_KEY" > "$RUNNER_TEMP/release.key"
           bin/dhctl release sign --key "$RUNNER_TEMP/release.key" --kid "$RELEASE_KID" \
             --version "$v" --commit "$GITHUB_SHA" --created-at "$(git log -1 --format=%ct)" \
-            --out out/release-manifest.json bin/*
+            --out out/release-manifest.json bin/* web/*
           rm -f "$RUNNER_TEMP/release.key"
       - name: Changelog
         run: deploy/release/changelog.sh "$GITHUB_REF_NAME" > out/CHANGELOG.md

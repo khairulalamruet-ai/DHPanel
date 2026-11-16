@@ -59,12 +59,32 @@ pub struct Settings {
     /// (`coraza.conf` and `crs/`; `DHPANEL_AGENT_WAF_DIR`). Without it no site gets the
     /// firewall, whatever the policy says: Caddy would not know the module.
     pub waf_dir: Option<PathBuf>,
-    /// The panel itself, when it runs on this machine too: its host name and the address of the
-    /// control plane (`DHPANEL_AGENT_PANEL_HOST`, `DHPANEL_AGENT_PANEL_UPSTREAM`, default
-    /// `127.0.0.1:8080`). One web server takes the visitors of the panel and of the sites, so its
-    /// route is part of what is sent to Caddy: a server that holds only the sites' routes would
-    /// take the panel off the air.
-    pub panel: Option<(String, String)>,
+    /// The panel itself, when it runs on this machine too. One web server takes the visitors of the
+    /// panel and of the sites, so the panel's routes are part of what is sent to Caddy: a server
+    /// that holds only the sites' routes would take the panel off the air.
+    pub panel: Option<Panel>,
+}
+
+/// The panel's own names and what answers them (`DHPANEL_AGENT_PANEL_HOST`,
+/// `DHPANEL_AGENT_PANEL_ADMIN_HOST`, `DHPANEL_AGENT_PANEL_WEB_ROOT`,
+/// `DHPANEL_AGENT_PANEL_UPSTREAM`, default `127.0.0.1:8080`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Panel {
+    /// Where the control plane listens (`/api/*` goes there).
+    pub upstream: String,
+    /// The names: the clients' (`<web_root>/client`) and, if any, the administrators'
+    /// (`<web_root>/admin`).
+    pub sites: Vec<PanelSite>,
+}
+
+/// One name the panel is reached at.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PanelSite {
+    /// The host name.
+    pub host: String,
+    /// The folder with the app (the built files of the web interface). Without one everything
+    /// goes to the control plane.
+    pub web_root: Option<PathBuf>,
 }
 
 impl Settings {
@@ -88,15 +108,46 @@ impl Settings {
             automatic_https,
             data_dir: std::env::var_os("DHPANEL_AGENT_CADDY_DATA").map(PathBuf::from),
             waf_dir: std::env::var_os("DHPANEL_AGENT_WAF_DIR").map(PathBuf::from),
-            panel: std::env::var("DHPANEL_AGENT_PANEL_HOST")
-                .ok()
-                .filter(|h| !h.is_empty())
-                .map(|host| {
-                    let upstream = std::env::var("DHPANEL_AGENT_PANEL_UPSTREAM")
-                        .unwrap_or_else(|_| "127.0.0.1:8080".to_owned());
-                    (host, upstream)
-                }),
+            panel: Panel::from_env(),
         })
+    }
+}
+
+impl Panel {
+    /// The panel's names: the clients' (`<web_root>/client`) and, if given, the administrators'
+    /// (`<web_root>/admin`).
+    #[must_use]
+    pub fn new(
+        host: String,
+        admin_host: Option<String>,
+        web_root: Option<PathBuf>,
+        upstream: String,
+    ) -> Self {
+        let mut sites = vec![PanelSite {
+            host,
+            web_root: web_root.as_ref().map(|r| r.join("client")),
+        }];
+        if let Some(host) = admin_host {
+            sites.push(PanelSite {
+                host,
+                web_root: web_root.as_ref().map(|r| r.join("admin")),
+            });
+        }
+        Self { upstream, sites }
+    }
+
+    /// From the environment; `None` without `DHPANEL_AGENT_PANEL_HOST`.
+    #[must_use]
+    pub fn from_env() -> Option<Self> {
+        let var = |name: &str| std::env::var(name).ok().filter(|v| !v.is_empty());
+        Some(Self::new(
+            var("DHPANEL_AGENT_PANEL_HOST")?,
+            var("DHPANEL_AGENT_PANEL_ADMIN_HOST"),
+            std::env::var_os("DHPANEL_AGENT_PANEL_WEB_ROOT")
+                .filter(|r| !r.is_empty())
+                .map(PathBuf::from),
+            var("DHPANEL_AGENT_PANEL_UPSTREAM").unwrap_or_else(|| "127.0.0.1:8080".to_owned()),
+        ))
     }
 }
 
@@ -314,25 +365,72 @@ fn load_pma_host(file: &Path) -> Option<String> {
 
 /// phpMyAdmin as a Caddy route: plain HTTP goes to HTTPS (a sign-in token is in
 /// the address), everything else to its container.
-/// The panel's own name: plain HTTP goes to HTTPS, everything else to the control plane.
-fn panel_route(host: &str, upstream: &str) -> Value {
-    json!({
-        "match": [{"host": [host]}],
-        "handle": [{"handler": "subroute", "routes": [
-            {
-                "match": [{"protocol": "http"}],
-                "handle": [{
-                    "handler": "static_response",
-                    "status_code": 308,
-                    "headers": {"Location": ["https://{http.request.host}{http.request.uri}"]}
-                }],
+/// One of the panel's names: plain HTTP goes to HTTPS; `/api/*` goes to the control plane; the
+/// rest is the web interface (the built files, with `index.html` for every path that is not a
+/// file, as a single-page app needs), or the control plane too when there is no web interface.
+fn panel_route(site: &PanelSite, upstream: &str) -> Value {
+    let api = json!({"handler": "reverse_proxy", "upstreams": [{"dial": upstream}]});
+    let compress = json!({"handler": "encode", "encodings": {"zstd": {}, "gzip": {}}, "prefer": ["zstd", "gzip"]});
+    let mut routes = vec![
+        json!({
+            "match": [{"protocol": "http"}],
+            "handle": [{
+                "handler": "static_response",
+                "status_code": 308,
+                "headers": {"Location": ["https://{http.request.host}{http.request.uri}"]}
+            }],
+            "terminal": true
+        }),
+        json!({"handle": [{
+            "handler": "headers",
+            "response": {"set": {
+                "Strict-Transport-Security": ["max-age=31536000"],
+                "X-Content-Type-Options": ["nosniff"],
+                "X-Frame-Options": ["DENY"],
+                "Referrer-Policy": ["strict-origin-when-cross-origin"]
+            }}
+        }]}),
+    ];
+    match &site.web_root {
+        None => routes.push(json!({"handle": [compress, api]})),
+        Some(root) => {
+            let root = root.to_string_lossy();
+            routes.push(json!({
+                "match": [{"path": ["/api/*"]}],
+                "handle": [compress.clone(), api],
                 "terminal": true
-            },
-            {"handle": [
-                {"handler": "encode", "encodings": {"zstd": {}, "gzip": {}}, "prefer": ["zstd", "gzip"]},
-                {"handler": "reverse_proxy", "upstreams": [{"dial": upstream}]}
-            ]}
-        ]}],
+            }));
+            // The files the build made are named by their content: kept for a year. Every other
+            // answer (the page itself) is asked again each time, so a new release shows at once.
+            routes.push(json!({
+                "match": [{"path": ["/assets/*"]}],
+                "handle": [{
+                    "handler": "headers",
+                    "response": {"set": {"Cache-Control": ["public, max-age=31536000, immutable"]}}
+                }]
+            }));
+            routes.push(json!({
+                "match": [{"not": [{"path": ["/assets/*"]}]}],
+                "handle": [{
+                    "handler": "headers",
+                    "response": {"set": {"Cache-Control": ["no-cache"]}}
+                }]
+            }));
+            routes.push(json!({
+                "match": [{"file": {"root": root, "try_files": ["{http.request.uri.path}"]}}],
+                "handle": [compress.clone(), {"handler": "file_server", "root": root}],
+                "terminal": true
+            }));
+            routes.push(json!({"handle": [
+                {"handler": "rewrite", "uri": "/index.html"},
+                compress,
+                {"handler": "file_server", "root": root}
+            ]}));
+        }
+    }
+    json!({
+        "match": [{"host": [site.host]}],
+        "handle": [{"handler": "subroute", "routes": routes}],
         "terminal": true
     })
 }
@@ -520,7 +618,9 @@ fn compile(
         }));
     }
     // The panel's own name before any tenant's: no site can take it over.
-    routes.extend(settings.panel.as_ref().map(|(h, u)| panel_route(h, u)));
+    if let Some(panel) = &settings.panel {
+        routes.extend(panel.sites.iter().map(|site| panel_route(site, &panel.upstream)));
+    }
     routes.extend(pma_host.map(pma_route));
     routes.extend(
         all.values()
@@ -1348,28 +1448,69 @@ mod tests {
     }
 
     #[test]
-    fn the_panels_own_route_comes_first_and_is_part_of_what_caddy_gets() {
-        let config = compile(
-            &BTreeMap::new(),
-            &BTreeSet::new(),
-            &Settings {
-                panel: Some(("panel.example.com".into(), "127.0.0.1:8080".into())),
-                ..settings()
-            },
-            &Pages::default(),
-            None,
-        );
-        let routes = config["apps"]["http"]["servers"]["dhpanel"]["routes"]
-            .as_array()
-            .unwrap();
-        // The panel first, then the "no such site" answer that ends the list.
-        assert_eq!(routes.len(), 2, "{routes:?}");
-        assert_eq!(routes[0]["match"][0]["host"][0], "panel.example.com");
-        let text = routes[0].to_string();
+    fn the_panels_own_routes_come_first_and_are_part_of_what_caddy_gets() {
+        let with = |panel| {
+            compile(
+                &BTreeMap::new(),
+                &BTreeSet::new(),
+                &Settings { panel, ..settings() },
+                &Pages::default(),
+                None,
+            )
+        };
+        let routes = |config: &Value| {
+            config["apps"]["http"]["servers"]["dhpanel"]["routes"]
+                .as_array()
+                .unwrap()
+                .clone()
+        };
+        // Without a web interface: the whole name goes to the control plane.
+        let api_only = routes(&with(Some(Panel {
+            upstream: "127.0.0.1:8080".into(),
+            sites: vec![PanelSite { host: "panel.example.com".into(), web_root: None }],
+        })));
+        assert_eq!(api_only.len(), 2, "the panel, then the \"no such site\" answer");
+        assert_eq!(api_only[0]["match"][0]["host"][0], "panel.example.com");
+        let text = api_only[0].to_string();
         assert!(text.contains("\"dial\":\"127.0.0.1:8080\"") && text.contains("308"), "{text}");
+        assert!(!text.contains("file_server"), "{text}");
+        // With one: clients on the panel's name, administrators on theirs; `/api/*` still goes to
+        // the control plane, the rest are the files of the app of that name.
+        let both = routes(&with(Some(Panel {
+            upstream: "127.0.0.1:8080".into(),
+            sites: vec![
+                PanelSite { host: "panel.example.com".into(), web_root: Some("/usr/share/dhpanel/web/client".into()) },
+                PanelSite { host: "admin.panel.example.com".into(), web_root: Some("/usr/share/dhpanel/web/admin".into()) },
+            ],
+        })));
+        assert_eq!(both.len(), 3);
+        let (client, admin) = (both[0].to_string(), both[1].to_string());
+        assert!(client.contains("/usr/share/dhpanel/web/client") && !client.contains("web/admin"), "{client}");
+        assert!(admin.contains("/usr/share/dhpanel/web/admin") && !admin.contains("web/client"), "{admin}");
+        for text in [&client, &admin] {
+            // The API first, then the files, then index.html for any other path (a page of the app).
+            let api = text.find("\"/api/*\"").unwrap();
+            let files = text.find("\"file_server\"").unwrap();
+            let fallback = text.find("/index.html").unwrap();
+            assert!(api < files && files < fallback, "{text}");
+            assert!(text.contains("immutable") && text.contains("no-cache") && text.contains("nosniff"), "{text}");
+        }
         // Without a panel on this machine there is no such route.
-        let none = compile(&BTreeMap::new(), &BTreeSet::new(), &settings(), &Pages::default(), None);
-        assert_eq!(none["apps"]["http"]["servers"]["dhpanel"]["routes"].as_array().unwrap().len(), 1);
+        assert_eq!(routes(&with(None)).len(), 1);
+    }
+
+    #[test]
+    fn the_panels_names_get_the_folder_of_their_own_app() {
+        let panel = Panel::new(
+            "a.example".into(),
+            Some("admin.a.example".into()),
+            Some(PathBuf::from("/w")),
+            "127.0.0.1:8080".into(),
+        );
+        assert_eq!(panel.sites[0].web_root.as_deref(), Some(Path::new("/w/client")));
+        assert_eq!(panel.sites[1].web_root.as_deref(), Some(Path::new("/w/admin")));
+        let none = Panel::new("a.example".into(), None, None, "127.0.0.1:8080".into());
+        assert_eq!((none.sites.len(), none.sites[0].web_root.clone()), (1, None));
     }
 
     #[test]

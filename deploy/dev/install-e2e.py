@@ -145,4 +145,21 @@ for _ in range(60):
         body = str(e)
     time.sleep(2)
 step("the site answers over HTTP with the account's page", page in body, body[:160])
+# --- the web interface ---------------------------------------------------------------------------
+def fetch(url):
+    try:
+        with urllib.request.urlopen(url, timeout=20) as r:
+            return r.status, r.read().decode(errors="replace"), dict(r.headers)
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode(errors="replace"), dict(e.headers)
+
+host = BASE.split("://", 1)[1]
+for label, url in (("clients", BASE), ("administrators", f"https://admin.{host}")):
+    status, text, headers = fetch(url + "/")
+    step(f"the web interface of the {label} is served at {url}", status == 200 and 'id="root"' in text, f"{status} {text[:100]!r}")
+    status, text, _ = fetch(url + "/some/page/of/the/app")
+    step(f"  a page of the app (not a file) gives the app, so a reload works", status == 200 and 'id="root"' in text, str(status))
+    status, text, _ = fetch(url + "/api/v1/public/health")
+    step(f"  /api/* on the same name is the control plane", status == 200 and "ok" in text.lower(), f"{status} {text[:80]!r}")
+    step(f"  the page carries the security headers", headers.get("X-Content-Type-Options") == "nosniff" and headers.get("X-Frame-Options") == "DENY", str({k: v for k, v in headers.items() if k.startswith("X-")}))
 print("all steps passed", flush=True)

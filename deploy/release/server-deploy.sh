@@ -38,20 +38,35 @@ mkdir "$work/x"
 tar -xzf "$work/$NAME.tar.gz" -C "$work/x" --no-same-owner --no-same-permissions "$NAME/bin"
 BIN="$work/x/$NAME/bin"
 [ -d "$BIN" ] || die "the archive has no bin folder"
-[ -z "$(find "$BIN" -mindepth 1 \( -type l -o -type d \) -print -quit)" ] || die "bin holds more than plain files"
+# The web interface comes with a release too (two archives); a release without it is fine.
+WEB=""
+if tar -tzf "$work/$NAME.tar.gz" | grep -q "^$NAME/web/"; then
+    tar -xzf "$work/$NAME.tar.gz" -C "$work/x" --no-same-owner --no-same-permissions "$NAME/web"
+    WEB="$work/x/$NAME/web"
+fi
+for dir in "$BIN" $WEB; do
+    [ -z "$(find "$dir" -mindepth 1 \( -type l -o -type d \) -print -quit)" ] || die "$dir holds more than plain files"
+done
 
-# The programs are what the signed manifest says (every file of it, byte for byte)...
-"$DHCTL" release verify --manifest "$work/release-manifest.json" --keys "$KEYS" --dir "$BIN"
-# ...and the two programs this server runs are among them (a manifest of other files will not do).
-python3 - "$work/release-manifest.json" <<'PY'
+# What is installed is what the signed manifest says (every file of it, byte for byte): the
+# programs and the web archives are put side by side so that one check covers them.
+STAGE="$work/stage"; mkdir "$STAGE"
+cp "$BIN"/* "$STAGE"/
+[ -z "$WEB" ] || cp "$WEB"/* "$STAGE"/
+"$DHCTL" release verify --manifest "$work/release-manifest.json" --keys "$KEYS" --dir "$STAGE"
+# ...and what this server installs is among them (a manifest of other files will not do).
+python3 - "$work/release-manifest.json" "${WEB:+web}" <<'PY'
 import base64, json, sys
 doc = json.load(open(sys.argv[1]))
 payload = doc["payload"] + "=" * (-len(doc["payload"]) % 4)
 names = {c["name"] for c in json.loads(base64.urlsafe_b64decode(payload))["components"]}
-missing = {"dhpanel-control-api", "dhctl"} - names
+needed = {"dhpanel-control-api", "dhctl"}
+if len(sys.argv) > 2 and sys.argv[2]:
+    needed |= {"web-client", "web-admin"}
+missing = needed - names
 if missing:
     sys.exit("dhpanel-deploy: the signed manifest does not list " + ", ".join(sorted(missing)))
 PY
 # Every program the deploy script installs is one of the checked files. (Not `exec`: the
 # working folder is removed when this ends.)
-"$DEPLOY" --bin-dir "$BIN"
+"$DEPLOY" --bin-dir "$BIN" ${WEB:+--web-dir "$WEB"}

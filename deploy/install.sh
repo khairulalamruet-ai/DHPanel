@@ -10,6 +10,12 @@
 #                        Caddy gets its certificate from it)
 #   --admin-email MAIL   the first administrator's email
 #   --admin-username U   the first administrator's login (default: owner; "admin" and other system names are reserved)
+#   --web-dir DIR        the built web interface: the two archives of a release (DIR/web-client and
+#                        DIR/web-admin) or the two built folders (DIR/client and DIR/admin). Default:
+#                        the web folder of the release this script is in, when there is one. Without
+#                        a web interface only the API is served.
+#   --admin-hostname N   the name the administrators' app is served under (default: admin.<hostname>;
+#                        it must point here too; on sslip.io names it does on its own)
 #   --no-agent           install the control plane only (nodes are added from other servers)
 #   --check              only look: what is there, what would be done; changes nothing
 #
@@ -22,7 +28,7 @@
 # of the node channel, and with the local node: rootless Docker, the agent and the root helper.
 set -euo pipefail
 
-BIN_DIR=""; HOSTNAME_FQDN=""; ADMIN_EMAIL=""; ADMIN_USER=owner; WITH_AGENT=1; CHECK=0
+BIN_DIR=""; WEB_DIR=""; ADMIN_HOSTNAME=""; HOSTNAME_FQDN=""; ADMIN_EMAIL=""; ADMIN_USER=owner; WITH_AGENT=1; CHECK=0
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ETC=/etc/dhpanel; SECRETS=$ETC/secrets; STATE=/var/lib/dhpanel; AGENT_PORT=8444
 
@@ -30,6 +36,8 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --bin-dir) BIN_DIR="${2:?--bin-dir needs a folder}"; shift 2 ;;
         --hostname) HOSTNAME_FQDN="${2:?--hostname needs a name}"; shift 2 ;;
+        --web-dir) WEB_DIR="${2:?--web-dir needs a folder}"; shift 2 ;;
+        --admin-hostname) ADMIN_HOSTNAME="${2:?--admin-hostname needs a name}"; shift 2 ;;
         --admin-email) ADMIN_EMAIL="${2:?--admin-email needs an address}"; shift 2 ;;
         --admin-username) ADMIN_USER="${2:?--admin-username needs a name}"; shift 2 ;;
         --no-agent) WITH_AGENT=0; shift ;;
@@ -64,6 +72,14 @@ command -v systemctl > /dev/null || die "systemd is required"
 [ -n "$BIN_DIR" ] || die "give the release's binaries with --bin-dir DIR"
 [ -n "$HOSTNAME_FQDN" ] || die "give the panel's DNS name with --hostname NAME"
 [[ "$HOSTNAME_FQDN" =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ ]] || die "--hostname must be a plain DNS name (lowercase letters, digits, dots, dashes)"
+[ -n "$WEB_DIR" ] || { [ -d "$HERE/web" ] && WEB_DIR="$HERE/web"; } || true
+if [ -n "$WEB_DIR" ]; then
+    if [ -f "$WEB_DIR/web-client" ] && [ -f "$WEB_DIR/web-admin" ]; then WEB_FORM=archives
+    elif [ -f "$WEB_DIR/client/index.html" ] && [ -f "$WEB_DIR/admin/index.html" ]; then WEB_FORM=folders
+    else die "$WEB_DIR must hold web-client and web-admin (a release's archives) or client/index.html and admin/index.html (the built folders)"; fi
+    [ -n "$ADMIN_HOSTNAME" ] || ADMIN_HOSTNAME="admin.$HOSTNAME_FQDN"
+    [[ "$ADMIN_HOSTNAME" =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ ]] || die "--admin-hostname must be a plain DNS name"
+fi
 [ -n "$ADMIN_EMAIL" ] || die "give the first administrator's email with --admin-email"
 [[ "$ADMIN_EMAIL" =~ ^[^@\ ]+@[^@\ ]+\.[^@\ ]+$ ]] || die "--admin-email does not look like an email address"
 need=(dhpanel-control-api dhctl); [ "$WITH_AGENT" -eq 1 ] && need+=(dhpanel-agent dhpanel-priv-helper)
@@ -85,6 +101,7 @@ if [ "$CHECK" -eq 1 ]; then
     echo "    postgresql 18: $(command -v /usr/lib/postgresql/18/bin/postgres > /dev/null && echo present || echo 'would be installed')"
     echo "    redis:         $(command -v redis-server || echo 'would be installed')"
     echo "    caddy:         $(command -v caddy || echo 'would be installed')"
+    echo "    web interface: $([ -n "$WEB_DIR" ] && echo "$WEB_DIR (clients on $HOSTNAME_FQDN, administrators on $ADMIN_HOSTNAME)" || echo 'none given: only the API is served')"
     echo "    panel user:    $(id dhpanel > /dev/null 2>&1 && echo present || echo 'would be created')"
     echo "    configuration: $([ -f $ETC/control.toml ] && echo "present ($ETC/control.toml is kept)" || echo 'would be written')"
     echo "    CA:            $([ -f $SECRETS/node_ca.crt ] && echo 'present (kept)' || echo 'would be created')"
@@ -235,30 +252,69 @@ systemctl restart dhpanel-control-api
 for _ in $(seq 1 40); do curl -fsS http://127.0.0.1:8080/api/v1/public/ready > /dev/null 2>&1 && break; sleep 0.5; done
 curl -fsS http://127.0.0.1:8080/api/v1/public/ready > /dev/null 2>&1 || die "the control plane does not answer (journalctl -u dhpanel-control-api)"
 
-say "Caddy in front of the panel"
-if [ "$WITH_AGENT" -eq 1 ]; then
-    # One web server for the panel and for the sites on this machine. The node agent owns the server
-    # named `dhpanel` (it fills it with every site's route), so the panel's own server has that
-    # name and the agent is told the panel's host name: the panel's route stays in what it sends.
-    cat > /etc/caddy/Caddyfile <<CADDY
-{
-    servers :443 {
-        name dhpanel
+WEB_ROOT=/usr/share/dhpanel/web
+if [ -n "$WEB_DIR" ]; then
+    say "the web interface (clients on $HOSTNAME_FQDN, administrators on $ADMIN_HOSTNAME)"
+    install -d -m 0755 "$WEB_ROOT"
+    for app in client admin; do
+        rm -rf "$WEB_ROOT/$app.new"
+        if [ "$WEB_FORM" = archives ]; then
+            mkdir "$WEB_ROOT/$app.new"
+            tar -xzf "$WEB_DIR/web-$app" -C "$WEB_ROOT/$app.new" --no-same-owner --no-same-permissions
+        else
+            cp -r "$WEB_DIR/$app" "$WEB_ROOT/$app.new"
+        fi
+        [ -f "$WEB_ROOT/$app.new/index.html" ] || die "the $app web interface has no index.html"
+        chown -R root:root "$WEB_ROOT/$app.new"; chmod -R u=rwX,go=rX "$WEB_ROOT/$app.new"
+        rm -rf "$WEB_ROOT/$app.old"; [ -d "$WEB_ROOT/$app" ] && mv "$WEB_ROOT/$app" "$WEB_ROOT/$app.old"
+        mv "$WEB_ROOT/$app.new" "$WEB_ROOT/$app"; rm -rf "$WEB_ROOT/$app.old"
+    done
+fi
+
+# One site block of the panel: the API goes to the control plane, the rest is an app's files (any
+# path that is not a file is the app's own page: it is a single-page app).
+panel_site() { # name, app folder
+    cat <<BLOCK
+$1 {
+    encode zstd gzip
+    header {
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        Referrer-Policy strict-origin-when-cross-origin
+    }
+    handle /api/* {
+        reverse_proxy 127.0.0.1:8080
+    }
+    handle {
+        root * $WEB_ROOT/$2
+        @assets path /assets/*
+        header @assets Cache-Control "public, max-age=31536000, immutable"
+        @page not path /assets/*
+        header @page Cache-Control no-cache
+        try_files {path} /index.html
+        file_server
     }
 }
-$HOSTNAME_FQDN {
-    encode zstd gzip
-    reverse_proxy 127.0.0.1:8080
+BLOCK
 }
-CADDY
-else
-    cat > /etc/caddy/Caddyfile <<CADDY
-$HOSTNAME_FQDN {
-    encode zstd gzip
-    reverse_proxy 127.0.0.1:8080
-}
-CADDY
-fi
+
+say "Caddy in front of the panel"
+{
+    options=""
+    if [ "$WITH_AGENT" -eq 1 ]; then
+        # One web server for the panel and for the sites on this machine. The node agent owns the
+        # server named `dhpanel` (it fills it with every site's route), so the panel's own server has
+        # that name and the agent is told the panel's names: they stay in what it sends.
+        printf '{\n    servers :443 {\n        name dhpanel\n    }\n}\n'
+    fi
+    if [ -n "$WEB_DIR" ]; then
+        panel_site "$HOSTNAME_FQDN" client
+        panel_site "$ADMIN_HOSTNAME" admin
+    else
+        printf '%s {\n    encode zstd gzip\n    reverse_proxy 127.0.0.1:8080\n}\n' "$HOSTNAME_FQDN"
+    fi
+} > /etc/caddy/Caddyfile
+caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile > /dev/null 2>&1 || die "the Caddyfile is not valid (caddy validate --config /etc/caddy/Caddyfile)"
 systemctl enable caddy > /dev/null 2>&1
 systemctl reload caddy 2> /dev/null || systemctl restart caddy
 
@@ -286,6 +342,7 @@ if [ "$WITH_AGENT" -eq 1 ]; then
 Environment=DHPANEL_AGENT_CADDY_ADMIN=http://127.0.0.1:2019
 Environment=DHPANEL_AGENT_PANEL_HOST=$HOSTNAME_FQDN
 Environment=DHPANEL_AGENT_PANEL_UPSTREAM=127.0.0.1:8080
+$([ -n "$WEB_DIR" ] && printf 'Environment=DHPANEL_AGENT_PANEL_ADMIN_HOST=%s\nEnvironment=DHPANEL_AGENT_PANEL_WEB_ROOT=%s\n' "$ADMIN_HOSTNAME" "$WEB_ROOT")
 CONF
     systemctl daemon-reload
     systemctl try-restart dhpanel-agent 2> /dev/null || true
@@ -297,6 +354,7 @@ cat <<EOF
 DHPanel is installed.
 
   Panel:     https://$HOSTNAME_FQDN   (the certificate arrives within a minute, once the name points here)
+$([ -n "$WEB_DIR" ] && printf '  Admin:     https://%s   (this name must point here too)\n' "$ADMIN_HOSTNAME")
   Login:     $ADMIN_USER
 $([ -n "$ADMIN_PASSWORD" ] && printf '  Password:  %s\n  (shown once, never stored: sign in and change it, then set up two-factor)\n' "$ADMIN_PASSWORD" || echo '  (the administrator already existed; its password is unchanged)')
 
