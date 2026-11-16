@@ -781,7 +781,8 @@ mod tests {
                 "services",
                 "security",
                 "apps",
-                "license"
+                "license",
+                "notifications"
             ]
         );
         // And they fit together: dependencies first.
@@ -803,6 +804,7 @@ mod tests {
                 "domains",
                 "files",
                 "logs",
+                "notifications",
                 "services",
                 "usage",
                 "apps",
@@ -824,6 +826,7 @@ mod tests {
                 "domains",
                 "files",
                 "logs",
+                "notifications",
                 "services",
                 "usage",
                 "apps",
