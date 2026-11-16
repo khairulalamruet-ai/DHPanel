@@ -162,6 +162,13 @@ if [ "$rootless" -eq 1 ]; then
     say "allocating subordinate ids ${start}-$((start + 65535)) for $AGENT_USER"
     usermod --add-subuids "${start}-$((start + 65535))" --add-subgids "${start}-$((start + 65535))" "$AGENT_USER"
   fi
+  # A plan's CPU, memory and process limits are enforced by cgroup v2 controllers, which systemd
+  # hands to a user's own services only when told to: older systemd versions (Ubuntu 22.04 has 249)
+  # leave `cpu` out, and rootless Docker then refuses every CPU limit.
+  say "delegating the cgroup controllers (cpu, cpuset, io, memory, pids) to users' services"
+  install -d -m 0755 /etc/systemd/system/user@.service.d
+  printf '[Service]\nDelegate=cpu cpuset io memory pids\n' > /etc/systemd/system/user@.service.d/dhpanel-delegate.conf
+  systemctl daemon-reload
   say "enabling lingering so the agent's Docker daemon runs without a login"
   loginctl enable-linger "$AGENT_USER"
   for _ in $(seq 1 30); do
@@ -169,6 +176,18 @@ if [ "$rootless" -eq 1 ]; then
     sleep 1
   done
   systemctl is-active --quiet "user@${AGENT_UID}.service" || die "user@${AGENT_UID}.service did not start"
+  # A user manager that was already running does not know the new delegation. It has to start
+  # again, and cgroup v2 lets it only when nothing of the old one is left in its cgroup.
+  controllers="/sys/fs/cgroup/user.slice/user-${AGENT_UID}.slice/user@${AGENT_UID}.service/cgroup.subtree_control"
+  if ! grep -qw cpu "$controllers" 2>/dev/null; then
+    systemctl stop dhpanel-agent 2>/dev/null || true
+    pkill -KILL -u "$AGENT_UID" 2>/dev/null || true
+    sleep 2
+    systemctl reset-failed "user@${AGENT_UID}.service" 2>/dev/null || true
+    systemctl restart "user@${AGENT_UID}.service"
+    for _ in $(seq 1 30); do systemctl is-active --quiet "user@${AGENT_UID}.service" && break; sleep 1; done
+  fi
+  grep -qw cpu "$controllers" 2>/dev/null || die "the cpu controller is not delegated to the agent's user ($controllers): CPU limits would not work"
 
   as_agent() {
     runuser -u "$AGENT_USER" -- env HOME="$STATE_DIR/home" \
@@ -198,6 +217,10 @@ if [ "$rootless" -eq 1 ]; then
     sleep 1
   done
   [ -S "/run/user/${AGENT_UID}/docker.sock" ] || die "the agent's Docker socket did not appear"
+  # Docker itself says whether it can limit CPU and memory: a hosting plan needs both.
+  if as_agent env DOCKER_HOST="unix:///run/user/${AGENT_UID}/docker.sock" docker info 2>&1 | grep -qiE "No (cpu cfs|memory limit|pids limit)"; then
+    die "the agent's Docker cannot limit CPU, memory or processes (docker info warns): check the cgroup v2 delegation"
+  fi
   say "rootless Docker is up: $(as_agent env DOCKER_HOST="unix:///run/user/${AGENT_UID}/docker.sock" docker version --format '{{.Server.Version}} (rootless={{range .Server.Components}}{{.Name}} {{end}})' 2>/dev/null | cut -c1-80)"
 else
   say "skipping rootless Docker (use --rootless-docker to set it up for the agent)"

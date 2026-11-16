@@ -332,6 +332,16 @@ async fn converge_stack(
             {
                 roll_php(docker, username, spec, &allowlist).await?;
             }
+            // Made before the web container was published on the machine's loopback address, which
+            // is how the node's web server reaches it: made again once, its files are in the volume.
+            Ok(info)
+                if spec.role.as_deref() == Some("web")
+                    && !spec.ports.is_empty()
+                    && info.published.is_empty() =>
+            {
+                gone_is_fine(docker.remove(&spec.name, true).await)?;
+                create_container(docker, spec, &allowlist).await?;
+            }
             Ok(info) => {
                 // A change of the plan or of the number of PHP versions changes the share.
                 if info.limits != spec.limits() {

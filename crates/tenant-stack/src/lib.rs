@@ -18,10 +18,7 @@
 
 use std::{collections::BTreeMap, fmt};
 
-use dhpanel_docker_manager::{
-    Capability, ContainerSpec, ImageRef, Limits, Name, Network, Restart, SpecError, Tmpfs,
-    VolumeMount,
-};
+use dhpanel_docker_manager::{Capability, ContainerSpec, ImageRef, Limits, Name, Network, PublishedPort, Restart, SpecError, Tmpfs, VolumeMount};
 use dhpanel_domain::{TenantUsername, Uid};
 use serde::Deserialize;
 use uuid::Uuid;
@@ -738,6 +735,16 @@ pub fn render(tenant: &Tenant<'_>, allowlist: &Allowlist) -> Result<Stack, Stack
                 .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
                 .collect();
             spec.network = Network::Named(network.clone());
+            // The web server of the node reaches a site's web container on the loopback address
+            // of the machine (a port Docker picks; the node agent reads it back). Nobody outside
+            // the machine can reach it, and containers cannot see the host's loopback.
+            if template.role == Role::Web {
+                spec.ports = vec![PublishedPort {
+                    container_port: WEB_PORT,
+                    host_port: 0,
+                    host_ip: std::net::IpAddr::from([127, 0, 0, 1]),
+                }];
+            }
             spec.restart = Restart::UnlessStopped;
             spec.cap_add = Vec::<Capability>::new();
             spec.tenant = Some(tenant.id);
@@ -918,7 +925,14 @@ mod tests {
                 assert!(list.allows(role, &spec.image), "{:?}", spec.image);
                 // 3. Nothing added back, nothing published, nothing from the host.
                 assert!(spec.cap_add.is_empty(), "no capabilities");
-                assert!(spec.ports.is_empty(), "no published ports");
+                // The web container publishes one port, on the loopback address only (the
+                // node's web server comes in that way); nothing else publishes anything.
+                if role == Role::Web {
+                    assert_eq!(spec.ports.len(), 1);
+                    assert!(spec.ports[0].host_ip.is_loopback(), "{:?}", spec.ports);
+                } else {
+                    assert!(spec.ports.is_empty(), "no published ports");
+                }
                 assert!(!spec.writable_root, "read-only root");
                 // No secrets in the environment: the one variable there is a fixed path.
                 assert!(

@@ -277,6 +277,9 @@ pub struct ContainerInfo {
     pub labels: HashMap<String, String>,
     /// The limits in force (zeros if Docker reports none).
     pub limits: Limits,
+    /// The ports published on the host, as they are now (a port that was left to Docker is the
+    /// one it chose).
+    pub published: Vec<PublishedPort>,
 }
 
 /// A container of an account, as listed.
@@ -1337,7 +1340,33 @@ impl DockerManager {
         }
         let state = c.state.unwrap_or_default();
         let running = state.running.unwrap_or(false);
+        let mut published = Vec::new();
+        for (key, bindings) in c
+            .network_settings
+            .and_then(|n| n.ports)
+            .unwrap_or_default()
+        {
+            let Some(container_port) = key
+                .strip_suffix("/tcp")
+                .and_then(|p| p.parse::<u16>().ok())
+            else {
+                continue;
+            };
+            for binding in bindings.unwrap_or_default() {
+                if let (Some(ip), Some(port)) = (
+                    binding.host_ip.and_then(|i| i.parse::<std::net::IpAddr>().ok()),
+                    binding.host_port.and_then(|p| p.parse::<u16>().ok()),
+                ) {
+                    published.push(PublishedPort {
+                        container_port,
+                        host_port: port,
+                        host_ip: ip,
+                    });
+                }
+            }
+        }
         Ok(ContainerInfo {
+            published,
             id: c.id.unwrap_or_default(),
             name: c
                 .name

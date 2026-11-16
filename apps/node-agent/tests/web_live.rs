@@ -91,6 +91,7 @@ async fn sites_are_served_suspended_redirected_and_put_back_after_caddy_forgets_
             automatic_https: false,
             data_dir: None,
             waf_dir: None,
+            panel: None,
         },
         &dir,
     );
@@ -281,6 +282,7 @@ async fn routes_are_kept_when_caddy_cannot_be_reached_and_applied_later() {
             automatic_https: false,
             data_dir: None,
             waf_dir: None,
+            panel: None,
         },
         &dir,
     );
@@ -354,6 +356,7 @@ async fn force_https_redirects_plain_requests_and_hsts_is_sent_over_https_only()
             automatic_https: true,
             data_dir: None,
             waf_dir: None,
+            panel: None,
         },
         &dir,
     );
@@ -491,6 +494,7 @@ async fn an_uploaded_certificate_is_served_until_it_is_removed() {
             automatic_https: true,
             data_dir: None,
             waf_dir: None,
+            panel: None,
         },
         &dir,
     );
@@ -653,6 +657,7 @@ async fn error_pages_are_the_installations_until_an_administrator_replaces_them(
             automatic_https: false,
             data_dir: None,
             waf_dir: None,
+            panel: None,
         },
         &dir,
     );
@@ -767,6 +772,7 @@ async fn a_policy_change_reaches_a_running_caddy_without_a_restart() {
             automatic_https: false,
             data_dir: None,
             waf_dir: Some(waf_dir.into()),
+            panel: None,
         },
         &dir,
     );
@@ -869,6 +875,7 @@ async fn a_listed_user_agent_is_refused_before_any_site_and_the_list_is_kept() {
         automatic_https: false,
         data_dir: None,
         waf_dir: None,
+        panel: None,
     };
     let web = WebContext::new(settings(), &dir);
     set_site_routes(

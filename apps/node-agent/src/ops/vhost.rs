@@ -105,6 +105,9 @@ fn put(dir: &Path, path: &Path, content: Option<&[u8]>) -> std::io::Result<()> {
                 .create_new(true)
                 .mode(0o644)
                 .open(&tmp)?;
+            // `mode` above is cut down by the process's umask (the agent's service sets 0077):
+            // the web container's user must be able to read this, so it is set outright.
+            out.set_permissions(std::fs::Permissions::from_mode(0o644))?;
             std::io::Write::write_all(&mut out, bytes)?;
             out.sync_all()?;
             std::fs::rename(tmp, path)

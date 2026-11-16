@@ -315,6 +315,10 @@ fn run_command(state_dir: PathBuf, stream_url: Option<String>) -> ExitCode {
         let web = dhpanel_node_agent::web::Settings::from_env()
             .map(|s| dhpanel_node_agent::web::WebContext::new(s, &state_dir));
         if let Some(web) = &web {
+            // Sites are reached on the loopback port their container is published on.
+            if let Some(context) = tenant_context(&state_dir) {
+                web.use_docker(context.docker.clone());
+            }
             tokio::spawn(web.clone().keep_in_sync(std::time::Duration::from_secs(20)));
         }
         // phpMyAdmin's temporary accounts are dropped when their time is up.

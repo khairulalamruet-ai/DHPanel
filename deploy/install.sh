@@ -236,12 +236,29 @@ for _ in $(seq 1 40); do curl -fsS http://127.0.0.1:8080/api/v1/public/ready > /
 curl -fsS http://127.0.0.1:8080/api/v1/public/ready > /dev/null 2>&1 || die "the control plane does not answer (journalctl -u dhpanel-control-api)"
 
 say "Caddy in front of the panel"
-cat > /etc/caddy/Caddyfile <<CADDY
+if [ "$WITH_AGENT" -eq 1 ]; then
+    # One web server for the panel and for the sites on this machine. The node agent owns the server
+    # named `dhpanel` (it fills it with every site's route), so the panel's own server has that
+    # name and the agent is told the panel's host name: the panel's route stays in what it sends.
+    cat > /etc/caddy/Caddyfile <<CADDY
+{
+    servers :443 {
+        name dhpanel
+    }
+}
 $HOSTNAME_FQDN {
     encode zstd gzip
     reverse_proxy 127.0.0.1:8080
 }
 CADDY
+else
+    cat > /etc/caddy/Caddyfile <<CADDY
+$HOSTNAME_FQDN {
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:8080
+}
+CADDY
+fi
 systemctl enable caddy > /dev/null 2>&1
 systemctl reload caddy 2> /dev/null || systemctl restart caddy
 
@@ -261,6 +278,17 @@ if [ "$WITH_AGENT" -eq 1 ]; then
         systemctl disable --now docker.service docker.socket > /dev/null 2>&1 || true
     fi
     "$HERE/agent/install.sh" --binary "$BIN_DIR/dhpanel-agent" --priv-helper "$BIN_DIR/dhpanel-priv-helper" --rootless-docker
+    # The agent drives the web server on this machine (Caddy's admin API, which listens on this
+    # machine only) and keeps the panel's own name in what it sends it.
+    install -d -m 0755 /etc/systemd/system/dhpanel-agent.service.d
+    cat > /etc/systemd/system/dhpanel-agent.service.d/panel.conf <<CONF
+[Service]
+Environment=DHPANEL_AGENT_CADDY_ADMIN=http://127.0.0.1:2019
+Environment=DHPANEL_AGENT_PANEL_HOST=$HOSTNAME_FQDN
+Environment=DHPANEL_AGENT_PANEL_UPSTREAM=127.0.0.1:8080
+CONF
+    systemctl daemon-reload
+    systemctl try-restart dhpanel-agent 2> /dev/null || true
 fi
 
 trap - EXIT

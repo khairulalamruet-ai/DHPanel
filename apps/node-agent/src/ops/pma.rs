@@ -174,6 +174,13 @@ async fn ensure_container(context: &TenantContext) -> Result<(), AgentError> {
                 .await
                 .map_err(|e| docker_error(&e))?;
             let mut spec = ContainerSpec::new(container.clone(), image);
+            // The node's web server reaches phpMyAdmin on the machine's loopback address (a port
+            // Docker picks; the agent reads it back), the same way it reaches a site.
+            spec.ports = vec![dhpanel_docker_manager::PublishedPort {
+                container_port: 80,
+                host_port: 0,
+                host_ip: std::net::IpAddr::from([127, 0, 0, 1]),
+            }];
             spec.env.insert(
                 "PMA_USER_CONFIG_BASE64".into(),
                 base64(USER_CONFIG.as_bytes()),
@@ -362,12 +369,17 @@ pub async fn open_phpmyadmin(
 /// A file that the container's page can read (and move away) but that is not
 /// listed for anyone else on the machine: the folder is the agent's own.
 fn write_private(path: &Path, text: &str) -> std::io::Result<()> {
-    use std::{io::Write as _, os::unix::fs::OpenOptionsExt as _};
+    use std::{
+        io::Write as _,
+        os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _},
+    };
     let mut file = std::fs::OpenOptions::new()
         .create_new(true)
         .write(true)
         .mode(0o644)
         .open(path)?;
+    // Not left to the umask (the agent's service sets 0077): the container's user reads this.
+    file.set_permissions(std::fs::Permissions::from_mode(0o644))?;
     file.write_all(text.as_bytes())?;
     file.sync_all()
 }

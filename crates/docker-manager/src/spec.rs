@@ -229,7 +229,8 @@ pub struct Tmpfs {
 pub struct PublishedPort {
     /// TCP port inside the container.
     pub container_port: u16,
-    /// Port on the host; 1024 or above (the daemon is rootless, ADR 0004).
+    /// Port on the host; 1024 or above (the daemon is rootless, ADR 0004). 0 lets Docker pick a
+    /// free one (only on the loopback address): read it back with `ContainerInfo::published`.
     pub host_port: u16,
     /// Address on the host to listen on. Loopback unless said otherwise.
     pub host_ip: IpAddr,
@@ -386,6 +387,13 @@ impl ContainerSpec {
             if p.container_port == 0 {
                 return Err(invalid("ports", "container port 0"));
             }
+            if p.host_port == 0 {
+                // "Any free port" is safe only where nobody outside can reach it.
+                if !p.host_ip.is_loopback() {
+                    return Err(invalid("ports", "a port chosen by Docker must be on the loopback address"));
+                }
+                continue;
+            }
             if p.host_port < 1024 {
                 return Err(invalid("ports", "host ports below 1024 are not available"));
             }
@@ -505,7 +513,12 @@ impl ContainerSpec {
                 .get_or_insert_with(Vec::new)
                 .push(PortBinding {
                     host_ip: Some(p.host_ip.to_string()),
-                    host_port: Some(p.host_port.to_string()),
+                    // An empty host port is "any free one".
+                    host_port: Some(if p.host_port == 0 {
+                        String::new()
+                    } else {
+                        p.host_port.to_string()
+                    }),
                 });
         }
         exposed.sort();

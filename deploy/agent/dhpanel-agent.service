@@ -35,7 +35,9 @@ AmbientCapabilities=
 ProtectSystem=strict
 ReadWritePaths=/var/lib/dhpanel-agent /var/lib/dhpanel-transfers
 Environment=DHPANEL_AGENT_TRANSFERS=/var/lib/dhpanel-transfers
-ProtectHome=yes
+# read-only, not yes: `yes` also hides /run/user, where the agent's own Docker socket is, and without
+# Docker the agent offers no tenant operation at all.
+ProtectHome=read-only
 PrivateTmp=yes
 PrivateDevices=yes
 ProtectKernelTunables=yes

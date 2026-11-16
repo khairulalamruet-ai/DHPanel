@@ -59,6 +59,12 @@ pub struct Settings {
     /// (`coraza.conf` and `crs/`; `DHPANEL_AGENT_WAF_DIR`). Without it no site gets the
     /// firewall, whatever the policy says: Caddy would not know the module.
     pub waf_dir: Option<PathBuf>,
+    /// The panel itself, when it runs on this machine too: its host name and the address of the
+    /// control plane (`DHPANEL_AGENT_PANEL_HOST`, `DHPANEL_AGENT_PANEL_UPSTREAM`, default
+    /// `127.0.0.1:8080`). One web server takes the visitors of the panel and of the sites, so its
+    /// route is part of what is sent to Caddy: a server that holds only the sites' routes would
+    /// take the panel off the air.
+    pub panel: Option<(String, String)>,
 }
 
 impl Settings {
@@ -82,6 +88,14 @@ impl Settings {
             automatic_https,
             data_dir: std::env::var_os("DHPANEL_AGENT_CADDY_DATA").map(PathBuf::from),
             waf_dir: std::env::var_os("DHPANEL_AGENT_WAF_DIR").map(PathBuf::from),
+            panel: std::env::var("DHPANEL_AGENT_PANEL_HOST")
+                .ok()
+                .filter(|h| !h.is_empty())
+                .map(|host| {
+                    let upstream = std::env::var("DHPANEL_AGENT_PANEL_UPSTREAM")
+                        .unwrap_or_else(|_| "127.0.0.1:8080".to_owned());
+                    (host, upstream)
+                }),
         })
     }
 }
@@ -99,6 +113,8 @@ pub struct WebContext {
     /// The name phpMyAdmin is served under (one line), if any.
     pma_file: PathBuf,
     agent: ureq::Agent,
+    /// Docker, to learn on which loopback port a site's web container is published.
+    docker: std::sync::OnceLock<dhpanel_docker_manager::DockerManager>,
     /// One change at a time: files and Caddy move together.
     busy: Mutex<()>,
 }
@@ -121,6 +137,7 @@ impl WebContext {
             agents_file: state_dir.join("user-agent-blocklist.json"),
             pma_file: state_dir.join("phpmyadmin-host"),
             agent,
+            docker: std::sync::OnceLock::new(),
             busy: Mutex::new(()),
         })
     }
@@ -297,6 +314,29 @@ fn load_pma_host(file: &Path) -> Option<String> {
 
 /// phpMyAdmin as a Caddy route: plain HTTP goes to HTTPS (a sign-in token is in
 /// the address), everything else to its container.
+/// The panel's own name: plain HTTP goes to HTTPS, everything else to the control plane.
+fn panel_route(host: &str, upstream: &str) -> Value {
+    json!({
+        "match": [{"host": [host]}],
+        "handle": [{"handler": "subroute", "routes": [
+            {
+                "match": [{"protocol": "http"}],
+                "handle": [{
+                    "handler": "static_response",
+                    "status_code": 308,
+                    "headers": {"Location": ["https://{http.request.host}{http.request.uri}"]}
+                }],
+                "terminal": true
+            },
+            {"handle": [
+                {"handler": "encode", "encodings": {"zstd": {}, "gzip": {}}, "prefer": ["zstd", "gzip"]},
+                {"handler": "reverse_proxy", "upstreams": [{"dial": upstream}]}
+            ]}
+        ]}],
+        "terminal": true
+    })
+}
+
 fn pma_route(host: &str) -> Value {
     json!({
         "match": [{"host": [host]}],
@@ -406,6 +446,45 @@ fn site_route(site: &SiteRoute, pages: &Pages, waf_dir: Option<&Path>) -> Value 
     })
 }
 
+/// Every `dial` address in a Caddy configuration that names a container (`dh-…`).
+fn collect_dials(value: &Value, out: &mut BTreeSet<String>) {
+    match value {
+        Value::Object(map) => {
+            for (key, v) in map {
+                if key == "dial"
+                    && let Some(dial) = v.as_str()
+                    && dial.starts_with("dh-")
+                {
+                    out.insert(dial.to_owned());
+                }
+                collect_dials(v, out);
+            }
+        }
+        Value::Array(items) => items.iter().for_each(|v| collect_dials(v, out)),
+        _ => {}
+    }
+}
+
+/// Puts the resolved address in the place of the name, wherever it is a `dial`.
+fn replace_dials(value: &mut Value, resolved: &BTreeMap<String, String>) {
+    match value {
+        Value::Object(map) => {
+            for (key, v) in map.iter_mut() {
+                if key == "dial"
+                    && let Some(dial) = v.as_str()
+                    && let Some(address) = resolved.get(dial)
+                {
+                    *v = Value::String(address.clone());
+                } else {
+                    replace_dials(v, resolved);
+                }
+            }
+        }
+        Value::Array(items) => items.iter_mut().for_each(|v| replace_dials(v, resolved)),
+        _ => {}
+    }
+}
+
 /// The whole Caddy configuration for every tenant's sites. Tenants and sites
 /// come in a fixed order, so the same input gives the same output. Names that have
 /// an uploaded certificate are not given one of Caddy's own.
@@ -440,6 +519,8 @@ fn compile(
             "terminal": true
         }));
     }
+    // The panel's own name before any tenant's: no site can take it over.
+    routes.extend(settings.panel.as_ref().map(|(h, u)| panel_route(h, u)));
     routes.extend(pma_host.map(pma_route));
     routes.extend(
         all.values()
@@ -713,6 +794,42 @@ impl WebContext {
     /// exactly that. Returns whether it had to load.
     ///
     /// # Errors
+    /// Gives the context Docker, so that a site's upstream (`dh-<tenant>-web:8080`, a name only
+    /// the tenant's network knows) can be turned into the loopback port the container is
+    /// published on, which is how the node's web server reaches it.
+    pub fn use_docker(&self, docker: dhpanel_docker_manager::DockerManager) {
+        let _ = self.docker.set(docker);
+    }
+
+    /// Replaces every `dh-…:port` upstream of `config` by `127.0.0.1:<published port>`. A name
+    /// that cannot be resolved (no such container yet) is left as it is: that site answers 502
+    /// until the next round puts it right.
+    async fn resolve_upstreams(&self, config: &mut Value) {
+        let Some(docker) = self.docker.get() else {
+            return;
+        };
+        let mut dials = BTreeSet::new();
+        collect_dials(config, &mut dials);
+        let mut resolved = BTreeMap::new();
+        for dial in dials {
+            let Some((name, port)) = dial.split_once(':') else {
+                continue;
+            };
+            let (Ok(container), Ok(port)) = (dhpanel_docker_manager::Name::parse(name), port.parse::<u16>()) else {
+                continue;
+            };
+            if let Ok(info) = docker.inspect(&container).await
+                && let Some(published) = info
+                    .published
+                    .iter()
+                    .find(|p| p.container_port == port && p.host_ip.is_loopback())
+            {
+                resolved.insert(dial.clone(), format!("127.0.0.1:{}", published.host_port));
+            }
+        }
+        replace_dials(config, &resolved);
+    }
+
     /// Caddy could not be reached or refused the configuration.
     pub async fn reconcile(self: &Arc<Self>) -> Result<bool, String> {
         let _guard = self.busy.lock().await;
@@ -726,7 +843,7 @@ impl WebContext {
             .flatten()
             .map(|c| c.host.clone())
             .collect();
-        let config = compile(
+        let mut config = compile(
             &load_all(&self.dir),
             &uploaded,
             &self.settings,
@@ -737,6 +854,7 @@ impl WebContext {
             },
             load_pma_host(&self.pma_file).as_deref(),
         );
+        self.resolve_upstreams(&mut config).await;
         let wanted = config
             .pointer(&format!("/apps/http/servers/{SERVER}"))
             .cloned()
@@ -1203,7 +1321,55 @@ mod tests {
             automatic_https: true,
             data_dir: None,
             waf_dir: None,
+            panel: None,
         }
+    }
+
+    #[test]
+    fn container_names_in_upstreams_are_found_and_replaced_wherever_they_are() {
+        let mut config = json!({"routes": [
+            {"handle": [{"handler": "reverse_proxy", "upstreams": [{"dial": "dh-alice-web:8080"}]}]},
+            {"handle": [{"handler": "reverse_proxy", "upstreams": [{"dial": "127.0.0.1:8080"}]}]},
+            {"handle": [{"handler": "reverse_proxy", "upstreams": [{"dial": "dh-bob-web:8080"}]}]}
+        ]});
+        let mut found = BTreeSet::new();
+        collect_dials(&config, &mut found);
+        // The panel's own address is not a container's.
+        assert_eq!(
+            found.iter().map(String::as_str).collect::<Vec<_>>(),
+            ["dh-alice-web:8080", "dh-bob-web:8080"]
+        );
+        // Only what could be resolved changes; the rest stays (and answers 502 meanwhile).
+        let resolved = BTreeMap::from([("dh-alice-web:8080".to_owned(), "127.0.0.1:41234".to_owned())]);
+        replace_dials(&mut config, &resolved);
+        let text = config.to_string();
+        assert!(text.contains("\"127.0.0.1:41234\"") && text.contains("\"dh-bob-web:8080\"") && text.contains("\"127.0.0.1:8080\""), "{text}");
+        assert!(!text.contains("dh-alice-web"), "{text}");
+    }
+
+    #[test]
+    fn the_panels_own_route_comes_first_and_is_part_of_what_caddy_gets() {
+        let config = compile(
+            &BTreeMap::new(),
+            &BTreeSet::new(),
+            &Settings {
+                panel: Some(("panel.example.com".into(), "127.0.0.1:8080".into())),
+                ..settings()
+            },
+            &Pages::default(),
+            None,
+        );
+        let routes = config["apps"]["http"]["servers"]["dhpanel"]["routes"]
+            .as_array()
+            .unwrap();
+        // The panel first, then the "no such site" answer that ends the list.
+        assert_eq!(routes.len(), 2, "{routes:?}");
+        assert_eq!(routes[0]["match"][0]["host"][0], "panel.example.com");
+        let text = routes[0].to_string();
+        assert!(text.contains("\"dial\":\"127.0.0.1:8080\"") && text.contains("308"), "{text}");
+        // Without a panel on this machine there is no such route.
+        let none = compile(&BTreeMap::new(), &BTreeSet::new(), &settings(), &Pages::default(), None);
+        assert_eq!(none["apps"]["http"]["servers"]["dhpanel"]["routes"].as_array().unwrap().len(), 1);
     }
 
     #[test]
