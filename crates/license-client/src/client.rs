@@ -67,7 +67,7 @@ impl ClientError {
     #[must_use]
     pub fn is_license_refusal(&self) -> bool {
         matches!(self, Self::Refused { code, .. }
-            if matches!(code.as_str(), "license_revoked" | "license_suspended" | "license_expired" | "binding_mismatch"))
+            if matches!(code.as_str(), "license_revoked" | "license_suspended" | "license_expired" | "binding_mismatch" | "integrity_failed"))
     }
 }
 
@@ -128,6 +128,9 @@ pub struct ScanResult {
     pub mismatched: Vec<String>,
     /// The files that were not reported.
     pub missing: Vec<String>,
+    /// The installation's integrity state now: `ok`, `failed` or `recovering`.
+    #[serde(default = "integrity_ok")]
+    pub integrity: String,
 }
 
 /// What a heartbeat answers.
@@ -135,8 +138,15 @@ pub struct ScanResult {
 pub struct Beat {
     /// `active`, `suspended`, `revoked` or `expired`.
     pub license_status: String,
+    /// The installation's integrity state: `ok`, `failed` or `recovering`.
+    #[serde(default = "integrity_ok")]
+    pub integrity: String,
     /// The authority's clock.
     pub server_time: i64,
+}
+
+fn integrity_ok() -> String {
+    "ok".to_owned()
 }
 
 #[derive(Deserialize)]

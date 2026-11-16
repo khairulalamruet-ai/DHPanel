@@ -169,13 +169,11 @@ async fn la_call(
         let mut r = if method == "POST" {
             agent.post(&url)
         } else {
-            return agent
-                .get(&url)
-                .call()
-                .unwrap()
-                .body_mut()
-                .read_json()
-                .unwrap();
+            let mut get = agent.get(&url);
+            if let Some(t) = &token {
+                get = get.header("authorization", format!("Bearer {t}"));
+            }
+            return get.call().unwrap().body_mut().read_json().unwrap();
         };
         if let Some(t) = &token {
             r = r.header("authorization", format!("Bearer {t}"));
@@ -695,4 +693,54 @@ async fn the_panel_scans_the_programs_it_runs_and_a_changed_one_fails(pool: PgPo
     .await
     .unwrap();
     assert_eq!(events, 2);
+
+    // The failed scan restricted management; asking for help, an approval and a clean scan
+    // put it right again.
+    let verdict = service.evaluate_and_save().await.unwrap().unwrap();
+    assert_eq!(
+        (format!("{:?}", verdict.mode), verdict.reason.as_deref()),
+        ("Restricted".to_owned(), Some("integrity_failed"))
+    );
+    for (name, bytes) in &files {
+        std::fs::write(programs.join(name), bytes).unwrap();
+    }
+    // Clean again, but nobody has looked: still restricted.
+    let scan = service.integrity_scan().await.unwrap();
+    assert_eq!(
+        (scan.result.as_str(), scan.integrity.as_str()),
+        ("passed", "failed")
+    );
+    service
+        .recovery_request("restored the programs from the release".to_owned())
+        .await
+        .unwrap();
+    let requests = la_call(
+        &a.url,
+        "GET",
+        "/api/v1/admin/recovery-requests?state=requested",
+        Some(&a.admin_token),
+        None,
+    )
+    .await;
+    let id = requests[0]["id"].as_str().unwrap().to_owned();
+    la_call(
+        &a.url,
+        "POST",
+        &format!("/api/v1/admin/recovery-requests/{id}/approve"),
+        Some(&a.admin_token),
+        Some(json!({})),
+    )
+    .await;
+    let scan = service.integrity_scan().await.unwrap();
+    assert_eq!(
+        (scan.result.as_str(), scan.integrity.as_str()),
+        ("passed", "ok")
+    );
+    let verdict = service.evaluate_and_save().await.unwrap().unwrap();
+    assert_eq!(
+        format!("{:?}", verdict.mode),
+        "Active",
+        "{:?}",
+        verdict.reason
+    );
 }

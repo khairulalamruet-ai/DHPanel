@@ -332,6 +332,8 @@ impl LicenseService {
                 // The authority says the license is no longer good: restricted at once.
                 if beat.license_status != "active" {
                     stored.refused = Some(format!("license_{}", beat.license_status));
+                } else if beat.integrity != "ok" {
+                    stored.refused = Some("integrity_failed".to_owned());
                 }
                 let row = store::get(&self.db).await.map_err(|e| db(&e))?;
                 store::save_stored(
@@ -391,7 +393,7 @@ impl LicenseService {
     pub async fn integrity_scan(&self) -> Result<dhpanel_license_client::ScanResult, ServiceError> {
         let client = self.client()?;
         let dir = self.binaries_dir.clone();
-        tokio::task::spawn_blocking(move || {
+        let result = tokio::task::spawn_blocking(move || {
             let scan = client.integrity_challenge(env!("CARGO_PKG_VERSION"))?;
             let mut files = std::collections::BTreeMap::new();
             for name in &scan.components {
@@ -407,7 +409,47 @@ impl LicenseService {
         })
         .await
         .map_err(|_| ServiceError::Cancelled)?
-        .map_err(Into::into)
+        .map_err(ServiceError::from)?;
+        self.apply_integrity(&result.integrity).await?;
+        Ok(result)
+    }
+
+    /// What the authority says about this installation's files decides whether management is
+    /// restricted: a failed (or still recovering) installation is, a cleared one is not.
+    async fn apply_integrity(&self, state: &str) -> Result<(), ServiceError> {
+        let mut stored = self.stored().await?;
+        let failed = Some("integrity_failed".to_owned());
+        let changed = if state == "ok" {
+            if stored.refused == failed {
+                stored.refused = None;
+                true
+            } else {
+                false
+            }
+        } else if stored.refused.is_none() {
+            stored.refused = failed;
+            true
+        } else {
+            false
+        };
+        if changed {
+            // The license's own summary stays as it is; only what is stored changes.
+            let row = store::get(&self.db).await.map_err(|e| db(&e))?;
+            store::save_stored(
+                &self.db,
+                &Kept {
+                    stored: &serde_json::to_value(&stored).unwrap_or_default(),
+                    license_id: row.license_id,
+                    plan: row.plan.as_deref(),
+                    license_status: row.license_status.as_deref(),
+                    license_expires_at: row.license_expires_at,
+                },
+            )
+            .await
+            .map_err(|e| db(&e))?;
+            self.evaluate_and_save().await?;
+        }
+        Ok(())
     }
 
     /// The loop: a verdict every minute, a heartbeat and a refresh when each is due (a failed
@@ -452,7 +494,13 @@ impl LicenseService {
                                 if scan.result != "passed" {
                                     tracing::warn!(result = %scan.result, mismatched = ?scan.mismatched, missing = ?scan.missing, "the integrity scan found a difference");
                                 }
-                                self.integrity_every
+                                // Until the authority has cleared this installation the scan is
+                                // repeated every hour, so a recovery ends soon after it is approved.
+                                if scan.integrity == "ok" {
+                                    self.integrity_every
+                                } else {
+                                    Duration::from_secs(3600).min(self.integrity_every)
+                                }
                             }
                             Err(e) => {
                                 tracing::warn!(error = %e, "the integrity scan did not get through");

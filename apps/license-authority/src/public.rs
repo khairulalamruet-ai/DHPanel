@@ -624,6 +624,28 @@ async fn held_by(
     .ok_or_else(|| AppError::forbidden("not_activated", "This installation holds no license."))
 }
 
+/// An installation whose scans failed (and has not been cleared) gets no entitlement and may
+/// not let go of its license either: starting over under a new identity must not be a way out.
+async fn check_integrity(
+    tx: &mut Transaction<'_, Postgres>,
+    installation_id: Uuid,
+) -> Result<(), AppError> {
+    let state: String =
+        sqlx::query_scalar("SELECT integrity_state FROM installations WHERE id = $1")
+            .bind(installation_id)
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(db)?;
+    if state == "ok" {
+        Ok(())
+    } else {
+        Err(AppError::forbidden(
+            "integrity_failed",
+            "A program of this installation is not the release's. Ask for a recovery.",
+        ))
+    }
+}
+
 /// The binding check of a request that carries a proof.
 async fn enforce_for(
     state: &LaState,
@@ -655,6 +677,7 @@ async fn refresh(
     let held = held_by(&mut tx, proof.installation_id).await?;
     let now = unix_now();
     usable(&held, now)?;
+    check_integrity(&mut tx, proof.installation_id).await?;
     enforce_for(&state, &held, &proof, &extensions, &headers).await?;
     let granted = issue(&state, &mut tx, &held, proof.installation_id, now).await?;
     sqlx::query("UPDATE installations SET last_seen_at = now() WHERE id = $1")
@@ -682,6 +705,8 @@ pub struct HeartbeatRequest {
 pub struct Beat {
     /// `active`, `suspended`, `revoked` or `expired`.
     pub license_status: String,
+    /// The installation's integrity state: `ok`, `failed` or `recovering`.
+    pub integrity: String,
     /// The authority's clock.
     pub server_time: i64,
 }
@@ -717,6 +742,12 @@ async fn heartbeat(
         .await
         .map_err(db)?;
     tx.commit().await.map_err(db)?;
+    let integrity: String =
+        sqlx::query_scalar("SELECT integrity_state FROM installations WHERE id = $1")
+            .bind(req.proof.installation_id)
+            .fetch_one(&state.db)
+            .await
+            .map_err(db)?;
     let now = unix_now();
     let license_status = match usable(&held, now) {
         Ok(()) => "active".to_owned(),
@@ -725,6 +756,7 @@ async fn heartbeat(
     };
     Ok(Json(Beat {
         license_status,
+        integrity,
         server_time: now,
     }))
 }
@@ -735,6 +767,7 @@ async fn deactivate(
 ) -> Result<StatusCode, AppError> {
     let mut tx = state.db.begin().await.map_err(db)?;
     prove(&state, &mut tx, "deactivate", &proof).await?;
+    check_integrity(&mut tx, proof.installation_id).await?;
     let changed = sqlx::query("UPDATE activations SET deactivated_at = now() WHERE installation_id = $1 AND deactivated_at IS NULL")
         .bind(proof.installation_id)
         .execute(&mut *tx)

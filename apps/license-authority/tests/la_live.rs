@@ -1226,3 +1226,277 @@ async fn a_changed_binary_fails_the_next_scan_and_leaves_an_event(pool: PgPool) 
         StatusCode::FORBIDDEN
     );
 }
+
+/// Integrity events and recovery (T17.17): a failed scan takes the license away until an
+/// administrator has looked; an approved recovery ends with a clean scan; every step is
+/// written to the audit log; a viewer cannot decide.
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "needs PostgreSQL"]
+async fn a_failed_scan_takes_the_license_away_until_a_recovery_is_approved_and_the_scan_is_clean(
+    pool: PgPool,
+) {
+    use dhpanel_license::{ReleaseManifest, SignedManifest, integrity_report_text, sha256_hex};
+    let e = env(&pool).await;
+    let token = admin(&pool, &e, "root@la.example", "admin").await;
+    let viewer = admin(&pool, &e, "viewer@la.example", "viewer").await;
+    let (_, key) = license(&e, &token, 1, &["mail"]).await;
+    let inst = Installation::new(&e.key_dir);
+    assert_eq!(inst.activate(&e, &key).await.0, StatusCode::OK);
+
+    // A published release.
+    let release_key =
+        FileSigningKey::generate_to_file(&e.key_dir.join("release-1.key"), "release-1").unwrap();
+    let files = vec![("dhpanel-control-api".to_owned(), b"control api".to_vec())];
+    let signed = SignedManifest::sign(
+        &ReleaseManifest::build("1.0.0", "abcdef0", 1, &files).unwrap(),
+        &release_key,
+    )
+    .unwrap();
+    call(
+        &e.app,
+        "POST",
+        "/api/v1/admin/release-keys",
+        Some(&token),
+        Some(json!({"kid": "release-1", "public_key": STANDARD.encode(release_key.public_key())})),
+    )
+    .await;
+    assert_eq!(
+        call(
+            &e.app,
+            "POST",
+            "/api/v1/admin/releases",
+            Some(&token),
+            Some(json!({"manifest": signed}))
+        )
+        .await
+        .0,
+        StatusCode::CREATED
+    );
+
+    // One scan with the given file contents; returns the answer.
+    let scan = |content: &'static [u8]| {
+        let (e, inst) = (&e, &inst);
+        async move {
+            let nonce = inst.nonce(e).await;
+            let (_, c) = call_with(
+                &e.app,
+                "POST",
+                "/api/v1/integrity/challenge",
+                None,
+                Some(json!({"installation_id": inst.id, "nonce": nonce, "version": "1.0.0",
+                            "signature": inst.sign("integrity", &nonce, Some("web1\npanel.example")),
+                            "hostname": "web1", "domain": "panel.example"})),
+                &[("x-forwarded-for", "203.0.113.7")],
+            )
+            .await;
+            let scan_id: Uuid = c["scan_id"].as_str().unwrap().parse().unwrap();
+            let found: std::collections::BTreeMap<String, String> =
+                [("dhpanel-control-api".to_owned(), sha256_hex(content))].into();
+            let signature = inst.sign(
+                "integrity-report",
+                c["nonce"].as_str().unwrap(),
+                Some(&integrity_report_text(&scan_id.to_string(), &found)),
+            );
+            call(&e.app, "POST", "/api/v1/integrity/report", None, Some(json!({"installation_id": inst.id, "scan_id": scan_id, "files": found, "signature": signature}))).await
+        }
+    };
+    let audited = |action: &'static str| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_scalar::<_, i64>("SELECT count(*) FROM audit_logs WHERE action = $1")
+                .bind(action)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+        }
+    };
+
+    // All is well; the license refreshes.
+    assert_eq!(scan(b"control api").await.1["integrity"], "ok");
+    assert_eq!(inst.ask(&e, "refresh").await.0, StatusCode::OK);
+
+    // The program is changed: the scan fails, the license is refused, and it cannot be given up
+    // to start over under another identity.
+    let (_, r) = scan(b"control api, patched").await;
+    assert_eq!(
+        (r["result"].as_str(), r["integrity"].as_str()),
+        (Some("failed"), Some("failed")),
+        "{r}"
+    );
+    let (status, got) = inst.ask(&e, "refresh").await;
+    assert_eq!(
+        (status, got["code"].as_str()),
+        (StatusCode::FORBIDDEN, Some("integrity_failed")),
+        "{got}"
+    );
+    assert_eq!(inst.ask(&e, "deactivate").await.0, StatusCode::FORBIDDEN);
+    let (_, beat) = inst.ask(&e, "heartbeat").await;
+    assert_eq!(
+        beat["integrity"], "failed",
+        "a heartbeat still gets through and says so"
+    );
+    assert_eq!(audited("integrity.failed").await, 1);
+    // A clean scan alone does not clear it: somebody has to look.
+    let (_, r) = scan(b"control api").await;
+    assert_eq!(
+        (r["result"].as_str(), r["integrity"].as_str()),
+        (Some("passed"), Some("failed")),
+        "{r}"
+    );
+    assert_eq!(inst.ask(&e, "refresh").await.0, StatusCode::FORBIDDEN);
+
+    // The installation asks for help; a viewer cannot decide, an administrator can.
+    let nonce = inst.nonce(&e).await;
+    let (status, _) = call_with(
+        &e.app,
+        "POST",
+        "/api/v1/licenses/recovery-request",
+        None,
+        Some(json!({"installation_id": inst.id, "nonce": nonce,
+                    "signature": inst.sign("recovery", &nonce, Some("web1\npanel.example")),
+                    "hostname": "web1", "domain": "panel.example", "note": "reinstalled from the release"})),
+        &[("x-forwarded-for", "203.0.113.7")],
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    let (_, requests) = call(
+        &e.app,
+        "GET",
+        "/api/v1/admin/recovery-requests?state=requested",
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(requests.as_array().unwrap().len(), 1, "{requests}");
+    assert_eq!(requests[0]["integrity_state"], "failed");
+    let request_id = requests[0]["id"].as_str().unwrap().to_owned();
+    let approve = format!("/api/v1/admin/recovery-requests/{request_id}/approve");
+    assert_eq!(
+        call(&e.app, "POST", &approve, Some(&viewer), Some(json!({})))
+            .await
+            .0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        call(
+            &e.app,
+            "POST",
+            &approve,
+            Some(&token),
+            Some(json!({"note": "checked with the customer"}))
+        )
+        .await
+        .0,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        call(&e.app, "POST", &approve, Some(&token), Some(json!({})))
+            .await
+            .0,
+        StatusCode::CONFLICT,
+        "decided once"
+    );
+    assert_eq!(audited("recovery.approved").await, 1);
+    // Approved is not yet cleared: the next scan decides. Still patched: failed again.
+    assert_eq!(inst.ask(&e, "refresh").await.0, StatusCode::FORBIDDEN);
+    let (_, r) = scan(b"control api, patched again").await;
+    assert_eq!(r["integrity"], "failed");
+
+    // Recovery again, this time a clean scan after the approval puts everything right.
+    let (_, listed) = call(
+        &e.app,
+        "GET",
+        "/api/v1/admin/recovery-requests",
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(listed[0]["state"], "approved");
+    let nonce = inst.nonce(&e).await;
+    call_with(&e.app, "POST", "/api/v1/licenses/recovery-request", None, Some(json!({"installation_id": inst.id, "nonce": nonce,
+        "signature": inst.sign("recovery", &nonce, Some("web1\npanel.example")), "hostname": "web1", "domain": "panel.example", "note": "again"})), &[("x-forwarded-for", "203.0.113.7")]).await;
+    let (_, requests) = call(
+        &e.app,
+        "GET",
+        "/api/v1/admin/recovery-requests?state=requested",
+        Some(&token),
+        None,
+    )
+    .await;
+    let second = requests[0]["id"].as_str().unwrap().to_owned();
+    assert_eq!(
+        call(
+            &e.app,
+            "POST",
+            &format!("/api/v1/admin/recovery-requests/{second}/approve"),
+            Some(&token),
+            Some(json!({}))
+        )
+        .await
+        .0,
+        StatusCode::NO_CONTENT
+    );
+    let (_, r) = scan(b"control api").await;
+    assert_eq!(
+        (r["result"].as_str(), r["integrity"].as_str()),
+        (Some("passed"), Some("ok")),
+        "{r}"
+    );
+    assert_eq!(
+        inst.ask(&e, "refresh").await.0,
+        StatusCode::OK,
+        "the license is back"
+    );
+    assert_eq!(audited("integrity.recovered").await, 1);
+    let (_, listed) = call(
+        &e.app,
+        "GET",
+        "/api/v1/admin/recovery-requests?state=completed",
+        Some(&token),
+        None,
+    )
+    .await;
+    // Both approved requests end with the clean scan.
+    assert_eq!(listed.as_array().unwrap().len(), 2, "{listed}");
+    let kinds: Vec<String> =
+        sqlx::query_scalar("SELECT kind FROM integrity_events ORDER BY created_at")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert!(
+        kinds.contains(&"recovered".to_owned()) && kinds.contains(&"mismatch".to_owned()),
+        "{kinds:?}"
+    );
+
+    // A false alarm is dismissed at once, and rejected requests stay rejected.
+    let (_, r) = scan(b"control api, oops").await;
+    assert_eq!(r["integrity"], "failed");
+    assert_eq!(inst.ask(&e, "refresh").await.0, StatusCode::FORBIDDEN);
+    let dismiss = format!("/api/v1/admin/installations/{}/integrity/dismiss", inst.id);
+    assert_eq!(
+        call(&e.app, "POST", &dismiss, Some(&viewer), Some(json!({})))
+            .await
+            .0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        call(
+            &e.app,
+            "POST",
+            &dismiss,
+            Some(&token),
+            Some(json!({"note": "false alarm, a backup was restored"}))
+        )
+        .await
+        .0,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        call(&e.app, "POST", &dismiss, Some(&token), Some(json!({})))
+            .await
+            .0,
+        StatusCode::CONFLICT
+    );
+    assert_eq!(inst.ask(&e, "refresh").await.0, StatusCode::OK);
+    assert_eq!(audited("integrity.dismissed").await, 1);
+}

@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 
 use axum::{
     Json, Router,
-    extract::{Query, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     routing::{get, post},
 };
@@ -38,6 +38,19 @@ pub fn router() -> Router<LaState> {
         .route("/api/v1/admin/release-keys", post(add_release_key))
         .route("/api/v1/admin/releases", get(list_releases).post(publish))
         .route("/api/v1/admin/integrity/events", get(list_events))
+        .route("/api/v1/admin/recovery-requests", get(list_recoveries))
+        .route(
+            "/api/v1/admin/recovery-requests/{id}/approve",
+            post(approve_recovery),
+        )
+        .route(
+            "/api/v1/admin/recovery-requests/{id}/reject",
+            post(reject_recovery),
+        )
+        .route(
+            "/api/v1/admin/installations/{id}/integrity/dismiss",
+            post(dismiss_integrity),
+        )
         .route("/api/v1/releases/latest", get(latest))
         .route("/api/v1/integrity/challenge", post(challenge))
         .route("/api/v1/integrity/report", post(report))
@@ -400,6 +413,8 @@ pub struct ScanResult {
     pub mismatched: Vec<String>,
     /// The files that were not reported.
     pub missing: Vec<String>,
+    /// What the installation's state is now: `ok`, `failed` or `recovering`.
+    pub integrity: String,
 }
 
 async fn report(
@@ -505,11 +520,62 @@ async fn report(
             .await
             .map_err(db)?;
     }
+    // What the result does to the installation. A changed or missing program makes it
+    // `failed` (its license is refused until an administrator has looked); a clean scan only
+    // ends a recovery an administrator approved. An unknown release changes nothing.
+    let before: String =
+        sqlx::query_scalar("SELECT integrity_state FROM installations WHERE id = $1 FOR UPDATE")
+            .bind(req.installation_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(db)?;
+    let after = match (result, before.as_str()) {
+        ("failed" | "partial", _) => "failed",
+        ("passed", "recovering") => "ok",
+        (_, current) => current,
+    };
+    if after != before {
+        sqlx::query("UPDATE installations SET integrity_state = $2, integrity_changed_at = now() WHERE id = $1")
+            .bind(req.installation_id)
+            .bind(after)
+            .execute(&mut *tx)
+            .await
+            .map_err(db)?;
+        let (kind, action) = if after == "ok" {
+            ("recovered", "integrity.recovered")
+        } else {
+            ("note", "integrity.failed")
+        };
+        if after == "ok" {
+            sqlx::query("INSERT INTO integrity_events (installation_id, scan_id, kind, detail) VALUES ($1, $2, $3, $4)")
+                .bind(req.installation_id)
+                .bind(req.scan_id)
+                .bind(kind)
+                .bind(serde_json::json!({"after": "clean scan"}))
+                .execute(&mut *tx)
+                .await
+                .map_err(db)?;
+            sqlx::query("UPDATE recovery_requests SET state = 'completed', updated_at = now() WHERE installation_id = $1 AND state = 'approved'")
+                .bind(req.installation_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(db)?;
+        }
+        audit(
+            &mut *tx,
+            "installation",
+            action,
+            Some(&req.installation_id.to_string()),
+            detail.clone(),
+        )
+        .await?;
+    }
     tx.commit().await.map_err(db)?;
     Ok(Json(ScanResult {
         result: result.to_owned(),
         mismatched,
         missing,
+        integrity: after.to_owned(),
     }))
 }
 
@@ -550,4 +616,196 @@ async fn list_events(
     .await
     .map(Json)
     .map_err(db)
+}
+
+/// A request for help after a failed check or a lost machine.
+#[derive(Serialize, FromRow)]
+pub struct RecoveryInfo {
+    /// Id.
+    pub id: Uuid,
+    /// The installation.
+    pub installation_id: Uuid,
+    /// `requested`, `approved`, `rejected` or `completed`.
+    pub state: String,
+    /// What the installation wrote.
+    pub note: Option<String>,
+    /// The installation's integrity state now.
+    pub integrity_state: String,
+    /// Asked (Unix seconds).
+    pub created_at: i64,
+}
+
+/// Which requests.
+#[derive(Deserialize)]
+pub struct RecoveryQuery {
+    /// Only this state.
+    pub state: Option<String>,
+}
+
+async fn list_recoveries(
+    State(state): State<LaState>,
+    _a: Admin,
+    Query(q): Query<RecoveryQuery>,
+) -> Result<Json<Vec<RecoveryInfo>>, AppError> {
+    sqlx::query_as(
+        "SELECT r.id, r.installation_id, r.state, r.note, i.integrity_state,
+                extract(epoch FROM r.created_at)::bigint AS created_at
+         FROM recovery_requests r JOIN installations i ON i.id = r.installation_id
+         WHERE ($1::text IS NULL OR r.state = $1)
+         ORDER BY r.created_at DESC LIMIT 500",
+    )
+    .bind(q.state)
+    .fetch_all(&state.db)
+    .await
+    .map(Json)
+    .map_err(db)
+}
+
+/// What an administrator says about a decision.
+#[derive(Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct Decision {
+    /// Why (kept in the audit log and in the event).
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+fn check_note(note: Option<&str>) -> Result<(), AppError> {
+    if note.is_some_and(|n| n.chars().count() > 500) {
+        return Err(bad("note", "At most 500 characters."));
+    }
+    Ok(())
+}
+
+async fn approve_recovery(
+    State(state): State<LaState>,
+    admin: Admin,
+    Path(id): Path<Uuid>,
+    Json(req): Json<Decision>,
+) -> Result<StatusCode, AppError> {
+    admin.may_change()?;
+    check_note(req.note.as_deref())?;
+    let mut tx = state.db.begin().await.map_err(db)?;
+    let installation: Option<Uuid> = sqlx::query_scalar(
+        "UPDATE recovery_requests SET state = 'approved', updated_at = now()
+         WHERE id = $1 AND state = 'requested' RETURNING installation_id",
+    )
+    .bind(id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(db)?;
+    let installation = installation.ok_or_else(|| {
+        AppError::conflict(
+            "wrong_state",
+            "Only a request that is waiting can be approved.",
+        )
+    })?;
+    // The installation may recover: its next clean scan puts it right. (One that is not
+    // failed has nothing to recover from; the request is only answered.)
+    sqlx::query("UPDATE installations SET integrity_state = 'recovering', integrity_changed_at = now() WHERE id = $1 AND integrity_state = 'failed'")
+        .bind(installation)
+        .execute(&mut *tx)
+        .await
+        .map_err(db)?;
+    sqlx::query(
+        "INSERT INTO integrity_events (installation_id, kind, detail) VALUES ($1, 'note', $2)",
+    )
+    .bind(installation)
+    .bind(serde_json::json!({"recovery": "approved", "by": admin.email, "note": req.note}))
+    .execute(&mut *tx)
+    .await
+    .map_err(db)?;
+    audit(
+        &mut *tx,
+        &admin.email,
+        "recovery.approved",
+        Some(&id.to_string()),
+        serde_json::json!({"installation_id": installation, "note": req.note}),
+    )
+    .await?;
+    tx.commit().await.map_err(db)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn reject_recovery(
+    State(state): State<LaState>,
+    admin: Admin,
+    Path(id): Path<Uuid>,
+    Json(req): Json<Decision>,
+) -> Result<StatusCode, AppError> {
+    admin.may_change()?;
+    check_note(req.note.as_deref())?;
+    let mut tx = state.db.begin().await.map_err(db)?;
+    let installation: Option<Uuid> = sqlx::query_scalar(
+        "UPDATE recovery_requests SET state = 'rejected', updated_at = now()
+         WHERE id = $1 AND state = 'requested' RETURNING installation_id",
+    )
+    .bind(id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(db)?;
+    let installation = installation.ok_or_else(|| {
+        AppError::conflict(
+            "wrong_state",
+            "Only a request that is waiting can be rejected.",
+        )
+    })?;
+    audit(
+        &mut *tx,
+        &admin.email,
+        "recovery.rejected",
+        Some(&id.to_string()),
+        serde_json::json!({"installation_id": installation, "note": req.note}),
+    )
+    .await?;
+    tx.commit().await.map_err(db)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// An administrator looked at a failed scan and found nothing wrong (a false alarm): the
+/// installation is `ok` again at once.
+async fn dismiss_integrity(
+    State(state): State<LaState>,
+    admin: Admin,
+    Path(installation_id): Path<Uuid>,
+    Json(req): Json<Decision>,
+) -> Result<StatusCode, AppError> {
+    admin.may_change()?;
+    check_note(req.note.as_deref())?;
+    let mut tx = state.db.begin().await.map_err(db)?;
+    let changed = sqlx::query("UPDATE installations SET integrity_state = 'ok', integrity_changed_at = now() WHERE id = $1 AND integrity_state <> 'ok'")
+        .bind(installation_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(db)?
+        .rows_affected();
+    if changed == 0 {
+        return Err(AppError::conflict(
+            "wrong_state",
+            "This installation has nothing to dismiss.",
+        ));
+    }
+    sqlx::query("UPDATE recovery_requests SET state = 'completed', updated_at = now() WHERE installation_id = $1 AND state IN ('requested', 'approved')")
+        .bind(installation_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(db)?;
+    sqlx::query(
+        "INSERT INTO integrity_events (installation_id, kind, detail) VALUES ($1, 'note', $2)",
+    )
+    .bind(installation_id)
+    .bind(serde_json::json!({"dismissed": true, "by": admin.email, "note": req.note}))
+    .execute(&mut *tx)
+    .await
+    .map_err(db)?;
+    audit(
+        &mut *tx,
+        &admin.email,
+        "integrity.dismissed",
+        Some(&installation_id.to_string()),
+        serde_json::json!({"note": req.note}),
+    )
+    .await?;
+    tx.commit().await.map_err(db)?;
+    Ok(StatusCode::NO_CONTENT)
 }
