@@ -196,11 +196,51 @@ pub enum WpCommand {
         /// On or off.
         on: bool,
     },
+    /// Check the core's files against WordPress's published checksums and look at the
+    /// settings that matter for safety (debug mode, the file editor, XML-RPC, permissions).
+    Scan,
+    /// Apply the hardening the flags ask for.
+    Harden {
+        /// Turn `WP_DEBUG` (and its display) off.
+        debug_off: bool,
+        /// Forbid editing plugin and theme files from the admin area.
+        file_edit_off: bool,
+        /// Switch XML-RPC off (a must-use plugin of ours).
+        xmlrpc_off: bool,
+        /// Take write permission from everybody but the owner and group, and make
+        /// `wp-config.php` private to its owner and group.
+        fix_permissions: bool,
+    },
     /// Set a user's password (given with the operation, not in it).
     ResetAdminPassword {
         /// The user's login.
         user: String,
     },
+}
+
+/// What a scan of a WordPress site found.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(deny_unknown_fields)]
+pub struct WpScan {
+    /// Every core file is as WordPress published it (and none is missing or extra).
+    pub checksums_ok: bool,
+    /// Core files whose content is not the published one (at most 100).
+    pub modified: Vec<String>,
+    /// Files in the core's folders that WordPress does not ship (at most 100).
+    pub extra: Vec<String>,
+    /// Core files that are gone (at most 100).
+    pub missing: Vec<String>,
+    /// `WP_DEBUG` is on.
+    pub debug: bool,
+    /// Plugin and theme files can be edited from the admin area.
+    pub file_edit_allowed: bool,
+    /// XML-RPC was switched off by the panel.
+    pub xmlrpc_disabled: bool,
+    /// The permission bits of `wp-config.php` (`640`).
+    pub config_mode: String,
+    /// Files and folders anybody may write to.
+    pub world_writable: u32,
 }
 
 /// A plugin or theme of a site.
@@ -2098,6 +2138,8 @@ pub enum Output {
     },
     /// Answer to [`WpCommand::Overview`].
     WordPressOverview(WpOverview),
+    /// Answer to [`WpCommand::Scan`].
+    WordPressScan(WpScan),
     /// Answer to the other [`WpCommand`]s: what WP-CLI said (clipped, secrets scrubbed).
     WpCliDone {
         /// The last of what it printed.

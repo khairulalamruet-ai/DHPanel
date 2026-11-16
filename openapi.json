@@ -10774,6 +10774,93 @@
         ]
       }
     },
+    "/api/v1/client/apps/{id}/wordpress/harden": {
+      "post": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "Put the safety settings right: debug off, the file editor off, XML-RPC off, permissions.",
+        "operationId": "clientWordPressHarden",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Application id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WpHarden"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Done",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WpAnswer"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Still running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Pending"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not the account's WordPress",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Nothing was asked for",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/client/apps/{id}/wordpress/maintenance": {
       "post": {
         "tags": [
@@ -10892,6 +10979,64 @@
         "responses": {
           "200": {
             "description": "Done",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WpAnswer"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Still running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Pending"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not the account's WordPress",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/apps/{id}/wordpress/scan": {
+      "get": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "Check the core's files against WordPress's published checksums and look at the settings\nthat matter for safety. A changed core file is named.",
+        "operationId": "clientWordPressScan",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Application id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The scan",
             "content": {
               "application/json": {
                 "schema": {
@@ -26431,6 +26576,17 @@
               }
             ]
           },
+          "scan": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/WpScan",
+                "description": "What the scan found."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "state": {
             "type": "string",
             "description": "`running`, `done` or `failed`."
@@ -26452,6 +26608,29 @@
           "version": {
             "type": "string",
             "description": "Its version (empty when it does not say)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "WpHarden": {
+        "type": "object",
+        "description": "What hardening to apply.",
+        "properties": {
+          "debug_off": {
+            "type": "boolean",
+            "description": "Turn debug mode off."
+          },
+          "file_edit_off": {
+            "type": "boolean",
+            "description": "Forbid editing plugin and theme files from the admin area."
+          },
+          "fix_permissions": {
+            "type": "boolean",
+            "description": "Take away write permission from everybody but the owner and group."
+          },
+          "xmlrpc_off": {
+            "type": "boolean",
+            "description": "Switch XML-RPC off."
           }
         },
         "additionalProperties": false
@@ -26596,6 +26775,71 @@
               "$ref": "#/components/schemas/WpItem"
             },
             "description": "The themes."
+          }
+        },
+        "additionalProperties": false
+      },
+      "WpScan": {
+        "type": "object",
+        "description": "What a scan of a WordPress site found.",
+        "required": [
+          "checksums_ok",
+          "modified",
+          "extra",
+          "missing",
+          "debug",
+          "file_edit_allowed",
+          "xmlrpc_disabled",
+          "config_mode",
+          "world_writable"
+        ],
+        "properties": {
+          "checksums_ok": {
+            "type": "boolean",
+            "description": "Every core file is as WordPress published it (and none is missing or extra)."
+          },
+          "config_mode": {
+            "type": "string",
+            "description": "The permission bits of `wp-config.php` (`640`)."
+          },
+          "debug": {
+            "type": "boolean",
+            "description": "`WP_DEBUG` is on."
+          },
+          "extra": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Files in the core's folders that WordPress does not ship (at most 100)."
+          },
+          "file_edit_allowed": {
+            "type": "boolean",
+            "description": "Plugin and theme files can be edited from the admin area."
+          },
+          "missing": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Core files that are gone (at most 100)."
+          },
+          "modified": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Core files whose content is not the published one (at most 100)."
+          },
+          "world_writable": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Files and folders anybody may write to.",
+            "minimum": 0
+          },
+          "xmlrpc_disabled": {
+            "type": "boolean",
+            "description": "XML-RPC was switched off by the panel."
           }
         },
         "additionalProperties": false

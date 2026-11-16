@@ -320,6 +320,102 @@ async fn wordpress_is_installed_in_a_tenants_files_within_two_minutes() {
             .code,
         ErrorCode::InvalidArguments
     );
+    // The scan: a clean site, then a changed core file, a stray file, debug mode on and a
+    // world-writable folder are all seen; the hardening puts the settings right.
+    let Output::WordPressScan(clean) =
+        manage_as(context.clone(), manage(WpCommand::Scan, None), (0, 0))
+            .await
+            .unwrap()
+    else {
+        panic!("not a scan")
+    };
+    eprintln!("clean scan: {clean:?}");
+    assert!(
+        clean.checksums_ok && clean.modified.is_empty() && clean.extra.is_empty(),
+        "{clean:?}"
+    );
+    assert!(!clean.debug && clean.file_edit_allowed && !clean.xmlrpc_disabled);
+    let version_php = www.join("blog").join("wp-includes").join("version.php");
+    let mut text = std::fs::read_to_string(&version_php).unwrap();
+    text.push_str("\n// injected\n");
+    std::fs::write(&version_php, text).unwrap();
+    std::fs::write(
+        www.join("blog").join("wp-admin").join("shell.php"),
+        "<?php // x",
+    )
+    .unwrap();
+    let config_path = www.join("blog").join("wp-config.php");
+    let config = std::fs::read_to_string(&config_path).unwrap();
+    std::fs::write(
+        &config_path,
+        config.replace("define( 'WP_DEBUG', false )", "define( 'WP_DEBUG', true )"),
+    )
+    .unwrap();
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(
+            www.join("blog").join("wp-content").join("uploads"),
+            std::fs::Permissions::from_mode(0o777),
+        )
+        .or_else(|_| {
+            std::fs::create_dir_all(www.join("blog").join("wp-content").join("uploads"))?;
+            std::fs::set_permissions(
+                www.join("blog").join("wp-content").join("uploads"),
+                std::fs::Permissions::from_mode(0o777),
+            )
+        })
+        .unwrap();
+    }
+    let Output::WordPressScan(dirty) =
+        manage_as(context.clone(), manage(WpCommand::Scan, None), (0, 0))
+            .await
+            .unwrap()
+    else {
+        panic!("not a scan")
+    };
+    eprintln!("dirty scan: {dirty:?}");
+    assert!(!dirty.checksums_ok);
+    assert!(
+        dirty.modified.iter().any(|f| f.ends_with("version.php")),
+        "{dirty:?}"
+    );
+    assert!(
+        dirty.extra.iter().any(|f| f.ends_with("shell.php")),
+        "{dirty:?}"
+    );
+    assert!(dirty.debug && dirty.world_writable >= 1, "{dirty:?}");
+    let hardened = manage_as(
+        context.clone(),
+        manage(
+            WpCommand::Harden {
+                debug_off: true,
+                file_edit_off: true,
+                xmlrpc_off: true,
+                fix_permissions: true,
+            },
+            None,
+        ),
+        (0, 0),
+    )
+    .await
+    .unwrap();
+    assert!(matches!(hardened, Output::WpCliDone { .. }), "{hardened:?}");
+    let Output::WordPressScan(after) =
+        manage_as(context.clone(), manage(WpCommand::Scan, None), (0, 0))
+            .await
+            .unwrap()
+    else {
+        panic!("not a scan")
+    };
+    eprintln!("after hardening: {after:?}");
+    assert!(
+        !after.debug && !after.file_edit_allowed && after.xmlrpc_disabled,
+        "{after:?}"
+    );
+    assert_eq!(after.world_writable, 0, "{after:?}");
+    assert_eq!(after.config_mode, "640");
+    // (The changed and stray files are still reported: hardening does not hide them.)
+    assert!(!after.checksums_ok);
     // The same folder again is refused; a bad folder and a short password are refused first.
     let again = install_as(context.clone(), make("blog", vec![]), (0, 0))
         .await

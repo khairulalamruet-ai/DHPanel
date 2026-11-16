@@ -8,6 +8,8 @@
 //! | GET | `/api/v1/client/apps/{id}/wordpress` | the owner (versions, updates) |
 //! | POST | `/api/v1/client/apps/{id}/wordpress/{plugins,themes,core}/update` | the owner |
 //! | POST | `/api/v1/client/apps/{id}/wordpress/{maintenance,admin-password}` | the owner |
+//! | GET | `/api/v1/client/apps/{id}/wordpress/scan` | the owner (core checksums, safety settings) |
+//! | POST | `/api/v1/client/apps/{id}/wordpress/harden` | the owner |
 //! | GET | `/api/v1/client/apps/{id}/operations/{op}` | the owner (the answer of a slow action) |
 //! | GET | `/api/v1/admin/tenants/{id}/apps` | `admin.apps.read` |
 //!
@@ -101,6 +103,11 @@ pub fn client_router() -> Router<AppsState> {
         .route(
             "/api/v1/client/apps/{id}/wordpress/admin-password",
             axum::routing::post(wp_admin_password),
+        )
+        .route("/api/v1/client/apps/{id}/wordpress/scan", get(wp_scan))
+        .route(
+            "/api/v1/client/apps/{id}/wordpress/harden",
+            axum::routing::post(wp_harden),
         )
         .route(
             "/api/v1/client/apps/{id}/operations/{op}",
@@ -639,6 +646,8 @@ pub struct WpAnswer {
     pub state: String,
     /// The versions and updates (for the overview).
     pub overview: Option<dhpanel_node_protocol::WpOverview>,
+    /// What the scan found.
+    pub scan: Option<dhpanel_node_protocol::WpScan>,
     /// What WP-CLI said (for the other actions).
     pub output: Option<String>,
     /// Why it failed.
@@ -705,15 +714,24 @@ fn answer_of(row: &dhpanel_database::operations::Operation) -> Option<WpAnswer> 
                 .clone()
                 .and_then(|o| serde_json::from_value(o).ok())?;
             Some(match output {
+                dhpanel_node_protocol::Output::WordPressScan(scan) => WpAnswer {
+                    state: "done".into(),
+                    overview: None,
+                    scan: Some(scan),
+                    output: None,
+                    error: None,
+                },
                 dhpanel_node_protocol::Output::WordPressOverview(o) => WpAnswer {
                     state: "done".into(),
                     overview: Some(o),
+                    scan: None,
                     output: None,
                     error: None,
                 },
                 dhpanel_node_protocol::Output::WpCliDone { output } => WpAnswer {
                     state: "done".into(),
                     overview: None,
+                    scan: None,
                     output: Some(output),
                     error: None,
                 },
@@ -723,6 +741,7 @@ fn answer_of(row: &dhpanel_database::operations::Operation) -> Option<WpAnswer> 
         Status::Failed => Some(WpAnswer {
             state: "failed".into(),
             overview: None,
+            scan: None,
             output: None,
             error: Some(
                 row.error
@@ -939,6 +958,76 @@ pub async fn wp_update_core(
     .await
 }
 
+/// What hardening to apply.
+#[derive(Debug, Default, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WpHarden {
+    /// Turn debug mode off.
+    #[serde(default)]
+    pub debug_off: bool,
+    /// Forbid editing plugin and theme files from the admin area.
+    #[serde(default)]
+    pub file_edit_off: bool,
+    /// Switch XML-RPC off.
+    #[serde(default)]
+    pub xmlrpc_off: bool,
+    /// Take away write permission from everybody but the owner and group.
+    #[serde(default)]
+    pub fix_permissions: bool,
+}
+
+/// Check the core's files against WordPress's published checksums and look at the settings
+/// that matter for safety. A changed core file is named.
+#[utoipa::path(get, path = "/api/v1/client/apps/{id}/wordpress/scan", tag = "apps", operation_id = "clientWordPressScan",
+    security(("session" = [])), params(("id" = Uuid, Path, description = "Application id")),
+    responses((status = 200, description = "The scan", body = WpAnswer), (status = 202, description = "Still running", body = Pending),
+              (status = 404, description = "Not the account's WordPress", body = ProblemDetails, content_type = "application/problem+json")))]
+pub async fn wp_scan(
+    State(state): State<AppsState>,
+    who: Principal,
+    Path(id): Path<Uuid>,
+) -> Result<axum::response::Response, AppError> {
+    run_wp(
+        &state,
+        &who,
+        id,
+        dhpanel_node_protocol::WpCommand::Scan,
+        None,
+    )
+    .await
+}
+
+/// Put the safety settings right: debug off, the file editor off, XML-RPC off, permissions.
+#[utoipa::path(post, path = "/api/v1/client/apps/{id}/wordpress/harden", tag = "apps", operation_id = "clientWordPressHarden",
+    security(("session" = [])), params(("id" = Uuid, Path, description = "Application id"), ("X-CSRF-Token" = String, Header, description = "The session's csrf_token")),
+    request_body = WpHarden,
+    responses((status = 200, description = "Done", body = WpAnswer), (status = 202, description = "Still running", body = Pending),
+              (status = 404, description = "Not the account's WordPress", body = ProblemDetails, content_type = "application/problem+json"),
+              (status = 422, description = "Nothing was asked for", body = ProblemDetails, content_type = "application/problem+json")))]
+pub async fn wp_harden(
+    State(state): State<AppsState>,
+    who: Principal,
+    Path(id): Path<Uuid>,
+    Json(req): Json<WpHarden>,
+) -> Result<axum::response::Response, AppError> {
+    if !(req.debug_off || req.file_edit_off || req.xmlrpc_off || req.fix_permissions) {
+        return Err(bad("debug_off", "Ask for at least one thing."));
+    }
+    run_wp(
+        &state,
+        &who,
+        id,
+        dhpanel_node_protocol::WpCommand::Harden {
+            debug_off: req.debug_off,
+            file_edit_off: req.file_edit_off,
+            xmlrpc_off: req.xmlrpc_off,
+            fix_permissions: req.fix_permissions,
+        },
+        None,
+    )
+    .await
+}
+
 /// Switch maintenance mode on or off.
 #[utoipa::path(post, path = "/api/v1/client/apps/{id}/wordpress/maintenance", tag = "apps", operation_id = "clientWordPressMaintenance",
     security(("session" = [])), params(("id" = Uuid, Path, description = "Application id"), ("X-CSRF-Token" = String, Header, description = "The session's csrf_token")),
@@ -1029,6 +1118,7 @@ pub async fn wp_operation(
     Ok(Json(answer.unwrap_or(WpAnswer {
         state: "running".into(),
         overview: None,
+        scan: None,
         output: None,
         error: None,
     })))
@@ -1039,11 +1129,13 @@ pub async fn wp_operation(
 #[openapi(
     paths(
         client_list, client_get, admin_list, install_wordpress, wp_overview, wp_update_plugins,
-        wp_update_themes, wp_update_core, wp_maintenance, wp_admin_password, wp_operation
+        wp_update_themes, wp_update_core, wp_maintenance, wp_admin_password, wp_operation, wp_scan,
+        wp_harden
     ),
     components(schemas(
         AppView, AppList, InstallWordPress, WpAnswer, WpSlug, WpVersion, WpMaintenance,
-        WpNewPassword, Pending, dhpanel_node_protocol::WpOverview, dhpanel_node_protocol::WpItem
+        WpNewPassword, Pending, WpHarden, dhpanel_node_protocol::WpOverview,
+        dhpanel_node_protocol::WpItem, dhpanel_node_protocol::WpScan
     )),
     tags((name = "apps", description = "Applications on domains and paths"))
 )]

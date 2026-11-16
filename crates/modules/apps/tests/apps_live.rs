@@ -584,6 +584,42 @@ async fn wordpress_actions_are_sent_to_the_node_and_answered(pool: PgPool) {
         )
         .await;
     assert_eq!(status, StatusCode::ACCEPTED);
+    // The scan and the hardening are asked for the same way; an empty hardening is refused.
+    let (status, _) = e
+        .call(&a, "GET", &format!("{base}/wordpress/scan"), None)
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    let (status, _) = e
+        .call(
+            &a,
+            "POST",
+            &format!("{base}/wordpress/harden"),
+            Some(json!({})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (status, _) = e
+        .call(
+            &a,
+            "POST",
+            &format!("{base}/wordpress/harden"),
+            Some(json!({"debug_off": true, "xmlrpc_off": true})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    let hardening: serde_json::Value = sqlx::query_scalar(
+        "SELECT payload -> 'command' FROM operations WHERE payload #>> '{command,type}' = 'harden'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        (
+            hardening["debug_off"].as_bool(),
+            hardening["fix_permissions"].as_bool()
+        ),
+        (Some(true), Some(false))
+    );
     // A password: sealed, never in the ledger.
     let (status, _) = e
         .call(

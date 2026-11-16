@@ -14,7 +14,7 @@ use std::{path::Path, sync::Arc, time::Duration};
 use dhpanel_docker_manager::{Network, Tmpfs, VolumeMount};
 use dhpanel_domain::TenantUsername;
 use dhpanel_node_protocol::{
-    AgentError, ErrorCode, Operation, Output, WpCommand, WpItem, WpOverview,
+    AgentError, ErrorCode, Operation, Output, WpCommand, WpItem, WpOverview, WpScan,
 };
 use dhpanel_tenant_stack::{Allowlist, Role, files_volume_name, network_name};
 
@@ -372,9 +372,45 @@ $W theme list --fields=name,status,version,update,update_version --format=json
 echo
 "#;
 
+const SCAN: &str = r#"
+echo "DH_SUM_START"
+$W core verify-checksums 2>&1 || true
+echo "DH_SUM_END"
+echo "DH_DEBUG=$($W config get WP_DEBUG 2>/dev/null | head -1 || true)"
+echo "DH_FILEEDIT=$($W config get DISALLOW_FILE_EDIT 2>/dev/null | head -1 || true)"
+if [ -f "$WP_PATH/wp-content/mu-plugins/dhpanel-hardening.php" ]; then echo "DH_XMLRPC=off"; else echo "DH_XMLRPC=on"; fi
+echo "DH_MODE=$(stat -c %a "$WP_PATH/wp-config.php" 2>/dev/null || echo '')"
+echo "DH_WRITABLE=$(find "$WP_PATH" -not -type l -perm -o+w 2>/dev/null | wc -l)"
+"#;
+
+const HARDEN: &str = r#"
+if [ "$H_DEBUG" = 1 ]; then
+  $W config set WP_DEBUG false --raw 2>&1
+  $W config set WP_DEBUG_DISPLAY false --raw 2>&1
+  echo "debug off"
+fi
+if [ "$H_EDIT" = 1 ]; then
+  $W config set DISALLOW_FILE_EDIT true --raw 2>&1
+  echo "file editor off"
+fi
+if [ "$H_XMLRPC" = 1 ]; then
+  mkdir -p "$WP_PATH/wp-content/mu-plugins"
+  printf '%s
+' '<?php' '/* Switched on and off by the hosting panel. */' "add_filter( 'xmlrpc_enabled', '__return_false' );" > "$WP_PATH/wp-content/mu-plugins/dhpanel-hardening.php"
+  echo "xmlrpc off"
+fi
+if [ "$H_PERMS" = 1 ]; then
+  find "$WP_PATH" -not -type l -perm -o+w -exec chmod o-w {} + 2>&1 || true
+  chmod 640 "$WP_PATH/wp-config.php" 2>&1 || true
+  echo "permissions fixed"
+fi
+"#;
+
 fn manage_script(command: &WpCommand) -> String {
     let body = match command {
         WpCommand::Overview => OVERVIEW,
+        WpCommand::Scan => SCAN,
+        WpCommand::Harden { .. } => HARDEN,
         WpCommand::UpdatePlugins { slug: Some(_) } => r#"$W plugin update "$WP_SLUG" 2>&1"#,
         WpCommand::UpdatePlugins { slug: None } => "$W plugin update --all 2>&1",
         WpCommand::UpdateThemes { slug: Some(_) } => r#"$W theme update "$WP_SLUG" 2>&1"#,
@@ -390,6 +426,76 @@ fn manage_script(command: &WpCommand) -> String {
         }
     };
     format!("{MANAGE_HEAD}{body}")
+}
+
+/// Reads the scan script's output.
+///
+/// # Errors
+/// The text is not what the script prints.
+pub fn parse_scan(output: &str) -> Result<WpScan, String> {
+    let (mut modified, mut extra, mut missing) = (Vec::new(), Vec::new(), Vec::new());
+    let mut in_sum = false;
+    let mut saw_end = false;
+    let (mut debug, mut file_edit, mut xmlrpc_off) = (String::new(), String::new(), false);
+    let (mut mode, mut writable) = (String::new(), 0u32);
+    let mut checksums_ok = true;
+    let clean = |p: &str| -> String { p.chars().filter(|c| !c.is_control()).take(300).collect() };
+    for line in output.lines() {
+        if line == "DH_SUM_START" {
+            in_sum = true;
+        } else if line == "DH_SUM_END" {
+            in_sum = false;
+            saw_end = true;
+        } else if in_sum {
+            if let Some(p) = line.strip_prefix("Warning: File doesn't verify against checksum: ") {
+                checksums_ok = false;
+                if modified.len() < 100 {
+                    modified.push(clean(p));
+                }
+            } else if let Some(p) = line.strip_prefix("Warning: File should not exist: ") {
+                checksums_ok = false;
+                if extra.len() < 100 {
+                    extra.push(clean(p));
+                }
+            } else if let Some(p) = line.strip_prefix("Warning: File is missing: ") {
+                checksums_ok = false;
+                if missing.len() < 100 {
+                    missing.push(clean(p));
+                }
+            } else if line.starts_with("Error:") {
+                checksums_ok = false;
+            }
+        } else if let Some(v) = line.strip_prefix("DH_DEBUG=") {
+            debug = v.trim().to_owned();
+        } else if let Some(v) = line.strip_prefix("DH_FILEEDIT=") {
+            file_edit = v.trim().to_owned();
+        } else if let Some(v) = line.strip_prefix("DH_XMLRPC=") {
+            xmlrpc_off = v.trim() == "off";
+        } else if let Some(v) = line.strip_prefix("DH_MODE=") {
+            mode = v
+                .trim()
+                .chars()
+                .filter(char::is_ascii_digit)
+                .take(4)
+                .collect();
+        } else if let Some(v) = line.strip_prefix("DH_WRITABLE=") {
+            writable = v.trim().parse().unwrap_or(0);
+        }
+    }
+    if !saw_end {
+        return Err("the checksum check did not finish".into());
+    }
+    Ok(WpScan {
+        checksums_ok,
+        modified,
+        extra,
+        missing,
+        debug: debug == "1" || debug.eq_ignore_ascii_case("true"),
+        file_edit_allowed: !(file_edit == "1" || file_edit.eq_ignore_ascii_case("true")),
+        xmlrpc_disabled: xmlrpc_off,
+        config_mode: mode,
+        world_writable: writable,
+    })
 }
 
 /// A line that is a JSON list of objects (PHP's own `[date] PHP Notice` lines are not).
@@ -525,6 +631,21 @@ pub async fn manage_as(
             }
             env.push(("WP_VERSION".into(), v.clone()));
         }
+        WpCommand::Harden {
+            debug_off,
+            file_edit_off,
+            xmlrpc_off,
+            fix_permissions,
+        } => {
+            for (name, on) in [
+                ("H_DEBUG", debug_off),
+                ("H_EDIT", file_edit_off),
+                ("H_XMLRPC", xmlrpc_off),
+                ("H_PERMS", fix_permissions),
+            ] {
+                env.push((name.into(), if *on { "1" } else { "0" }.into()));
+            }
+        }
         WpCommand::ResetAdminPassword { user } => {
             let Some(password) = password else {
                 return Err(invalid("the password is missing"));
@@ -622,6 +743,11 @@ pub async fn manage_as(
             format!("WP-CLI ended with {}: {tail}", done.exit_code),
         ));
     }
+    if matches!(command, WpCommand::Scan) {
+        return parse_scan(&done.output)
+            .map(Output::WordPressScan)
+            .map_err(|e| failed(&format!("the scan is unreadable: {e}")));
+    }
     if matches!(command, WpCommand::Overview) {
         return parse_overview(&done.output)
             .map(Output::WordPressOverview)
@@ -657,6 +783,26 @@ mod tests {
         assert!(parse_overview("nothing").is_err());
         let on = parse_overview("DH_CORE=6.8\nDH_UPDATE=\nDH_MAINT=Maintenance mode is active.\nDH_PLUGINS\n[]\nDH_THEMES\n[]\n").unwrap();
         assert!(on.maintenance && on.core_update.is_none());
+    }
+
+    #[test]
+    fn the_scan_is_read() {
+        let text = "DH_SUM_START\nWarning: File doesn't verify against checksum: wp-includes/version.php\nWarning: File should not exist: shell.php\nError: WordPress installation doesn't verify against checksums.\nDH_SUM_END\nDH_DEBUG=true\nDH_FILEEDIT=\nDH_XMLRPC=on\nDH_MODE=644\nDH_WRITABLE=3\n";
+        let s = parse_scan(text).unwrap();
+        assert!(!s.checksums_ok && s.debug && s.file_edit_allowed && !s.xmlrpc_disabled);
+        assert_eq!(
+            (s.modified.as_slice(), s.extra.as_slice()),
+            (
+                ["wp-includes/version.php".to_owned()].as_slice(),
+                ["shell.php".to_owned()].as_slice()
+            )
+        );
+        assert_eq!((s.config_mode.as_str(), s.world_writable), ("644", 3));
+        let clean = parse_scan("DH_SUM_START\nSuccess: WordPress installation verifies against checksums.\nDH_SUM_END\nDH_DEBUG=\nDH_FILEEDIT=1\nDH_XMLRPC=off\nDH_MODE=640\nDH_WRITABLE=0\n").unwrap();
+        assert!(
+            clean.checksums_ok && !clean.debug && !clean.file_edit_allowed && clean.xmlrpc_disabled
+        );
+        assert!(parse_scan("nothing").is_err());
     }
 
     #[test]
