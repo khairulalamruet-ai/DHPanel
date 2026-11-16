@@ -192,6 +192,6 @@ jobs:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
-        run: deploy/release/remote-deploy.sh "out/dhpanel-${GITHUB_REF_NAME#v}-linux-x86_64.tar.gz"
+        run: deploy/release/remote-deploy.sh "out/dhpanel-${GITHUB_REF_NAME#v}-linux-x86_64.tar.gz" out/release-manifest.json
       - name: Smoke test
         run: deploy/release/smoke.sh "${{ vars.PANEL_URL }}"

@@ -45,7 +45,7 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: |
           mkdir out
-          gh release download "v$VERSION" --dir out --pattern "dhpanel-$VERSION-linux-x86_64.tar.gz" --pattern manifest.json --pattern manifest.json.sigstore
+          gh release download "v$VERSION" --dir out --pattern "dhpanel-$VERSION-linux-x86_64.tar.gz" --pattern manifest.json --pattern manifest.json.sigstore --pattern release-manifest.json
       - name: The manifest was signed by the release workflow of this tag, and the archive is in it
         env:
           VERSION: ${{ inputs.version }}
@@ -71,6 +71,6 @@ jobs:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
-        run: deploy/release/remote-deploy.sh "out/dhpanel-${{ inputs.version }}-linux-x86_64.tar.gz"
+        run: deploy/release/remote-deploy.sh "out/dhpanel-${{ inputs.version }}-linux-x86_64.tar.gz" out/release-manifest.json
       - name: Smoke test
         run: deploy/release/smoke.sh "${{ vars.PANEL_URL }}"

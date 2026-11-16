@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# deploy/release/server-deploy.sh for real (T19.11 hardening), on the build box as root:
+#   deploy/dev/remote.sh sh "sudo -n bash deploy/dev/deploy-live.sh"
+# The deploy script itself is replaced by one that only notes it was called, so nothing on the
+# box changes; what is tested is what server-deploy.sh lets through.
+set -uo pipefail
+cd "$(dirname "$0")/../.."
+DHCTL="${DHPANEL_DHCTL:-/home/dev/target-rust/debug/dhctl}"
+[ -x "$DHCTL" ] || { echo "no dhctl at $DHCTL"; exit 2; }
+T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
+STATE="$T/state"; mkdir -p "$STATE/incoming"
+CALLED="$T/called"
+cat > "$T/fake-deploy.sh" <<FAKE
+#!/usr/bin/env bash
+echo "\$@" > "$CALLED"; ls "\${2}" >> "$CALLED"
+FAKE
+chmod +x "$T/fake-deploy.sh"
+"$DHCTL" release keygen --kid good-1 --out "$T/good.key" > "$T/keys.txt"
+"$DHCTL" release keygen --kid evil-1 --out "$T/evil.key" > /dev/null
+export DHPANEL_DEPLOY_STATE="$STATE" DHPANEL_RELEASE_KEYS="$T/keys.txt" DHPANEL_DEPLOY_SCRIPT="$T/fake-deploy.sh" DHPANEL_DHCTL="$DHCTL"
+fail=0
+NAME=dhpanel-1.2.3-linux-x86_64
+
+# A release: the archive, and the manifest signed over its programs.
+build() { # label key kid [extra-programs-in-manifest]
+    rm -rf "$T/rel" "$STATE/incoming"/*; mkdir -p "$T/rel/$NAME/bin"
+    printf 'api' > "$T/rel/$NAME/bin/dhpanel-control-api"; printf 'ctl' > "$T/rel/$NAME/bin/dhctl"
+    chmod +x "$T/rel/$NAME/bin"/*
+    ( cd "$T/rel/$NAME/bin" && "$DHCTL" release sign --key "$2" --kid "$3" --version 1.2.3 --commit abc123 --out "$T/manifest.json" ${4:-dhpanel-control-api dhctl} > /dev/null )
+    tar -czf "$STATE/incoming/$NAME.tar.gz" -C "$T/rel" "$NAME"
+    cp "$T/manifest.json" "$STATE/incoming/release-manifest.json"
+    rm -f "$CALLED"
+}
+run() { "$PWD/deploy/release/server-deploy.sh" "$NAME" > "$T/out" 2>&1; }
+expect() { # label, want (pass|refuse)
+    local called=no; [ -f "$CALLED" ] && called=yes
+    if { [ "$2" = pass ] && [ "$called" = yes ] && [ "$rc" = 0 ]; } || { [ "$2" = refuse ] && [ "$called" = no ] && [ "$rc" != 0 ]; }; then
+        echo "ok    $1"
+    else echo "FAIL  $1 (exit $rc, deploy called: $called)"; sed 's/^/        /' "$T/out" | tail -4; fail=1; fi
+}
+
+build good "$T/good.key" good-1; run; rc=$?; expect "a release signed by a trusted key is deployed" pass
+grep -q "dhctl" "$CALLED" && echo "ok    the deploy script got the checked programs" || { echo "FAIL  no programs handed over"; fail=1; }
+[ -z "$(ls "$STATE" | grep '^work\.')" ] && echo "ok    the working folder is gone" || { echo "FAIL  working folder left"; fail=1; }
+[ -z "$(ls "$STATE/incoming")" ] && echo "ok    the incoming folder is emptied" || { echo "FAIL  incoming not emptied"; fail=1; }
+
+build evil "$T/evil.key" evil-1; run; rc=$?; expect "a manifest signed by a key that is not trusted is refused" refuse
+build lying "$T/evil.key" good-1; run; rc=$?; expect "a manifest that claims a trusted key id with another key is refused" refuse
+
+build tamper "$T/good.key" good-1; mkdir "$T/ex"; tar -xzf "$STATE/incoming/$NAME.tar.gz" -C "$T/ex"; printf 'EVIL' > "$T/ex/$NAME/bin/dhpanel-control-api"; tar -czf "$STATE/incoming/$NAME.tar.gz" -C "$T/ex" "$NAME"; rm -rf "$T/ex"; run; rc=$?; expect "a program changed after signing is refused" refuse
+
+build missing "$T/good.key" good-1 dhpanel-control-api; run; rc=$?; expect "a signed manifest that does not list dhctl is refused" refuse
+
+build link "$T/good.key" good-1; mkdir "$T/ex"; tar -xzf "$STATE/incoming/$NAME.tar.gz" -C "$T/ex"; ln -s /etc/passwd "$T/ex/$NAME/bin/extra"; tar -czf "$STATE/incoming/$NAME.tar.gz" -C "$T/ex" "$NAME"; rm -rf "$T/ex"; run; rc=$?; expect "a link inside bin is refused" refuse
+
+build escape "$T/good.key" good-1; mkdir "$T/ex"; echo x > "$T/ex/x"; tar -czf "$STATE/incoming/$NAME.tar.gz" -C "$T/ex" --transform "s|^x|../../escape|" x 2>/dev/null; rm -rf "$T/ex"; run; rc=$?; expect "an archive with a path that climbs out is refused" refuse
+[ ! -e "$T/../escape" ] && echo "ok    nothing was written outside" || { echo "FAIL  something escaped"; fail=1; }
+
+build plain "$T/good.key" good-1; rm "$STATE/incoming/release-manifest.json"; run; rc=$?; expect "no manifest, no deploy" refuse
+build name "$T/good.key" good-1; rc=0; "$PWD/deploy/release/server-deploy.sh" "../../etc/passwd" > "$T/out" 2>&1 && rc=0 || rc=$?; [ "$rc" != 0 ] && [ ! -f "$CALLED" ] && echo "ok    a name that is not a release name is refused" || { echo "FAIL  odd name accepted"; fail=1; }
+exit $fail
