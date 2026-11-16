@@ -190,6 +190,30 @@ impl ReleaseManifest {
     }
 }
 
+/// The text an integrity report is signed over (by the installation, under the scan's nonce):
+/// the scan's id and then `name=sha256` for each file, in name order. Both sides write it
+/// with this function.
+#[must_use]
+pub fn integrity_report_text(
+    scan_id: &str,
+    files: &std::collections::BTreeMap<String, String>,
+) -> String {
+    let mut text = scan_id.to_owned();
+    for (name, hash) in files {
+        text.push('\n');
+        text.push_str(name);
+        text.push('=');
+        text.push_str(hash);
+    }
+    text
+}
+
+/// The SHA-256 of `bytes` as the hex a manifest and a report use.
+#[must_use]
+pub fn sha256_hex(bytes: &[u8]) -> String {
+    hex(&sha256(bytes))
+}
+
 fn hex(bytes: &[u8]) -> String {
     use std::fmt::Write as _;
     bytes.iter().fold(String::new(), |mut s, b| {

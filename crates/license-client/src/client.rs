@@ -106,6 +106,30 @@ struct Granted {
     server_time: i64,
 }
 
+/// A scan the authority asks for.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct ScanChallenge {
+    /// This scan.
+    pub scan_id: Uuid,
+    /// What the report is signed with.
+    pub nonce: String,
+    /// Until when it may be answered (Unix seconds).
+    pub expires_at: i64,
+    /// The files to hash.
+    pub components: Vec<String>,
+}
+
+/// How a scan came out.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct ScanResult {
+    /// `passed`, `failed`, `partial` or `unverifiable`.
+    pub result: String,
+    /// The files that are not what the release says.
+    pub mismatched: Vec<String>,
+    /// The files that were not reported.
+    pub missing: Vec<String>,
+}
+
 /// What a heartbeat answers.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct Beat {
@@ -339,6 +363,49 @@ impl LicenseClient {
             return Err(ClientError::Refused { status, code });
         }
         Ok(())
+    }
+
+    /// Asks the authority for an integrity scan of the release `version`.
+    ///
+    /// # Errors
+    /// [`ClientError`].
+    pub fn integrity_challenge(&self, version: &str) -> Result<ScanChallenge, ClientError> {
+        let mut body = self.proof("integrity")?;
+        body["version"] = version.into();
+        let (_, text) = self.post("/api/v1/integrity/challenge", &body)?;
+        serde_json::from_str(&text)
+            .map_err(|_| ClientError::Invalid("the challenge is unreadable".into()))
+    }
+
+    /// Sends what was found for a scan: file name to SHA-256 (hex), signed with the
+    /// installation's key under the scan's nonce.
+    ///
+    /// # Errors
+    /// [`ClientError`].
+    pub fn integrity_report(
+        &self,
+        scan: &ScanChallenge,
+        files: &std::collections::BTreeMap<String, String>,
+    ) -> Result<ScanResult, ClientError> {
+        let signature = self.identity.prove(
+            "integrity-report",
+            &scan.nonce,
+            Some(&dhpanel_license::integrity_report_text(
+                &scan.scan_id.to_string(),
+                files,
+            )),
+        )?;
+        let (_, text) = self.post(
+            "/api/v1/integrity/report",
+            &serde_json::json!({
+                "installation_id": self.identity.installation_id,
+                "scan_id": scan.scan_id,
+                "files": files,
+                "signature": signature,
+            }),
+        )?;
+        serde_json::from_str(&text)
+            .map_err(|_| ClientError::Invalid("the answer is unreadable".into()))
     }
 
     /// Asks for help after a failed integrity check or a lost machine (a person reads it).

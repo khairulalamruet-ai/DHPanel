@@ -16,4 +16,6 @@ pub use document::{
 };
 pub use hash::sha256;
 pub use keys::{FileSigningKey, KeyError, PublicKeys, SigningKey, verify_with};
-pub use release::{Component, ReleaseError, ReleaseManifest, SignedManifest};
+pub use release::{
+    Component, ReleaseError, ReleaseManifest, SignedManifest, integrity_report_text, sha256_hex,
+};

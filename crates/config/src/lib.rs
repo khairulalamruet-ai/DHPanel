@@ -139,6 +139,10 @@ pub struct LicenseConfig {
     pub refresh_hours: u32,
     /// Hours the license keeps working without the authority's confirmation (1..=720).
     pub grace_hours: u32,
+    /// Where the release's programs are installed: the integrity scan hashes them there.
+    pub binaries_dir: PathBuf,
+    /// Hours between integrity scans (1..=168).
+    pub integrity_hours: u32,
 }
 
 impl Default for LicenseConfig {
@@ -153,6 +157,8 @@ impl Default for LicenseConfig {
             heartbeat_hours: 6,
             refresh_hours: 12,
             grace_hours: 72,
+            binaries_dir: PathBuf::from("/usr/local/bin"),
+            integrity_hours: 24,
         }
     }
 }
@@ -522,7 +528,7 @@ impl ControlConfig {
                 reason: "must not exceed session_absolute_hours".to_owned(),
             });
         }
-        let range_checks: [(&'static str, u32, std::ops::RangeInclusive<u32>); 10] = [
+        let range_checks: [(&'static str, u32, std::ops::RangeInclusive<u32>); 11] = [
             ("auth.sudo_minutes", self.auth.sudo_minutes, 1..=60),
             (
                 "agent.enrollment_token_minutes",
@@ -547,6 +553,11 @@ impl ControlConfig {
             ),
             ("license.refresh_hours", self.license.refresh_hours, 1..=168),
             ("license.grace_hours", self.license.grace_hours, 1..=720),
+            (
+                "license.integrity_hours",
+                self.license.integrity_hours,
+                1..=168,
+            ),
             (
                 "auth.ip_lockout_minutes",
                 self.auth.ip_lockout_minutes,

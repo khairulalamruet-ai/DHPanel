@@ -1023,3 +1023,206 @@ async fn a_license_is_bound_to_its_domain_host_name_and_address(pool: PgPool) {
         "the claimed address is not the connection's"
     );
 }
+
+/// Releases and the daily scan (T17.14, T17.16): a manifest signed with the release key is
+/// published, an installation that reports the hashes of what it runs passes, and one binary
+/// that is not the release's makes the scan fail and leaves an event.
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "needs PostgreSQL"]
+async fn a_changed_binary_fails_the_next_scan_and_leaves_an_event(pool: PgPool) {
+    use dhpanel_license::{ReleaseManifest, SignedManifest, integrity_report_text, sha256_hex};
+    let e = env(&pool).await;
+    let token = admin(&pool, &e, "root@la.example", "admin").await;
+    let (_, key) = license(&e, &token, 1, &["mail"]).await;
+    let inst = Installation::new(&e.key_dir);
+    let (status, got) = inst.activate(&e, &key).await;
+    assert_eq!(status, StatusCode::OK, "{got}");
+
+    // The release: two programs, signed by a release key the authority knows.
+    let release_key =
+        FileSigningKey::generate_to_file(&e.key_dir.join("release-1.key"), "release-1").unwrap();
+    let files = vec![
+        (
+            "dhpanel-control-api".to_owned(),
+            b"control api 1.0".to_vec(),
+        ),
+        ("dhpanel-worker".to_owned(), b"worker 1.0".to_vec()),
+    ];
+    let manifest = ReleaseManifest::build("1.0.0", "abcdef0", 1_700_000_000, &files).unwrap();
+    let signed = SignedManifest::sign(&manifest, &release_key).unwrap();
+    // Nobody trusts the key yet: not published.
+    let publish = |signed: &SignedManifest| {
+        call(
+            &e.app,
+            "POST",
+            "/api/v1/admin/releases",
+            Some(&token),
+            Some(json!({"manifest": signed})),
+        )
+    };
+    let (status, _) = publish(&signed).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (status, got) = call(
+        &e.app,
+        "POST",
+        "/api/v1/admin/release-keys",
+        Some(&token),
+        Some(json!({"kid": "release-1", "public_key": STANDARD.encode(release_key.public_key())})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{got}");
+    // A changed manifest is not published; the real one is, once.
+    let mut changed = signed.clone();
+    changed.payload.push('A');
+    assert_eq!(publish(&changed).await.0, StatusCode::UNPROCESSABLE_ENTITY);
+    let (status, got) = publish(&signed).await;
+    assert_eq!(status, StatusCode::CREATED, "{got}");
+    assert_eq!(publish(&signed).await.0, StatusCode::CONFLICT);
+    let (status, doc) = call(&e.app, "GET", "/api/v1/releases/latest", None, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(doc["kid"], "release-1");
+
+    // One scan: ask, hash, report.
+    let scan = |version: &'static str,
+                files: std::collections::BTreeMap<String, String>,
+                sign_for: Option<Uuid>| {
+        let (e, inst, token) = (&e, &inst, &token);
+        async move {
+            let nonce = inst.nonce(e).await;
+            let (status, c) = call_with(
+                &e.app,
+                "POST",
+                "/api/v1/integrity/challenge",
+                None,
+                Some(json!({"installation_id": inst.id, "nonce": nonce, "version": version,
+                            "signature": inst.sign("integrity", &nonce, Some("web1\npanel.example")),
+                            "hostname": "web1", "domain": "panel.example"})),
+                &[("x-forwarded-for", "203.0.113.7")],
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{c}");
+            let scan_id: Uuid = c["scan_id"].as_str().unwrap().parse().unwrap();
+            let scan_nonce = c["nonce"].as_str().unwrap().to_owned();
+            let text = integrity_report_text(&sign_for.unwrap_or(scan_id).to_string(), &files);
+            let signature = inst.sign("integrity-report", &scan_nonce, Some(&text));
+            let (status, r) = call(
+                &e.app,
+                "POST",
+                "/api/v1/integrity/report",
+                None,
+                Some(json!({"installation_id": inst.id, "scan_id": scan_id, "files": files, "signature": signature})),
+            )
+            .await;
+            let _ = token;
+            (c, scan_id, status, r)
+        }
+    };
+    let honest = |files: &[(String, Vec<u8>)]| -> std::collections::BTreeMap<String, String> {
+        files
+            .iter()
+            .map(|(n, b)| (n.clone(), sha256_hex(b)))
+            .collect()
+    };
+    let (c, _, status, r) = scan("1.0.0", honest(&files), None).await;
+    assert_eq!(
+        c["components"],
+        json!(["dhpanel-control-api", "dhpanel-worker"])
+    );
+    assert_eq!(
+        (status, r["result"].clone()),
+        (StatusCode::OK, json!("passed")),
+        "{r}"
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM integrity_events WHERE kind <> 'binding'"
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap(),
+        0
+    );
+
+    // One byte of one program is not the release's: failed, with an event naming the file.
+    let mut patched = files.clone();
+    patched[0].1[3] ^= 1;
+    let (_, scan_id, status, r) = scan("1.0.0", honest(&patched), None).await;
+    assert_eq!(
+        (status, r["result"].clone()),
+        (StatusCode::OK, json!("failed")),
+        "{r}"
+    );
+    assert_eq!(r["mismatched"], json!(["dhpanel-control-api"]));
+    let (kind, detail): (String, Value) =
+        sqlx::query_as("SELECT kind, detail FROM integrity_events WHERE scan_id = $1")
+            .bind(scan_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(kind, "mismatch");
+    assert_eq!(detail["mismatched"], json!(["dhpanel-control-api"]));
+    let (status, listed) = call(
+        &e.app,
+        "GET",
+        &format!("/api/v1/admin/integrity/events?installation_id={}", inst.id),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(listed.as_array().unwrap().len(), 1, "{listed}");
+
+    // A program that is not there: partial. A version nobody published: unverifiable.
+    let mut fewer = honest(&files);
+    fewer.remove("dhpanel-worker");
+    let (_, _, _, r) = scan("1.0.0", fewer, None).await;
+    assert_eq!(r["result"], "partial");
+    assert_eq!(r["missing"], json!(["dhpanel-worker"]));
+    let (c, _, _, r) = scan("9.9.9", honest(&files), None).await;
+    assert_eq!(c["components"], json!([]));
+    assert_eq!(r["result"], "unverifiable");
+
+    // A report signed for another scan is not accepted, and a scan is answered once.
+    let (_, _, status, _) = scan("1.0.0", honest(&files), Some(Uuid::new_v4())).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let nonce = inst.nonce(&e).await;
+    let (_, c) = call_with(
+        &e.app,
+        "POST",
+        "/api/v1/integrity/challenge",
+        None,
+        Some(
+            json!({"installation_id": inst.id, "nonce": nonce, "version": "1.0.0",
+                    "signature": inst.sign("integrity", &nonce, Some("web1\npanel.example")),
+                    "hostname": "web1", "domain": "panel.example"}),
+        ),
+        &[("x-forwarded-for", "203.0.113.7")],
+    )
+    .await;
+    let scan_id: Uuid = c["scan_id"].as_str().unwrap().parse().unwrap();
+    let files_ok = honest(&files);
+    let signature = inst.sign(
+        "integrity-report",
+        c["nonce"].as_str().unwrap(),
+        Some(&integrity_report_text(&scan_id.to_string(), &files_ok)),
+    );
+    let body = json!({"installation_id": inst.id, "scan_id": scan_id, "files": files_ok, "signature": signature});
+    assert_eq!(
+        call(
+            &e.app,
+            "POST",
+            "/api/v1/integrity/report",
+            None,
+            Some(body.clone())
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        call(&e.app, "POST", "/api/v1/integrity/report", None, Some(body))
+            .await
+            .0,
+        StatusCode::FORBIDDEN
+    );
+}

@@ -204,6 +204,19 @@ fn check_signature(public_key: &[u8], message: &[u8], signature: &str) -> Result
     }
 }
 
+/// [`prove`], for the other parts of the authority.
+///
+/// # Errors
+/// The authentication errors of [`prove`].
+pub(crate) async fn prove_request(
+    state: &LaState,
+    tx: &mut Transaction<'_, Postgres>,
+    purpose: &str,
+    proof: &Proof,
+) -> Result<(), AppError> {
+    prove(state, tx, purpose, proof).await
+}
+
 /// Proves that the request comes from the installation it names (a known one).
 async fn prove(
     state: &LaState,

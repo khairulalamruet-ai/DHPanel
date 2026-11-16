@@ -72,6 +72,9 @@ pub struct LicenseService {
     policy: Policy,
     heartbeat_every: Duration,
     refresh_every: Duration,
+    /// Where the release's programs are installed, and how often they are checked.
+    binaries_dir: std::path::PathBuf,
+    integrity_every: Duration,
 }
 
 impl LicenseService {
@@ -120,6 +123,8 @@ impl LicenseService {
             policy,
             heartbeat_every: hours(config.heartbeat_hours),
             refresh_every: hours(config.refresh_hours),
+            binaries_dir: config.binaries_dir.clone(),
+            integrity_every: hours(config.integrity_hours),
         })
     }
 
@@ -377,11 +382,41 @@ impl LicenseService {
             .map_err(Into::into)
     }
 
+    /// The integrity scan: asks the authority which files make this release, hashes them where
+    /// they are installed and sends the hashes back (signed). A file that is not there is left
+    /// out of the report, which is how the authority learns it is missing.
+    ///
+    /// # Errors
+    /// [`ServiceError`].
+    pub async fn integrity_scan(&self) -> Result<dhpanel_license_client::ScanResult, ServiceError> {
+        let client = self.client()?;
+        let dir = self.binaries_dir.clone();
+        tokio::task::spawn_blocking(move || {
+            let scan = client.integrity_challenge(env!("CARGO_PKG_VERSION"))?;
+            let mut files = std::collections::BTreeMap::new();
+            for name in &scan.components {
+                // Names come from the authority: never a path.
+                if name.contains(['/', '\\']) || name.starts_with('.') {
+                    continue;
+                }
+                if let Ok(bytes) = std::fs::read(dir.join(name)) {
+                    files.insert(name.clone(), dhpanel_license::sha256_hex(&bytes));
+                }
+            }
+            client.integrity_report(&scan, &files)
+        })
+        .await
+        .map_err(|_| ServiceError::Cancelled)?
+        .map_err(Into::into)
+    }
+
     /// The loop: a verdict every minute, a heartbeat and a refresh when each is due (a failed
     /// try is repeated after fifteen minutes at most). Returns when `shutdown` turns true.
     pub async fn run(self: Arc<Self>, mut shutdown: tokio::sync::watch::Receiver<bool>) {
         let retry = Duration::from_secs(900);
         let (mut next_refresh, mut next_heartbeat) = (Duration::ZERO, Duration::ZERO);
+        // The first scan is a little after the start, so a restart does not scan at once.
+        let mut next_scan = Duration::from_secs(600);
         let mut elapsed = Duration::ZERO;
         let tick = Duration::from_secs(60);
         loop {
@@ -407,6 +442,21 @@ impl LicenseService {
                             Err(e) => {
                                 tracing::warn!(error = %e, "the heartbeat did not get through");
                                 retry.min(self.heartbeat_every)
+                            }
+                        };
+                }
+                if has_license && elapsed >= next_scan {
+                    next_scan = elapsed
+                        + match self.integrity_scan().await {
+                            Ok(scan) => {
+                                if scan.result != "passed" {
+                                    tracing::warn!(result = %scan.result, mismatched = ?scan.mismatched, missing = ?scan.missing, "the integrity scan found a difference");
+                                }
+                                self.integrity_every
+                            }
+                            Err(e) => {
+                                tracing::warn!(error = %e, "the integrity scan did not get through");
+                                retry.min(self.integrity_every)
                             }
                         };
                 }

@@ -8,6 +8,7 @@
 pub mod admin;
 pub mod binding;
 pub mod config;
+pub mod integrity;
 pub mod public;
 
 use std::{sync::Arc, time::Duration};
@@ -244,5 +245,6 @@ pub fn router(state: LaState) -> Router {
         .route("/health", get(health))
         .merge(public::router())
         .merge(admin::router())
+        .merge(integrity::router())
         .with_state(state)
 }

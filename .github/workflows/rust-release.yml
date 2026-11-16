@@ -151,13 +151,15 @@ jobs:
             echo "::warning::RELEASE_SIGNING_KEY or RELEASE_KID is not set: no release-key manifest was made"
             exit 0
           fi
+          # The manifest lists the programs themselves (what an installation runs and what the
+          # daily integrity scan hashes), taken out of the x86_64 archive.
           v="${GITHUB_REF_NAME#v}"
-          mkdir -p tool && tar -xzf out/dhpanel-${v}-linux-x86_64.tar.gz -C tool --strip-components=2 "dhpanel-${v}-linux-x86_64/bin/dhctl"
+          mkdir -p bin && tar -xzf out/dhpanel-${v}-linux-x86_64.tar.gz -C bin --strip-components=2 "dhpanel-${v}-linux-x86_64/bin"
           umask 077
           printf '%s' "$RELEASE_SIGNING_KEY" > "$RUNNER_TEMP/release.key"
-          tool/dhctl release sign --key "$RUNNER_TEMP/release.key" --kid "$RELEASE_KID" \
+          bin/dhctl release sign --key "$RUNNER_TEMP/release.key" --kid "$RELEASE_KID" \
             --version "$v" --commit "$GITHUB_SHA" --created-at "$(git log -1 --format=%ct)" \
-            --out out/release-manifest.json out/dhpanel-*.tar.gz
+            --out out/release-manifest.json bin/*
           rm -f "$RUNNER_TEMP/release.key"
       - name: Changelog
         run: deploy/release/changelog.sh "$GITHUB_REF_NAME" > out/CHANGELOG.md

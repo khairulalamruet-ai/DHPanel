@@ -181,7 +181,16 @@ async fn la_call(
             r = r.header("authorization", format!("Bearer {t}"));
         }
         match body {
-            Some(b) => r.send_json(b).unwrap().body_mut().read_json().unwrap(),
+            Some(b) => {
+                // Some answers have no body (201 for a key): that is no JSON, and not an error.
+                let text = r
+                    .send_json(b)
+                    .unwrap()
+                    .body_mut()
+                    .read_to_string()
+                    .unwrap_or_default();
+                serde_json::from_str(&text).unwrap_or(Value::Null)
+            }
             None => r
                 .send_empty()
                 .unwrap()
@@ -614,4 +623,76 @@ async fn admin_again(pool: &PgPool) -> Uuid {
         .fetch_one(pool)
         .await
         .unwrap()
+}
+
+/// The daily integrity scan from the panel's side (T17.16): the panel hashes the programs it
+/// runs where they are installed and the authority compares them with the release; a changed
+/// program fails the scan, a missing one is noticed, and nothing is sent that is not a hash.
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL"]
+async fn the_panel_scans_the_programs_it_runs_and_a_changed_one_fails(pool: PgPool) {
+    use dhpanel_license::{ReleaseManifest, SignedManifest};
+    let a = authority().await;
+    let (_, key) = make_license(&a, 1).await;
+    let programs = a.dir.join("installed");
+    std::fs::create_dir_all(&programs).unwrap();
+    let files = vec![
+        ("dhpanel-control-api".to_owned(), b"control api".to_vec()),
+        ("dhpanel-worker".to_owned(), b"worker".to_vec()),
+    ];
+    for (name, bytes) in &files {
+        std::fs::write(programs.join(name), bytes).unwrap();
+    }
+    // The release this panel is: the pipeline's key signs the programs' hashes, the authority
+    // is told to trust that key and publishes them.
+    let release_key =
+        FileSigningKey::generate_to_file(&a.dir.join("release-1.key"), "release-1").unwrap();
+    let signed = SignedManifest::sign(
+        &ReleaseManifest::build(env!("CARGO_PKG_VERSION"), "abcdef0", 1_700_000_000, &files)
+            .unwrap(),
+        &release_key,
+    )
+    .unwrap();
+    la_call(
+        &a.url,
+        "POST",
+        "/api/v1/admin/release-keys",
+        Some(&a.admin_token),
+        Some(json!({"kid": "release-1", "public_key": base64_of(&release_key.public_key())})),
+    )
+    .await;
+    la_call(
+        &a.url,
+        "POST",
+        "/api/v1/admin/releases",
+        Some(&a.admin_token),
+        Some(json!({"manifest": signed})),
+    )
+    .await;
+
+    let mut config = config_for(Some(&a));
+    config.binaries_dir = programs.clone();
+    let service = Arc::new(LicenseService::new(pool.clone(), &config).unwrap());
+    service.activate(key).await.unwrap();
+
+    let scan = service.integrity_scan().await.unwrap();
+    assert_eq!(scan.result, "passed", "{scan:?}");
+    // One program is changed on disk: the next scan fails and names it.
+    std::fs::write(programs.join("dhpanel-worker"), b"worker, patched").unwrap();
+    let scan = service.integrity_scan().await.unwrap();
+    assert_eq!(
+        (scan.result.as_str(), scan.mismatched),
+        ("failed", vec!["dhpanel-worker".to_owned()])
+    );
+    // A program that is gone is noticed too.
+    std::fs::remove_file(programs.join("dhpanel-control-api")).unwrap();
+    let scan = service.integrity_scan().await.unwrap();
+    assert_eq!(scan.missing, vec!["dhpanel-control-api".to_owned()]);
+    let events: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM integrity_events WHERE kind IN ('mismatch', 'unverifiable')",
+    )
+    .fetch_one(&a.la_db)
+    .await
+    .unwrap();
+    assert_eq!(events, 2);
 }

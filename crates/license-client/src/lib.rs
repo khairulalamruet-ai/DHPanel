@@ -6,7 +6,9 @@ pub mod client;
 pub mod identity;
 pub mod state;
 
-pub use client::{Beat, ClientError, LicenseClient, LicenseSummary, Received};
+pub use client::{
+    Beat, ClientError, LicenseClient, LicenseSummary, Received, ScanChallenge, ScanResult,
+};
 pub use identity::{Identity, IdentityError};
 pub use state::{Evaluation, Limit, Mode, Policy, Stored, evaluate};
 
