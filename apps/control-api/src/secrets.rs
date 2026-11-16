@@ -99,6 +99,61 @@ pub fn operation_secrets(
                         plugins,
                     });
                 }
+                // The same for an application of the catalog: the database user's password
+                // when it has a database, the administrator's when it has one.
+                Operation::InstallApp {
+                    app_id,
+                    tenant_id,
+                    username,
+                    uid,
+                    path,
+                    definition,
+                    database,
+                    database_password: None,
+                    site,
+                    admin_password: None,
+                } => {
+                    let open = |name: &'static str| {
+                        let (db, master_key) = (db.clone(), master_key.clone());
+                        async move {
+                            let sealed = dhpanel_database::apps::sealed_secret(&db, app_id, name)
+                                .await
+                                .map_err(|_| "could not read an install secret".to_owned())?
+                                .ok_or_else(|| "this install has ended".to_owned())?;
+                            let bytes = master_key
+                                .open(
+                                    &dhpanel_database::apps::secret_context(app_id, name),
+                                    &sealed,
+                                )
+                                .map_err(|_| "an install secret does not open".to_owned())?;
+                            String::from_utf8(bytes)
+                                .map_err(|_| "an install secret is not text".to_owned())
+                                .map(dhpanel_node_protocol::DbPassword)
+                        }
+                    };
+                    let database_password = if database.is_some() {
+                        Some(open("db_password").await?)
+                    } else {
+                        None
+                    };
+                    let admin_password = if definition.needs_admin() {
+                        Some(open("admin_password").await?)
+                    } else {
+                        None
+                    };
+                    return Ok(Operation::InstallApp {
+                        app_id,
+                        tenant_id,
+                        username,
+                        uid,
+                        path,
+                        definition,
+                        database,
+                        database_password,
+                        site,
+                        admin_password,
+                    });
+                }
                 // A WordPress user's new password: sealed by the API, opened here for this
                 // one message.
                 Operation::RunWpCli {

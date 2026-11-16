@@ -949,10 +949,7 @@ impl Dispatcher {
         };
         let mut queued = 0;
         for app in apps {
-            if app.kind != "wordpress" {
-                continue;
-            }
-            match self.step_wordpress_install(&app).await {
+            match self.step_install(&app).await {
                 Ok(true) => queued += 1,
                 Ok(false) => {}
                 Err(err) => {
@@ -979,10 +976,7 @@ impl Dispatcher {
         Ok(false)
     }
 
-    async fn step_wordpress_install(
-        &self,
-        app: &dhpanel_database::apps::Installing,
-    ) -> Result<bool, String> {
+    async fn step_install(&self, app: &dhpanel_database::apps::Installing) -> Result<bool, String> {
         let db = self.ops.db();
         let text = |key: &str| {
             app.settings
@@ -1047,48 +1041,54 @@ impl Dispatcher {
                 Ok(true)
             }
             Some("grant") => {
-                let Some(op_id) = id_of("op") else {
-                    return self
-                        .fail_app(app, "the install lost track of its operation")
-                        .await;
-                };
-                let Some(row) = self.ops.get(op_id).await.map_err(|e| e.to_string())? else {
-                    return self
-                        .fail_app(app, "the install lost track of its operation")
-                        .await;
-                };
-                match row.status {
-                    dhpanel_database::operations::Status::Succeeded => {}
-                    dhpanel_database::operations::Status::Failed => {
+                // An application with a database waits for the grant to be done; one
+                // without goes straight to the installer.
+                let has_database = text("database").is_some();
+                if has_database {
+                    let Some(op_id) = id_of("op") else {
                         return self
-                            .fail_app(app, "the database could not be given to its user")
+                            .fail_app(app, "the install lost track of its operation")
                             .await;
+                    };
+                    let Some(row) = self.ops.get(op_id).await.map_err(|e| e.to_string())? else {
+                        return self
+                            .fail_app(app, "the install lost track of its operation")
+                            .await;
+                    };
+                    match row.status {
+                        dhpanel_database::operations::Status::Succeeded => {}
+                        dhpanel_database::operations::Status::Failed => {
+                            return self
+                                .fail_app(app, "the database could not be given to its user")
+                                .await;
+                        }
+                        _ => return Ok(false),
                     }
-                    _ => return Ok(false),
                 }
-                let (Some(db_name), Some(url), Some(title), Some(admin_user), Some(admin_email)) = (
-                    text("database"),
-                    text("url"),
-                    text("title"),
-                    text("admin_user"),
-                    text("admin_email"),
-                ) else {
+                let (Some(url), Some(title)) = (text("url"), text("title")) else {
                     return self
                         .fail_app(app, "the install's settings are incomplete")
                         .await;
                 };
-                let plugins: Vec<String> = app
-                    .settings
-                    .get("plugins")
-                    .and_then(|p| serde_json::from_value(p.clone()).ok())
-                    .unwrap_or_default();
-                let mut request = dhpanel_operations::Request::new(
-                    app.node_id,
+                let uid = u32::try_from(app.uid).unwrap_or_default();
+                let operation = if app.kind == "wordpress" {
+                    let (Some(db_name), Some(admin_user), Some(admin_email)) =
+                        (text("database"), text("admin_user"), text("admin_email"))
+                    else {
+                        return self
+                            .fail_app(app, "the install's settings are incomplete")
+                            .await;
+                    };
+                    let plugins: Vec<String> = app
+                        .settings
+                        .get("plugins")
+                        .and_then(|p| serde_json::from_value(p.clone()).ok())
+                        .unwrap_or_default();
                     dhpanel_node_protocol::Operation::InstallWordPress {
                         app_id: app.id,
                         tenant_id: app.tenant_id,
                         username: app.username.clone(),
-                        uid: u32::try_from(app.uid).unwrap_or_default(),
+                        uid,
                         path: text("folder").unwrap_or_default(),
                         database: dhpanel_node_protocol::WpDatabase {
                             name: db_name.clone(),
@@ -1106,7 +1106,40 @@ impl Dispatcher {
                         version: None,
                         locale: text("locale"),
                         plugins,
-                    },
+                    }
+                } else {
+                    let Some(definition) = app.settings.get("definition").and_then(|d| {
+                        serde_json::from_value::<dhpanel_node_protocol::AppDefinition>(d.clone())
+                            .ok()
+                    }) else {
+                        return self
+                            .fail_app(app, "the install's definition is missing")
+                            .await;
+                    };
+                    dhpanel_node_protocol::Operation::InstallApp {
+                        app_id: app.id,
+                        tenant_id: app.tenant_id,
+                        username: app.username.clone(),
+                        uid,
+                        path: text("folder").unwrap_or_default(),
+                        definition: Box::new(definition),
+                        database: text("database").map(|name| dhpanel_node_protocol::WpDatabase {
+                            name: name.clone(),
+                            user: name,
+                        }),
+                        database_password: None,
+                        site: dhpanel_node_protocol::AppSite {
+                            url,
+                            title,
+                            admin_user: text("admin_user").unwrap_or_default(),
+                            admin_email: text("admin_email").unwrap_or_default(),
+                        },
+                        admin_password: None,
+                    }
+                };
+                let mut request = dhpanel_operations::Request::new(
+                    app.node_id,
+                    operation,
                     format!("appinstall:{}", app.id.simple()),
                 );
                 request.tenant_id = Some(app.tenant_id);
@@ -1147,7 +1180,8 @@ impl Dispatcher {
                                 serde_json::from_value::<dhpanel_node_protocol::Output>(o).ok()
                             })
                             .and_then(|o| match o {
-                                dhpanel_node_protocol::Output::WordPressInstalled { version } => {
+                                dhpanel_node_protocol::Output::WordPressInstalled { version }
+                                | dhpanel_node_protocol::Output::AppInstalled { version } => {
                                     Some(version)
                                 }
                                 _ => None,

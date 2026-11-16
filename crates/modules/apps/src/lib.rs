@@ -5,6 +5,8 @@
 //! | GET | `/api/v1/client/apps[?domain_id=]` | the owner |
 //! | GET | `/api/v1/client/apps/{id}` | the owner |
 //! | POST | `/api/v1/client/apps/wordpress` | the owner; the `databases` feature |
+//! | GET | `/api/v1/client/apps/catalog` | the owner |
+//! | POST | `/api/v1/client/apps/install` | the owner (any application of the catalog) |
 //! | GET | `/api/v1/client/apps/{id}/wordpress` | the owner (versions, updates) |
 //! | POST | `/api/v1/client/apps/{id}/wordpress/{plugins,themes,core}/update` | the owner |
 //! | POST | `/api/v1/client/apps/{id}/wordpress/{maintenance,admin-password}` | the owner |
@@ -17,6 +19,8 @@
 //! domain and a path under it. There is one application per place, so the panel always knows
 //! what answers on `example.com/blog`. The installers (T12.02, T12.05) create the rows and
 //! move them from `installing` to `active` or `failed`; this module shows them.
+
+use std::sync::Arc;
 
 use axum::{
     Json, Router,
@@ -57,6 +61,8 @@ pub struct AppsState {
     pub master_key: MasterKey,
     /// How long a request waits for the node before answering `202`.
     pub wait: std::time::Duration,
+    /// The applications that can be installed.
+    pub catalog: Arc<dhpanel_catalog::Catalog>,
 }
 
 /// How long a request waits for the node by default.
@@ -82,6 +88,11 @@ pub fn client_router() -> Router<AppsState> {
         .route(
             "/api/v1/client/apps/wordpress",
             axum::routing::post(install_wordpress),
+        )
+        .route("/api/v1/client/apps/catalog", get(catalog_list))
+        .route(
+            "/api/v1/client/apps/install",
+            axum::routing::post(install_app),
         )
         .route("/api/v1/client/apps/{id}/wordpress", get(wp_overview))
         .route(
@@ -465,8 +476,9 @@ pub async fn install_wordpress(
         &tenant,
         &plan,
         app_id,
-        &name,
-        &req.admin_password,
+        Some(&name),
+        Some(&req.admin_password),
+        "wordpress",
     )
     .await;
     if let Err(err) = result {
@@ -487,15 +499,18 @@ pub async fn install_wordpress(
     Ok((StatusCode::ACCEPTED, Json(view(app))))
 }
 
-/// The database, its user, the sealed passwords and the first operations, in one transaction.
+/// The database and its user (when the application needs one), the sealed passwords and the
+/// first operations, in one transaction.
+#[allow(clippy::too_many_arguments)]
 async fn queue_setup(
     state: &AppsState,
     who: &Principal,
     tenant: &tenants::Tenant,
     plan: &plans::Plan,
     app_id: Uuid,
-    name: &str,
-    admin_password: &str,
+    name: Option<&str>,
+    admin_password: Option<&str>,
+    kind: &str,
 ) -> Result<(), AppError> {
     let limit = |key: &str| {
         let value = plan
@@ -505,136 +520,438 @@ async fn queue_setup(
             .unwrap_or(10);
         (value >= 0).then_some(value)
     };
-    let mut tx = state.db.begin().await.map_err(internal)?;
-    dhpanel_database::domains::lock_tenant(&mut tx, tenant.id)
-        .await
-        .map_err(internal)?;
-    if let Some(max) = limit("max_databases")
-        && dbstore::count(&mut tx, tenant.id).await.map_err(internal)? >= max
-    {
-        return Err(AppError::conflict(
-            "limit_reached",
-            format!("This plan allows {max} databases."),
-        ));
-    }
-    if let Some(max) = limit("max_db_users")
-        && dbstore::count_users(&mut tx, tenant.id)
-            .await
-            .map_err(internal)?
-            >= max
-    {
-        return Err(AppError::conflict(
-            "limit_reached",
-            format!("This plan allows {max} database users."),
-        ));
-    }
-    let taken = |e: dbstore::AddError| match e {
-        dbstore::AddError::Taken => AppError::conflict("name_taken", "The database name is taken."),
-        dbstore::AddError::Database(db) => internal(db),
-    };
-    let db = dbstore::create(&mut tx, tenant.id, name)
-        .await
-        .map_err(taken)?;
-    let user = dbstore::create_user(&mut tx, tenant.id, name)
-        .await
-        .map_err(taken)?;
-    let password = generate_password();
     let seal = |context: Vec<u8>, text: &str| {
         state
             .master_key
             .seal(&context, text.as_bytes())
             .map_err(internal)
     };
-    dbstore::keep_password(
-        &mut tx,
-        user.id,
-        &seal(dbstore::password_context(user.id), &password)?,
-    )
-    .await
-    .map_err(internal)?;
-    store::keep_secret(
-        &mut tx,
-        app_id,
-        "db_password",
-        &seal(store::secret_context(app_id, "db_password"), &password)?,
-    )
-    .await
-    .map_err(internal)?;
-    store::keep_secret(
-        &mut tx,
-        app_id,
-        "admin_password",
-        &seal(
-            store::secret_context(app_id, "admin_password"),
-            admin_password,
-        )?,
-    )
-    .await
-    .map_err(internal)?;
-    let queue = |op: Operation, key: String| {
-        let payload = serde_json::to_value(&op);
-        (op, key, payload)
-    };
-    for (op, key, payload) in [
-        queue(
-            Operation::CreateDatabase {
-                name: name.to_owned(),
-            },
-            format!("dbcreate:{}", db.id.simple()),
-        ),
-        queue(
-            Operation::UpsertDbUser {
-                username: tenant.username.clone(),
-                name: name.to_owned(),
-                password: None::<DbPassword>,
-            },
-            format!("dbuser:{}:{}", user.id.simple(), Uuid::now_v7().simple()),
-        ),
-    ] {
-        let payload = payload.map_err(internal)?;
-        operations::enqueue_in(
+    let mut tx = state.db.begin().await.map_err(internal)?;
+    dhpanel_database::domains::lock_tenant(&mut tx, tenant.id)
+        .await
+        .map_err(internal)?;
+    if let Some(name) = name {
+        if let Some(max) = limit("max_databases")
+            && dbstore::count(&mut tx, tenant.id).await.map_err(internal)? >= max
+        {
+            return Err(AppError::conflict(
+                "limit_reached",
+                format!("This plan allows {max} databases."),
+            ));
+        }
+        if let Some(max) = limit("max_db_users")
+            && dbstore::count_users(&mut tx, tenant.id)
+                .await
+                .map_err(internal)?
+                >= max
+        {
+            return Err(AppError::conflict(
+                "limit_reached",
+                format!("This plan allows {max} database users."),
+            ));
+        }
+        let taken = |e: dbstore::AddError| match e {
+            dbstore::AddError::Taken => {
+                AppError::conflict("name_taken", "The database name is taken.")
+            }
+            dbstore::AddError::Database(db) => internal(db),
+        };
+        let db = dbstore::create(&mut tx, tenant.id, name)
+            .await
+            .map_err(taken)?;
+        let user = dbstore::create_user(&mut tx, tenant.id, name)
+            .await
+            .map_err(taken)?;
+        let password = generate_password();
+        dbstore::keep_password(
             &mut tx,
-            &NewOperation {
-                node_id: tenant.node_id,
-                kind: op.type_name(),
-                tenant_id: Some(tenant.id),
-                payload: &payload,
-                idempotency_key: &key,
-                created_by: Some(who.account_id()),
-                ttl_secs: OPERATION_TTL_SECS,
-                max_attempts: OPERATION_ATTEMPTS,
-            },
+            user.id,
+            &seal(dbstore::password_context(user.id), &password)?,
         )
         .await
-        .map_err(|e| match e {
-            EnqueueError::UnknownNode => AppError::conflict(
-                "node_unavailable",
-                "The node of this account no longer exists.",
+        .map_err(internal)?;
+        store::keep_secret(
+            &mut tx,
+            app_id,
+            "db_password",
+            &seal(store::secret_context(app_id, "db_password"), &password)?,
+        )
+        .await
+        .map_err(internal)?;
+        for (op, key) in [
+            (
+                Operation::CreateDatabase {
+                    name: name.to_owned(),
+                },
+                format!("dbcreate:{}", db.id.simple()),
             ),
-            other => internal(other),
-        })?;
+            (
+                Operation::UpsertDbUser {
+                    username: tenant.username.clone(),
+                    name: name.to_owned(),
+                    password: None::<DbPassword>,
+                },
+                format!("dbuser:{}:{}", user.id.simple(), Uuid::now_v7().simple()),
+            ),
+        ] {
+            let payload = serde_json::to_value(&op).map_err(internal)?;
+            operations::enqueue_in(
+                &mut tx,
+                &NewOperation {
+                    node_id: tenant.node_id,
+                    kind: op.type_name(),
+                    tenant_id: Some(tenant.id),
+                    payload: &payload,
+                    idempotency_key: &key,
+                    created_by: Some(who.account_id()),
+                    ttl_secs: OPERATION_TTL_SECS,
+                    max_attempts: OPERATION_ATTEMPTS,
+                },
+            )
+            .await
+            .map_err(|e| match e {
+                EnqueueError::UnknownNode => AppError::conflict(
+                    "node_unavailable",
+                    "The node of this account no longer exists.",
+                ),
+                other => internal(other),
+            })?;
+        }
+        dhpanel_database::sqlx::query(
+            "UPDATE apps SET database_id = $2, settings = settings || jsonb_build_object('db_id', $2::text, 'user_id', $3::text) WHERE id = $1",
+        )
+        .bind(app_id)
+        .bind(db.id)
+        .bind(user.id)
+        .execute(&mut *tx)
+        .await
+        .map_err(internal)?;
     }
-    dhpanel_database::sqlx::query(
-        "UPDATE apps SET database_id = $2, settings = settings || jsonb_build_object('db_id', $2::text, 'user_id', $3::text) WHERE id = $1",
-    )
-    .bind(app_id)
-    .bind(db.id)
-    .bind(user.id)
-    .execute(&mut *tx)
-    .await
-    .map_err(internal)?;
+    if let Some(password) = admin_password {
+        store::keep_secret(
+            &mut tx,
+            app_id,
+            "admin_password",
+            &seal(store::secret_context(app_id, "admin_password"), password)?,
+        )
+        .await
+        .map_err(internal)?;
+    }
     dhpanel_audit::insert(
         &mut *tx,
         &AuditEntry::new("app.install_requested", Outcome::Success)
             .actor(who.account_id())
             .tenant(tenant.id)
             .target("app", app_id)
-            .metadata(serde_json::json!({ "kind": "wordpress", "database": name })),
+            .metadata(serde_json::json!({ "kind": kind, "database": name })),
     )
     .await
     .map_err(internal)?;
     tx.commit().await.map_err(internal)?;
     Ok(())
+}
+
+/// An application of the catalog, as people choose it.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct CatalogEntry {
+    /// The catalog name, `joomla`.
+    pub slug: String,
+    /// What people see.
+    pub name: String,
+    /// The version it installs.
+    pub version: String,
+    /// A line about it.
+    pub description: String,
+    /// A group, `cms`.
+    pub category: String,
+    /// It gets a database of its own.
+    pub needs_database: bool,
+    /// The installer asks for an administrator's login, address and password.
+    pub needs_admin: bool,
+    /// The folder of the application the domain should be served from (empty: its own).
+    pub document_root: String,
+}
+
+/// The catalog.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct CatalogList {
+    /// By slug.
+    pub items: Vec<CatalogEntry>,
+}
+
+/// The applications that can be installed.
+#[utoipa::path(get, path = "/api/v1/client/apps/catalog", tag = "apps", operation_id = "clientAppCatalog",
+    security(("session" = [])),
+    responses((status = 200, description = "The catalog", body = CatalogList),
+              (status = 403, description = "`client_only`", body = ProblemDetails, content_type = "application/problem+json")))]
+pub async fn catalog_list(
+    State(state): State<AppsState>,
+    who: Principal,
+) -> Result<Json<CatalogList>, AppError> {
+    client_tenant(&state, &who).await?;
+    let items = state
+        .catalog
+        .all()
+        .map(|d| CatalogEntry {
+            slug: d.slug.clone(),
+            name: d.name.clone(),
+            version: d.version.clone(),
+            description: d.description.clone(),
+            category: d.category.clone(),
+            needs_database: d.needs_database,
+            needs_admin: d.needs_admin(),
+            document_root: d.document_root.clone(),
+        })
+        .collect();
+    Ok(Json(CatalogList { items }))
+}
+
+/// An application of the catalog to install.
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct InstallApp {
+    /// The catalog name, `joomla`.
+    pub slug: String,
+    /// The domain it is served on (one of the account's).
+    pub domain_id: Uuid,
+    /// The path under the domain (`/` when absent).
+    #[serde(default)]
+    pub path: Option<String>,
+    /// The site's title.
+    pub title: String,
+    /// The administrator's login (when the application has one).
+    #[serde(default)]
+    pub admin_user: Option<String>,
+    /// Their email address.
+    #[serde(default)]
+    pub admin_email: Option<String>,
+    /// Their password (12 to 128 characters).
+    #[serde(default)]
+    pub admin_password: Option<String>,
+}
+
+impl std::fmt::Debug for InstallApp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InstallApp")
+            .field("slug", &self.slug)
+            .field("domain_id", &self.domain_id)
+            .field("admin_password", &"..")
+            .finish_non_exhaustive()
+    }
+}
+
+/// Install an application of the catalog. WordPress goes the way of its own installer; the
+/// others run the steps of their definition on the node. The answer is the application,
+/// `installing`.
+#[utoipa::path(post, path = "/api/v1/client/apps/install", tag = "apps", operation_id = "clientInstallApp",
+    security(("session" = [])), params(("X-CSRF-Token" = String, Header, description = "The session's csrf_token")),
+    request_body = InstallApp,
+    responses((status = 202, description = "Queued", body = AppView),
+              (status = 403, description = "`client_only` or `feature_disabled`", body = ProblemDetails, content_type = "application/problem+json"),
+              (status = 404, description = "Not in the catalog", body = ProblemDetails, content_type = "application/problem+json"),
+              (status = 409, description = "`place_taken`, `limit_reached` or `tenant_not_running`", body = ProblemDetails, content_type = "application/problem+json"),
+              (status = 422, description = "A value that is not valid", body = ProblemDetails, content_type = "application/problem+json")))]
+pub async fn install_app(
+    State(state): State<AppsState>,
+    who: Principal,
+    Json(req): Json<InstallApp>,
+) -> Result<(StatusCode, Json<AppView>), AppError> {
+    let definition = state
+        .catalog
+        .get(&req.slug)
+        .cloned()
+        .ok_or_else(|| AppError::not_found("catalog_app"))?;
+    if definition.engine == "wordpress" {
+        let (Some(admin_user), Some(admin_email), Some(admin_password)) =
+            (req.admin_user, req.admin_email, req.admin_password)
+        else {
+            return Err(bad("admin_user", "WordPress needs an administrator."));
+        };
+        return install_wordpress(
+            State(state),
+            who,
+            Json(InstallWordPress {
+                domain_id: req.domain_id,
+                path: req.path,
+                title: req.title,
+                admin_user,
+                admin_email,
+                admin_password,
+                locale: None,
+                plugins: Vec::new(),
+            }),
+        )
+        .await;
+    }
+    let tenant = client_tenant(&state, &who).await?;
+    if tenant.status.as_str() != "active" {
+        return Err(AppError::conflict(
+            "tenant_not_running",
+            "Only a running account can install applications.",
+        ));
+    }
+    let plan = plans::get(&state.db, tenant.plan_id)
+        .await
+        .map_err(internal)?
+        .ok_or_else(|| internal(std::io::Error::other("the plan of a tenant vanished")))?;
+    if definition.needs_database
+        && !plans::includes_feature(&state.db, plan.id, "databases")
+            .await
+            .map_err(internal)?
+    {
+        return Err(AppError::forbidden(
+            "feature_disabled",
+            "Databases are not included in this plan.",
+        ));
+    }
+    let path = req
+        .path
+        .as_deref()
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .unwrap_or("/");
+    let folder = path.trim_start_matches('/');
+    if !path.starts_with('/')
+        || path.len() > 200
+        || (!folder.is_empty()
+            && !folder
+                .split('/')
+                .all(|part| plain(part, 1, 100, "._-") && part != "." && part != ".."))
+    {
+        return Err(bad("path", "A path such as / or /blog."));
+    }
+    let title = req.title.trim();
+    if title.is_empty()
+        || title.chars().count() > 100
+        || !title
+            .chars()
+            .all(|c| c.is_alphanumeric() || " .,_:!&()?-".contains(c))
+    {
+        return Err(bad(
+            "title",
+            "1 to 100 letters, digits, spaces and . , _ : ! & ( ) ? -",
+        ));
+    }
+    let (mut admin_user, mut admin_email, mut admin_password) = (None, None, None);
+    if definition.needs_admin() {
+        let user = req.admin_user.as_deref().unwrap_or_default().to_owned();
+        let email = req
+            .admin_email
+            .as_deref()
+            .unwrap_or_default()
+            .trim()
+            .to_owned();
+        let password = req.admin_password.clone().unwrap_or_default();
+        if !plain(&user, 3, 60, "_.-") {
+            return Err(bad("admin_user", "3 to 60 letters, digits, _ . -"));
+        }
+        if !email.contains('@') || !plain(&email, 3, 200, "@._+-") {
+            return Err(bad("admin_email", "An email address."));
+        }
+        if password.chars().count() < 12
+            || password.len() > 128
+            || password.chars().any(char::is_control)
+        {
+            return Err(bad("admin_password", "12 to 128 characters."));
+        }
+        admin_user = Some(user);
+        admin_email = Some(email);
+        admin_password = Some(password);
+    }
+    let fqdn = dhpanel_database::sqlx::query_scalar::<_, String>(
+        "SELECT fqdn FROM domains WHERE id = $1 AND tenant_id = $2",
+    )
+    .bind(req.domain_id)
+    .bind(tenant.id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(internal)?
+    .ok_or_else(|| bad("domain_id", "Not one of your domains."))?;
+    let url = if folder.is_empty() {
+        format!("https://{fqdn}")
+    } else {
+        format!("https://{fqdn}/{folder}")
+    };
+    let db_name = if definition.needs_database {
+        let tenant_name = TenantUsername::parse(&tenant.username).map_err(internal)?;
+        let stem = format!(
+            "{}_{}",
+            tenant_name.as_str(),
+            definition.slug.replace('-', "")
+        );
+        let number = store::next_name_number(&state.db, tenant.id, &stem)
+            .await
+            .map_err(internal)?;
+        let name = format!("{stem}{number}");
+        if name.len() > dhpanel_domain::databases::MAX_NAME_LEN {
+            return Err(bad(
+                "domain_id",
+                "The account's name is too long for a database name.",
+            ));
+        }
+        Some(name)
+    } else {
+        None
+    };
+    let settings = serde_json::json!({
+        // A database to wait for, or straight to the installer.
+        "stage": if db_name.is_some() { "setup" } else { "grant" },
+        "folder": folder,
+        "url": url,
+        "title": title,
+        "admin_user": admin_user,
+        "admin_email": admin_email,
+        "database": db_name,
+        "definition": definition,
+    });
+    let app_id = store::create(
+        &state.db,
+        &store::NewApp {
+            tenant_id: tenant.id,
+            domain_id: Some(req.domain_id),
+            path: if folder.is_empty() { "/" } else { path },
+            kind: &definition.slug,
+            name: title,
+            version: None,
+            database_id: None,
+            settings: &settings,
+        },
+    )
+    .await
+    .map_err(|e| match e {
+        store::CreateError::Taken => {
+            AppError::conflict("place_taken", "Something is installed there already.")
+        }
+        store::CreateError::NotOwned => bad("domain_id", "Not one of your domains."),
+        store::CreateError::Database(db) => internal(db),
+    })?;
+    let result = queue_setup(
+        &state,
+        &who,
+        &tenant,
+        &plan,
+        app_id,
+        db_name.as_deref(),
+        admin_password.as_deref(),
+        &definition.slug,
+    )
+    .await;
+    if let Err(err) = result {
+        let _ = store::set_status(
+            &state.db,
+            app_id,
+            "failed",
+            None,
+            Some("could not be set up"),
+        )
+        .await;
+        return Err(err);
+    }
+    let app = store::get(&state.db, tenant.id, app_id)
+        .await
+        .map_err(internal)?
+        .ok_or_else(|| AppError::not_found("app"))?;
+    Ok((StatusCode::ACCEPTED, Json(view(app))))
 }
 
 // ------------------------------------------------------------------ WordPress manager
@@ -1128,12 +1445,12 @@ pub async fn wp_operation(
 #[derive(OpenApi)]
 #[openapi(
     paths(
-        client_list, client_get, admin_list, install_wordpress, wp_overview, wp_update_plugins,
+        client_list, client_get, admin_list, install_wordpress, catalog_list, install_app, wp_overview, wp_update_plugins,
         wp_update_themes, wp_update_core, wp_maintenance, wp_admin_password, wp_operation, wp_scan,
         wp_harden
     ),
     components(schemas(
-        AppView, AppList, InstallWordPress, WpAnswer, WpSlug, WpVersion, WpMaintenance,
+        AppView, AppList, InstallWordPress, CatalogEntry, CatalogList, InstallApp, WpAnswer, WpSlug, WpVersion, WpMaintenance,
         WpNewPassword, Pending, WpHarden, dhpanel_node_protocol::WpOverview,
         dhpanel_node_protocol::WpItem, dhpanel_node_protocol::WpScan
     )),

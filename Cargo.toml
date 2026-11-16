@@ -9,6 +9,7 @@ members = [
     "crates/kernel",
     "crates/safe-fs",
     "crates/backup",
+    "crates/catalog",
     "crates/backup-dest",
     "crates/system-backup",
     "crates/fileops",
@@ -93,6 +94,7 @@ dhpanel-mod-domains = { path = "crates/modules/domains" }
 dhpanel-mod-databases = { path = "crates/modules/databases" }
 dhpanel-mod-files = { path = "crates/modules/files" }
 dhpanel-mod-backups = { path = "crates/modules/backups" }
+dhpanel-catalog = { path = "crates/catalog" }
 dhpanel-mod-apps = { path = "crates/modules/apps" }
 dhpanel-mod-cron = { path = "crates/modules/cron" }
 dhpanel-mod-logs = { path = "crates/modules/logs" }

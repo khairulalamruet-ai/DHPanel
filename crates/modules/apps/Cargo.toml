@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 dhpanel-audit.workspace = true
+dhpanel-catalog.workspace = true
 dhpanel-auth-core.workspace = true
 dhpanel-domain.workspace = true
 dhpanel-node-protocol = { workspace = true, features = ["openapi"] }

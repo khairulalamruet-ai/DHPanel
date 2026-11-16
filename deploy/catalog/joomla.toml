@@ -1,0 +1,35 @@
+# Joomla from the official full package, installed with its own command line installer.
+slug           = "joomla"
+name           = "Joomla"
+version        = "6.2.0"
+description    = "A content management system for sites with many kinds of pages and users."
+category       = "cms"
+needs_database = true
+
+[source]
+url    = "https://github.com/joomla/joomla-cms/releases/download/6.2.0/Joomla_6.2.0-Stable-Full_Package.zip"
+sha256 = "eaafc68b5990d7b9dd9156656d4c3c3547743d1d7a85682a92e2f9121b58f018"
+format = "zip"
+strip  = 0
+
+[[steps]]
+type = "php"
+args = [
+  "installation/joomla.php", "install",
+  "--site-name={{title}}",
+  "--admin-user={{admin_user}}",
+  "--admin-username={{admin_user}}",
+  "--admin-password={{admin_password}}",
+  "--admin-email={{admin_email}}",
+  "--db-type=mysqli",
+  "--db-host={{db_host}}",
+  "--db-user={{db_user}}",
+  "--db-pass={{db_password}}",
+  "--db-name={{db_name}}",
+  "--db-prefix=jml_",
+  "--db-encryption=0",
+]
+
+[[steps]]
+type = "remove"
+path = "installation"

@@ -1,0 +1,8 @@
+# WordPress: installed by the panel's own WordPress installer (T12.02), not by steps.
+slug           = "wordpress"
+name           = "WordPress"
+version        = "latest"
+description    = "The most used publishing system: sites, blogs and shops."
+category       = "cms"
+needs_database = true
+engine         = "wordpress"

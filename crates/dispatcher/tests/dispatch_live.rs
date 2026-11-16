@@ -1962,3 +1962,97 @@ async fn a_wordpress_install_moves_from_the_database_to_the_grant_to_the_install
     agent_stop.send(true).unwrap();
     agent.await.unwrap();
 }
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs PostgreSQL"]
+async fn an_application_without_a_database_goes_straight_to_the_installer(pool: PgPool) {
+    let p = plane(&pool).await;
+    let d = Dispatcher::new(p.ops.clone(), p.gateway.clone(), None, dispatch_settings());
+    let mut registry = Registry::new();
+    registry.register("install_app", |op| async move {
+        let Operation::InstallApp {
+            definition,
+            database,
+            path,
+            ..
+        } = op
+        else {
+            return Err(AgentError::new(ErrorCode::Internal, "wrong operation"));
+        };
+        assert_eq!(
+            (definition.slug.as_str(), database.is_none(), path.as_str()),
+            ("static-site", true, "promo")
+        );
+        Ok(Output::AppInstalled {
+            version: "1.0".into(),
+        })
+    });
+    let node = make_node_with(&p, &pool, "apps", registry).await;
+    let (agent_stop, agent) = node.start_agent(p.addr);
+    wait_connected(&p, node.id).await;
+    let results = p.gateway.take_results().expect("results taken once");
+    tokio::spawn(d.clone().run(results, p.stop.subscribe()));
+    let account: Uuid = sqlx::query_scalar(
+        "INSERT INTO accounts (kind, username, email, password_hash)
+         VALUES ('client', 'fay', 'fay@example.com',
+                 '$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHQ$aGFzaGhhc2hoYXNoaGFzaA') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let plan: Uuid = sqlx::query_scalar("SELECT id FROM plans WHERE is_default")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let tenant: Uuid = sqlx::query_scalar(
+        "INSERT INTO tenants (owner_account_id, node_id, plan_id, username, uid, status)
+         VALUES ($1, $2, $3, 'fay', 10006, 'active') RETURNING id",
+    )
+    .bind(account)
+    .bind(node.id)
+    .bind(plan)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let definition = dhpanel_catalog::Catalog::embedded()
+        .unwrap()
+        .get("static-site")
+        .unwrap()
+        .clone();
+    let settings = serde_json::json!({
+        "stage": "grant", "folder": "promo", "url": "https://fay.example/promo", "title": "Promo",
+        "definition": definition
+    });
+    let app: Uuid = sqlx::query_scalar(
+        "INSERT INTO apps (tenant_id, path, kind, name, settings)
+         VALUES ($1, '/promo', 'static-site', 'Promo', $2) RETURNING id",
+    )
+    .bind(tenant)
+    .bind(settings)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(d.request_app_installs().await, 1);
+    let mut status = String::new();
+    for _ in 0..100 {
+        d.request_app_installs().await;
+        status = sqlx::query_scalar("SELECT status FROM apps WHERE id = $1")
+            .bind(app)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        if status == "active" {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert_eq!(status, "active");
+    let version: Option<String> = sqlx::query_scalar("SELECT version FROM apps WHERE id = $1")
+        .bind(app)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(version.as_deref(), Some("1.0"));
+    agent_stop.send(true).unwrap();
+    agent.await.unwrap();
+}

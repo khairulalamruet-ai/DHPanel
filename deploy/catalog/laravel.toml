@@ -1,0 +1,40 @@
+# A new Laravel application made with Composer. Serve it from its `public` folder. The
+# installer's own PHP has no PDO MySQL driver, so migrations are left to the site's PHP.
+slug           = "laravel"
+name           = "Laravel"
+version        = "13"
+description    = "A PHP framework for building your own application: a fresh project with its database configured (run php artisan migrate when you are ready)."
+category       = "framework"
+needs_database = true
+document_root  = "public"
+
+[[steps]]
+type = "composer"
+args = ["create-project", "laravel/laravel", ".", "--prefer-dist", "--no-scripts"]
+
+[[steps]]
+type    = "write_file"
+path    = ".env"
+content = """APP_NAME="{{title}}"
+APP_ENV=production
+APP_KEY={{app_key}}
+APP_DEBUG=false
+APP_URL={{site_url}}
+
+LOG_CHANNEL=stack
+
+DB_CONNECTION=mariadb
+DB_HOST={{db_host}}
+DB_PORT=3306
+DB_DATABASE={{db_name}}
+DB_USERNAME={{db_user}}
+DB_PASSWORD={{db_password}}
+
+SESSION_DRIVER=database
+CACHE_STORE=database
+QUEUE_CONNECTION=database
+"""
+
+[[steps]]
+type = "php"
+args = ["artisan", "package:discover", "--ansi"]

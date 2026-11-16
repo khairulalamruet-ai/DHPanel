@@ -467,12 +467,24 @@ pub fn mount(
                 "apps" => {
                     let (db, sessions, master_key) =
                         (db.clone(), sessions.clone(), master_key.clone());
+                    // Built-in applications, and any the operator put in a directory.
+                    let catalog = Arc::new(
+                        match std::env::var_os("DHPANEL_CATALOG_DIR") {
+                            Some(dir) => dhpanel_catalog::Catalog::with_dir(std::path::Path::new(&dir)),
+                            None => dhpanel_catalog::Catalog::embedded(),
+                        }
+                        .unwrap_or_else(|e| {
+                            tracing::error!(error = %e, "the application catalog is not valid; using none");
+                            dhpanel_catalog::Catalog::default()
+                        }),
+                    );
                     Box::new(move || {
                         let state = dhpanel_mod_apps::AppsState {
                             db: db.clone(),
                             sessions: sessions.clone(),
                             master_key: master_key.clone(),
                             wait: dhpanel_mod_apps::DEFAULT_WAIT,
+                            catalog: catalog.clone(),
                         };
                         ModuleRoutes {
                             admin: Some(dhpanel_mod_apps::admin_router().with_state(state.clone())),

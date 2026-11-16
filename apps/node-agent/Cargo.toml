@@ -66,6 +66,7 @@ redb = "4"
 rustix = { version = "1", default-features = false, features = ["std", "fs"] }
 
 [dev-dependencies]
+dhpanel-catalog.workspace = true
 dhpanel-node-gateway.workspace = true
 dhpanel-operations.workspace = true
 # Tests play the control plane: they make a real CA, and the enrolment test runs

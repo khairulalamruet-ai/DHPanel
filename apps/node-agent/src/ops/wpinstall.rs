@@ -54,7 +54,7 @@ fn invalid(what: &str) -> AgentError {
     AgentError::new(ErrorCode::InvalidArguments, what.to_owned())
 }
 
-fn plain(text: &str, max: usize, extra: &str) -> bool {
+pub(super) fn plain(text: &str, max: usize, extra: &str) -> bool {
     !text.is_empty()
         && text.len() <= max
         && text
@@ -63,7 +63,7 @@ fn plain(text: &str, max: usize, extra: &str) -> bool {
 }
 
 /// Whether `url` is a plain http(s) address with nothing a shell or WordPress would trip on.
-fn plain_url(url: &str) -> bool {
+pub(super) fn plain_url(url: &str) -> bool {
     (url.starts_with("https://") || url.starts_with("http://"))
         && url.len() <= 300
         && url
@@ -72,7 +72,7 @@ fn plain_url(url: &str) -> bool {
 }
 
 /// A folder of the tenant's files, relative to `www`; empty for `www` itself.
-fn plain_folder(folder: &str) -> bool {
+pub(super) fn plain_folder(folder: &str) -> bool {
     folder.is_empty()
         || (folder.len() <= 200
             && !folder.starts_with('/')
@@ -280,7 +280,7 @@ pub async fn install_as(
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn run(
+pub(super) async fn run(
     context: &TenantContext,
     username: &TenantUsername,
     secrets: &Path,

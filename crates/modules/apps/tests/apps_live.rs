@@ -65,12 +65,14 @@ async fn env(pool: &PgPool) -> Env {
                     sessions: sessions.clone(),
                     master_key: dhpanel_auth_core::secretbox::MasterKey::from_bytes(&[42; 32]),
                     wait: std::time::Duration::from_millis(300),
+                    catalog: std::sync::Arc::new(dhpanel_catalog::Catalog::embedded().unwrap()),
                 })),
                 client: Some(client_router().with_state(AppsState {
                     db: pool.clone(),
                     sessions: sessions.clone(),
                     master_key: dhpanel_auth_core::secretbox::MasterKey::from_bytes(&[42; 32]),
                     wait: std::time::Duration::from_millis(300),
+                    catalog: std::sync::Arc::new(dhpanel_catalog::Catalog::embedded().unwrap()),
                 })),
                 ..ModuleRoutes::none()
             }
@@ -652,4 +654,112 @@ async fn wordpress_actions_are_sent_to_the_node_and_answered(pool: PgPool) {
             .unwrap();
     assert_eq!(kept, 1);
     let _ = (bob, apps::list);
+}
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn the_catalog_is_listed_and_any_of_its_applications_can_be_asked_for(pool: PgPool) {
+    let e = env(&pool).await;
+    let (alice_account, alice) = client(&pool, "alice", 10_000).await;
+    let a = e.sign_in(alice_account).await;
+    let site = domain(&pool, alice, "alice.example").await;
+    let (status, catalog) = e.call(&a, "GET", "/api/v1/client/apps/catalog", None).await;
+    assert_eq!(status, StatusCode::OK, "{catalog}");
+    let items = catalog["items"].as_array().unwrap();
+    let find = |slug: &str| items.iter().find(|i| i["slug"] == slug).unwrap();
+    assert_eq!(
+        (
+            find("joomla")["needs_database"].as_bool(),
+            find("joomla")["needs_admin"].as_bool()
+        ),
+        (Some(true), Some(true))
+    );
+    assert_eq!(
+        (
+            find("static-site")["needs_database"].as_bool(),
+            find("static-site")["needs_admin"].as_bool()
+        ),
+        (Some(false), Some(false))
+    );
+    assert_eq!(find("laravel")["document_root"], "public");
+    let path = "/api/v1/client/apps/install";
+    // A site made of files only: no database, no operation yet, straight to the installer.
+    let (status, made) = e
+        .call(&a, "POST", path, Some(json!({"slug": "static-site", "domain_id": site, "path": "/promo", "title": "Promo page"})))
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{made}");
+    assert_eq!(
+        (made["kind"].as_str(), made["status"].as_str()),
+        (Some("static-site"), Some("installing"))
+    );
+    let stage: serde_json::Value =
+        sqlx::query_scalar("SELECT settings FROM apps WHERE id = $1::uuid")
+            .bind(made["id"].as_str().unwrap())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(stage["stage"], "grant");
+    assert_eq!(stage["definition"]["slug"], "static-site");
+    let databases: i64 = sqlx::query_scalar("SELECT count(*) FROM databases")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(databases, 0);
+    // Joomla needs a database and an administrator.
+    let joomla = json!({"slug": "joomla", "domain_id": site, "path": "/cms", "title": "My Joomla",
+        "admin_user": "boss", "admin_email": "boss@example.com", "admin_password": "a-long-enough-pass-1"});
+    let (status, made) = e.call(&a, "POST", path, Some(joomla.clone())).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{made}");
+    let names: Vec<String> = sqlx::query_scalar("SELECT name FROM databases")
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    assert_eq!(names, ["alice_joomla1"]);
+    let ledger: String =
+        sqlx::query_scalar("SELECT coalesce(string_agg(payload::text, ' '), '') FROM operations")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(!ledger.contains("a-long-enough-pass-1"));
+    // The same place is taken; an unknown application, a missing administrator and a title
+    // with markup are refused.
+    let (status, again) = e.call(&a, "POST", path, Some(joomla.clone())).await;
+    assert_eq!(
+        (status, again["code"].as_str()),
+        (StatusCode::CONFLICT, Some("place_taken")),
+        "{again}"
+    );
+    let (status, _) = e
+        .call(
+            &a,
+            "POST",
+            path,
+            Some(json!({"slug": "nope", "domain_id": site, "title": "x"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let mut no_admin = joomla.clone();
+    no_admin["path"] = json!("/other");
+    no_admin["admin_user"] = json!("");
+    assert_eq!(
+        e.call(&a, "POST", path, Some(no_admin)).await.0,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    let mut markup = joomla;
+    markup["path"] = json!("/markup");
+    markup["title"] = json!("<script>alert(1)</script>");
+    assert_eq!(
+        e.call(&a, "POST", path, Some(markup)).await.0,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    // WordPress through the same door goes the way of its own installer.
+    let (status, wp) = e
+        .call(&a, "POST", path, Some(json!({"slug": "wordpress", "domain_id": site, "path": "/wp", "title": "WP",
+            "admin_user": "boss", "admin_email": "boss@example.com", "admin_password": "a-long-enough-pass-1"})))
+        .await;
+    assert_eq!(
+        (status, wp["kind"].as_str()),
+        (StatusCode::ACCEPTED, Some("wordpress")),
+        "{wp}"
+    );
 }

@@ -70,7 +70,13 @@ fn feature(name: &'static str, deps: &[&str]) -> Arc<dyn Module> {
     })
 }
 
+/// These tests run one at a time. Together they stall for half a minute (sqlx's test pools share
+/// one budget of connections, and the module sync here is not made for being run at once), and
+/// the one that has to wait the longest then gives up with a pool time-out.
+static ONE_AT_A_TIME: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 struct Env {
+    _one: tokio::sync::MutexGuard<'static, ()>,
     app: Router,
     sessions: SessionStore,
     pool: PgPool,
@@ -84,6 +90,7 @@ struct Browser {
 
 /// auth (core), system (core, the real routes), dns, domains -> dns, ssl -> domains.
 async fn env(pool: &PgPool) -> Env {
+    let one = ONE_AT_A_TIME.lock().await;
     let url = std::env::var("REDIS_URL").expect("REDIS_URL must be set");
     let redis = RedisHandle::new(&SecretString::from(url)).expect("valid REDIS_URL");
     let sessions = SessionStore::new(redis, pool.clone(), SessionConfig::default());
@@ -168,6 +175,7 @@ async fn env(pool: &PgPool) -> Env {
     mount.rebuild();
     mount.apply(&db::enabled_names(pool).await.unwrap().into_iter().collect());
     Env {
+        _one: one,
         app: mount.service(),
         sessions,
         pool: pool.clone(),

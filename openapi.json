@@ -10359,6 +10359,129 @@
         ]
       }
     },
+    "/api/v1/client/apps/catalog": {
+      "get": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "The applications that can be installed.",
+        "operationId": "clientAppCatalog",
+        "responses": {
+          "200": {
+            "description": "The catalog",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogList"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/apps/install": {
+      "post": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "Install an application of the catalog. WordPress goes the way of its own installer; the\nothers run the steps of their definition on the node. The answer is the application,\n`installing`.",
+        "operationId": "clientInstallApp",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstallApp"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only` or `feature_disabled`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not in the catalog",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`place_taken`, `limit_reached` or `tenant_not_running`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A value that is not valid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/client/apps/wordpress": {
       "post": {
         "tags": [
@@ -20071,6 +20194,70 @@
           }
         }
       },
+      "CatalogEntry": {
+        "type": "object",
+        "description": "An application of the catalog, as people choose it.",
+        "required": [
+          "slug",
+          "name",
+          "version",
+          "description",
+          "category",
+          "needs_database",
+          "needs_admin",
+          "document_root"
+        ],
+        "properties": {
+          "category": {
+            "type": "string",
+            "description": "A group, `cms`."
+          },
+          "description": {
+            "type": "string",
+            "description": "A line about it."
+          },
+          "document_root": {
+            "type": "string",
+            "description": "The folder of the application the domain should be served from (empty: its own)."
+          },
+          "name": {
+            "type": "string",
+            "description": "What people see."
+          },
+          "needs_admin": {
+            "type": "boolean",
+            "description": "The installer asks for an administrator's login, address and password."
+          },
+          "needs_database": {
+            "type": "boolean",
+            "description": "It gets a database of its own."
+          },
+          "slug": {
+            "type": "string",
+            "description": "The catalog name, `joomla`."
+          },
+          "version": {
+            "type": "string",
+            "description": "The version it installs."
+          }
+        }
+      },
+      "CatalogList": {
+        "type": "object",
+        "description": "The catalog.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CatalogEntry"
+            },
+            "description": "By slug."
+          }
+        }
+      },
       "ChangeDestination": {
         "type": "object",
         "description": "What to change; what is left out stays.",
@@ -22170,6 +22357,59 @@
           "signature": {
             "type": "string",
             "description": "The signature that matched (`Php.Trojan.Agent`)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "InstallApp": {
+        "type": "object",
+        "description": "An application of the catalog to install.",
+        "required": [
+          "slug",
+          "domain_id",
+          "title"
+        ],
+        "properties": {
+          "admin_email": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Their email address."
+          },
+          "admin_password": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Their password (12 to 128 characters)."
+          },
+          "admin_user": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The administrator's login (when the application has one)."
+          },
+          "domain_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The domain it is served on (one of the account's)."
+          },
+          "path": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The path under the domain (`/` when absent)."
+          },
+          "slug": {
+            "type": "string",
+            "description": "The catalog name, `joomla`."
+          },
+          "title": {
+            "type": "string",
+            "description": "The site's title."
           }
         },
         "additionalProperties": false

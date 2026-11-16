@@ -1,0 +1,31 @@
+# NOT LOADED (the folder is not read): Drupal's installer needs the PDO MySQL driver, which the
+# installer image (wordpress:cli) does not have. Move this file to deploy/catalog/ once the tools
+# image has it; the steps are written but have not been run.
+# Drupal made with Composer and installed with Drush. Serve it from its `web` folder.
+slug           = "drupal"
+name           = "Drupal"
+version        = "11"
+description    = "A content management system for large, structured sites."
+category       = "cms"
+needs_database = true
+document_root  = "web"
+
+[[steps]]
+type = "composer"
+args = ["create-project", "drupal/recommended-project", ".", "--prefer-dist"]
+
+[[steps]]
+type = "composer"
+args = ["require", "drush/drush", "--no-interaction"]
+
+[[steps]]
+type = "php"
+args = [
+  "vendor/bin/drush", "site:install", "standard",
+  "--db-url=mysql://{{db_user}}:{{db_password}}@{{db_host}}/{{db_name}}",
+  "--account-name={{admin_user}}",
+  "--account-pass={{admin_password}}",
+  "--account-mail={{admin_email}}",
+  "--site-name={{title}}",
+  "--yes",
+]

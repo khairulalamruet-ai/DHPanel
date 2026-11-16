@@ -96,7 +96,9 @@ if [ "$what" = test ] || [ "$what" = all ]; then
     # fully subnetted"). Unused networks are of no use to anyone: remove them first.
     docker network prune -f > /dev/null 2>&1 || true
     # Two cores: with every test at once the database tests time out setting up (PoolTimedOut).
-    step test env RUST_TEST_THREADS=4 cargo test --workspace --locked --no-fail-fast -- --include-ignored
+    # sqlx gives every test pool up to 5 connections out of ONE shared budget of 20, so at most 3
+    # tests may run at once (3 x 5 = 15).
+    step test env RUST_TEST_THREADS=3 cargo test --workspace --locked --no-fail-fast -- --include-ignored
     grep "test result" "$HOME/test.log" | awk '{p+=$4; f+=$6} END {print "tests: passed=" p " failed=" f}'
     grep -E "^test .* FAILED|panicked at" "$HOME/test.log" | head -20
 fi

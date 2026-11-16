@@ -167,6 +167,285 @@ pub struct WafSetting {
     pub disabled_rules: Vec<u32>,
 }
 
+/// The values an application's steps are given.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AppSite {
+    /// Its address, `https://example.com/blog`.
+    pub url: String,
+    /// Its title.
+    pub title: String,
+    /// The first administrator's login (empty when the definition has none).
+    #[serde(default)]
+    pub admin_user: String,
+    /// Their email address (empty when the definition has none).
+    #[serde(default)]
+    pub admin_email: String,
+}
+
+/// Where an application's files come from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(deny_unknown_fields)]
+pub struct AppSource {
+    /// An `https://` address.
+    pub url: String,
+    /// The SHA-256 of the file, 64 hex digits: a file that does not match is not used.
+    pub sha256: String,
+    /// `zip` or `tar.gz`.
+    pub format: String,
+    /// Leading folders of the archive to drop (0 or 1).
+    #[serde(default)]
+    pub strip: u8,
+}
+
+/// One step of an installation: a fixed vocabulary, never shell text.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AppStep {
+    /// Write a file (relative to the application's folder) from a text with placeholders.
+    WriteFile {
+        /// Where, `config/app.php`.
+        path: String,
+        /// The text; `{{title}}`, `{{site_url}}`, `{{admin_user}}`, `{{admin_email}}`,
+        /// `{{admin_password}}`, `{{db_name}}`, `{{db_user}}`, `{{db_password}}`, `{{db_host}}`,
+        /// `{{random}}` (32 hex digits, new each time) and `{{app_key}}` (`base64:` and 32
+        /// random bytes) are replaced.
+        content: String,
+    },
+    /// Run `php` in the application's folder with these arguments (placeholders as above;
+    /// one argument may not hold a line break).
+    Php {
+        /// The arguments.
+        args: Vec<String>,
+    },
+    /// Run Composer (a pinned version, checked by its checksum) in the application's folder.
+    Composer {
+        /// The arguments.
+        args: Vec<String>,
+    },
+    /// Remove a file or folder inside the application's folder.
+    Remove {
+        /// What.
+        path: String,
+    },
+}
+
+/// An application of the catalog: data, not code. Checked by [`AppDefinition::checked`] on
+/// the control plane when it is loaded and again on the node before anything runs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(deny_unknown_fields)]
+pub struct AppDefinition {
+    /// The catalog name, `joomla`.
+    pub slug: String,
+    /// What people see, `Joomla`.
+    pub name: String,
+    /// The version it installs.
+    pub version: String,
+    /// A line about it.
+    #[serde(default)]
+    pub description: String,
+    /// A group, `cms`.
+    #[serde(default)]
+    pub category: String,
+    /// It needs a database of its own.
+    #[serde(default)]
+    pub needs_database: bool,
+    /// `wordpress` for the built-in WordPress installer (which has no steps of its own);
+    /// empty for everything made of source and steps.
+    #[serde(default)]
+    pub engine: String,
+    /// The folder of the application the domain should be served from (`public`, `web`),
+    /// when it is not the application's own folder.
+    #[serde(default)]
+    pub document_root: String,
+    /// Where the files come from; none for an application made of its steps alone.
+    #[serde(default)]
+    pub source: Option<AppSource>,
+    /// What to do after the files are in place.
+    #[serde(default)]
+    pub steps: Vec<AppStep>,
+}
+
+/// The placeholders a definition's texts may hold.
+pub const APP_PLACEHOLDERS: [&str; 10] = [
+    "title",
+    "site_url",
+    "admin_user",
+    "admin_email",
+    "admin_password",
+    "db_name",
+    "db_user",
+    "db_password",
+    "db_host",
+    "random",
+];
+
+impl AppDefinition {
+    /// The placeholders the definition uses (`app_key` counts as `random`).
+    #[must_use]
+    pub fn placeholders(&self) -> Vec<String> {
+        let mut found = Vec::new();
+        let mut scan = |text: &str| {
+            let mut rest = text;
+            while let Some(start) = rest.find("{{") {
+                let after = &rest[start + 2..];
+                let Some(end) = after.find("}}") else { break };
+                let name = after[..end].trim().to_owned();
+                if !found.contains(&name) {
+                    found.push(name);
+                }
+                rest = &after[end + 2..];
+            }
+        };
+        for step in &self.steps {
+            match step {
+                AppStep::WriteFile { content, .. } => scan(content),
+                AppStep::Php { args } | AppStep::Composer { args } => {
+                    args.iter().for_each(|a| scan(a));
+                }
+                AppStep::Remove { .. } => {}
+            }
+        }
+        found
+    }
+
+    /// Whether the steps need an administrator's login, address and password.
+    #[must_use]
+    pub fn needs_admin(&self) -> bool {
+        self.engine == "wordpress"
+            || self
+                .placeholders()
+                .iter()
+                .any(|p| matches!(p.as_str(), "admin_user" | "admin_email" | "admin_password"))
+    }
+
+    /// Checks everything that is checkable without running anything.
+    ///
+    /// # Errors
+    /// The first thing that is not valid, in words.
+    pub fn checked(&self) -> Result<(), String> {
+        fn plain(text: &str, min: usize, max: usize, extra: &str) -> bool {
+            (min..=max).contains(&text.len())
+                && text
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || extra.contains(c))
+        }
+        fn rel_path(path: &str) -> bool {
+            !path.is_empty()
+                && path.len() <= 200
+                && path.split('/').all(|part| {
+                    !part.is_empty()
+                        && part != "."
+                        && part != ".."
+                        && part
+                            .chars()
+                            .all(|c| c.is_ascii_alphanumeric() || "._-".contains(c))
+                })
+        }
+        if !plain(&self.slug, 2, 32, "-_")
+            || !self.slug.starts_with(|c: char| c.is_ascii_lowercase())
+        {
+            return Err("slug: 2 to 32 lower-case letters, digits, - and _".into());
+        }
+        if self.name.is_empty()
+            || self.name.chars().count() > 60
+            || self.name.chars().any(char::is_control)
+        {
+            return Err("name: 1 to 60 characters".into());
+        }
+        if !plain(&self.version, 1, 40, ".+_-") {
+            return Err("version: not valid".into());
+        }
+        if self.description.chars().count() > 300 || self.description.chars().any(char::is_control)
+        {
+            return Err("description: at most 300 characters".into());
+        }
+        if !self.category.is_empty() && !plain(&self.category, 1, 32, "-_") {
+            return Err("category: not valid".into());
+        }
+        if !["", "wordpress"].contains(&self.engine.as_str()) {
+            return Err("engine: empty or wordpress".into());
+        }
+        if self.engine == "wordpress" && (self.source.is_some() || !self.steps.is_empty()) {
+            return Err("a wordpress definition has no source or steps".into());
+        }
+        if !self.document_root.is_empty() && !rel_path(&self.document_root) {
+            return Err("document_root: a plain relative folder".into());
+        }
+        if let Some(source) = &self.source {
+            let url_ok = source.url.starts_with("https://")
+                && source.url.len() <= 400
+                && source
+                    .url
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "-._~:/?#[]@!&()*+,;=%".contains(c));
+            if !url_ok {
+                return Err("source.url: an https address of plain characters".into());
+            }
+            if source.sha256.len() != 64
+                || !source
+                    .sha256
+                    .chars()
+                    .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c))
+            {
+                return Err("source.sha256: 64 lower-case hex digits".into());
+            }
+            if !["zip", "tar.gz"].contains(&source.format.as_str()) || source.strip > 1 {
+                return Err("source: format is zip or tar.gz, strip is 0 or 1".into());
+            }
+        }
+        if self.steps.len() > 40 {
+            return Err("steps: at most 40".into());
+        }
+        for (i, step) in self.steps.iter().enumerate() {
+            let bad = |what: &str| Err(format!("step {}: {what}", i + 1));
+            match step {
+                AppStep::WriteFile { path, content } => {
+                    if !rel_path(path) {
+                        return bad("path must be a plain relative path");
+                    }
+                    if content.len() > 64 * 1024 || content.contains('\0') {
+                        return bad("content: at most 64 KiB, no NUL");
+                    }
+                    if content.replace(' ', "").contains("{{admin_password}}") {
+                        return bad(
+                            "the administrator's password may only be an argument, not file text",
+                        );
+                    }
+                }
+                AppStep::Php { args } | AppStep::Composer { args } => {
+                    if args.is_empty()
+                        || args.len() > 40
+                        || args
+                            .iter()
+                            .any(|a| a.len() > 1000 || a.contains(['\n', '\r', '\0']))
+                    {
+                        return bad("1 to 40 arguments of at most 1000 characters, no line breaks");
+                    }
+                }
+                AppStep::Remove { path } => {
+                    if !rel_path(path) {
+                        return bad("path must be a plain relative path");
+                    }
+                }
+            }
+        }
+        for name in self.placeholders() {
+            let known = APP_PLACEHOLDERS.contains(&name.as_str()) || name == "app_key";
+            if !known {
+                return Err(format!("unknown placeholder {{{{{name}}}}}"));
+            }
+            if name.starts_with("db_") && !self.needs_database {
+                return Err(format!("{{{{{name}}}}} needs needs_database = true"));
+            }
+        }
+        Ok(())
+    }
+}
+
 /// What can be done to a WordPress site (each is a fixed WP-CLI command line).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -1674,6 +1953,36 @@ pub enum Operation {
         #[serde(default)]
         plugins: Vec<String>,
     },
+    /// Installs an application of the catalog (see [`AppDefinition`]) in a folder of a tenant's
+    /// files: the archive is downloaded and its checksum verified, then the definition's steps
+    /// run, in a one-off container as the tenant's user on the tenant's network. The steps are
+    /// from a fixed vocabulary; no shell text of the definition ever runs. Answered with
+    /// [`Output::AppInstalled`].
+    InstallApp {
+        /// The application's id (the control plane finds the passwords by it).
+        app_id: Uuid,
+        /// The tenant.
+        tenant_id: Uuid,
+        /// The tenant's system name.
+        username: String,
+        /// The tenant's numeric user id.
+        uid: u32,
+        /// The folder under the tenant's `www` (empty: `www` itself).
+        path: String,
+        /// What to install.
+        definition: Box<AppDefinition>,
+        /// The database, when the definition needs one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        database: Option<WpDatabase>,
+        /// The database user's password; absent in the ledger, present on the wire.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        database_password: Option<DbPassword>,
+        /// The values the steps' placeholders take.
+        site: AppSite,
+        /// The first administrator's password; absent in the ledger, present on the wire.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        admin_password: Option<DbPassword>,
+    },
     /// Looks at or changes a WordPress site with WP-CLI, in the same kind of one-off container
     /// as [`Operation::InstallWordPress`]. Only the commands of [`WpCommand`] exist. Answered
     /// with [`Output::WordPressOverview`] (for `overview`) or [`Output::WpCliDone`].
@@ -1855,6 +2164,7 @@ impl Operation {
         "scan_tenant",
         "install_wordpress",
         "run_wp_cli",
+        "install_app",
         "scan_image",
         "check_image_updates",
         "inventory_wordpress",
@@ -1934,6 +2244,7 @@ impl Operation {
             Self::ScanTenant { .. } => "scan_tenant",
             Self::InstallWordPress { .. } => "install_wordpress",
             Self::RunWpCli { .. } => "run_wp_cli",
+            Self::InstallApp { .. } => "install_app",
             Self::ScanImage { .. } => "scan_image",
             Self::CheckImageUpdates { .. } => "check_image_updates",
             Self::InventoryWordPress { .. } => "inventory_wordpress",
@@ -2135,6 +2446,11 @@ pub enum Output {
     WordPressInventory {
         /// The installations found (at most 20).
         installs: Vec<WpInstall>,
+    },
+    /// Answer to [`Operation::InstallApp`].
+    AppInstalled {
+        /// What the definition says it installed.
+        version: String,
     },
     /// Answer to [`WpCommand::Overview`].
     WordPressOverview(WpOverview),
@@ -3416,7 +3732,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            73,
+            74,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }
