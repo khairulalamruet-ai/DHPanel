@@ -13,7 +13,9 @@ use std::{path::Path, sync::Arc, time::Duration};
 
 use dhpanel_docker_manager::{Network, Tmpfs, VolumeMount};
 use dhpanel_domain::TenantUsername;
-use dhpanel_node_protocol::{AgentError, ErrorCode, Operation, Output};
+use dhpanel_node_protocol::{
+    AgentError, ErrorCode, Operation, Output, WpCommand, WpItem, WpOverview,
+};
 use dhpanel_tenant_stack::{Allowlist, Role, files_volume_name, network_name};
 
 use super::{
@@ -113,7 +115,7 @@ pub async fn install_as(
     use std::os::unix::fs::PermissionsExt as _;
     let Operation::InstallWordPress {
         app_id,
-        tenant_id,
+        tenant_id: _,
         username,
         uid: _,
         path,
@@ -210,22 +212,23 @@ pub async fn install_as(
         cleanup(&secrets);
         return Err(failed(&format!("cannot write the secrets: {}", e.kind())));
     }
+    let env: Vec<(String, String)> = [
+        ("WP_VERSION", version.as_deref().unwrap_or("")),
+        ("WP_LOCALE", locale.as_deref().unwrap_or("")),
+        ("DB_NAME", database.name.as_str()),
+        ("DB_USER", database.user.as_str()),
+        ("DB_HOST", "db"),
+        ("SITE_URL", site.url.as_str()),
+        ("SITE_TITLE", site.title.as_str()),
+        ("ADMIN_USER", site.admin_user.as_str()),
+        ("ADMIN_EMAIL", site.admin_email.as_str()),
+        ("PLUGINS", plugins.join(" ").as_str()),
+    ]
+    .iter()
+    .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+    .collect();
     let outcome = run(
-        &context,
-        &username,
-        tenant_id,
-        &secrets,
-        short,
-        image,
-        run_as,
-        &Settings {
-            path: &path,
-            database: &database,
-            site: &site,
-            version: version.as_deref().unwrap_or(""),
-            locale: locale.as_deref().unwrap_or(""),
-            plugins: &plugins.join(" "),
-        },
+        &context, &username, &secrets, short, image, run_as, &path, SCRIPT, env, LIMIT,
     )
     .await;
     cleanup(&secrets);
@@ -276,27 +279,19 @@ pub async fn install_as(
     Ok(Output::WordPressInstalled { version })
 }
 
-struct Settings<'a> {
-    path: &'a str,
-    database: &'a dhpanel_node_protocol::WpDatabase,
-    site: &'a dhpanel_node_protocol::WpSite,
-    version: &'a str,
-    locale: &'a str,
-    plugins: &'a str,
-}
-
 #[allow(clippy::too_many_arguments)]
 async fn run(
     context: &TenantContext,
     username: &TenantUsername,
-    tenant_id: uuid::Uuid,
     secrets: &Path,
     short: &str,
     image: dhpanel_docker_manager::ImageRef,
     run_as: (u32, u32),
-    s: &Settings<'_>,
+    path: &str,
+    script: &str,
+    env: Vec<(String, String)>,
+    limit: Duration,
 ) -> Result<dhpanel_docker_manager::CommandResult, AgentError> {
-    let _ = tenant_id;
     let state_dir = state(context)?;
     let secrets_volume = db::name(&format!("dh-wpi-{short}"))?;
     context
@@ -309,7 +304,7 @@ async fn run(
     let mut spec = base_spec(
         db::name(&format!("dh-wpi-{short}"))?,
         image,
-        &["sh", "-c", SCRIPT],
+        &["sh", "-c", script],
     );
     spec.cap_add = Vec::new();
     spec.user = Some(run_as);
@@ -332,42 +327,337 @@ async fn run(
             read_only: true,
         },
     ];
-    let folder = if s.path.is_empty() {
+    let folder = if path.is_empty() {
         "/var/www/html".to_owned()
     } else {
-        format!("/var/www/html/{}", s.path)
+        format!("/var/www/html/{path}")
     };
-    let env = [
+    spec.env = [
         ("HOME", "/tmp"),
         ("WP_CLI_CACHE_DIR", "/tmp/wp-cache"),
         ("WP_PATH", folder.as_str()),
         ("WP_EXTRA", if run_as.0 == 0 { "--allow-root" } else { "" }),
-        ("WP_VERSION", s.version),
-        ("WP_LOCALE", s.locale),
-        ("DB_NAME", s.database.name.as_str()),
-        ("DB_USER", s.database.user.as_str()),
-        ("DB_HOST", "db"),
-        ("SITE_URL", s.site.url.as_str()),
-        ("SITE_TITLE", s.site.title.as_str()),
-        ("ADMIN_USER", s.site.admin_user.as_str()),
-        ("ADMIN_EMAIL", s.site.admin_email.as_str()),
-        ("PLUGINS", s.plugins),
-    ];
-    spec.env = env
-        .iter()
-        .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
-        .collect();
+    ]
+    .iter()
+    .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+    .chain(env)
+    .collect();
     let _ = context.docker.remove(&spec.name, true).await;
     context
         .docker
-        .run_to_end(&spec, LIMIT)
+        .run_to_end(&spec, limit)
         .await
         .map_err(|e| docker_error(&e))
 }
 
+/// The part of the script every management command starts with.
+const MANAGE_HEAD: &str = r#"
+set -eu
+W="php -d memory_limit=512M /usr/local/bin/wp --path=$WP_PATH $WP_EXTRA"
+if [ ! -e "$WP_PATH/wp-load.php" ]; then
+  echo "There is no WordPress in that folder" >&2
+  exit 4
+fi
+"#;
+
+const OVERVIEW: &str = r#"
+echo "DH_CORE=$($W core version)"
+echo "DH_UPDATE=$($W core check-update --field=version 2>/dev/null | head -1 || true)"
+echo "DH_MAINT=$($W maintenance-mode status 2>&1 | head -1 || true)"
+echo "DH_PLUGINS"
+$W plugin list --fields=name,status,version,update,update_version --format=json
+echo
+echo "DH_THEMES"
+$W theme list --fields=name,status,version,update,update_version --format=json
+echo
+"#;
+
+fn manage_script(command: &WpCommand) -> String {
+    let body = match command {
+        WpCommand::Overview => OVERVIEW,
+        WpCommand::UpdatePlugins { slug: Some(_) } => r#"$W plugin update "$WP_SLUG" 2>&1"#,
+        WpCommand::UpdatePlugins { slug: None } => "$W plugin update --all 2>&1",
+        WpCommand::UpdateThemes { slug: Some(_) } => r#"$W theme update "$WP_SLUG" 2>&1"#,
+        WpCommand::UpdateThemes { slug: None } => "$W theme update --all 2>&1",
+        WpCommand::UpdateCore { version: Some(_) } => {
+            r#"$W core update --version="$WP_VERSION" 2>&1; $W core update-db 2>&1"#
+        }
+        WpCommand::UpdateCore { version: None } => "$W core update 2>&1; $W core update-db 2>&1",
+        WpCommand::Maintenance { on: true } => "$W maintenance-mode activate 2>&1",
+        WpCommand::Maintenance { on: false } => "$W maintenance-mode deactivate 2>&1",
+        WpCommand::ResetAdminPassword { .. } => {
+            r#"$W user update "$WP_USER" --user_pass="$(cat /run/dh/adminpass)" 2>&1"#
+        }
+    };
+    format!("{MANAGE_HEAD}{body}")
+}
+
+/// A line that is a JSON list of objects (PHP's own `[date] PHP Notice` lines are not).
+fn is_list(line: &str) -> bool {
+    line == "[]" || line.starts_with("[{")
+}
+
+/// Reads the overview script's output.
+///
+/// # Errors
+/// The text is not what the script prints.
+pub fn parse_overview(output: &str) -> Result<WpOverview, String> {
+    let mut core = String::new();
+    let mut update = String::new();
+    let mut maintenance = false;
+    let mut section = "";
+    let (mut plugins, mut themes) = (String::new(), String::new());
+    for line in output.lines() {
+        if let Some(v) = line.strip_prefix("DH_CORE=") {
+            core = v.trim().to_owned();
+        } else if let Some(v) = line.strip_prefix("DH_UPDATE=") {
+            update = v.trim().to_owned();
+        } else if let Some(v) = line.strip_prefix("DH_MAINT=") {
+            maintenance = v.to_ascii_lowercase().contains("is active");
+        } else if line == "DH_PLUGINS" {
+            section = "plugins";
+        } else if line == "DH_THEMES" {
+            section = "themes";
+        } else if section == "plugins" && is_list(line) {
+            // (Warnings and notices WP-CLI or PHP print around the list are not part of it.)
+            plugins.push_str(line);
+        } else if section == "themes" && is_list(line) {
+            themes.push_str(line);
+        }
+    }
+    let items = |json: &str| -> Result<Vec<WpItem>, String> {
+        let list: Vec<serde_json::Value> = serde_json::from_str(json).map_err(|e| {
+            format!(
+                "unreadable list: {e}: {}",
+                json.chars()
+                    .filter(|c| !c.is_control())
+                    .take(400)
+                    .collect::<String>()
+            )
+        })?;
+        Ok(list
+            .iter()
+            .take(500)
+            .map(|v| {
+                let text = |k: &str| {
+                    v.get(k)
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("")
+                        .chars()
+                        .filter(|c| !c.is_control())
+                        .take(100)
+                        .collect::<String>()
+                };
+                WpItem {
+                    name: text("name"),
+                    status: text("status"),
+                    version: text("version"),
+                    update_available: text("update") == "available",
+                    update_version: text("update_version"),
+                }
+            })
+            .collect())
+    };
+    if core.is_empty() {
+        return Err("no core version".into());
+    }
+    Ok(WpOverview {
+        core,
+        core_update: (!update.is_empty()).then_some(update),
+        maintenance,
+        plugins: items(&plugins)?,
+        themes: items(&themes)?,
+    })
+}
+
+/// `run_wp_cli`.
+///
+/// # Errors
+/// [`AgentError`]: bad arguments or no WordPress there (not retryable), Docker or the image
+/// failing (retryable), WP-CLI ending badly (the last of what it said, without the password).
+pub async fn run_wp_cli(context: Arc<TenantContext>, op: Operation) -> Result<Output, AgentError> {
+    let uid = match &op {
+        Operation::RunWpCli { uid, .. } => *uid,
+        _ => return Err(super::wrong_operation()),
+    };
+    manage_as(context, op, (uid, uid)).await
+}
+
+/// [`run_wp_cli`] running as the given user (a test passes another one).
+///
+/// # Errors
+/// As [`run_wp_cli`].
+pub async fn manage_as(
+    context: Arc<TenantContext>,
+    op: Operation,
+    run_as: (u32, u32),
+) -> Result<Output, AgentError> {
+    use std::os::unix::fs::PermissionsExt as _;
+    let Operation::RunWpCli {
+        app_id,
+        tenant_id: _,
+        username,
+        uid: _,
+        path,
+        command,
+        password,
+    } = op
+    else {
+        return Err(super::wrong_operation());
+    };
+    let username = TenantUsername::parse(&username).map_err(|e| invalid(&e.to_string()))?;
+    if !plain_folder(&path) {
+        return Err(invalid("the folder must stay inside the tenant's files"));
+    }
+    let mut env: Vec<(String, String)> = Vec::new();
+    let mut secret: Option<String> = None;
+    match &command {
+        WpCommand::UpdatePlugins { slug: Some(slug) }
+        | WpCommand::UpdateThemes { slug: Some(slug) } => {
+            if !plain(slug, 100, "-_.") {
+                return Err(invalid("a plugin or theme name is not valid"));
+            }
+            env.push(("WP_SLUG".into(), slug.clone()));
+        }
+        WpCommand::UpdateCore { version: Some(v) } => {
+            if !(plain(v, 20, ".") && v.starts_with(|c: char| c.is_ascii_digit())) {
+                return Err(invalid("the version is not valid"));
+            }
+            env.push(("WP_VERSION".into(), v.clone()));
+        }
+        WpCommand::ResetAdminPassword { user } => {
+            let Some(password) = password else {
+                return Err(invalid("the password is missing"));
+            };
+            if !plain(user, 60, "_.-")
+                || password.0.chars().count() < 12
+                || password.0.len() > 128
+                || password.0.chars().any(char::is_control)
+            {
+                return Err(invalid("the user or the password is not valid"));
+            }
+            env.push(("WP_USER".into(), user.clone()));
+            secret = Some(password.0);
+        }
+        _ => {}
+    }
+    let allowlist = Allowlist::embedded().map_err(|e| failed(&format!("the image list: {e}")))?;
+    let image = allowlist
+        .current(Role::Wpcli)
+        .map_err(|e| failed(&e.to_string()))?
+        .clone();
+    context
+        .docker
+        .pull_image(&image)
+        .await
+        .map_err(|e| docker_error(&e))?;
+    let short = format!("{}m", &app_id.simple().to_string()[..11]);
+    let secrets = state(&context)?.join("wpcli").join(&short);
+    let _ = std::fs::remove_dir_all(&secrets);
+    std::fs::create_dir_all(&secrets)
+        .map_err(|e| failed(&format!("cannot make the folder: {e}")))?;
+    let written = (|| -> std::io::Result<()> {
+        std::fs::set_permissions(&secrets, std::fs::Permissions::from_mode(0o755))?;
+        if let Some(text) = &secret {
+            let file = secrets.join("adminpass");
+            std::fs::write(&file, text)?;
+            std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644))?;
+        }
+        Ok(())
+    })();
+    if let Err(e) = written {
+        let _ = std::fs::remove_dir_all(&secrets);
+        return Err(failed(&format!("cannot write the secret: {}", e.kind())));
+    }
+    let limit = match command {
+        WpCommand::Overview
+        | WpCommand::Maintenance { .. }
+        | WpCommand::ResetAdminPassword { .. } => Duration::from_secs(120),
+        _ => Duration::from_secs(600),
+    };
+    let outcome = run(
+        &context,
+        &username,
+        &secrets,
+        &short,
+        image,
+        run_as,
+        &path,
+        &manage_script(&command),
+        env,
+        limit,
+    )
+    .await;
+    let _ = std::fs::remove_dir_all(&secrets);
+    let _ = context
+        .docker
+        .remove_volume(&db::name(&format!("dh-wpi-{short}"))?)
+        .await;
+    let done = outcome?;
+    let scrub = |text: &str| match &secret {
+        Some(s) => text.replace(s.as_str(), "***"),
+        None => text.to_owned(),
+    };
+    if done.exit_code != 0 {
+        let tail: String = scrub(&done.output)
+            .lines()
+            .rev()
+            .take(4)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect::<Vec<_>>()
+            .join(" | ")
+            .chars()
+            .filter(|c| !c.is_control())
+            .take(400)
+            .collect();
+        let code = if done.exit_code == 4 {
+            ErrorCode::InvalidArguments
+        } else {
+            ErrorCode::Internal
+        };
+        return Err(AgentError::new(
+            code,
+            format!("WP-CLI ended with {}: {tail}", done.exit_code),
+        ));
+    }
+    if matches!(command, WpCommand::Overview) {
+        return parse_overview(&done.output)
+            .map(Output::WordPressOverview)
+            .map_err(|e| failed(&format!("the overview is unreadable: {e}")));
+    }
+    let tail: String = scrub(&done.output)
+        .chars()
+        .rev()
+        .take(4000)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .filter(|c| !c.is_control() || *c == '\n')
+        .collect();
+    Ok(Output::WpCliDone { output: tail })
+}
+
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_overview_is_read() {
+        let text = "DH_CORE=6.4.3\nDH_UPDATE=6.8.1\nDH_MAINT=Maintenance mode is not active.\nDH_PLUGINS\n[{\"name\":\"akismet\",\"status\":\"active\",\"version\":\"5.0\",\"update\":\"available\",\"update_version\":\"5.3\"}]\nDH_THEMES\n[{\"name\":\"twentytwentyfour\",\"status\":\"inactive\",\"version\":\"1.1\",\"update\":\"none\",\"update_version\":\"\"}]\n";
+        let o = parse_overview(text).unwrap();
+        assert_eq!(
+            (o.core.as_str(), o.core_update.as_deref(), o.maintenance),
+            ("6.4.3", Some("6.8.1"), false)
+        );
+        assert!(o.plugins[0].update_available && o.plugins[0].update_version == "5.3");
+        assert!(!o.themes[0].update_available);
+        assert!(parse_overview("nothing").is_err());
+        let on = parse_overview("DH_CORE=6.8\nDH_UPDATE=\nDH_MAINT=Maintenance mode is active.\nDH_PLUGINS\n[]\nDH_THEMES\n[]\n").unwrap();
+        assert!(on.maintenance && on.core_update.is_none());
+    }
 
     #[test]
     fn only_plain_values_pass() {

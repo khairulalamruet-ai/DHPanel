@@ -472,6 +472,7 @@ pub fn mount(
                             db: db.clone(),
                             sessions: sessions.clone(),
                             master_key: master_key.clone(),
+                            wait: dhpanel_mod_apps::DEFAULT_WAIT,
                         };
                         ModuleRoutes {
                             admin: Some(dhpanel_mod_apps::admin_router().with_state(state.clone())),

@@ -10484,6 +10484,527 @@
         ]
       }
     },
+    "/api/v1/client/apps/{id}/operations/{op}": {
+      "get": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "The answer of an action that was still running.",
+        "operationId": "clientAppOperation",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Application id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "op",
+            "in": "path",
+            "description": "Operation id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Its state and answer",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WpAnswer"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not the account's",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/apps/{id}/wordpress": {
+      "get": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "The versions of a WordPress site's core, plugins and themes, what has an update, and\nwhether maintenance mode is on.",
+        "operationId": "clientWordPressOverview",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Application id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The overview",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WpAnswer"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The node is slow: ask `operations/{operation_id}`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Pending"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not the account's WordPress",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`app_not_ready`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/apps/{id}/wordpress/admin-password": {
+      "post": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "Set a WordPress user's password.",
+        "operationId": "clientWordPressAdminPassword",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Application id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WpNewPassword"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Done",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WpAnswer"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Still running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Pending"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not the account's WordPress",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A user or password that is not valid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/apps/{id}/wordpress/core/update": {
+      "post": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "Update WordPress itself (to a version, or the latest).",
+        "operationId": "clientWordPressUpdateCore",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Application id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WpVersion"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Done",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WpAnswer"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Still running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Pending"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not the account's WordPress",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/apps/{id}/wordpress/maintenance": {
+      "post": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "Switch maintenance mode on or off.",
+        "operationId": "clientWordPressMaintenance",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Application id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WpMaintenance"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Done",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WpAnswer"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Still running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Pending"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not the account's WordPress",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/apps/{id}/wordpress/plugins/update": {
+      "post": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "Update one plugin, or all of them.",
+        "operationId": "clientWordPressUpdatePlugins",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Application id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WpSlug"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Done",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WpAnswer"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Still running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Pending"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not the account's WordPress",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/apps/{id}/wordpress/themes/update": {
+      "post": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "Update one theme, or all of them.",
+        "operationId": "clientWordPressUpdateThemes",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Application id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WpSlug"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Done",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WpAnswer"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Still running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Pending"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not the account's WordPress",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/client/backup-exports": {
       "get": {
         "tags": [
@@ -25878,6 +26399,44 @@
           }
         }
       },
+      "WpAnswer": {
+        "type": "object",
+        "description": "The answer of a WordPress action.",
+        "required": [
+          "state"
+        ],
+        "properties": {
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it failed."
+          },
+          "output": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What WP-CLI said (for the other actions)."
+          },
+          "overview": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/WpOverview",
+                "description": "The versions and updates (for the overview)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "type": "string",
+            "description": "`running`, `done` or `failed`."
+          }
+        }
+      },
       "WpComponent": {
         "type": "object",
         "description": "A WordPress plugin or theme and the version it says it is.",
@@ -25928,6 +26487,143 @@
               "$ref": "#/components/schemas/WpComponent"
             },
             "description": "The themes."
+          }
+        },
+        "additionalProperties": false
+      },
+      "WpItem": {
+        "type": "object",
+        "description": "A plugin or theme of a site.",
+        "required": [
+          "name",
+          "status",
+          "version",
+          "update_available",
+          "update_version"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Its folder name."
+          },
+          "status": {
+            "type": "string",
+            "description": "`active`, `inactive`, `must-use`, ..."
+          },
+          "update_available": {
+            "type": "boolean",
+            "description": "A newer version exists."
+          },
+          "update_version": {
+            "type": "string",
+            "description": "That version."
+          },
+          "version": {
+            "type": "string",
+            "description": "The version installed."
+          }
+        },
+        "additionalProperties": false
+      },
+      "WpMaintenance": {
+        "type": "object",
+        "description": "Maintenance mode on or off.",
+        "required": [
+          "on"
+        ],
+        "properties": {
+          "on": {
+            "type": "boolean",
+            "description": "On or off."
+          }
+        },
+        "additionalProperties": false
+      },
+      "WpNewPassword": {
+        "type": "object",
+        "description": "A new password for a WordPress user.",
+        "required": [
+          "user",
+          "password"
+        ],
+        "properties": {
+          "password": {
+            "type": "string",
+            "description": "The new password (12 to 128 characters)."
+          },
+          "user": {
+            "type": "string",
+            "description": "The user's login."
+          }
+        },
+        "additionalProperties": false
+      },
+      "WpOverview": {
+        "type": "object",
+        "description": "What a WordPress site is made of.",
+        "required": [
+          "core",
+          "maintenance",
+          "plugins",
+          "themes"
+        ],
+        "properties": {
+          "core": {
+            "type": "string",
+            "description": "The core's version."
+          },
+          "core_update": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The version the core can be updated to, when there is one."
+          },
+          "maintenance": {
+            "type": "boolean",
+            "description": "Maintenance mode is on."
+          },
+          "plugins": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WpItem"
+            },
+            "description": "The plugins."
+          },
+          "themes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WpItem"
+            },
+            "description": "The themes."
+          }
+        },
+        "additionalProperties": false
+      },
+      "WpSlug": {
+        "type": "object",
+        "description": "A plugin or theme to update (all when absent).",
+        "properties": {
+          "slug": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Its folder name."
+          }
+        },
+        "additionalProperties": false
+      },
+      "WpVersion": {
+        "type": "object",
+        "description": "A WordPress version to update to (the latest when absent).",
+        "properties": {
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Such as `6.8.2`."
           }
         },
         "additionalProperties": false

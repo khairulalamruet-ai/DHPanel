@@ -5,6 +5,10 @@
 //! | GET | `/api/v1/client/apps[?domain_id=]` | the owner |
 //! | GET | `/api/v1/client/apps/{id}` | the owner |
 //! | POST | `/api/v1/client/apps/wordpress` | the owner; the `databases` feature |
+//! | GET | `/api/v1/client/apps/{id}/wordpress` | the owner (versions, updates) |
+//! | POST | `/api/v1/client/apps/{id}/wordpress/{plugins,themes,core}/update` | the owner |
+//! | POST | `/api/v1/client/apps/{id}/wordpress/{maintenance,admin-password}` | the owner |
+//! | GET | `/api/v1/client/apps/{id}/operations/{op}` | the owner (the answer of a slow action) |
 //! | GET | `/api/v1/admin/tenants/{id}/apps` | `admin.apps.read` |
 //!
 //! An application is a catalog kind (WordPress, Joomla, a Node.js app, ...) at a place: a
@@ -49,7 +53,12 @@ pub struct AppsState {
     pub sessions: SessionStore,
     /// Seals the passwords an install needs.
     pub master_key: MasterKey,
+    /// How long a request waits for the node before answering `202`.
+    pub wait: std::time::Duration,
 }
+
+/// How long a request waits for the node by default.
+pub const DEFAULT_WAIT: std::time::Duration = std::time::Duration::from_secs(20);
 
 impl FromRef<AppsState> for PgPool {
     fn from_ref(s: &AppsState) -> Self {
@@ -71,6 +80,31 @@ pub fn client_router() -> Router<AppsState> {
         .route(
             "/api/v1/client/apps/wordpress",
             axum::routing::post(install_wordpress),
+        )
+        .route("/api/v1/client/apps/{id}/wordpress", get(wp_overview))
+        .route(
+            "/api/v1/client/apps/{id}/wordpress/plugins/update",
+            axum::routing::post(wp_update_plugins),
+        )
+        .route(
+            "/api/v1/client/apps/{id}/wordpress/themes/update",
+            axum::routing::post(wp_update_themes),
+        )
+        .route(
+            "/api/v1/client/apps/{id}/wordpress/core/update",
+            axum::routing::post(wp_update_core),
+        )
+        .route(
+            "/api/v1/client/apps/{id}/wordpress/maintenance",
+            axum::routing::post(wp_maintenance),
+        )
+        .route(
+            "/api/v1/client/apps/{id}/wordpress/admin-password",
+            axum::routing::post(wp_admin_password),
+        )
+        .route(
+            "/api/v1/client/apps/{id}/operations/{op}",
+            get(wp_operation),
         )
 }
 
@@ -596,11 +630,421 @@ async fn queue_setup(
     Ok(())
 }
 
+// ------------------------------------------------------------------ WordPress manager
+
+/// The answer of a WordPress action.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct WpAnswer {
+    /// `running`, `done` or `failed`.
+    pub state: String,
+    /// The versions and updates (for the overview).
+    pub overview: Option<dhpanel_node_protocol::WpOverview>,
+    /// What WP-CLI said (for the other actions).
+    pub output: Option<String>,
+    /// Why it failed.
+    pub error: Option<String>,
+}
+
+/// An action that is still running: ask again with the operation's id.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct Pending {
+    /// The operation to ask about.
+    pub operation_id: Uuid,
+}
+
+/// A plugin or theme to update (all when absent).
+#[derive(Debug, Default, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WpSlug {
+    /// Its folder name.
+    #[serde(default)]
+    pub slug: Option<String>,
+}
+
+/// A WordPress version to update to (the latest when absent).
+#[derive(Debug, Default, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WpVersion {
+    /// Such as `6.8.2`.
+    #[serde(default)]
+    pub version: Option<String>,
+}
+
+/// Maintenance mode on or off.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WpMaintenance {
+    /// On or off.
+    pub on: bool,
+}
+
+/// A new password for a WordPress user.
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WpNewPassword {
+    /// The user's login.
+    pub user: String,
+    /// The new password (12 to 128 characters).
+    pub password: String,
+}
+
+impl std::fmt::Debug for WpNewPassword {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WpNewPassword")
+            .field("user", &self.user)
+            .finish_non_exhaustive()
+    }
+}
+
+fn answer_of(row: &dhpanel_database::operations::Operation) -> Option<WpAnswer> {
+    use dhpanel_database::operations::Status;
+    match row.status {
+        Status::Succeeded => {
+            let output: dhpanel_node_protocol::Output = row
+                .output
+                .clone()
+                .and_then(|o| serde_json::from_value(o).ok())?;
+            Some(match output {
+                dhpanel_node_protocol::Output::WordPressOverview(o) => WpAnswer {
+                    state: "done".into(),
+                    overview: Some(o),
+                    output: None,
+                    error: None,
+                },
+                dhpanel_node_protocol::Output::WpCliDone { output } => WpAnswer {
+                    state: "done".into(),
+                    overview: None,
+                    output: Some(output),
+                    error: None,
+                },
+                _ => return None,
+            })
+        }
+        Status::Failed => Some(WpAnswer {
+            state: "failed".into(),
+            overview: None,
+            output: None,
+            error: Some(
+                row.error
+                    .as_ref()
+                    .and_then(|e| e.get("message"))
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("the action failed")
+                    .to_owned(),
+            ),
+        }),
+        Status::Pending | Status::Dispatched | Status::Retryable => None,
+    }
+}
+
+/// Runs one WP-CLI action on an active WordPress application of the account and waits a
+/// little for the answer.
+async fn run_wp(
+    state: &AppsState,
+    who: &Principal,
+    app_id: Uuid,
+    command: dhpanel_node_protocol::WpCommand,
+    password: Option<&str>,
+) -> Result<axum::response::Response, AppError> {
+    use axum::response::IntoResponse as _;
+    let tenant = client_tenant(state, who).await?;
+    let app = store::get(&state.db, tenant.id, app_id)
+        .await
+        .map_err(internal)?
+        .filter(|a| a.kind == "wordpress")
+        .ok_or_else(|| AppError::not_found("app"))?;
+    if app.status != "active" {
+        return Err(AppError::conflict(
+            "app_not_ready",
+            "This WordPress is not installed (yet).",
+        ));
+    }
+    if tenant.status.as_str() != "active" {
+        return Err(AppError::conflict(
+            "tenant_not_running",
+            "Only a running account can change its applications.",
+        ));
+    }
+    let folder = app.path.trim_start_matches('/').to_owned();
+    if let Some(p) = password {
+        let sealed = state
+            .master_key
+            .seal(&store::secret_context(app.id, "admin_reset"), p.as_bytes())
+            .map_err(internal)?;
+        let mut conn = state.db.acquire().await.map_err(internal)?;
+        store::keep_secret(&mut conn, app.id, "admin_reset", &sealed)
+            .await
+            .map_err(internal)?;
+    }
+    let op = Operation::RunWpCli {
+        app_id: app.id,
+        tenant_id: tenant.id,
+        username: tenant.username.clone(),
+        uid: u32::try_from(tenant.uid).unwrap_or_default(),
+        path: folder,
+        command: command.clone(),
+        password: None::<DbPassword>,
+    };
+    let payload = serde_json::to_value(&op).map_err(internal)?;
+    let queued = operations::enqueue(
+        &state.db,
+        &NewOperation {
+            node_id: tenant.node_id,
+            kind: op.type_name(),
+            tenant_id: Some(tenant.id),
+            payload: &payload,
+            idempotency_key: &format!("wp:{}", Uuid::new_v4().simple()),
+            created_by: Some(who.account_id()),
+            ttl_secs: 900,
+            max_attempts: 1,
+        },
+    )
+    .await
+    .map_err(|e| match e {
+        EnqueueError::UnknownNode => AppError::conflict(
+            "node_unavailable",
+            "The node of this account no longer exists.",
+        ),
+        other => internal(other),
+    })?;
+    let id = queued.operation().id;
+    let started = std::time::Instant::now();
+    loop {
+        let row = operations::get(&state.db, id)
+            .await
+            .map_err(internal)?
+            .ok_or_else(|| AppError::not_found("operation"))?;
+        if let Some(answer) = answer_of(&row) {
+            if password.is_some() {
+                let _ = store::forget_secret(&state.db, app.id, "admin_reset").await;
+            }
+            return Ok(Json(answer).into_response());
+        }
+        if started.elapsed() >= state.wait {
+            return Ok((StatusCode::ACCEPTED, Json(Pending { operation_id: id })).into_response());
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+}
+
+/// The versions of a WordPress site's core, plugins and themes, what has an update, and
+/// whether maintenance mode is on.
+#[utoipa::path(get, path = "/api/v1/client/apps/{id}/wordpress", tag = "apps", operation_id = "clientWordPressOverview",
+    security(("session" = [])), params(("id" = Uuid, Path, description = "Application id")),
+    responses((status = 200, description = "The overview", body = WpAnswer),
+              (status = 202, description = "The node is slow: ask `operations/{operation_id}`", body = Pending),
+              (status = 404, description = "Not the account's WordPress", body = ProblemDetails, content_type = "application/problem+json"),
+              (status = 409, description = "`app_not_ready`", body = ProblemDetails, content_type = "application/problem+json")))]
+pub async fn wp_overview(
+    State(state): State<AppsState>,
+    who: Principal,
+    Path(id): Path<Uuid>,
+) -> Result<axum::response::Response, AppError> {
+    run_wp(
+        &state,
+        &who,
+        id,
+        dhpanel_node_protocol::WpCommand::Overview,
+        None,
+    )
+    .await
+}
+
+/// Update one plugin, or all of them.
+#[utoipa::path(post, path = "/api/v1/client/apps/{id}/wordpress/plugins/update", tag = "apps", operation_id = "clientWordPressUpdatePlugins",
+    security(("session" = [])), params(("id" = Uuid, Path, description = "Application id"), ("X-CSRF-Token" = String, Header, description = "The session's csrf_token")),
+    request_body = WpSlug,
+    responses((status = 200, description = "Done", body = WpAnswer), (status = 202, description = "Still running", body = Pending),
+              (status = 404, description = "Not the account's WordPress", body = ProblemDetails, content_type = "application/problem+json")))]
+pub async fn wp_update_plugins(
+    State(state): State<AppsState>,
+    who: Principal,
+    Path(id): Path<Uuid>,
+    Json(req): Json<WpSlug>,
+) -> Result<axum::response::Response, AppError> {
+    if req
+        .slug
+        .as_deref()
+        .is_some_and(|s| !plain(s, 1, 100, "-_."))
+    {
+        return Err(bad("slug", "A plugin's folder name."));
+    }
+    run_wp(
+        &state,
+        &who,
+        id,
+        dhpanel_node_protocol::WpCommand::UpdatePlugins { slug: req.slug },
+        None,
+    )
+    .await
+}
+
+/// Update one theme, or all of them.
+#[utoipa::path(post, path = "/api/v1/client/apps/{id}/wordpress/themes/update", tag = "apps", operation_id = "clientWordPressUpdateThemes",
+    security(("session" = [])), params(("id" = Uuid, Path, description = "Application id"), ("X-CSRF-Token" = String, Header, description = "The session's csrf_token")),
+    request_body = WpSlug,
+    responses((status = 200, description = "Done", body = WpAnswer), (status = 202, description = "Still running", body = Pending),
+              (status = 404, description = "Not the account's WordPress", body = ProblemDetails, content_type = "application/problem+json")))]
+pub async fn wp_update_themes(
+    State(state): State<AppsState>,
+    who: Principal,
+    Path(id): Path<Uuid>,
+    Json(req): Json<WpSlug>,
+) -> Result<axum::response::Response, AppError> {
+    if req
+        .slug
+        .as_deref()
+        .is_some_and(|s| !plain(s, 1, 100, "-_."))
+    {
+        return Err(bad("slug", "A theme's folder name."));
+    }
+    run_wp(
+        &state,
+        &who,
+        id,
+        dhpanel_node_protocol::WpCommand::UpdateThemes { slug: req.slug },
+        None,
+    )
+    .await
+}
+
+/// Update WordPress itself (to a version, or the latest).
+#[utoipa::path(post, path = "/api/v1/client/apps/{id}/wordpress/core/update", tag = "apps", operation_id = "clientWordPressUpdateCore",
+    security(("session" = [])), params(("id" = Uuid, Path, description = "Application id"), ("X-CSRF-Token" = String, Header, description = "The session's csrf_token")),
+    request_body = WpVersion,
+    responses((status = 200, description = "Done", body = WpAnswer), (status = 202, description = "Still running", body = Pending),
+              (status = 404, description = "Not the account's WordPress", body = ProblemDetails, content_type = "application/problem+json")))]
+pub async fn wp_update_core(
+    State(state): State<AppsState>,
+    who: Principal,
+    Path(id): Path<Uuid>,
+    Json(req): Json<WpVersion>,
+) -> Result<axum::response::Response, AppError> {
+    if req
+        .version
+        .as_deref()
+        .is_some_and(|v| !(plain(v, 1, 20, ".") && v.starts_with(|c: char| c.is_ascii_digit())))
+    {
+        return Err(bad("version", "A version such as 6.8.2."));
+    }
+    run_wp(
+        &state,
+        &who,
+        id,
+        dhpanel_node_protocol::WpCommand::UpdateCore {
+            version: req.version,
+        },
+        None,
+    )
+    .await
+}
+
+/// Switch maintenance mode on or off.
+#[utoipa::path(post, path = "/api/v1/client/apps/{id}/wordpress/maintenance", tag = "apps", operation_id = "clientWordPressMaintenance",
+    security(("session" = [])), params(("id" = Uuid, Path, description = "Application id"), ("X-CSRF-Token" = String, Header, description = "The session's csrf_token")),
+    request_body = WpMaintenance,
+    responses((status = 200, description = "Done", body = WpAnswer), (status = 202, description = "Still running", body = Pending),
+              (status = 404, description = "Not the account's WordPress", body = ProblemDetails, content_type = "application/problem+json")))]
+pub async fn wp_maintenance(
+    State(state): State<AppsState>,
+    who: Principal,
+    Path(id): Path<Uuid>,
+    Json(req): Json<WpMaintenance>,
+) -> Result<axum::response::Response, AppError> {
+    run_wp(
+        &state,
+        &who,
+        id,
+        dhpanel_node_protocol::WpCommand::Maintenance { on: req.on },
+        None,
+    )
+    .await
+}
+
+/// Set a WordPress user's password.
+#[utoipa::path(post, path = "/api/v1/client/apps/{id}/wordpress/admin-password", tag = "apps", operation_id = "clientWordPressAdminPassword",
+    security(("session" = [])), params(("id" = Uuid, Path, description = "Application id"), ("X-CSRF-Token" = String, Header, description = "The session's csrf_token")),
+    request_body = WpNewPassword,
+    responses((status = 200, description = "Done", body = WpAnswer), (status = 202, description = "Still running", body = Pending),
+              (status = 404, description = "Not the account's WordPress", body = ProblemDetails, content_type = "application/problem+json"),
+              (status = 422, description = "A user or password that is not valid", body = ProblemDetails, content_type = "application/problem+json")))]
+pub async fn wp_admin_password(
+    State(state): State<AppsState>,
+    who: Principal,
+    Path(id): Path<Uuid>,
+    Json(req): Json<WpNewPassword>,
+) -> Result<axum::response::Response, AppError> {
+    if !plain(&req.user, 1, 60, "_.-") {
+        return Err(bad("user", "A WordPress login."));
+    }
+    if req.password.chars().count() < 12
+        || req.password.len() > 128
+        || req.password.chars().any(char::is_control)
+    {
+        return Err(bad("password", "12 to 128 characters."));
+    }
+    run_wp(
+        &state,
+        &who,
+        id,
+        dhpanel_node_protocol::WpCommand::ResetAdminPassword { user: req.user },
+        Some(&req.password),
+    )
+    .await
+}
+
+/// The answer of an action that was still running.
+#[utoipa::path(get, path = "/api/v1/client/apps/{id}/operations/{op}", tag = "apps", operation_id = "clientAppOperation",
+    security(("session" = [])), params(("id" = Uuid, Path, description = "Application id"), ("op" = Uuid, Path, description = "Operation id")),
+    responses((status = 200, description = "Its state and answer", body = WpAnswer),
+              (status = 404, description = "Not the account's", body = ProblemDetails, content_type = "application/problem+json")))]
+pub async fn wp_operation(
+    State(state): State<AppsState>,
+    who: Principal,
+    Path((id, op)): Path<(Uuid, Uuid)>,
+) -> Result<Json<WpAnswer>, AppError> {
+    let tenant = client_tenant(&state, &who).await?;
+    store::get(&state.db, tenant.id, id)
+        .await
+        .map_err(internal)?
+        .ok_or_else(|| AppError::not_found("app"))?;
+    let row = operations::get(&state.db, op)
+        .await
+        .map_err(internal)?
+        .filter(|r| r.tenant_id == Some(tenant.id) && r.kind == "run_wp_cli")
+        .filter(|r| {
+            r.payload.get("app_id").and_then(serde_json::Value::as_str) == Some(&id.to_string())
+        })
+        .ok_or_else(|| AppError::not_found("operation"))?;
+    let answer = answer_of(&row);
+    if answer.is_some()
+        && row
+            .payload
+            .pointer("/command/type")
+            .and_then(serde_json::Value::as_str)
+            == Some("reset_admin_password")
+    {
+        let _ = store::forget_secret(&state.db, id, "admin_reset").await;
+    }
+    Ok(Json(answer.unwrap_or(WpAnswer {
+        state: "running".into(),
+        overview: None,
+        output: None,
+        error: None,
+    })))
+}
+
 /// The module's OpenAPI document.
 #[derive(OpenApi)]
 #[openapi(
-    paths(client_list, client_get, admin_list, install_wordpress),
-    components(schemas(AppView, AppList, InstallWordPress)),
+    paths(
+        client_list, client_get, admin_list, install_wordpress, wp_overview, wp_update_plugins,
+        wp_update_themes, wp_update_core, wp_maintenance, wp_admin_password, wp_operation
+    ),
+    components(schemas(
+        AppView, AppList, InstallWordPress, WpAnswer, WpSlug, WpVersion, WpMaintenance,
+        WpNewPassword, Pending, dhpanel_node_protocol::WpOverview, dhpanel_node_protocol::WpItem
+    )),
     tags((name = "apps", description = "Applications on domains and paths"))
 )]
 pub struct AppsApi;

@@ -99,6 +99,40 @@ pub fn operation_secrets(
                         plugins,
                     });
                 }
+                // A WordPress user's new password: sealed by the API, opened here for this
+                // one message.
+                Operation::RunWpCli {
+                    app_id,
+                    tenant_id,
+                    username,
+                    uid,
+                    path,
+                    command: command @ dhpanel_node_protocol::WpCommand::ResetAdminPassword { .. },
+                    password: None,
+                } => {
+                    let sealed = dhpanel_database::apps::sealed_secret(&db, app_id, "admin_reset")
+                        .await
+                        .map_err(|_| "could not read a password".to_owned())?
+                        .ok_or_else(|| "this password was used already".to_owned())?;
+                    let bytes = master_key
+                        .open(
+                            &dhpanel_database::apps::secret_context(app_id, "admin_reset"),
+                            &sealed,
+                        )
+                        .map_err(|_| "a password does not open".to_owned())?;
+                    return Ok(Operation::RunWpCli {
+                        app_id,
+                        tenant_id,
+                        username,
+                        uid,
+                        path,
+                        command,
+                        password: Some(dhpanel_node_protocol::DbPassword(
+                            String::from_utf8(bytes)
+                                .map_err(|_| "a password is not text".to_owned())?,
+                        )),
+                    });
+                }
                 // The download credential of an SQL import: sealed by the API, opened
                 // for this one message. Once the import has ended there is none, and
                 // the node's download (which would be refused anyway) is not tried.

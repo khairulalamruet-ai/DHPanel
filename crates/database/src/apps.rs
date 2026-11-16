@@ -250,6 +250,21 @@ pub async fn sealed_secret(
     .await
 }
 
+/// Forgets one secret of an application.
+///
+/// # Errors
+/// Database errors.
+pub async fn forget_secret(pool: &PgPool, app_id: Uuid, name: &str) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        "DELETE FROM app_secrets WHERE app_id = $1 AND name = $2",
+        app_id,
+        name
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 /// Forgets the secrets of an application.
 ///
 /// # Errors

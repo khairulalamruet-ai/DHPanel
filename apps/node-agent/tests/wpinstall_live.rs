@@ -6,8 +6,13 @@ use std::{path::PathBuf, sync::Arc, time::Instant};
 
 use dhpanel_docker_manager::{Capability, ContainerSpec, DockerManager, Name, Network};
 use dhpanel_domain::TenantUsername;
-use dhpanel_node_agent::ops::{tenant::TenantContext, wpinstall::install_as};
-use dhpanel_node_protocol::{DbPassword, ErrorCode, Operation, Output, WpDatabase, WpSite};
+use dhpanel_node_agent::ops::{
+    tenant::TenantContext,
+    wpinstall::{install_as, manage_as},
+};
+use dhpanel_node_protocol::{
+    DbPassword, ErrorCode, Operation, Output, WpCommand, WpDatabase, WpSite,
+};
 use dhpanel_tenant_stack::{Allowlist, Role, files_volume_name, network_name};
 use uuid::Uuid;
 
@@ -169,6 +174,151 @@ async fn wordpress_is_installed_in_a_tenants_files_within_two_minutes() {
             .read_dir()
             .map(|mut d| d.next().is_some())
             .unwrap_or(false)
+    );
+    // The manager: an old plugin is put in place by hand, the overview sees its update, the
+    // update is done, maintenance mode is switched, a password is reset.
+    let wpcli = allowlist.current(Role::Wpcli).unwrap().clone();
+    let mut old = ContainerSpec::new(Name::parse("dh-wpit-old").unwrap(), wpcli);
+    old.entrypoint = vec![
+        "sh".into(),
+        "-c".into(),
+        "php -d memory_limit=512M /usr/local/bin/wp --allow-root --path=/var/www/html/blog plugin install classic-editor --version=1.0 --force".into(),
+    ];
+    old.user = Some((0, 0));
+    old.memory_bytes = 1024 * 1024 * 1024;
+    old.writable_root = true;
+    old.network = Network::Named(network.clone());
+    old.volumes = vec![dhpanel_docker_manager::VolumeMount {
+        volume: files.clone(),
+        target: "/var/www/html".into(),
+        read_only: false,
+    }];
+    let _ = docker.remove(&old.name, true).await;
+    let put = docker
+        .run_to_end(&old, std::time::Duration::from_secs(120))
+        .await
+        .unwrap();
+    assert_eq!(put.exit_code, 0, "{}", put.output);
+    let manage = |command: WpCommand, password: Option<&str>| Operation::RunWpCli {
+        app_id: Uuid::now_v7(),
+        tenant_id: id,
+        username: "alice".into(),
+        uid: 10_000,
+        path: "blog".into(),
+        command,
+        password: password.map(|p| DbPassword(p.into())),
+    };
+    let Output::WordPressOverview(before) =
+        manage_as(context.clone(), manage(WpCommand::Overview, None), (0, 0))
+            .await
+            .unwrap()
+    else {
+        panic!("not an overview")
+    };
+    eprintln!("overview: {before:?}");
+    let plugin = before
+        .plugins
+        .iter()
+        .find(|p| p.name == "classic-editor")
+        .unwrap();
+    assert_eq!(plugin.version, "1.0");
+    assert!(plugin.update_available, "{plugin:?}");
+    assert!(!before.maintenance);
+    let done = manage_as(
+        context.clone(),
+        manage(
+            WpCommand::UpdatePlugins {
+                slug: Some("classic-editor".into()),
+            },
+            None,
+        ),
+        (0, 0),
+    )
+    .await
+    .unwrap();
+    assert!(matches!(done, Output::WpCliDone { .. }), "{done:?}");
+    let Output::WordPressOverview(after) =
+        manage_as(context.clone(), manage(WpCommand::Overview, None), (0, 0))
+            .await
+            .unwrap()
+    else {
+        panic!("not an overview")
+    };
+    let plugin = after
+        .plugins
+        .iter()
+        .find(|p| p.name == "classic-editor")
+        .unwrap();
+    assert!(
+        !plugin.update_available && plugin.version != "1.0",
+        "{plugin:?}"
+    );
+    manage_as(
+        context.clone(),
+        manage(WpCommand::Maintenance { on: true }, None),
+        (0, 0),
+    )
+    .await
+    .unwrap();
+    let Output::WordPressOverview(m) =
+        manage_as(context.clone(), manage(WpCommand::Overview, None), (0, 0))
+            .await
+            .unwrap()
+    else {
+        panic!()
+    };
+    assert!(m.maintenance);
+    manage_as(
+        context.clone(),
+        manage(WpCommand::Maintenance { on: false }, None),
+        (0, 0),
+    )
+    .await
+    .unwrap();
+    let reset = manage_as(
+        context.clone(),
+        manage(
+            WpCommand::ResetAdminPassword {
+                user: "boss".into(),
+            },
+            Some("A-brand-new-Admin-Pass-9"),
+        ),
+        (0, 0),
+    )
+    .await
+    .unwrap();
+    let Output::WpCliDone { output } = reset else {
+        panic!()
+    };
+    assert!(!output.contains("A-brand-new"), "{output}");
+    let bad = manage_as(
+        context.clone(),
+        manage(
+            WpCommand::ResetAdminPassword {
+                user: "boss".into(),
+            },
+            Some("short"),
+        ),
+        (0, 0),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(bad.code, ErrorCode::InvalidArguments);
+    let nowhere = Operation::RunWpCli {
+        app_id: Uuid::now_v7(),
+        tenant_id: id,
+        username: "alice".into(),
+        uid: 10_000,
+        path: "nothing-here".into(),
+        command: WpCommand::Overview,
+        password: None,
+    };
+    assert_eq!(
+        manage_as(context.clone(), nowhere, (0, 0))
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::InvalidArguments
     );
     // The same folder again is refused; a bad folder and a short password are refused first.
     let again = install_as(context.clone(), make("blog", vec![]), (0, 0))

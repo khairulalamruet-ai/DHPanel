@@ -167,6 +167,76 @@ pub struct WafSetting {
     pub disabled_rules: Vec<u32>,
 }
 
+/// What can be done to a WordPress site (each is a fixed WP-CLI command line).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum WpCommand {
+    /// Versions of the core, plugins and themes, which have updates, the maintenance state.
+    Overview,
+    /// Update one plugin, or all of them.
+    UpdatePlugins {
+        /// A plugin's folder name; all plugins when absent.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        slug: Option<String>,
+    },
+    /// Update one theme, or all of them.
+    UpdateThemes {
+        /// A theme's folder name; all themes when absent.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        slug: Option<String>,
+    },
+    /// Update the core (to a version, or the latest) and its database.
+    UpdateCore {
+        /// A version such as `6.8.2`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        version: Option<String>,
+    },
+    /// Switch maintenance mode on or off.
+    Maintenance {
+        /// On or off.
+        on: bool,
+    },
+    /// Set a user's password (given with the operation, not in it).
+    ResetAdminPassword {
+        /// The user's login.
+        user: String,
+    },
+}
+
+/// A plugin or theme of a site.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(deny_unknown_fields)]
+pub struct WpItem {
+    /// Its folder name.
+    pub name: String,
+    /// `active`, `inactive`, `must-use`, ...
+    pub status: String,
+    /// The version installed.
+    pub version: String,
+    /// A newer version exists.
+    pub update_available: bool,
+    /// That version.
+    pub update_version: String,
+}
+
+/// What a WordPress site is made of.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(deny_unknown_fields)]
+pub struct WpOverview {
+    /// The core's version.
+    pub core: String,
+    /// The version the core can be updated to, when there is one.
+    pub core_update: Option<String>,
+    /// Maintenance mode is on.
+    pub maintenance: bool,
+    /// The plugins.
+    pub plugins: Vec<WpItem>,
+    /// The themes.
+    pub themes: Vec<WpItem>,
+}
+
 /// The database a WordPress site uses (on the node's database server, reached as `db`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -1564,6 +1634,26 @@ pub enum Operation {
         #[serde(default)]
         plugins: Vec<String>,
     },
+    /// Looks at or changes a WordPress site with WP-CLI, in the same kind of one-off container
+    /// as [`Operation::InstallWordPress`]. Only the commands of [`WpCommand`] exist. Answered
+    /// with [`Output::WordPressOverview`] (for `overview`) or [`Output::WpCliDone`].
+    RunWpCli {
+        /// The application's id (the control plane finds a password by it).
+        app_id: Uuid,
+        /// The tenant.
+        tenant_id: Uuid,
+        /// The tenant's system name.
+        username: String,
+        /// The tenant's numeric user id.
+        uid: u32,
+        /// The folder under the tenant's `www` (empty: `www` itself).
+        path: String,
+        /// What to do.
+        command: WpCommand,
+        /// The new password of `reset_admin_password`; absent in the ledger, present on the wire.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        password: Option<DbPassword>,
+    },
     /// Looks for known vulnerabilities in an image with Trivy (it reads the image from its
     /// registry; no Docker socket is involved). Answered with [`Output::ImageScanned`].
     ScanImage {
@@ -1724,6 +1814,7 @@ impl Operation {
         "set_firewall_rules",
         "scan_tenant",
         "install_wordpress",
+        "run_wp_cli",
         "scan_image",
         "check_image_updates",
         "inventory_wordpress",
@@ -1802,6 +1893,7 @@ impl Operation {
             Self::SetFirewallRules { .. } => "set_firewall_rules",
             Self::ScanTenant { .. } => "scan_tenant",
             Self::InstallWordPress { .. } => "install_wordpress",
+            Self::RunWpCli { .. } => "run_wp_cli",
             Self::ScanImage { .. } => "scan_image",
             Self::CheckImageUpdates { .. } => "check_image_updates",
             Self::InventoryWordPress { .. } => "inventory_wordpress",
@@ -2003,6 +2095,13 @@ pub enum Output {
     WordPressInventory {
         /// The installations found (at most 20).
         installs: Vec<WpInstall>,
+    },
+    /// Answer to [`WpCommand::Overview`].
+    WordPressOverview(WpOverview),
+    /// Answer to the other [`WpCommand`]s: what WP-CLI said (clipped, secrets scrubbed).
+    WpCliDone {
+        /// The last of what it printed.
+        output: String,
     },
     /// Answer to [`Operation::InstallWordPress`].
     WordPressInstalled {
@@ -3275,7 +3374,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            72,
+            73,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }

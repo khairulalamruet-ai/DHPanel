@@ -203,6 +203,10 @@ impl Registry {
                 move |op| nodeservices::read_service_log(context.clone(), op)
             });
             registry.register("report_server_info", server::report_server_info);
+            registry.register("run_wp_cli", {
+                let context = context.clone();
+                move |op| wpinstall::run_wp_cli(context.clone(), op)
+            });
             registry.register("install_wordpress", {
                 let context = context.clone();
                 move |op| wpinstall::install_wordpress(context.clone(), op)

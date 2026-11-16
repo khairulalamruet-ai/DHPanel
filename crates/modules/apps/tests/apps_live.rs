@@ -64,11 +64,13 @@ async fn env(pool: &PgPool) -> Env {
                     db: pool.clone(),
                     sessions: sessions.clone(),
                     master_key: dhpanel_auth_core::secretbox::MasterKey::from_bytes(&[42; 32]),
+                    wait: std::time::Duration::from_millis(300),
                 })),
                 client: Some(client_router().with_state(AppsState {
                     db: pool.clone(),
                     sessions: sessions.clone(),
                     master_key: dhpanel_auth_core::secretbox::MasterKey::from_bytes(&[42; 32]),
+                    wait: std::time::Duration::from_millis(300),
                 })),
                 ..ModuleRoutes::none()
             }
@@ -450,4 +452,168 @@ async fn wordpress_is_asked_for_with_a_database_of_its_own_and_sealed_passwords(
         let (status, body) = e.call(&a, "POST", path, Some(bad.clone())).await;
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{bad} -> {body}");
     }
+}
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn wordpress_actions_are_sent_to_the_node_and_answered(pool: PgPool) {
+    use dhpanel_database::apps::{self, NewApp};
+    let e = env(&pool).await;
+    let (alice_account, alice) = client(&pool, "alice", 10_000).await;
+    let a = e.sign_in(alice_account).await;
+    let (bob_account, bob) = client(&pool, "bob", 10_001).await;
+    let b = e.sign_in(bob_account).await;
+    let site = domain(&pool, alice, "alice.example").await;
+    let settings = json!({});
+    let id = apps::create(
+        &pool,
+        &NewApp {
+            tenant_id: alice,
+            domain_id: Some(site),
+            path: "/blog",
+            kind: "wordpress",
+            name: "Blog",
+            version: None,
+            database_id: None,
+            settings: &settings,
+        },
+    )
+    .await
+    .unwrap();
+    let base = format!("/api/v1/client/apps/{id}");
+    // Not installed yet: refused. Then it is active.
+    let (status, got) = e.call(&a, "GET", &format!("{base}/wordpress"), None).await;
+    assert_eq!(
+        (status, got["code"].as_str()),
+        (StatusCode::CONFLICT, Some("app_not_ready")),
+        "{got}"
+    );
+    apps::set_status(&pool, id, "active", Some("7.1.4"), None)
+        .await
+        .unwrap();
+    // The node is slow: 202 with the operation to ask about.
+    let (status, pending) = e.call(&a, "GET", &format!("{base}/wordpress"), None).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{pending}");
+    let op = pending["operation_id"].as_str().unwrap().to_owned();
+    let (kind, payload): (String, serde_json::Value) =
+        sqlx::query_as("SELECT kind, payload FROM operations WHERE id = $1::uuid")
+            .bind(&op)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(kind, "run_wp_cli");
+    assert_eq!(
+        (
+            payload["path"].as_str(),
+            payload["command"]["type"].as_str()
+        ),
+        (Some("blog"), Some("overview"))
+    );
+    let (_, poll) = e
+        .call(&a, "GET", &format!("{base}/operations/{op}"), None)
+        .await;
+    assert_eq!(poll["state"], "running");
+    // The node answers; the next ask has the overview.
+    let overview = json!({"type": "word_press_overview", "core": "6.4.3", "core_update": "7.1.4", "maintenance": false,
+        "plugins": [{"name": "classic-editor", "status": "active", "version": "1.0", "update_available": true, "update_version": "1.7.0"}],
+        "themes": []});
+    sqlx::query("UPDATE operations SET status = 'dispatched', dispatched_at = now(), attempts = 1 WHERE id = $1::uuid")
+        .bind(&op)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let done = sqlx::query("UPDATE operations SET status = 'succeeded', output = $2, finished_at = now() WHERE id = $1::uuid")
+        .bind(&op)
+        .bind(&overview)
+        .execute(&pool)
+        .await;
+    assert!(done.is_ok(), "{done:?}");
+    let (status, poll) = e
+        .call(&a, "GET", &format!("{base}/operations/{op}"), None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{poll}");
+    assert_eq!(poll["state"], "done", "{poll}");
+    assert_eq!(poll["overview"]["plugins"][0]["update_version"], "1.7.0");
+    // Nobody else's.
+    assert_eq!(
+        e.call(&b, "GET", &format!("{base}/wordpress"), None)
+            .await
+            .0,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        e.call(&b, "GET", &format!("{base}/operations/{op}"), None)
+            .await
+            .0,
+        StatusCode::NOT_FOUND
+    );
+    // A plugin update names its plugin; nothing odd gets through.
+    let (status, _) = e
+        .call(
+            &a,
+            "POST",
+            &format!("{base}/wordpress/plugins/update"),
+            Some(json!({"slug": "classic-editor"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    let (status, _) = e
+        .call(
+            &a,
+            "POST",
+            &format!("{base}/wordpress/plugins/update"),
+            Some(json!({"slug": "x; rm -rf"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (status, _) = e
+        .call(
+            &a,
+            "POST",
+            &format!("{base}/wordpress/core/update"),
+            Some(json!({"version": "6.8 beta"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (status, _) = e
+        .call(
+            &a,
+            "POST",
+            &format!("{base}/wordpress/maintenance"),
+            Some(json!({"on": true})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    // A password: sealed, never in the ledger.
+    let (status, _) = e
+        .call(
+            &a,
+            "POST",
+            &format!("{base}/wordpress/admin-password"),
+            Some(json!({"user": "boss", "password": "short"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (status, _) = e
+        .call(
+            &a,
+            "POST",
+            &format!("{base}/wordpress/admin-password"),
+            Some(json!({"user": "boss", "password": "A-brand-new-Admin-Pass-9"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    let ledger: String =
+        sqlx::query_scalar("SELECT string_agg(payload::text, ' ') FROM operations")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(!ledger.contains("A-brand-new"), "{ledger}");
+    let kept: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM app_secrets WHERE name = 'admin_reset'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(kept, 1);
+    let _ = (bob, apps::list);
 }
