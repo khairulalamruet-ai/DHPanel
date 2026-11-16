@@ -1341,20 +1341,16 @@ impl DockerManager {
         let state = c.state.unwrap_or_default();
         let running = state.running.unwrap_or(false);
         let mut published = Vec::new();
-        for (key, bindings) in c
-            .network_settings
-            .and_then(|n| n.ports)
-            .unwrap_or_default()
-        {
-            let Some(container_port) = key
-                .strip_suffix("/tcp")
-                .and_then(|p| p.parse::<u16>().ok())
+        for (key, bindings) in c.network_settings.and_then(|n| n.ports).unwrap_or_default() {
+            let Some(container_port) = key.strip_suffix("/tcp").and_then(|p| p.parse::<u16>().ok())
             else {
                 continue;
             };
             for binding in bindings.unwrap_or_default() {
                 if let (Some(ip), Some(port)) = (
-                    binding.host_ip.and_then(|i| i.parse::<std::net::IpAddr>().ok()),
+                    binding
+                        .host_ip
+                        .and_then(|i| i.parse::<std::net::IpAddr>().ok()),
                     binding.host_port.and_then(|p| p.parse::<u16>().ok()),
                 ) {
                     published.push(PublishedPort {

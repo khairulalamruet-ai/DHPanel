@@ -390,7 +390,10 @@ impl ContainerSpec {
             if p.host_port == 0 {
                 // "Any free port" is safe only where nobody outside can reach it.
                 if !p.host_ip.is_loopback() {
-                    return Err(invalid("ports", "a port chosen by Docker must be on the loopback address"));
+                    return Err(invalid(
+                        "ports",
+                        "a port chosen by Docker must be on the loopback address",
+                    ));
                 }
                 continue;
             }

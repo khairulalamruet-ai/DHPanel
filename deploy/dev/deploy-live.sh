@@ -12,7 +12,7 @@ STATE="$T/state"; mkdir -p "$STATE/incoming"
 CALLED="$T/called"
 cat > "$T/fake-deploy.sh" <<FAKE
 #!/usr/bin/env bash
-echo "\$@" > "$CALLED"; ls "\${2}" >> "$CALLED"; [ "\${3:-}" = --web-dir ] && ls "\${4}" >> "$CALLED"
+echo "\$@" > "$CALLED"; ls "\${2}" >> "$CALLED"; if [ "\${3:-}" = --web-dir ]; then ls "\${4}" >> "$CALLED"; fi
 FAKE
 chmod +x "$T/fake-deploy.sh"
 "$DHCTL" release keygen --kid good-1 --out "$T/good.key" > "$T/keys.txt"

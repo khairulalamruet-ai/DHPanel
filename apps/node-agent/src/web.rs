@@ -619,7 +619,12 @@ fn compile(
     }
     // The panel's own name before any tenant's: no site can take it over.
     if let Some(panel) = &settings.panel {
-        routes.extend(panel.sites.iter().map(|site| panel_route(site, &panel.upstream)));
+        routes.extend(
+            panel
+                .sites
+                .iter()
+                .map(|site| panel_route(site, &panel.upstream)),
+        );
     }
     routes.extend(pma_host.map(pma_route));
     routes.extend(
@@ -915,7 +920,10 @@ impl WebContext {
             let Some((name, port)) = dial.split_once(':') else {
                 continue;
             };
-            let (Ok(container), Ok(port)) = (dhpanel_docker_manager::Name::parse(name), port.parse::<u16>()) else {
+            let (Ok(container), Ok(port)) = (
+                dhpanel_docker_manager::Name::parse(name),
+                port.parse::<u16>(),
+            ) else {
                 continue;
             };
             if let Ok(info) = docker.inspect(&container).await
@@ -1440,10 +1448,16 @@ mod tests {
             ["dh-alice-web:8080", "dh-bob-web:8080"]
         );
         // Only what could be resolved changes; the rest stays (and answers 502 meanwhile).
-        let resolved = BTreeMap::from([("dh-alice-web:8080".to_owned(), "127.0.0.1:41234".to_owned())]);
+        let resolved =
+            BTreeMap::from([("dh-alice-web:8080".to_owned(), "127.0.0.1:41234".to_owned())]);
         replace_dials(&mut config, &resolved);
         let text = config.to_string();
-        assert!(text.contains("\"127.0.0.1:41234\"") && text.contains("\"dh-bob-web:8080\"") && text.contains("\"127.0.0.1:8080\""), "{text}");
+        assert!(
+            text.contains("\"127.0.0.1:41234\"")
+                && text.contains("\"dh-bob-web:8080\"")
+                && text.contains("\"127.0.0.1:8080\""),
+            "{text}"
+        );
         assert!(!text.contains("dh-alice-web"), "{text}");
     }
 
@@ -1453,7 +1467,10 @@ mod tests {
             compile(
                 &BTreeMap::new(),
                 &BTreeSet::new(),
-                &Settings { panel, ..settings() },
+                &Settings {
+                    panel,
+                    ..settings()
+                },
                 &Pages::default(),
                 None,
             )
@@ -1467,33 +1484,58 @@ mod tests {
         // Without a web interface: the whole name goes to the control plane.
         let api_only = routes(&with(Some(Panel {
             upstream: "127.0.0.1:8080".into(),
-            sites: vec![PanelSite { host: "panel.example.com".into(), web_root: None }],
+            sites: vec![PanelSite {
+                host: "panel.example.com".into(),
+                web_root: None,
+            }],
         })));
-        assert_eq!(api_only.len(), 2, "the panel, then the \"no such site\" answer");
+        assert_eq!(
+            api_only.len(),
+            2,
+            "the panel, then the \"no such site\" answer"
+        );
         assert_eq!(api_only[0]["match"][0]["host"][0], "panel.example.com");
         let text = api_only[0].to_string();
-        assert!(text.contains("\"dial\":\"127.0.0.1:8080\"") && text.contains("308"), "{text}");
+        assert!(
+            text.contains("\"dial\":\"127.0.0.1:8080\"") && text.contains("308"),
+            "{text}"
+        );
         assert!(!text.contains("file_server"), "{text}");
         // With one: clients on the panel's name, administrators on theirs; `/api/*` still goes to
         // the control plane, the rest are the files of the app of that name.
         let both = routes(&with(Some(Panel {
             upstream: "127.0.0.1:8080".into(),
             sites: vec![
-                PanelSite { host: "panel.example.com".into(), web_root: Some("/usr/share/dhpanel/web/client".into()) },
-                PanelSite { host: "admin.panel.example.com".into(), web_root: Some("/usr/share/dhpanel/web/admin".into()) },
+                PanelSite {
+                    host: "panel.example.com".into(),
+                    web_root: Some("/usr/share/dhpanel/web/client".into()),
+                },
+                PanelSite {
+                    host: "admin.panel.example.com".into(),
+                    web_root: Some("/usr/share/dhpanel/web/admin".into()),
+                },
             ],
         })));
         assert_eq!(both.len(), 3);
         let (client, admin) = (both[0].to_string(), both[1].to_string());
-        assert!(client.contains("/usr/share/dhpanel/web/client") && !client.contains("web/admin"), "{client}");
-        assert!(admin.contains("/usr/share/dhpanel/web/admin") && !admin.contains("web/client"), "{admin}");
+        assert!(
+            client.contains("/usr/share/dhpanel/web/client") && !client.contains("web/admin"),
+            "{client}"
+        );
+        assert!(
+            admin.contains("/usr/share/dhpanel/web/admin") && !admin.contains("web/client"),
+            "{admin}"
+        );
         for text in [&client, &admin] {
             // The API first, then the files, then index.html for any other path (a page of the app).
             let api = text.find("\"/api/*\"").unwrap();
             let files = text.find("\"file_server\"").unwrap();
             let fallback = text.find("/index.html").unwrap();
             assert!(api < files && files < fallback, "{text}");
-            assert!(text.contains("immutable") && text.contains("no-cache") && text.contains("nosniff"), "{text}");
+            assert!(
+                text.contains("immutable") && text.contains("no-cache") && text.contains("nosniff"),
+                "{text}"
+            );
         }
         // Without a panel on this machine there is no such route.
         assert_eq!(routes(&with(None)).len(), 1);
@@ -1507,10 +1549,19 @@ mod tests {
             Some(PathBuf::from("/w")),
             "127.0.0.1:8080".into(),
         );
-        assert_eq!(panel.sites[0].web_root.as_deref(), Some(Path::new("/w/client")));
-        assert_eq!(panel.sites[1].web_root.as_deref(), Some(Path::new("/w/admin")));
+        assert_eq!(
+            panel.sites[0].web_root.as_deref(),
+            Some(Path::new("/w/client"))
+        );
+        assert_eq!(
+            panel.sites[1].web_root.as_deref(),
+            Some(Path::new("/w/admin"))
+        );
         let none = Panel::new("a.example".into(), None, None, "127.0.0.1:8080".into());
-        assert_eq!((none.sites.len(), none.sites[0].web_root.clone()), (1, None));
+        assert_eq!(
+            (none.sites.len(), none.sites[0].web_root.clone()),
+            (1, None)
+        );
     }
 
     #[test]

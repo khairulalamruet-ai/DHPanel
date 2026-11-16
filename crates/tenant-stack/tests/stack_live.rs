@@ -112,10 +112,17 @@ async fn the_stack_starts_as_the_tenant_not_as_root_and_nothing_is_left_behind()
             assert_eq!(host.cap_drop, Some(vec!["ALL".to_owned()]));
             assert_eq!(host.readonly_rootfs, Some(true));
             assert_eq!(host.privileged, Some(false));
-            assert!(
-                host.port_bindings.is_none_or(|p| p.is_empty()),
-                "nothing published"
-            );
+            // Only the web container is published, and only on the machine's loopback address (the
+            // node's web server comes in that way); nothing else is.
+            let published = host.port_bindings.unwrap_or_default();
+            if spec.role.as_deref() == Some("web") {
+                assert_eq!(published.len(), 1, "{published:?}");
+                for binding in published.values().flatten().flatten() {
+                    assert_eq!(binding.host_ip.as_deref(), Some("127.0.0.1"), "{binding:?}");
+                }
+            } else {
+                assert!(published.is_empty(), "nothing published: {published:?}");
+            }
             // The memory limit Docker enforces is the one in the plan.
             let status = manager.usage(&spec.name).await.map_err(|e| e.to_string())?;
             assert!(
