@@ -73,6 +73,7 @@ utoipa = "6"
 utoipa-scalar = { version = "0.4.0", features = ["axum"] }
 
 [dev-dependencies]
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "postgres", "macros", "uuid", "json", "migrate"] }
 # The manifest tests compare declared permission keys with the ones the code checks.
 dhpanel-rbac.workspace = true
 tower = { version = "0.5", features = ["util"] }

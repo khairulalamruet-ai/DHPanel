@@ -223,10 +223,12 @@ async fn only_holders_of_the_manage_permission_can_add_nodes(pool: PgPool) {
 #[sqlx::test(migrations = "../../../migrations")]
 #[ignore = "needs PostgreSQL + Redis"]
 async fn adding_a_node_needs_a_recent_confirmation_of_identity(pool: PgPool) {
-    let e = env(&pool, None, 1);
+    // A window of three seconds: one second was too tight for a busy machine (the call after
+    // the re-confirmation must still be inside it).
+    let e = env(&pool, None, 3);
     let root = account(&pool, "rootuser", &["super_admin"]).await;
     let r = e.sign_in(root).await;
-    tokio::time::sleep(Duration::from_millis(1300)).await;
+    tokio::time::sleep(Duration::from_millis(3300)).await;
     let (status, body) = e.create(&r, "node-1").await;
     assert_eq!(
         (status, code(&body)),

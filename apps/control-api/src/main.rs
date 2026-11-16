@@ -7,6 +7,8 @@ mod app;
 mod modules;
 mod openapi;
 mod secrets;
+#[cfg(test)]
+mod security_tests;
 mod system_backup;
 
 use std::{process::ExitCode, sync::Arc};

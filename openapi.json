@@ -12216,6 +12216,92 @@
         ]
       }
     },
+    "/api/v1/client/containers/{name}/restart": {
+      "post": {
+        "tags": [
+          "services"
+        ],
+        "summary": "Restart one of the account's services.",
+        "operationId": "clientRestartContainer",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "The container's name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Restarted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Restarted"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The node is slow; the restart goes on",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Pending"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The account has no such service",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`tenant_not_running`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`node_unavailable`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/client/cron-jobs": {
       "get": {
         "tags": [
@@ -18570,92 +18656,6 @@
           },
           "403": {
             "description": "`client_only`",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "`node_unavailable`",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "session": []
-          }
-        ]
-      }
-    },
-    "/api/v1/client/services/{name}/restart": {
-      "post": {
-        "tags": [
-          "services"
-        ],
-        "summary": "Restart one of the account's services.",
-        "operationId": "clientRestartService",
-        "parameters": [
-          {
-            "name": "name",
-            "in": "path",
-            "description": "The container's name",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "X-CSRF-Token",
-            "in": "header",
-            "description": "The session's csrf_token",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Restarted",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Restarted"
-                }
-              }
-            }
-          },
-          "202": {
-            "description": "The node is slow; the restart goes on",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Pending"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "The account has no such service",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "`tenant_not_running`",
             "content": {
               "application/problem+json": {
                 "schema": {

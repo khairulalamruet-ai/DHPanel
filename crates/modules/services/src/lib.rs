@@ -3,7 +3,7 @@
 //! | Method | Path | Needs |
 //! |---|---|---|
 //! | GET | `/api/v1/client/services` | the owner |
-//! | POST | `/api/v1/client/services/{name}/restart` | the owner |
+//! | POST | `/api/v1/client/containers/{name}/restart` | the owner |
 //! | GET | `/api/v1/client/processes` | the owner |
 //! | POST | `/api/v1/client/processes/{container}/{pid}/signal` | the owner |
 //! | GET | `/api/v1/admin/nodes/{id}/server` | `admin.server.read` |
@@ -107,7 +107,7 @@ pub fn client_router() -> Router<ServicesState> {
     Router::new()
         .route("/api/v1/client/services", get(list_services))
         .route(
-            "/api/v1/client/services/{name}/restart",
+            "/api/v1/client/containers/{name}/restart",
             post(restart_service),
         )
         .route("/api/v1/client/processes", get(list_processes))
@@ -296,9 +296,9 @@ pub async fn list_services(
 /// Restart one of the account's services.
 #[utoipa::path(
     post,
-    path = "/api/v1/client/services/{name}/restart",
+    path = "/api/v1/client/containers/{name}/restart",
     tag = "services",
-    operation_id = "clientRestartService",
+    operation_id = "clientRestartContainer",
     security(("session" = [])),
     params(
         ("name" = String, Path, description = "The container's name"),

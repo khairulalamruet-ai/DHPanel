@@ -370,7 +370,7 @@ async fn an_account_lists_and_restarts_its_services_and_nobody_elses(pool: PgPoo
         .call(
             &alice,
             "POST",
-            "/api/v1/client/services/dh-alice-web/restart",
+            "/api/v1/client/containers/dh-alice-web/restart",
         )
         .await;
     assert_eq!(status, StatusCode::OK, "{done}");
@@ -381,7 +381,7 @@ async fn an_account_lists_and_restarts_its_services_and_nobody_elses(pool: PgPoo
             .call(
                 &alice,
                 "POST",
-                &format!("/api/v1/client/services/{name}/restart"),
+                &format!("/api/v1/client/containers/{name}/restart"),
             )
             .await;
         assert_eq!(status, StatusCode::NOT_FOUND, "{name}");
@@ -401,7 +401,7 @@ async fn an_account_lists_and_restarts_its_services_and_nobody_elses(pool: PgPoo
         .call(
             &alice,
             "POST",
-            "/api/v1/client/services/dh-alice-web/restart",
+            "/api/v1/client/containers/dh-alice-web/restart",
         )
         .await;
     assert_eq!(

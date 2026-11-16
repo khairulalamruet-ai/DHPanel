@@ -101,6 +101,7 @@ pub fn base_router(state: AppState) -> Router {
 /// (2 MiB for what handlers read, 9 MiB at most for any body) -> compression -> routes.
 pub fn router(routes: Router, trusted_proxies: Arc<[IpAddr]>) -> Router {
     routes
+        .layer(axum::middleware::from_fn(security_headers))
         .layer(CompressionLayer::new())
         .layer(axum::extract::DefaultBodyLimit::max(BODY_LIMIT_BYTES))
         .layer(RequestBodyLimitLayer::new(UPLOAD_LIMIT_BYTES))
@@ -119,6 +120,42 @@ pub fn router(routes: Router, trusted_proxies: Arc<[IpAddr]>) -> Router {
         .layer(axum::middleware::from_fn(
             dhpanel_http_kit::request_id::correlation_id_layer,
         ))
+}
+
+/// Headers every answer carries (ASVS V14): the browser is told not to guess types, not to put
+/// the page in a frame, not to send a referrer, and not to keep what an API call answered; a
+/// JSON answer also gets a policy that lets nothing load.
+async fn security_headers(
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    use axum::http::{HeaderName, HeaderValue};
+    let api = request.uri().path().starts_with("/api/");
+    let mut response = next.run(request).await;
+    let headers = response.headers_mut();
+    let mut set = |name: &'static str, value: &'static str| {
+        headers
+            .entry(HeaderName::from_static(name))
+            .or_insert(HeaderValue::from_static(value));
+    };
+    set("x-content-type-options", "nosniff");
+    set("x-frame-options", "DENY");
+    set("referrer-policy", "no-referrer");
+    if api {
+        set("cache-control", "no-store");
+    }
+    let is_json = response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|t| t.contains("json"));
+    if is_json {
+        response.headers_mut().insert(
+            HeaderName::from_static("content-security-policy"),
+            HeaderValue::from_static("default-src 'none'; frame-ancestors 'none'"),
+        );
+    }
+    response
 }
 
 async fn openapi_json() -> impl IntoResponse {
