@@ -35,10 +35,13 @@ jobs:
       fail-fast: true
       matrix:
         include:
+          # Built on Ubuntu 22.04: a program carries the glibc version of the machine it was
+          # linked on, so a build on 22.04 (glibc 2.35) runs on 22.04, 24.04 and Debian 12,
+          # while one made on 24.04 (glibc 2.39) runs on neither of the older systems.
           - arch: x86_64
-            runner: ubuntu-24.04
+            runner: ubuntu-22.04
           - arch: aarch64
-            runner: ubuntu-24.04-arm
+            runner: ubuntu-22.04-arm
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     steps:
@@ -57,6 +60,11 @@ jobs:
           export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
           export RUSTFLAGS="--remap-path-prefix=$PWD=/src --remap-path-prefix=$HOME/.cargo=/cargo -C strip=symbols"
           cargo build --release --locked -p dhpanel-control-api -p dhpanel-dhctl -p dhpanel-node-agent -p dhpanel-priv-helper -p dhpanel-license-authority
+          # No program may need a newer glibc than the oldest system the installer supports.
+          for f in target/release/dhpanel-control-api target/release/dhctl target/release/dhpanel-agent target/release/dhpanel-priv-helper target/release/dhpanel-license-authority; do
+            v="$(objdump -T "$f" | grep -o 'GLIBC_[0-9.]*' | sort -V | tail -1 | cut -d_ -f2)"
+            [ "$(printf '%s\n2.35\n' "$v" | sort -V | tail -1)" = 2.35 ] || { echo "$f needs glibc $v (more than 2.35)"; exit 1; }
+          done
           mkdir -p dist/bin
           for b in dhpanel-control-api dhctl dhpanel-agent dhpanel-priv-helper dhpanel-license-authority; do
             install -m 0755 "target/release/$b" dist/bin/
@@ -85,7 +93,7 @@ jobs:
   reproduce:
     name: the build is reproducible
     needs: build
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7

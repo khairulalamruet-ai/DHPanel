@@ -153,6 +153,7 @@ if [ "$rootless" -eq 1 ]; then
   command -v dockerd-rootless-setuptool.sh >/dev/null \
     || die "dockerd-rootless-setuptool.sh not found: install docker-ce-rootless-extras (and uidmap) first"
   command -v newuidmap >/dev/null || die "newuidmap not found: install the uidmap package"
+  command -v slirp4netns >/dev/null || die "slirp4netns not found: install the slirp4netns package"
   command -v loginctl >/dev/null || die "loginctl not found"
 
   if ! grep -q "^${AGENT_USER}:" /etc/subuid 2>/dev/null; then
@@ -181,7 +182,7 @@ if [ "$rootless" -eq 1 ]; then
   # logins per address, T11.07). Rootless Docker's default port driver (builtin) shows every
   # container the bridge gateway instead; slirp4netns passes the true source address on.
   dropin="$STATE_DIR/home/.config/systemd/user/docker.service.d"
-  want=$'[Service]\nEnvironment=DOCKERD_ROOTLESS_ROOTLESSKIT_PORT_DRIVER=slirp4netns\n'
+  want=$'[Service]\nEnvironment=DOCKERD_ROOTLESS_ROOTLESSKIT_NET=slirp4netns\nEnvironment=DOCKERD_ROOTLESS_ROOTLESSKIT_PORT_DRIVER=slirp4netns\n'
   if [ "$(cat "$dropin/port-driver.conf" 2>/dev/null)" != "${want%$'\n'}" ]; then
     say "using the slirp4netns port driver so containers see real client addresses"
     as_agent mkdir -p "$dropin"

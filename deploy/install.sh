@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Installs the DHPanel control plane, and by default a local node agent, on ONE new server
-# (Ubuntu 24.04 or Debian 12, run as root). T19.01.
+# (Ubuntu 22.04/24.04/26.04 or Debian 12/13, run as root). T19.01.
 #
 #   sudo ./install.sh --bin-dir ./bin --hostname panel.example.com --admin-email you@example.com
 #
@@ -9,7 +9,7 @@
 #   --hostname NAME      the DNS name the panel is served under (it must already point here;
 #                        Caddy gets its certificate from it)
 #   --admin-email MAIL   the first administrator's email
-#   --admin-username U   the first administrator's login (default: admin)
+#   --admin-username U   the first administrator's login (default: owner; "admin" and other system names are reserved)
 #   --no-agent           install the control plane only (nodes are added from other servers)
 #   --check              only look: what is there, what would be done; changes nothing
 #
@@ -22,7 +22,7 @@
 # of the node channel, and with the local node: rootless Docker, the agent and the root helper.
 set -euo pipefail
 
-BIN_DIR=""; HOSTNAME_FQDN=""; ADMIN_EMAIL=""; ADMIN_USER=admin; WITH_AGENT=1; CHECK=0
+BIN_DIR=""; HOSTNAME_FQDN=""; ADMIN_EMAIL=""; ADMIN_USER=owner; WITH_AGENT=1; CHECK=0
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ETC=/etc/dhpanel; SECRETS=$ETC/secrets; STATE=/var/lib/dhpanel; AGENT_PORT=8444
 
@@ -48,10 +48,18 @@ trap 'rc=$?; [ $rc -ne 0 ] && [ -n "$step" ] && echo "install.sh: stopped during
 [ "$(uname -s)" = Linux ] || die "Linux only"
 . /etc/os-release
 case "${ID:-}:${VERSION_ID:-}" in
-    ubuntu:24.04 | debian:12) CODENAME="$VERSION_CODENAME" ;;
-    *) die "this installer supports Ubuntu 24.04 and Debian 12 (this is ${PRETTY_NAME:-unknown})" ;;
+    ubuntu:22.04 | ubuntu:24.04 | ubuntu:26.04 | debian:12 | debian:13) CODENAME="$VERSION_CODENAME" ;;
+    ubuntu:20.04 | ubuntu:18.04 | ubuntu:16.04)
+        die "Ubuntu ${VERSION_ID} is not supported: it starts with the old cgroup v1 (a hosting account's memory and CPU limits do not work with rootless Docker there), has kernel 5.4 and no PostgreSQL 18 packages. Use Ubuntu 22.04 or newer." ;;
+    centos:7* | rhel:7* | ol:7* | rocky:7*)
+        die "${PRETTY_NAME:-this system} is not supported: kernel 3.10 cannot run rootless containers, there is no PostgreSQL 18 for it, and it is out of support. Use Ubuntu 22.04 or newer, Debian 12 or newer." ;;
+    almalinux:* | rocky:* | rhel:* | centos:* | ol:*)
+        die "${PRETTY_NAME:-this system} (the Red Hat family) is not supported by this installer yet: it needs dnf, firewalld and SELinux handling. Use Ubuntu 22.04 or newer, Debian 12 or newer." ;;
+    *) die "this installer supports Ubuntu 22.04, 24.04 and 26.04 and Debian 12 and 13 (this is ${PRETTY_NAME:-unknown})" ;;
 esac
 [ "$(uname -m)" = x86_64 ] || [ "$(uname -m)" = aarch64 ] || die "x86_64 or aarch64 only"
+# Resource limits of rootless containers need cgroup v2 (the default on every system above).
+[ "$(stat -fc %T /sys/fs/cgroup 2> /dev/null)" = cgroup2fs ] || die "cgroup v2 is not in use (the unified hierarchy): hosting accounts' memory and CPU limits would not work"
 command -v systemctl > /dev/null || die "systemd is required"
 [ -n "$BIN_DIR" ] || die "give the release's binaries with --bin-dir DIR"
 [ -n "$HOSTNAME_FQDN" ] || die "give the panel's DNS name with --hostname NAME"
@@ -90,7 +98,8 @@ apt_install() { apt-get install -y -qq "$@" > /dev/null; }
 # --- packages --------------------------------------------------------------------------------
 say "base packages"
 apt-get update -qq > /dev/null
-apt_install ca-certificates curl gnupg openssl ufw uidmap dbus-user-session
+# slirp4netns: rootless Docker's network driver (newer Docker releases no longer bring it along).
+apt_install ca-certificates curl gnupg openssl ufw uidmap dbus-user-session slirp4netns
 
 say "PostgreSQL 18"
 if [ ! -x /usr/lib/postgresql/18/bin/postgres ]; then
@@ -105,7 +114,18 @@ for _ in $(seq 1 30); do runuser -u postgres -- psql -qAt -c 'select 1' > /dev/n
 runuser -u postgres -- psql -qAt -c 'select 1' > /dev/null 2>&1 || die "PostgreSQL does not answer (journalctl -u postgresql)"
 
 say "Redis"
-command -v redis-server > /dev/null || apt_install redis-server
+if ! command -v redis-server > /dev/null; then
+    # The panel needs Redis 6.2 or newer (GETDEL). Ubuntu 22.04 ships 6.0, so there Redis is taken
+    # from the Redis project's own repository; the other systems' own packages are new enough.
+    if [ "${ID}:${VERSION_ID}" = ubuntu:22.04 ]; then
+        curl -fsSL https://packages.redis.io/gpg | gpg --dearmor --yes -o /usr/share/keyrings/redis-archive-keyring.gpg
+        echo "deb [signed-by=/usr/share/keyrings/redis-archive-keyring.gpg] https://packages.redis.io/deb ${CODENAME} main" > /etc/apt/sources.list.d/redis.list
+        apt-get update -qq > /dev/null
+    fi
+    apt_install redis-server
+fi
+redis_version="$(redis-server --version | sed -n 's/.*v=\([0-9.]*\).*/\1/p')"
+[ "$(printf '%s\n6.2\n' "$redis_version" | sort -V | head -1)" = 6.2 ] || die "Redis $redis_version is too old: the panel needs 6.2 or newer"
 systemctl enable --now redis-server > /dev/null 2>&1
 
 say "Caddy"
@@ -128,7 +148,9 @@ secret() { # name, command that prints it: written once, never replaced
     if [ ! -s "$SECRETS/$1" ]; then
         (umask 077; "${@:2}" > "$SECRETS/$1")
     fi
-    chown root:dhpanel "$SECRETS/$1"; chmod 0640 "$SECRETS/$1"
+    # The panel's own user reads it and nobody else: the program refuses a secret file that
+    # anyone but its owner can read.
+    chown dhpanel:dhpanel "$SECRETS/$1"; chmod 0600 "$SECRETS/$1"
 }
 say "database and Redis passwords"
 secret db_password bash -c 'openssl rand -hex 24'
@@ -187,9 +209,12 @@ export DHPANEL_CONFIG="$ETC/control.toml"
 as_panel() { runuser -u dhpanel -- env DHPANEL_CONFIG="$DHPANEL_CONFIG" "$@"; }
 
 say "the node channel's certificate authority"
-[ -f "$SECRETS/node_ca.crt" ] || as_panel dhctl ca init --dir "$SECRETS" > /dev/null
-[ -f "$SECRETS/server.crt" ] || as_panel dhctl ca issue-server --dir "$SECRETS" --dns "$HOSTNAME_FQDN" --out-dir "$SECRETS" > /dev/null
-chmod 0750 "$SECRETS"; chmod 0640 "$SECRETS"/*.crt; chmod 0600 "$SECRETS"/*.key; chown dhpanel:dhpanel "$SECRETS"/*.key
+# Made by root (the folder is not writable for the panel's user); the keys are handed over below.
+[ -f "$SECRETS/node_ca.crt" ] || dhctl ca init --dir "$SECRETS" > /dev/null
+[ -f "$SECRETS/server.crt" ] || dhctl ca issue-server --dir "$SECRETS" --dns "$HOSTNAME_FQDN" --out-dir "$SECRETS" > /dev/null
+chmod 0750 "$SECRETS"; chmod 0640 "$SECRETS"/*.crt; chmod 0600 "$SECRETS"/*.key
+# Made by root, read by the panel's user (the certificates are not secret, the keys are).
+chown dhpanel:dhpanel "$SECRETS"/*.crt "$SECRETS"/*.key
 
 say "database schema"
 as_panel dhctl migrate > /dev/null
