@@ -327,7 +327,7 @@ fn the_files_of_an_account_are_packed_into_an_encrypted_stream_that_unpacks_the_
     symlink("/etc/passwd", s.path("www/link")).unwrap();
     let key = [3u8; KEY_LEN];
     let mut stored = Vec::new();
-    let packed = pack_files(&root, &key, &mut stored).unwrap();
+    let packed = pack_files(&root, &key, None, &mut stored).unwrap();
     assert_eq!((packed.entries, packed.skipped), (5, 1), "{packed:?}");
     assert!(
         !stored.windows(5).any(|w| w == b"<?php"),
@@ -367,6 +367,51 @@ fn the_files_of_an_account_are_packed_into_an_encrypted_stream_that_unpacks_the_
 }
 
 #[test]
+fn the_last_pass_of_a_transfer_packs_only_what_is_newer_than_the_first_copy() {
+    use dhpanel_backup::{KEY_LEN, StreamReader};
+    use dhpanel_fileops::backup::pack_files;
+    use std::io::Read as _;
+    let s = Scratch::new("since");
+    let root = s.root();
+    std::fs::create_dir_all(s.path("www/sub")).unwrap();
+    std::fs::write(s.path("www/old.php"), "old").unwrap();
+    std::fs::write(s.path("www/sub/old2.txt"), "old2").unwrap();
+    // Wait out the clock's second, take the time, make the new ones.
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    let since = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    std::fs::write(s.path("www/new.php"), "new").unwrap();
+    std::fs::write(s.path("www/old.php"), "old, changed").unwrap();
+    let key = [5u8; KEY_LEN];
+    let mut stored = Vec::new();
+    pack_files(&root, &key, Some(since), &mut stored).unwrap();
+    let plain = StreamReader::new(&stored[..], &key);
+    let mut archive = tar::Archive::new(zstd::stream::Decoder::new(plain).unwrap());
+    let mut seen = Vec::new();
+    for entry in archive.entries().unwrap() {
+        let mut entry = entry.unwrap();
+        let name = entry.path().unwrap().to_string_lossy().into_owned();
+        let mut body = String::new();
+        entry.read_to_string(&mut body).unwrap();
+        seen.push((name, body));
+    }
+    // The folders are all there (the new files need their places); the files are the new
+    // and the changed ones only.
+    assert_eq!(
+        seen,
+        [
+            ("www/".to_owned(), String::new()),
+            ("www/new.php".to_owned(), "new".to_owned()),
+            ("www/old.php".to_owned(), "old, changed".to_owned()),
+            ("www/sub/".to_owned(), String::new()),
+        ]
+    );
+}
+
+#[test]
 fn packed_files_are_put_back_over_changes_and_only_where_asked() {
     use dhpanel_backup::KEY_LEN;
     use dhpanel_fileops::backup::{pack_files, unpack_files};
@@ -379,7 +424,7 @@ fn packed_files_are_put_back_over_changes_and_only_where_asked() {
     std::fs::write(s.path("other/b.txt"), "b").unwrap();
     let key = [5u8; KEY_LEN];
     let mut stored = Vec::new();
-    pack_files(&root, &key, &mut stored).unwrap();
+    pack_files(&root, &key, None, &mut stored).unwrap();
     // Damage: a changed file, a deleted file, a file made since, a link in the way.
     std::fs::write(s.path("www/index.php"), "hacked").unwrap();
     std::fs::remove_file(s.path("www/sub/a.txt")).unwrap();

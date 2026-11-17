@@ -175,6 +175,8 @@ async fn an_account_is_backed_up_encrypted_and_every_part_checks_out() {
         dns: serde_json::json!([{"name": "example.com", "type": "A", "value": "203.0.113.7"}]),
         meta: serde_json::json!({"plan": "basic", "php": "8.4"}),
         created_at: 1_700_000_000,
+        db_users: Vec::new(),
+        files_since: None,
     };
 
     // Bad arguments change nothing.
@@ -387,6 +389,8 @@ async fn an_account_is_backed_up_encrypted_and_every_part_checks_out() {
             dns: false,
             snapshot,
             verify_only,
+            create_databases: false,
+            restore_db_users: false,
         }
     };
     // Verifying changes nothing and reads every part.
@@ -641,6 +645,8 @@ async fn an_account_is_backed_up_encrypted_and_every_part_checks_out() {
             dns: false,
             snapshot: false,
             verify_only: true,
+            create_databases: false,
+            restore_db_users: false,
         },
     )
     .await

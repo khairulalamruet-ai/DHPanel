@@ -245,14 +245,20 @@ pub async fn create_backup(
         credentials,
         key,
         databases,
+        db_users,
+        files_since,
         dns,
-        meta,
+        mut meta,
         created_at,
     } = op
     else {
         return Err(super::wrong_operation());
     };
-    dhpanel_domain::TenantUsername::parse(&account).map_err(|e| invalid(&e.to_string()))?;
+    let tenant =
+        dhpanel_domain::TenantUsername::parse(&account).map_err(|e| invalid(&e.to_string()))?;
+    if db_users.len() > 200 {
+        return Err(invalid("too many database users"));
+    }
     for d in &databases {
         dhpanel_domain::databases::check_identifier(d).map_err(|e| invalid(&e.to_string()))?;
     }
@@ -262,6 +268,36 @@ pub async fn create_backup(
     if serde_json::to_vec(&dns).map_or(usize::MAX, |v| v.len()) > 256 * 1024
         || serde_json::to_vec(&meta).map_or(usize::MAX, |v| v.len()) > 256 * 1024
     {
+        return Err(invalid("the documents are too big"));
+    }
+    // The database users' passwords, as the servers hold them, go into the setup data (which is
+    // encrypted like the rest), so that a transfer makes the users again with the same ones.
+    if !db_users.is_empty() {
+        let mut carried = Vec::new();
+        for user in &db_users {
+            dhpanel_domain::databases::check_identifier(&user.name)
+                .map_err(|e| invalid(&e.to_string()))?;
+            let credential = match user.engine {
+                dhpanel_node_protocol::DbEngine::Mysql => {
+                    db::user_hash(&context, &tenant, &user.name).await?
+                }
+                dhpanel_node_protocol::DbEngine::Postgres => {
+                    super::pg::user_verifier(&context, &user.name).await?
+                }
+            };
+            if let Some(credential) = credential {
+                carried.push(serde_json::json!({
+                    "name": user.name,
+                    "engine": user.engine,
+                    "credential": credential,
+                }));
+            }
+        }
+        if let Some(object) = meta.as_object_mut() {
+            object.insert("db_users".to_owned(), serde_json::Value::Array(carried));
+        }
+    }
+    if serde_json::to_vec(&meta).map_or(usize::MAX, |v| v.len()) > 256 * 1024 {
         return Err(invalid("the documents are too big"));
     }
     let key_text = key.ok_or_else(|| invalid("no key"))?;
@@ -277,7 +313,18 @@ pub async fn create_backup(
     };
     let mut parts: Vec<Part> = Vec::new();
     let result = make_parts(
-        &context, &dest, &id, tenant_id, uid, &key_text, key, &databases, &dns, &meta, &mut parts,
+        &context,
+        &dest,
+        &id,
+        tenant_id,
+        uid,
+        &key_text,
+        key,
+        &databases,
+        &dns,
+        &meta,
+        files_since,
+        &mut parts,
     )
     .await;
     let finish = match result {
@@ -324,6 +371,7 @@ pub async fn create_backup(
 }
 
 /// The tenant's files, packed by the helper into a staged file, stored as `object`.
+#[allow(clippy::too_many_arguments)]
 async fn files_part(
     context: &TenantContext,
     dest: &Shared,
@@ -332,6 +380,7 @@ async fn files_part(
     tenant_id: Uuid,
     uid: u32,
     key_text: &DbPassword,
+    since: Option<i64>,
 ) -> Result<(u64, String), AgentError> {
     let dir = transfers_dir(context);
     std::fs::create_dir_all(&dir)
@@ -344,6 +393,7 @@ async fn files_part(
         uid,
         staged: staged_name.to_owned(),
         key: key_text.0.trim().to_owned(),
+        since,
     };
     tokio::task::spawn_blocking(move || ask_helper(&socket, action))
         .await
@@ -374,6 +424,7 @@ async fn make_parts(
     databases: &[String],
     dns: &serde_json::Value,
     meta: &serde_json::Value,
+    since: Option<i64>,
     parts: &mut Vec<Part>,
 ) -> Result<(), AgentError> {
     // 1. The files.
@@ -386,6 +437,7 @@ async fn make_parts(
         tenant_id,
         uid,
         key_text,
+        since,
     )
     .await?;
     parts.push(Part {
@@ -533,11 +585,14 @@ pub async fn restore_backup(
         dns,
         snapshot,
         verify_only,
+        create_databases,
+        restore_db_users,
     } = op
     else {
         return Err(super::wrong_operation());
     };
-    dhpanel_domain::TenantUsername::parse(&account).map_err(|e| invalid(&e.to_string()))?;
+    let tenant =
+        dhpanel_domain::TenantUsername::parse(&account).map_err(|e| invalid(&e.to_string()))?;
     for d in &databases {
         dhpanel_domain::databases::check_identifier(d).map_err(|e| invalid(&e.to_string()))?;
     }
@@ -584,7 +639,8 @@ pub async fn restore_backup(
                                 .is_some_and(|d| databases.contains(d))
                     }
                     PartKind::Dns => verify_only || dns,
-                    PartKind::Meta | PartKind::System => verify_only,
+                    PartKind::Meta => verify_only || restore_db_users,
+                    PartKind::System => verify_only,
                 };
                 if wanted {
                     needed.push(part.name.clone());
@@ -674,7 +730,56 @@ pub async fn restore_backup(
         )
         .await?;
     }
-    // 4. The databases, replaced by their dumps.
+    // 4. The databases, replaced by their dumps (made first on a node that has none yet, with
+    // the users the backup carries).
+    if create_databases {
+        for database in &databases {
+            db::create_database(
+                context.clone(),
+                Operation::CreateDatabase {
+                    name: database.clone(),
+                    engine: dhpanel_node_protocol::DbEngine::Mysql,
+                    dedicated: None,
+                },
+            )
+            .await?;
+        }
+    }
+    if restore_db_users {
+        let name = manifest
+            .parts
+            .iter()
+            .find(|p| p.kind == PartKind::Meta)
+            .map(|p| p.name.clone())
+            .ok_or_else(|| invalid("the backup has no setup data"))?;
+        let (dest2, object) = (dest.clone(), format!("{id}/{name}"));
+        let meta = tokio::task::spawn_blocking(move || read_json_part(&dest2, &object, &key))
+            .await
+            .map_err(|_| failed("the reading was cancelled"))??;
+        for user in meta
+            .get("db_users")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            let (Some(user_name), Some(credential)) = (
+                user.get("name").and_then(serde_json::Value::as_str),
+                user.get("credential").and_then(serde_json::Value::as_str),
+            ) else {
+                continue;
+            };
+            dhpanel_domain::databases::check_identifier(user_name)
+                .map_err(|e| invalid(&e.to_string()))?;
+            // Only MariaDB users are carried by a restore today.
+            if user
+                .get("engine")
+                .and_then(serde_json::Value::as_str)
+                .is_none_or(|e| e == "mysql")
+            {
+                db::set_user_hash(&context, &tenant, user_name, credential).await?;
+            }
+        }
+    }
     for database in &databases {
         let name = manifest
             .parts
@@ -760,6 +865,7 @@ async fn make_snapshot(
             tenant_id,
             uid,
             key_text,
+            None,
         )
         .await?;
         snap.push(BackupPartInfo {

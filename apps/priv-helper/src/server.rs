@@ -286,6 +286,7 @@ fn execute_one(action: &Action, config: &Config) -> Result<(), (ErrorCode, &'sta
             uid,
             staged,
             key,
+            since,
         } => crate::files::backup_files(
             &config.tenants,
             &config.transfers,
@@ -294,6 +295,7 @@ fn execute_one(action: &Action, config: &Config) -> Result<(), (ErrorCode, &'sta
             *uid,
             staged,
             key,
+            *since,
         ),
         Action::RestoreFiles {
             tenant_id,

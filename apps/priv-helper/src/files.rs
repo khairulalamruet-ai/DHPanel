@@ -436,6 +436,7 @@ pub fn take_file(
 ///
 /// # Errors
 /// As [`place_file`].
+#[allow(clippy::too_many_arguments)]
 pub fn backup_files(
     env: &TenantEnv,
     transfers: &Path,
@@ -444,6 +445,7 @@ pub fn backup_files(
     uid: u32,
     staged: &str,
     key: &str,
+    since: Option<i64>,
 ) -> Result<(), Failure> {
     if key.len() != 64 || !key.bytes().all(|b| b.is_ascii_hexdigit()) {
         return Err((ErrorCode::InvalidArguments, "the key is 64 hex digits"));
@@ -478,7 +480,9 @@ pub fn backup_files(
         Stdio::null(),
         Stdio::from(File::from(out)),
         Some(Box::new(std::io::Cursor::new(
-            format!("{key}\n").into_bytes(),
+            since
+                .map_or_else(|| format!("{key}\n"), |t| format!("{key}\n{t}\n"))
+                .into_bytes(),
         ))),
     )
     .and_then(|(ok, out, err)| said(ok, &out, &err));
@@ -503,7 +507,10 @@ pub fn backup_worker(
         .take(256)
         .read_to_string(&mut text)
         .map_err(|_| FileResult::error(FileErrorCode::InvalidArguments, "no key"))?;
-    let hex = text.trim();
+    // The key, and on a second line the time to pack only what is newer than.
+    let mut lines = text.lines();
+    let hex = lines.next().unwrap_or_default().trim();
+    let since: Option<i64> = lines.next().and_then(|l| l.trim().parse().ok());
     let mut key = [0u8; dhpanel_backup::KEY_LEN];
     if hex.len() != key.len() * 2 {
         return Err(FileResult::error(
@@ -518,7 +525,7 @@ pub fn backup_worker(
     }
     let root = Root::open(root)
         .map_err(|_| FileResult::error(FileErrorCode::NotFound, "the files are not there"))?;
-    dhpanel_fileops::backup::pack_files(&root, &key, out)
+    dhpanel_fileops::backup::pack_files(&root, &key, since, out)
         .map(|_| ())
         .map_err(|(code, message)| FileResult::error(code, message))
 }

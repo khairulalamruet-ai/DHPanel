@@ -39,6 +39,7 @@ pub mod client;
 pub mod import;
 pub mod runner;
 pub mod system;
+pub mod transfer;
 
 /// The module's manifest.
 pub const MANIFEST: &str = include_str!("../../../../modules/backups/module.toml");
@@ -84,6 +85,23 @@ pub fn admin_router() -> Router<BackupsState> {
             post(make_default),
         )
         .route("/api/v1/admin/backup-imports", post(import::start_import))
+        .route(
+            "/api/v1/admin/node-transfers",
+            get(transfer::list).post(transfer::start),
+        )
+        .route("/api/v1/admin/node-transfers/{id}", get(transfer::show))
+        .route(
+            "/api/v1/admin/node-transfers/{id}/cutover",
+            post(transfer::cutover),
+        )
+        .route(
+            "/api/v1/admin/node-transfers/{id}/cleanup",
+            post(transfer::cleanup),
+        )
+        .route(
+            "/api/v1/admin/node-transfers/{id}/cancel",
+            post(transfer::cancel),
+        )
         .route(
             "/api/v1/admin/system-backups",
             get(system::list_system_backups).post(system::start_system_backup),
@@ -681,13 +699,15 @@ pub async fn remove_destination(
         client::list_backups, client::start_backup, client::delete_backup, client::start_restore,
         client::list_restores, client::start_export, client::list_exports, import::start_import, client::get_schedule, client::put_schedule, client::delete_schedule,
         system::list_system_backups, system::start_system_backup, system::delete_system_backup,
+        transfer::list, transfer::show, transfer::start, transfer::cutover, transfer::cleanup, transfer::cancel,
         system::get_system_schedule, system::put_system_schedule, system::delete_system_schedule
     ),
     components(schemas(
         DestinationView, DestinationList, AddDestination, ChangeDestination,
         client::BackupView, client::BackupList, client::PartView, client::StartRestore,
         client::RestoreView, client::RestoreList, client::ScheduleView, client::StartExport,
-        client::ExportView, client::ExportList, import::StartImport
+        client::ExportView, client::ExportList, import::StartImport,
+        transfer::TransferView, transfer::StartTransfer
     )),
     tags((name = "backups", description = "Backups"))
 )]

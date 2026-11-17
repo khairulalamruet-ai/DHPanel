@@ -409,6 +409,9 @@ async fn main() -> ExitCode {
                 if let Err(error) = dhpanel_mod_backups::runner::tick(&db, &runner_key, now).await {
                     tracing::warn!(%error, "the backup runner could not finish a round");
                 }
+                if let Err(error) = dhpanel_mod_backups::transfer::tick(&db, &runner_key).await {
+                    tracing::warn!(%error, "the node transfers could not finish a round");
+                }
                 system.run().await;
             }
         }

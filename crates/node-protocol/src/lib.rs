@@ -919,6 +919,18 @@ impl DbEngine {
     }
 }
 
+/// A database user whose password the node keeps in a backup (inside the encrypted setup
+/// data), so that a transfer to another node makes the user again with the same password.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BackupDbUser {
+    /// The user's whole name.
+    pub name: String,
+    /// Which kind of server it is on.
+    #[serde(default, skip_serializing_if = "DbEngine::is_mysql")]
+    pub engine: DbEngine,
+}
+
 /// What one user may do in one database, as [`Operation::MigrateTenantDatabases`] carries it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -1719,6 +1731,13 @@ pub enum Operation {
         key: Option<DbPassword>,
         /// The whole names of the databases to dump.
         databases: Vec<String>,
+        /// Database users whose password hashes go into the setup data (for a transfer).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        db_users: Vec<BackupDbUser>,
+        /// Pack only the files made or changed after this time (Unix seconds): the last pass of
+        /// a transfer.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        files_since: Option<i64>,
         /// The DNS records of the account's domains (stored as `dns.json`).
         dns: serde_json::Value,
         /// What is needed to set the account up again (stored as `meta.json`).
@@ -1770,6 +1789,12 @@ pub enum Operation {
         snapshot: bool,
         /// Only check the backup; change nothing.
         verify_only: bool,
+        /// Make a database that is not there before it is filled (a transfer to a new node).
+        #[serde(default)]
+        create_databases: bool,
+        /// Make the database users the backup carries, with their passwords (a transfer).
+        #[serde(default)]
+        restore_db_users: bool,
     },
     /// Removes everything a backup stored at its destination (`<backup id>/`; with
     /// `snapshots`, also the `pre-*` folders of its restores are not touched). Safe to
@@ -4066,6 +4091,8 @@ mod tests {
                 dns: serde_json::json!([]),
                 meta: serde_json::json!({}),
                 created_at: 1,
+                db_users: Vec::new(),
+                files_since: None,
             },
             Operation::UpsertFtpAccount {
                 tenant_id: id(),

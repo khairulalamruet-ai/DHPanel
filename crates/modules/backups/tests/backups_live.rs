@@ -987,3 +987,526 @@ async fn an_account_export_is_asked_for_and_turned_into_a_backup_of_the_same_acc
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// What the node does for a transfer's step, done by hand: an operation succeeds.
+async fn node_did(pool: &PgPool, kind: &str, node: Uuid) -> Value {
+    let (id, payload): (Uuid, Value) = sqlx::query_as(
+        "SELECT id, payload FROM operations WHERE kind = $1 AND node_id = $2 AND status = 'pending'
+         ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(kind)
+    .bind(node)
+    .fetch_one(pool)
+    .await
+    .unwrap_or_else(|e| panic!("no pending {kind} for that node: {e}"));
+    sqlx::query("UPDATE operations SET status = 'dispatched', attempts = 1 WHERE id = $1")
+        .bind(id)
+        .execute(pool)
+        .await
+        .unwrap();
+    assert!(
+        dhpanel_database::operations::succeed(pool, id, &json!({}))
+            .await
+            .unwrap()
+    );
+    payload
+}
+
+/// A step the node could not do.
+async fn node_failed(pool: &PgPool, kind: &str, node: Uuid, message: &str) {
+    let id: Uuid = sqlx::query_scalar(
+        "SELECT id FROM operations WHERE kind = $1 AND node_id = $2 AND status = 'pending'
+         ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(kind)
+    .bind(node)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE operations SET status = 'dispatched', attempts = 1 WHERE id = $1")
+        .bind(id)
+        .execute(pool)
+        .await
+        .unwrap();
+    dhpanel_database::operations::fail(
+        pool,
+        id,
+        &json!({"code": "internal", "message": message, "retryable": false}),
+        None,
+    )
+    .await
+    .unwrap();
+}
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn an_account_is_copied_to_another_node_while_it_runs_then_frozen_for_the_last_pass_and_switched(
+    pool: PgPool,
+) {
+    use dhpanel_mod_backups::{runner, transfer};
+    let e = env(&pool).await;
+    let root = e
+        .sign_in(admin(&pool, "rootuser", &["super_admin"]).await)
+        .await;
+    let (_, tenant) = client(&pool, "dina", 10_000).await;
+    let old: Uuid = sqlx::query_scalar("SELECT node_id FROM tenants WHERE id = $1")
+        .bind(tenant)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE nodes SET public_ip = '203.0.113.1', status = 'online' WHERE id = $1")
+        .bind(old)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let new: Uuid = sqlx::query_scalar(
+        "INSERT INTO nodes (name, public_ip, status) VALUES ('node2', '203.0.113.2', 'online') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let dest: Uuid = sqlx::query_scalar(
+        "INSERT INTO backup_destinations (name, kind, settings, is_default)
+         VALUES ('Disk', 'local', '{\"path\": \"/var/backups\"}', true) RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    // What the account has: a site with a DNS record that names its node, a database and a
+    // user with access (and a remote address), a cron job.
+    let domain: Uuid = sqlx::query_scalar(
+        "INSERT INTO domains (tenant_id, fqdn, kind) VALUES ($1, 'dina.example', 'primary') RETURNING id",
+    )
+    .bind(tenant)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let zone: Uuid = sqlx::query_scalar(
+        "INSERT INTO dns_zones (domain_id, name) VALUES ($1, 'dina.example') RETURNING id",
+    )
+    .bind(domain)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    for (name, rtype, content) in [("@", "A", "203.0.113.1"), ("@", "TXT", "203.0.113.1")] {
+        sqlx::query("INSERT INTO dns_records (zone_id, name, rtype, content, ttl) VALUES ($1, $2, $3, $4, 300)")
+            .bind(zone)
+            .bind(name)
+            .bind(rtype)
+            .bind(content)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    let database: Uuid = sqlx::query_scalar(
+        "INSERT INTO databases (tenant_id, name, status) VALUES ($1, 'dina_shop', 'ready') RETURNING id",
+    )
+    .bind(tenant)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let user: Uuid = sqlx::query_scalar(
+        "INSERT INTO db_users (tenant_id, name, status) VALUES ($1, 'dina_web', 'ready') RETURNING id",
+    )
+    .bind(tenant)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO db_grants (tenant_id, database_id, user_id, access) VALUES ($1, $2, $3, 'all')")
+        .bind(tenant)
+        .bind(database)
+        .bind(user)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO db_remote_hosts (user_id, cidr) VALUES ($1, '198.51.100.9/32')")
+        .bind(user)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO cron_jobs (tenant_id, name, schedule, command) VALUES ($1, 'tick', '*/10 * * * *', 'php cron.php')")
+        .bind(tenant)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let key = MasterKey::from_bytes(&KEY);
+    let path = "/api/v1/admin/node-transfers";
+
+    // Not to the same node, not to one that is not online, not an account that is not there.
+    let (status, body) = e
+        .call(
+            &root,
+            "POST",
+            path,
+            Some(json!({"tenant_id": tenant, "to_node_id": old})),
+        )
+        .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "same_node"),
+        "{body}"
+    );
+    sqlx::query("UPDATE nodes SET status = 'offline' WHERE id = $1")
+        .bind(new)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, body) = e
+        .call(
+            &root,
+            "POST",
+            path,
+            Some(json!({"tenant_id": tenant, "to_node_id": new})),
+        )
+        .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "node_unavailable")
+    );
+    sqlx::query("UPDATE nodes SET status = 'online' WHERE id = $1")
+        .bind(new)
+        .execute(&pool)
+        .await
+        .unwrap();
+    // What a transfer cannot carry yet is named and refused.
+    sqlx::query("INSERT INTO ftp_accounts (tenant_id, name, home) VALUES ($1, 'dina_site', 'www')")
+        .bind(tenant)
+        .execute(&pool)
+        .await
+        .ok();
+    let ftp: i64 = sqlx::query_scalar("SELECT count(*) FROM ftp_accounts WHERE tenant_id = $1")
+        .bind(tenant)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    if ftp > 0 {
+        let (status, body) = e
+            .call(
+                &root,
+                "POST",
+                path,
+                Some(json!({"tenant_id": tenant, "to_node_id": new})),
+            )
+            .await;
+        assert_eq!(
+            (status, code(&body)),
+            (StatusCode::CONFLICT, "transfer_unsupported"),
+            "{body}"
+        );
+        sqlx::query("DELETE FROM ftp_accounts WHERE tenant_id = $1")
+            .bind(tenant)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+
+    // Start: the account is set up on the new node first.
+    let (status, started) = e
+        .call(
+            &root,
+            "POST",
+            path,
+            Some(json!({"tenant_id": tenant, "to_node_id": new})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{started}");
+    let id = started["id"].as_str().unwrap().to_owned();
+    let (status, body) = e
+        .call(
+            &root,
+            "POST",
+            path,
+            Some(json!({"tenant_id": tenant, "to_node_id": new})),
+        )
+        .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "transfer_active")
+    );
+    let state = || {
+        let pool = pool.clone();
+        let id = id.clone();
+        async move {
+            sqlx::query_scalar::<_, String>(
+                "SELECT state FROM tenant_transfers WHERE id = $1::uuid",
+            )
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        }
+    };
+    transfer::tick(&pool, &key).await.unwrap();
+    assert_eq!(state().await, "provisioning");
+    let setup = node_did(&pool, "set_up_tenant", new).await;
+    assert_eq!(setup["username"], "dina");
+
+    // The first copy: a backup on the OLD node that carries the users' passwords, restored on
+    // the NEW node, which makes the databases and the users.
+    transfer::tick(&pool, &key).await.unwrap();
+    assert_eq!(state().await, "precopy_backup");
+    runner::tick(&pool, &key, 1_710_000_000).await.unwrap();
+    let first = node_did(&pool, "create_backup", old).await;
+    assert!(first.get("files_since").is_none(), "{first}");
+    assert_eq!(first["db_users"][0]["name"], "dina_web");
+    assert_eq!(first["databases"], json!(["dina_shop"]));
+    sqlx::query("UPDATE backups SET status = 'ready' WHERE tenant_id = $1")
+        .bind(tenant)
+        .execute(&pool)
+        .await
+        .unwrap();
+    transfer::tick(&pool, &key).await.unwrap();
+    assert_eq!(state().await, "precopy_restore");
+    runner::tick(&pool, &key, 1_710_000_001).await.unwrap();
+    let restore = node_did(&pool, "restore_backup", new).await;
+    assert_eq!(restore["create_databases"], true);
+    assert_eq!(restore["restore_db_users"], true);
+    assert_eq!(restore["files"], true);
+    sqlx::query("UPDATE backup_restores SET status = 'done' WHERE tenant_id = $1")
+        .bind(tenant)
+        .execute(&pool)
+        .await
+        .unwrap();
+    transfer::tick(&pool, &key).await.unwrap();
+    // The site still runs on the old node and the account still belongs to it.
+    assert_eq!(state().await, "precopied");
+    let owner: Uuid = sqlx::query_scalar("SELECT node_id FROM tenants WHERE id = $1")
+        .bind(tenant)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(owner, old);
+    transfer::tick(&pool, &key).await.unwrap();
+    assert_eq!(state().await, "precopied", "it waits to be told to go on");
+
+    // Cutover: frozen on the old node; the last backup carries only what changed.
+    let (status, body) = e
+        .call(&root, "POST", &format!("{path}/{id}/cleanup"), None)
+        .await;
+    assert_eq!((status, code(&body)), (StatusCode::CONFLICT, "wrong_state"));
+    let (status, _) = e
+        .call(&root, "POST", &format!("{path}/{id}/cutover"), None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    transfer::tick(&pool, &key).await.unwrap();
+    assert_eq!(state().await, "freezing");
+    let frozen = node_did(&pool, "suspend_tenant", old).await;
+    assert_eq!(frozen["username"], "dina");
+    transfer::tick(&pool, &key).await.unwrap();
+    assert_eq!(state().await, "delta_backup");
+    // The first copy is old now (the backup row must not be a live one for the next).
+    runner::tick(&pool, &key, 1_710_000_100).await.unwrap();
+    let delta = node_did(&pool, "create_backup", old).await;
+    assert!(delta["files_since"].as_i64().is_some(), "{delta}");
+    sqlx::query("UPDATE backups SET status = 'ready' WHERE status IN ('queued', 'running')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    transfer::tick(&pool, &key).await.unwrap();
+    assert_eq!(state().await, "delta_restore");
+    runner::tick(&pool, &key, 1_710_000_101).await.unwrap();
+    node_did(&pool, "restore_backup", new).await;
+    sqlx::query("UPDATE backup_restores SET status = 'done' WHERE status IN ('queued', 'running')")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // The switch: the account is the new node's; the sites, PHP, jobs, grants and the DNS
+    // record that named the old address follow.
+    let routes_before: i64 = sqlx::query_scalar("SELECT routes_version FROM tenants WHERE id = $1")
+        .bind(tenant)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    transfer::tick(&pool, &key).await.unwrap();
+    assert_eq!(state().await, "switched");
+    let owner: Uuid = sqlx::query_scalar("SELECT node_id FROM tenants WHERE id = $1")
+        .bind(tenant)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(owner, new);
+    let routes_after: i64 = sqlx::query_scalar("SELECT routes_version FROM tenants WHERE id = $1")
+        .bind(tenant)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!(routes_after > routes_before);
+    let records: Vec<(String, String)> =
+        sqlx::query_as("SELECT rtype, content FROM dns_records WHERE zone_id = $1 ORDER BY rtype")
+            .bind(zone)
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        records,
+        [
+            ("A".to_owned(), "203.0.113.2".to_owned()),
+            ("TXT".to_owned(), "203.0.113.1".to_owned())
+        ],
+        "only an address record that named the old node's address is changed"
+    );
+    let cron = node_did(&pool, "sync_cron_jobs", new).await;
+    assert_eq!(cron["jobs"][0]["command"], "php cron.php");
+    let grant = node_did(&pool, "grant_db", new).await;
+    assert_eq!(
+        (grant["database"].as_str(), grant["access"].as_str()),
+        (Some("dina_shop"), Some("all"))
+    );
+    let remote = node_did(&pool, "set_db_remote_hosts", new).await;
+    assert_eq!(remote["cidrs"], json!(["198.51.100.9/32"]));
+    let on_new: Value = sqlx::query_scalar(
+        "SELECT payload FROM operations WHERE kind = 'set_db_remote_access' AND node_id = $1",
+    )
+    .bind(new)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(on_new["cidrs"], json!(["198.51.100.9/32"]));
+    let (_, shown) = e.call(&root, "GET", &format!("{path}/{id}"), None).await;
+    assert_eq!(shown["state"], "switched");
+    assert!(
+        shown["downtime_secs"].as_i64().is_some_and(|s| s >= 0),
+        "{shown}"
+    );
+
+    // The old copy stays until someone says; then it goes, and the transfer's own backups with it.
+    let (status, _) = e
+        .call(&root, "POST", &format!("{path}/{id}/cleanup"), None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let gone = node_did(&pool, "delete_tenant", old).await;
+    assert_eq!(gone["purge_data"], true);
+    transfer::tick(&pool, &key).await.unwrap();
+    assert_eq!(state().await, "done");
+    let leftover: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM backups WHERE tenant_id = $1 AND status NOT IN ('deleting', 'deleted')",
+    )
+    .bind(tenant)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(leftover, 0);
+    let audit: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM audit_logs WHERE action LIKE 'node_transfer.%'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(audit, 3, "started, cut over, cleaned up");
+    let _ = dest;
+}
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn a_failure_after_the_freeze_gives_the_old_node_its_account_back_and_a_cancel_removes_the_copy(
+    pool: PgPool,
+) {
+    use dhpanel_mod_backups::{runner, transfer};
+    let e = env(&pool).await;
+    let root = e
+        .sign_in(admin(&pool, "rootuser", &["super_admin"]).await)
+        .await;
+    let (_, tenant) = client(&pool, "erin", 10_001).await;
+    let old: Uuid = sqlx::query_scalar("SELECT node_id FROM tenants WHERE id = $1")
+        .bind(tenant)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let new: Uuid = sqlx::query_scalar(
+        "INSERT INTO nodes (name, public_ip, status) VALUES ('node2', '203.0.113.2', 'online') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO backup_destinations (name, kind, settings, is_default)
+         VALUES ('Disk', 'local', '{\"path\": \"/var/backups\"}', true)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let key = MasterKey::from_bytes(&KEY);
+    let path = "/api/v1/admin/node-transfers";
+    let (_, started) = e
+        .call(
+            &root,
+            "POST",
+            path,
+            Some(json!({"tenant_id": tenant, "to_node_id": new, "auto_cutover": true})),
+        )
+        .await;
+    let id = started["id"].as_str().unwrap().to_owned();
+    let state = || {
+        let pool = pool.clone();
+        let id = id.clone();
+        async move {
+            sqlx::query_scalar::<_, String>(
+                "SELECT state FROM tenant_transfers WHERE id = $1::uuid",
+            )
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        }
+    };
+    // All the way to the freeze by itself.
+    transfer::tick(&pool, &key).await.unwrap();
+    node_did(&pool, "set_up_tenant", new).await;
+    transfer::tick(&pool, &key).await.unwrap();
+    runner::tick(&pool, &key, 1_710_000_000).await.unwrap();
+    node_did(&pool, "create_backup", old).await;
+    sqlx::query("UPDATE backups SET status = 'ready'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    transfer::tick(&pool, &key).await.unwrap();
+    runner::tick(&pool, &key, 1_710_000_001).await.unwrap();
+    node_did(&pool, "restore_backup", new).await;
+    sqlx::query("UPDATE backup_restores SET status = 'done'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    transfer::tick(&pool, &key).await.unwrap();
+    assert_eq!(state().await, "precopied");
+    transfer::tick(&pool, &key).await.unwrap();
+    assert_eq!(state().await, "freezing");
+    node_did(&pool, "suspend_tenant", old).await;
+    transfer::tick(&pool, &key).await.unwrap();
+    runner::tick(&pool, &key, 1_710_000_100).await.unwrap();
+    // The last backup fails: the old node gets its account back and nothing is switched.
+    node_failed(&pool, "create_backup", old, "the destination is full").await;
+    transfer::tick(&pool, &key).await.unwrap();
+    assert_eq!(state().await, "failed");
+    let resumed = node_did(&pool, "resume_tenant", old).await;
+    assert_eq!(resumed["username"], "erin");
+    let owner: Uuid = sqlx::query_scalar("SELECT node_id FROM tenants WHERE id = $1")
+        .bind(tenant)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(owner, old);
+    let (_, shown) = e.call(&root, "GET", &format!("{path}/{id}"), None).await;
+    assert!(
+        shown["error"].as_str().is_some_and(|e| !e.is_empty()),
+        "{shown}"
+    );
+
+    // A failed transfer's half-made copy is removed with a cancel, and a new one can start.
+    let (status, _) = e
+        .call(&root, "POST", &format!("{path}/{id}/cancel"), None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let removed = node_did(&pool, "delete_tenant", new).await;
+    assert_eq!(removed["purge_data"], true);
+    transfer::tick(&pool, &key).await.unwrap();
+    assert_eq!(state().await, "cancelled");
+    let (status, _) = e
+        .call(
+            &root,
+            "POST",
+            path,
+            Some(json!({"tenant_id": tenant, "to_node_id": new})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED);
+}

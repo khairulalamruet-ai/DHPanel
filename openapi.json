@@ -5470,6 +5470,359 @@
         ]
       }
     },
+    "/api/v1/admin/node-transfers": {
+      "get": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "The newest transfers.",
+        "operationId": "adminListNodeTransfers",
+        "responses": {
+          "200": {
+            "description": "The newest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TransferView"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Start moving an account to another node.",
+        "operationId": "adminStartNodeTransfer",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartTransfer"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransferView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such account, node or destination",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`transfer_active`, `same_node`, `node_unavailable`, `tenant_not_active` or `transfer_unsupported` (the account has what a transfer cannot carry yet)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/node-transfers/{id}": {
+      "get": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "One transfer.",
+        "operationId": "adminGetNodeTransfer",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Transfer id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The transfer",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransferView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such transfer",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/node-transfers/{id}/cancel": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Give up before the switch: the old node keeps the account, the new node's copy is removed.",
+        "operationId": "adminCancelNodeTransfer",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Transfer id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Being cancelled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransferView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such transfer",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`wrong_state`: it is switched or over",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/node-transfers/{id}/cleanup": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Remove the account from the old node (after the switch).",
+        "operationId": "adminCleanUpNodeTransfer",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Transfer id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Being removed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransferView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such transfer",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`wrong_state`: the account has not been switched",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/node-transfers/{id}/cutover": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Go on to the last pass: the account is frozen on the old node, what changed is carried, and\nthe account is switched to the new node.",
+        "operationId": "adminCutOverNodeTransfer",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Transfer id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Going on",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransferView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such transfer",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`wrong_state`: the first copy is not there yet, or it is over",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/nodes": {
       "get": {
         "tags": [
@@ -31045,6 +31398,39 @@
           "verify_only": {
             "type": "boolean",
             "description": "Only check that the backup is whole; change nothing."
+          }
+        },
+        "additionalProperties": false
+      },
+      "StartTransfer": {
+        "type": "object",
+        "description": "What to move, and where.",
+        "required": [
+          "tenant_id",
+          "to_node_id"
+        ],
+        "properties": {
+          "auto_cutover": {
+            "type": "boolean",
+            "description": "Go on to the last pass (and the switch) as soon as the first copy is there."
+          },
+          "destination_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The backup destination to pass the copies through (the default one when left out)."
+          },
+          "tenant_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The hosting account."
+          },
+          "to_node_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The node it goes to."
           }
         },
         "additionalProperties": false

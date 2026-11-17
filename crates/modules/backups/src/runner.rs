@@ -171,6 +171,23 @@ async fn send_queued(db: &PgPool) -> Result<(), TickError> {
             .filter(|d| d.status == "ready" && d.engine == "mysql" && shared_mysql)
             .map(|d| d.name)
             .collect();
+        // A backup of a transfer is made on the node the account is leaving, which is not
+        // always the one it is recorded on, and carries more.
+        let extras = dhpanel_database::transfers::extras(db, backup.id).await?;
+        let db_users = if extras.is_some_and(|x| x.with_db_users) {
+            dhpanel_database::tenant_db::move_set(db, tenant.id, "mysql")
+                .await?
+                .users
+                .into_iter()
+                .map(|name| dhpanel_node_protocol::BackupDbUser {
+                    name,
+                    engine: dhpanel_node_protocol::DbEngine::Mysql,
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let node_id = extras.map_or(tenant.node_id, |x| x.node_id);
         let op = Operation::CreateBackup {
             tenant_id: tenant.id,
             uid: u32::try_from(tenant.uid).unwrap_or(0),
@@ -180,6 +197,8 @@ async fn send_queued(db: &PgPool) -> Result<(), TickError> {
             credentials: None,
             key: None,
             databases,
+            db_users,
+            files_since: extras.and_then(|x| x.files_since),
             // The zone records of the account's domains.
             dns: dhpanel_database::dns::backup_records(db, tenant.id).await?,
             meta: serde_json::json!({
@@ -191,7 +210,7 @@ async fn send_queued(db: &PgPool) -> Result<(), TickError> {
         };
         queue(
             db,
-            tenant.node_id,
+            node_id,
             Some(tenant.id),
             &op,
             &format!("backup:{}", backup.id),
@@ -214,6 +233,8 @@ async fn send_restores(db: &PgPool) -> Result<(), TickError> {
         let Some(destination) = store::destination(db, destination_id).await? else {
             continue;
         };
+        let extras = dhpanel_database::transfers::extras(db, restore.id).await?;
+        let node_id = extras.map_or(tenant.node_id, |x| x.node_id);
         let op = Operation::RestoreBackup {
             tenant_id: tenant.id,
             uid: u32::try_from(tenant.uid).unwrap_or(0),
@@ -229,10 +250,12 @@ async fn send_restores(db: &PgPool) -> Result<(), TickError> {
             dns: restore.dns,
             snapshot: restore.snapshot,
             verify_only: restore.verify_only,
+            create_databases: extras.is_some_and(|x| x.create_databases),
+            restore_db_users: extras.is_some_and(|x| x.restore_db_users),
         };
         queue(
             db,
-            tenant.node_id,
+            node_id,
             Some(tenant.id),
             &op,
             &format!("restore:{}", restore.id),
@@ -427,6 +450,8 @@ pub async fn fill(db: &PgPool, master_key: &MasterKey, op: Operation) -> Result<
             target,
             key: None,
             databases,
+            db_users,
+            files_since,
             dns,
             meta,
             created_at,
@@ -440,6 +465,8 @@ pub async fn fill(db: &PgPool, master_key: &MasterKey, op: Operation) -> Result<
             credentials: open_credentials(destination_of(backup_id).await?).await?,
             key: Some(open_key(backup_id).await?),
             databases,
+            db_users,
+            files_since,
             dns,
             meta,
             created_at,
@@ -458,6 +485,8 @@ pub async fn fill(db: &PgPool, master_key: &MasterKey, op: Operation) -> Result<
             dns,
             snapshot,
             verify_only,
+            create_databases,
+            restore_db_users,
             ..
         } => Ok(Operation::RestoreBackup {
             tenant_id,
@@ -474,6 +503,8 @@ pub async fn fill(db: &PgPool, master_key: &MasterKey, op: Operation) -> Result<
             dns,
             snapshot,
             verify_only,
+            create_databases,
+            restore_db_users,
         }),
         Operation::ExportBackup {
             backup_id,

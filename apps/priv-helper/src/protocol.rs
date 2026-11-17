@@ -111,6 +111,9 @@ pub enum Action {
         staged: String,
         /// The key.
         key: String,
+        /// Only files made or changed after this time (Unix seconds).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        since: Option<i64>,
     },
     /// Puts the files of an encrypted backup stream (a staged file of the agent's transfer
     /// folder, see [`Action::BackupFiles`]) back into a tenant's folder, as the tenant's own

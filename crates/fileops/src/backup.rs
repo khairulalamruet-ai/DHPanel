@@ -68,11 +68,20 @@ impl<R: Read> Read for Fixed<R> {
     }
 }
 
-/// Packs everything below `root` (the trash excluded) into `out`, encrypted with `key`.
+/// Packs everything below `root` (the trash excluded) into `out`, encrypted with `key`. With
+/// `since` (Unix seconds) only the files that were made or changed after that time are packed
+/// (by the later of their modification and status change time, which a copy that keeps the
+/// old modification time does not hide); the folders are all there, so the new files have
+/// their places.
 ///
 /// # Errors
 /// The disk or `out` failing (not a changing file: see the module documentation).
-pub fn pack_files(root: &Root, key: &[u8; KEY_LEN], out: impl Write) -> Out<Packed> {
+pub fn pack_files(
+    root: &Root,
+    key: &[u8; KEY_LEN],
+    since: Option<i64>,
+    out: impl Write,
+) -> Out<Packed> {
     let io = |e: std::io::Error| (FileErrorCode::Failed, format!("cannot pack: {}", e.kind()));
     let encrypted = StreamWriter::new(out, key).map_err(io)?;
     let compressed = zstd::stream::Encoder::new(encrypted, 3).map_err(io)?;
@@ -85,7 +94,7 @@ pub fn pack_files(root: &Root, key: &[u8; KEY_LEN], out: impl Write) -> Out<Pack
         Mode::empty(),
     ))?;
     let mut packed = Packed::default();
-    walk(&top, "", 0, &mut tar, &mut packed)?;
+    walk(&top, "", 0, since, &mut tar, &mut packed)?;
     let compressed = tar.into_inner().map_err(io)?;
     let encrypted = compressed.finish().map_err(io)?;
     encrypted.finish().map_err(io)?;
@@ -96,6 +105,7 @@ fn walk<W: Write>(
     dir: &OwnedFd,
     path: &str,
     depth: usize,
+    since: Option<i64>,
     tar: &mut tar::Builder<W>,
     packed: &mut Packed,
 ) -> Out<()> {
@@ -135,9 +145,12 @@ fn walk<W: Write>(
                 tar.append_data(&mut header, format!("{child}/"), std::io::empty())
                     .map_err(io)?;
                 packed.entries += 1;
-                walk(&fd, &child, depth + 1, tar, packed)?;
+                walk(&fd, &child, depth + 1, since, tar, packed)?;
             }
             EntryKind::File => {
+                if since.is_some_and(|t| st.st_mtime.max(st.st_ctime) <= t) {
+                    continue;
+                }
                 let Ok(fd) = sys(rustix::fs::openat(
                     dir,
                     name.as_str(),
