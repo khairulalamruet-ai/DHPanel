@@ -1028,6 +1028,7 @@ dependencies = [
  "dhpanel-mod-files",
  "dhpanel-mod-license",
  "dhpanel-mod-logs",
+ "dhpanel-mod-migration",
  "dhpanel-mod-nodes",
  "dhpanel-mod-notifications",
  "dhpanel-mod-plans",
@@ -1583,6 +1584,33 @@ dependencies = [
  "serde",
  "serde_json",
  "sqlx",
+ "tokio",
+ "tower",
+ "utoipa",
+ "uuid",
+]
+
+[[package]]
+name = "dhpanel-mod-migration"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "dhpanel-audit",
+ "dhpanel-cache",
+ "dhpanel-database",
+ "dhpanel-domain",
+ "dhpanel-http-kit",
+ "dhpanel-import",
+ "dhpanel-kernel",
+ "dhpanel-mod-auth",
+ "dhpanel-rbac",
+ "dhpanel-session",
+ "flate2",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tar",
  "tokio",
  "tower",
  "utoipa",

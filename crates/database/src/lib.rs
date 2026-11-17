@@ -31,6 +31,7 @@ pub mod imports;
 pub mod license;
 pub mod malware;
 pub mod mfa;
+pub mod migration_transfers;
 pub mod modules;
 pub mod node_enrollments;
 pub mod node_firewalls;

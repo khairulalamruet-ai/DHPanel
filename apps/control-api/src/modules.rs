@@ -27,6 +27,7 @@ const EMBEDDED: &[(&str, &str)] = &[
     ("files", dhpanel_mod_files::MANIFEST),
     ("backups", dhpanel_mod_backups::MANIFEST),
     ("cron", dhpanel_mod_cron::MANIFEST),
+    ("migration", dhpanel_mod_migration::MANIFEST),
     ("logs", dhpanel_mod_logs::MANIFEST),
     ("usage", dhpanel_mod_usage::MANIFEST),
     ("services", dhpanel_mod_services::MANIFEST),
@@ -432,6 +433,20 @@ pub fn mount(
                         None => ModuleRoutes::none(),
                     })
                 }
+                "migration" => {
+                    let (db, sessions, spool_dir) =
+                        (db.clone(), sessions.clone(), spool_dir.clone());
+                    Box::new(move || ModuleRoutes {
+                        admin: Some(dhpanel_mod_migration::admin_router().with_state(
+                            dhpanel_mod_migration::MigrationState {
+                                db: db.clone(),
+                                sessions: sessions.clone(),
+                                spool_dir: spool_dir.clone(),
+                            },
+                        )),
+                        ..ModuleRoutes::none()
+                    })
+                }
                 "cron" => {
                     let (db, sessions, late_settings) =
                         (db.clone(), sessions.clone(), late_settings.clone());
@@ -808,6 +823,7 @@ mod tests {
                 "files",
                 "backups",
                 "cron",
+                "migration",
                 "logs",
                 "usage",
                 "services",
@@ -836,6 +852,7 @@ mod tests {
                 "domains",
                 "files",
                 "logs",
+                "migration",
                 "notifications",
                 "resellers",
                 "services",
@@ -859,6 +876,7 @@ mod tests {
                 "domains",
                 "files",
                 "logs",
+                "migration",
                 "notifications",
                 "resellers",
                 "services",
@@ -906,6 +924,8 @@ mod tests {
             p::UsersImpersonate::KEY,
             p::ResellersRead::KEY,
             p::ResellersManage::KEY,
+            p::MigrationRead::KEY,
+            p::MigrationManage::KEY,
             p::DomainsRead::KEY,
             p::DomainsManage::KEY,
             p::DatabasesRead::KEY,
@@ -925,7 +945,7 @@ mod tests {
         }
         assert_eq!(
             declared.len(),
-            32,
+            34,
             "a manifest declares a key the code does not know: {declared:?}"
         );
     }

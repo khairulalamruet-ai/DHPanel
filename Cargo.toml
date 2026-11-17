@@ -57,6 +57,7 @@ members = [
     "crates/modules/security",
     "crates/dns",
     "crates/import",
+    "crates/modules/migration",
 ]
 
 [workspace.package]
@@ -105,6 +106,8 @@ dhpanel-license-client = { path = "crates/license-client" }
 dhpanel-mod-apps = { path = "crates/modules/apps" }
 dhpanel-mod-license = { path = "crates/modules/license" }
 dhpanel-mod-cron = { path = "crates/modules/cron" }
+dhpanel-mod-migration = { path = "crates/modules/migration" }
+dhpanel-import = { path = "crates/import" }
 dhpanel-mod-logs = { path = "crates/modules/logs" }
 dhpanel-mod-notifications = { path = "crates/modules/notifications" }
 dhpanel-mod-usage = { path = "crates/modules/usage" }

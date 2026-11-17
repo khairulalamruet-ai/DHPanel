@@ -4602,6 +4602,312 @@
         ]
       }
     },
+    "/api/v1/admin/migration/transfers": {
+      "get": {
+        "tags": [
+          "migration"
+        ],
+        "summary": "The transfers, newest first.",
+        "operationId": "listMigrationTransfers",
+        "responses": {
+          "200": {
+            "description": "The transfers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TransferView"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "migration"
+        ],
+        "summary": "Start a transfer: read the backup and plan the import.",
+        "operationId": "createMigrationTransfer",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTransfer"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created and, for a dry run, finished",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransferView"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`import_unavailable`: only dry runs can be started",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid input",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/migration/transfers/{id}": {
+      "get": {
+        "tags": [
+          "migration"
+        ],
+        "summary": "One transfer, with its steps and log.",
+        "operationId": "getMigrationTransfer",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Transfer id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The transfer",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransferView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such transfer",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "migration"
+        ],
+        "summary": "Delete a transfer that has ended.",
+        "operationId": "deleteMigrationTransfer",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Transfer id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "description": "No such transfer",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`still_running`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/migration/transfers/{id}/cancel": {
+      "post": {
+        "tags": [
+          "migration"
+        ],
+        "summary": "Stop a transfer that has not ended.",
+        "operationId": "cancelMigrationTransfer",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Transfer id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cancelled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransferView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such transfer",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`not_cancellable`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/migration/transfers/{id}/retry": {
+      "post": {
+        "tags": [
+          "migration"
+        ],
+        "summary": "Run a failed or cancelled transfer again from its first step.",
+        "operationId": "retryMigrationTransfer",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Transfer id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Run again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransferView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such transfer",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`not_retryable`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/modules": {
       "get": {
         "tags": [
@@ -23289,6 +23595,52 @@
         },
         "additionalProperties": false
       },
+      "CreateTransfer": {
+        "type": "object",
+        "description": "A transfer to start.",
+        "required": [
+          "source_type",
+          "backup_file",
+          "tenant_username",
+          "target_domain"
+        ],
+        "properties": {
+          "backup_file": {
+            "type": "string",
+            "description": "The backup's file name in the import folder."
+          },
+          "dry_run": {
+            "type": "boolean",
+            "description": "Only plan (default `true`). The real import is not available yet."
+          },
+          "on_conflict": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`fail` (default), `rename` or `skip`."
+          },
+          "remote_host": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Fetching the backup from another server is not available yet (T15.05): must be absent."
+          },
+          "source_type": {
+            "type": "string",
+            "description": "`cpanel` or `cyberpanel` (`openpanel` and `dhpanel_archive` are not readable yet)."
+          },
+          "target_domain": {
+            "type": "string",
+            "description": "The main domain here."
+          },
+          "tenant_username": {
+            "type": "string",
+            "description": "The account's name here."
+          }
+        }
+      },
       "CreateUser": {
         "type": "object",
         "description": "A new user.",
@@ -29489,6 +29841,36 @@
           "disabled"
         ]
       },
+      "StepView": {
+        "type": "object",
+        "description": "One step of a transfer.",
+        "required": [
+          "id",
+          "name",
+          "status"
+        ],
+        "properties": {
+          "details": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What it did or why it failed."
+          },
+          "id": {
+            "type": "string",
+            "description": "Id, `step-<n>`."
+          },
+          "name": {
+            "type": "string",
+            "description": "What it does."
+          },
+          "status": {
+            "type": "string",
+            "description": "`pending`, `running`, `completed` or `failed`."
+          }
+        }
+      },
       "SudoRequest": {
         "type": "object",
         "description": "Re-authentication to enter sudo mode.",
@@ -31178,6 +31560,10 @@
     {
       "name": "cron",
       "description": "Cron jobs"
+    },
+    {
+      "name": "migration",
+      "description": "Bring an account over from another hosting panel"
     },
     {
       "name": "logs",

@@ -113,6 +113,14 @@ pub mod permissions {
         pub ResellersManage = "admin.resellers.manage"
     );
     crate::permission!(
+        /// See the imports from other hosting panels.
+        pub MigrationRead = "admin.migration.read"
+    );
+    crate::permission!(
+        /// Start, stop and remove imports from other hosting panels.
+        pub MigrationManage = "admin.migration.manage"
+    );
+    crate::permission!(
         /// See every domain on the panel.
         pub DomainsRead = "admin.domains.read"
     );

@@ -1,0 +1,14 @@
+# Migration: bring an account over from another hosting panel (crates/modules/migration).
+[module]
+name       = "migration"
+version    = "0.1.0"
+title      = { en = "Migration", bn = "মাইগ্রেশন" }
+category   = "core"
+core       = false
+depends_on = ["auth", "rbac", "audit", "nodes", "plans", "users"]
+
+[permissions]
+keys = ["admin.migration.read", "admin.migration.manage"]
+
+[ui]
+admin_nav = { group = "Hosting", order = 40, icon = "arrow-right-left" }
