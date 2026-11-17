@@ -1,0 +1,12 @@
+# Who must review what (see AGENTS.md for the folders each agent owns).
+/apps/                 @khairulalamruet-ai
+/crates/               @khairulalamruet-ai
+/migrations/           @khairulalamruet-ai
+/modules/              @khairulalamruet-ai
+/deploy/               @khairulalamruet-ai
+/tests/                @khairulalamruet-ai
+/Cargo.toml            @khairulalamruet-ai
+/web/                  @khairulalamruet-ai
+/docs/                 @khairulalamruet-ai
+/AGENTS.md             @khairulalamruet-ai
+/.github/              @khairulalamruet-ai
