@@ -8,7 +8,9 @@ all-features = true
 # Any RustSec vulnerability or unmaintained/unsound notice fails the check.
 # Add an `ignore = [{ id = "RUSTSEC-...", reason = "..." }]` entry only with a written reason.
 yanked = "deny"
-ignore = []
+ignore = [
+    { id = "RUSTSEC-2026-0543", reason = "chrono is flagged unmaintained, not vulnerable. It is pulled in by zxcvbn and russh, which we cannot drop today; no exploitable flaw is reported. TODO: re-check when zxcvbn or russh move to jiff/time, then remove this entry." },
+]
 
 [licenses]
 confidence-threshold = 0.9
