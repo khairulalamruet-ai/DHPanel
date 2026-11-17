@@ -881,6 +881,65 @@ impl std::fmt::Debug for RuntimeEnv {
     }
 }
 
+/// One DNS record a mail domain needs, as the mail server gives it (names are relative to the
+/// domain: `@` is the domain itself).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MailDnsRecord {
+    /// `@`, `selector._domainkey`, `_dmarc`, ...
+    pub name: String,
+    /// `MX` or `TXT`.
+    pub rtype: String,
+    /// The value (an MX's target host, a TXT's text).
+    pub content: String,
+    /// An MX's preference.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub priority: Option<u16>,
+}
+
+/// An address that sends what it gets on to others (the address is not a mailbox).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MailForwarder {
+    /// The local part of the address.
+    pub local: String,
+    /// Where it goes (full addresses).
+    pub to: Vec<String>,
+}
+
+/// A message waiting in the mail server's outgoing queue.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MailQueueItem {
+    /// The queue's own id.
+    pub id: String,
+    /// The sender.
+    pub sender: String,
+    /// The recipients.
+    pub recipients: Vec<String>,
+    /// `queued` (not tried yet) or `deferred` (tried, will be again).
+    pub status: String,
+    /// Why the last try failed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// When it was queued (Unix seconds).
+    pub queued_at: i64,
+    /// How many times it was tried.
+    pub retries: u32,
+    /// Its size in bytes.
+    pub size_bytes: u64,
+}
+
+/// How much one mailbox holds.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MailUsage {
+    /// The whole address.
+    pub address: String,
+    /// Bytes stored.
+    pub used_bytes: u64,
+}
+
 /// Which kind of database server an operation is for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -1191,6 +1250,8 @@ pub const MAX_CRON_RUNS_PER_REPORT: usize = 500;
 pub const MAX_DB_SIZES_PER_REPORT: usize = 5000;
 /// Most databases (and users) one [`Operation::MigrateTenantDatabases`] carries.
 pub const MAX_MIGRATED_DATABASES: usize = 500;
+/// Most queued messages one mail report carries.
+pub const MAX_MAIL_QUEUE_ITEMS: usize = 500;
 
 /// Most address ranges allowed to reach one node's database server in all.
 pub const MAX_DB_REMOTE_ACCESS: usize = 2000;
@@ -1544,6 +1605,106 @@ pub enum Operation {
     /// Measure the size of every database on the node's shared server (data and
     /// indexes). Answered with [`Output::DbSizes`].
     ReportDbSizes,
+    /// Make sure the node's mail server (Stalwart) runs and is set up: its volumes, its
+    /// administrator (made on first use, kept in the agent's secret store, never sent), the
+    /// certificate for `hostname` (the one given, or a self-signed one until there is a real
+    /// one) and the container, with the mail ports published. Safe to repeat. Answered with
+    /// [`Output::MailServerReady`].
+    EnsureMailServer {
+        /// The name the server says it is, `mail.example.com`.
+        hostname: String,
+        /// The certificate chain in PEM, with its key; the key is absent in the ledger.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        certificate_pem: Option<String>,
+        /// The certificate's private key in PEM.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        private_key_pem: Option<DbPassword>,
+    },
+    /// Make a domain known to the mail server (its DKIM keys are made by the server), set its
+    /// catch-all address and its outgoing limit, and answer with the DNS records it needs.
+    /// Safe to repeat. Answered with [`Output::MailDomainSet`].
+    SetMailDomain {
+        /// The domain.
+        domain: String,
+        /// Where mail to an address the domain does not have goes (a full address), if anywhere.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        catch_all: Option<String>,
+        /// Most messages the domain may send out in an hour (none: no limit).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        per_hour: Option<u32>,
+        /// Hold the domain's outgoing mail (an abuse stop): a limit of one a day.
+        #[serde(default)]
+        held: bool,
+    },
+    /// Remove a domain from the mail server, with its mailboxes and lists. Safe to repeat.
+    /// Answered with [`Output::MailDomainRemoved`].
+    RemoveMailDomain {
+        /// The domain.
+        domain: String,
+    },
+    /// Make a mailbox, or change its password, quota or other addresses. Safe to repeat.
+    /// Answered with [`Output::MailboxSet`].
+    UpsertMailbox {
+        /// The domain.
+        domain: String,
+        /// The local part.
+        local: String,
+        /// The password; absent in the ledger, present on the wire.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        password: Option<DbPassword>,
+        /// How much it may hold, in bytes (past it mail is refused).
+        quota_bytes: u64,
+        /// Other local parts that reach the same mailbox.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        aliases: Vec<String>,
+    },
+    /// Remove a mailbox with its mail. Safe to repeat. Answered with [`Output::MailboxDropped`].
+    DropMailbox {
+        /// The domain.
+        domain: String,
+        /// The local part.
+        local: String,
+    },
+    /// Set the domain's forwarders: the whole list (what is not in it is removed). Safe to
+    /// repeat. Answered with [`Output::MailForwardersSet`].
+    SetMailForwarders {
+        /// The domain.
+        domain: String,
+        /// The forwarders.
+        forwarders: Vec<MailForwarder>,
+    },
+    /// Turn a mailbox's automatic reply on or off. Safe to repeat. Answered with
+    /// [`Output::MailAutoresponderSet`].
+    SetMailAutoresponder {
+        /// The domain.
+        domain: String,
+        /// The local part.
+        local: String,
+        /// Whether it replies.
+        enabled: bool,
+        /// The subject of the reply.
+        subject: String,
+        /// The text of the reply.
+        body: String,
+        /// Only from this time (Unix seconds).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        from: Option<i64>,
+        /// Only until this time (Unix seconds).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        until: Option<i64>,
+    },
+    /// What the mail server holds: every mailbox's size and the outgoing queue (at most
+    /// [`MAX_MAIL_QUEUE_ITEMS`] messages). Answered with [`Output::MailReport`].
+    ReportMail,
+    /// Retry the queued messages now (`flush`), or remove them (`delete`); `ids` limits it to
+    /// those messages (all of the queue when empty, for `flush`). Answered with
+    /// [`Output::MailQueueChanged`].
+    MailQueueAction {
+        /// `flush` or `delete`.
+        action: String,
+        /// The messages' ids.
+        ids: Vec<String>,
+    },
     /// Make sure the node's PostgreSQL server runs: its volume, its superuser password
     /// (made on first use, kept in the agent's secret store, never sent anywhere), and
     /// the container, published on the node's loopback address only. Safe to repeat.
@@ -2533,6 +2694,15 @@ impl Operation {
         "report_db_sizes",
         "migrate_tenant_databases",
         "remove_dedicated_db",
+        "ensure_mail_server",
+        "set_mail_domain",
+        "remove_mail_domain",
+        "upsert_mailbox",
+        "drop_mailbox",
+        "set_mail_forwarders",
+        "set_mail_autoresponder",
+        "report_mail",
+        "mail_queue_action",
         "ensure_pg_server",
         "report_pg_sizes",
         "upsert_db_user",
@@ -2662,6 +2832,15 @@ impl Operation {
             Self::ReportDbSizes => "report_db_sizes",
             Self::MigrateTenantDatabases { .. } => "migrate_tenant_databases",
             Self::RemoveDedicatedDb { .. } => "remove_dedicated_db",
+            Self::EnsureMailServer { .. } => "ensure_mail_server",
+            Self::SetMailDomain { .. } => "set_mail_domain",
+            Self::RemoveMailDomain { .. } => "remove_mail_domain",
+            Self::UpsertMailbox { .. } => "upsert_mailbox",
+            Self::DropMailbox { .. } => "drop_mailbox",
+            Self::SetMailForwarders { .. } => "set_mail_forwarders",
+            Self::SetMailAutoresponder { .. } => "set_mail_autoresponder",
+            Self::ReportMail => "report_mail",
+            Self::MailQueueAction { .. } => "mail_queue_action",
             Self::EnsurePgServer => "ensure_pg_server",
             Self::ReportPgSizes => "report_pg_sizes",
             Self::UpsertDbUser { .. } => "upsert_db_user",
@@ -2942,6 +3121,52 @@ pub enum Output {
     DatabaseDropped {
         /// Whether there was one to remove.
         existed: bool,
+    },
+    /// Answer to [`Operation::EnsureMailServer`].
+    MailServerReady {
+        /// Whether this call made the container.
+        created: bool,
+    },
+    /// Answer to [`Operation::SetMailDomain`].
+    MailDomainSet {
+        /// The DNS records the domain needs for mail (MX, SPF, DKIM, DMARC).
+        records: Vec<MailDnsRecord>,
+    },
+    /// Answer to [`Operation::RemoveMailDomain`].
+    MailDomainRemoved {
+        /// Whether the server knew the domain.
+        existed: bool,
+    },
+    /// Answer to [`Operation::UpsertMailbox`].
+    MailboxSet {
+        /// Whether this call made the mailbox.
+        created: bool,
+    },
+    /// Answer to [`Operation::DropMailbox`].
+    MailboxDropped {
+        /// Whether there was one.
+        existed: bool,
+    },
+    /// Answer to [`Operation::SetMailForwarders`].
+    MailForwardersSet {
+        /// How many forwarders the domain has now.
+        count: usize,
+    },
+    /// Answer to [`Operation::SetMailAutoresponder`].
+    MailAutoresponderSet,
+    /// Answer to [`Operation::ReportMail`].
+    MailReport {
+        /// Every mailbox's size.
+        usage: Vec<MailUsage>,
+        /// The outgoing queue.
+        queue: Vec<MailQueueItem>,
+        /// How many messages the queue holds (more than `queue` when it was cut).
+        queue_total: u64,
+    },
+    /// Answer to [`Operation::MailQueueAction`].
+    MailQueueChanged {
+        /// How many messages it touched.
+        count: usize,
     },
     /// Answer to [`Operation::MigrateTenantDatabases`].
     DbMigrated {
@@ -4023,6 +4248,49 @@ mod tests {
             Operation::ReportDbSizes,
             Operation::EnsurePgServer,
             Operation::ReportPgSizes,
+            Operation::EnsureMailServer {
+                hostname: "mail.example.com".into(),
+                certificate_pem: None,
+                private_key_pem: None,
+            },
+            Operation::SetMailDomain {
+                domain: "example.com".into(),
+                catch_all: None,
+                per_hour: Some(100),
+                held: false,
+            },
+            Operation::RemoveMailDomain {
+                domain: "example.com".into(),
+            },
+            Operation::UpsertMailbox {
+                domain: "example.com".into(),
+                local: "info".into(),
+                password: None,
+                quota_bytes: 1 << 30,
+                aliases: vec![],
+            },
+            Operation::DropMailbox {
+                domain: "example.com".into(),
+                local: "info".into(),
+            },
+            Operation::SetMailForwarders {
+                domain: "example.com".into(),
+                forwarders: vec![],
+            },
+            Operation::SetMailAutoresponder {
+                domain: "example.com".into(),
+                local: "info".into(),
+                enabled: true,
+                subject: "Away".into(),
+                body: "Back soon".into(),
+                from: None,
+                until: None,
+            },
+            Operation::ReportMail,
+            Operation::MailQueueAction {
+                action: "flush".into(),
+                ids: vec![],
+            },
             Operation::MigrateTenantDatabases {
                 username: "alice".into(),
                 engine: DbEngine::Postgres,
@@ -4247,7 +4515,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            84,
+            93,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }

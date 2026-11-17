@@ -626,7 +626,11 @@ fn check_target(target: &str) -> Result<(), SpecError> {
     // The two places below `/etc` and `/usr` a volume may go: the web server's site
     // configuration and the PHP options directory, which is the point of a web
     // and a PHP container.
-    if trimmed == "/etc/nginx/conf.d" || trimmed == "/usr/local/etc/php/dhpanel.d" {
+    // And the mail server's own configuration folder (T13.02), which is its volume.
+    if trimmed == "/etc/nginx/conf.d"
+        || trimmed == "/usr/local/etc/php/dhpanel.d"
+        || trimmed == "/etc/stalwart"
+    {
         return Ok(());
     }
     let forbidden = trimmed.is_empty()

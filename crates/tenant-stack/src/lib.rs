@@ -51,6 +51,8 @@ pub enum Role {
     Pma,
     /// The node's PostgreSQL server (not part of a tenant's stack; T07.12).
     Pg,
+    /// The node's mail server (not part of a tenant's stack; T13.02).
+    Mail,
     /// The node's SFTP and FTPS server (not part of a tenant's stack).
     Sftp,
     /// The node's malware scanner, run for one scan at a time (not part of a tenant's stack).
@@ -84,6 +86,7 @@ impl Role {
             Self::Db => "db",
             Self::Pma => "pma",
             Self::Pg => "pg",
+            Self::Mail => "mail",
             Self::Sftp => "sftp",
             Self::Clamav => "clamav",
             Self::Trivy => "trivy",
@@ -767,6 +770,7 @@ pub fn render(tenant: &Tenant<'_>, allowlist: &Allowlist) -> Result<Stack, Stack
             Role::Db
             | Role::Pma
             | Role::Pg
+            | Role::Mail
             | Role::Sftp
             | Role::Clamav
             | Role::Trivy

@@ -165,3 +165,9 @@ role      = "git"
 reference = "alpine/git@sha256:2306e2b05ee0ef99f5d25b0779f645b24ae9f91ba187107503592fcdfe78da3a"
 tag       = "latest"
 note      = "git 2.54 on Alpine"
+
+[[image]]
+role      = "mail"
+reference = "stalwartlabs/stalwart@sha256:5ebdf474b237161742fe4309396af4ae8797c938e8e6eb7e2d4837332c4f9851"
+tag       = "v1"
+note      = "Stalwart 1.1.1: the node's mail server (SMTP, IMAP, JMAP, spam filter) (T13.02)"

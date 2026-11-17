@@ -35,6 +35,7 @@ pub mod ftp;
 pub mod gitdeploy;
 pub mod imagescan;
 pub mod logs;
+pub mod mail;
 pub mod metrics;
 pub mod nodeservices;
 pub mod pg;
@@ -344,6 +345,42 @@ impl Registry {
             registry.register("remove_dedicated_db", {
                 let context = context.clone();
                 move |op| dbmigrate::remove(context.clone(), op)
+            });
+            registry.register("ensure_mail_server", {
+                let context = context.clone();
+                move |op| mail::ensure_mail_server(context.clone(), op)
+            });
+            registry.register("set_mail_domain", {
+                let context = context.clone();
+                move |op| mail::set_mail_domain(context.clone(), op)
+            });
+            registry.register("remove_mail_domain", {
+                let context = context.clone();
+                move |op| mail::remove_mail_domain(context.clone(), op)
+            });
+            registry.register("upsert_mailbox", {
+                let context = context.clone();
+                move |op| mail::upsert_mailbox(context.clone(), op)
+            });
+            registry.register("drop_mailbox", {
+                let context = context.clone();
+                move |op| mail::drop_mailbox(context.clone(), op)
+            });
+            registry.register("set_mail_forwarders", {
+                let context = context.clone();
+                move |op| mail::set_mail_forwarders(context.clone(), op)
+            });
+            registry.register("set_mail_autoresponder", {
+                let context = context.clone();
+                move |op| mail::set_mail_autoresponder(context.clone(), op)
+            });
+            registry.register("report_mail", {
+                let context = context.clone();
+                move |op| mail::report_mail(context.clone(), op)
+            });
+            registry.register("mail_queue_action", {
+                let context = context.clone();
+                move |op| mail::mail_queue_action(context.clone(), op)
             });
             registry.register("ensure_pg_server", {
                 let context = context.clone();
