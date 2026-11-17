@@ -12,6 +12,8 @@ they belong (`proposals/docs/adr/*` → `docs/adr/`, and so on) and delete this 
 | `docs/adr/0004-agent-protocol.md` | T00.17 (4), T02.01 | `docs/adr/` |
 | `docs/adr/0005-mail-stack.md` | T13.01 | `docs/adr/` |
 | `docs/security/pentest-scope.md` | T19.09 | `docs/security/` |
+| `docs/adr/0006-ssl-strategy.md` | T05.13 | `docs/adr/` |
+| `docs/dev/module-authoring-guide.md` | T03.14 | `docs/dev/` |
 | `docs/documentation-plan.md` | T19.10 | `docs/` |
 | `docs/acceptance-checklist.md` | T19.12 | `docs/` |
 | `repo-files/` | T00.01 | repo root |
