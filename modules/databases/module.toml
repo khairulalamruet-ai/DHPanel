@@ -12,7 +12,7 @@ depends_on = ["auth", "rbac", "audit", "system", "plans", "users"]
 keys = ["admin.databases.read", "admin.databases.manage"]
 
 [features]
-keys = ["databases", "db_remote", "db_postgres"]
+keys = ["databases", "db_remote", "db_postgres", "db_dedicated"]
 
 # A plan without these keys gets the defaults.
 [limits]

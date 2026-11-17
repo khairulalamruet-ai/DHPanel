@@ -919,6 +919,28 @@ impl DbEngine {
     }
 }
 
+/// What one user may do in one database, as [`Operation::MigrateTenantDatabases`] carries it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MigrateGrant {
+    /// The database's whole name.
+    pub database: String,
+    /// The user's whole name.
+    pub user: String,
+    /// `read_only`, `read_write` or `all`.
+    pub access: String,
+}
+
+/// The remote addresses of one user, as [`Operation::MigrateTenantDatabases`] carries them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MigrateRemote {
+    /// The user's whole name.
+    pub user: String,
+    /// IPv4 `a.b.c.d/n`.
+    pub cidrs: Vec<String>,
+}
+
 /// The size of one database.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -1155,6 +1177,8 @@ pub const MAX_CRON_RUNS_PER_REPORT: usize = 500;
 
 /// Most databases in one size report.
 pub const MAX_DB_SIZES_PER_REPORT: usize = 5000;
+/// Most databases (and users) one [`Operation::MigrateTenantDatabases`] carries.
+pub const MAX_MIGRATED_DATABASES: usize = 500;
 
 /// Most address ranges allowed to reach one node's database server in all.
 pub const MAX_DB_REMOTE_ACCESS: usize = 2000;
@@ -1515,6 +1539,37 @@ pub enum Operation {
     EnsurePgServer,
     /// [`Operation::ReportDbSizes`] for the node's PostgreSQL server.
     ReportPgSizes,
+    /// Move a tenant's databases of one kind between the node's shared server and the tenant's
+    /// own server (T07.13): the target server is made if it is not there, the users are made
+    /// there with the same passwords (copied on the node; no password is sent), each database
+    /// is dumped from the source, loaded into the target (a copy of an earlier try is replaced),
+    /// and the grants and remote addresses are set again. The source is left as it was: the
+    /// control plane removes it when it has switched. Safe to repeat. Answered with
+    /// [`Output::DbMigrated`].
+    MigrateTenantDatabases {
+        /// The tenant's system name.
+        username: String,
+        /// Which kind of server.
+        engine: DbEngine,
+        /// Whether the target is the tenant's own server (otherwise the shared one).
+        to_dedicated: bool,
+        /// The databases' whole names (at most [`MAX_MIGRATED_DATABASES`]).
+        databases: Vec<String>,
+        /// The users' whole names (at most [`MAX_MIGRATED_DATABASES`]).
+        users: Vec<String>,
+        /// Who may do what where.
+        grants: Vec<MigrateGrant>,
+        /// The addresses users may connect from besides their own network.
+        remote_hosts: Vec<MigrateRemote>,
+    },
+    /// Remove a tenant's own database server of one kind, with its data. Safe to repeat.
+    /// Answered with [`Output::DedicatedDbRemoved`].
+    RemoveDedicatedDb {
+        /// The tenant's system name.
+        username: String,
+        /// Which kind of server.
+        engine: DbEngine,
+    },
     /// Fetch an SQL dump from the control plane and run it in one of the tenant's
     /// databases, as a temporary account that has rights in that database only. The
     /// file is checked (size and SHA-256) before anything runs, may be gzip
@@ -2451,6 +2506,8 @@ impl Operation {
         "open_phpmyadmin",
         "report_import_progress",
         "report_db_sizes",
+        "migrate_tenant_databases",
+        "remove_dedicated_db",
         "ensure_pg_server",
         "report_pg_sizes",
         "upsert_db_user",
@@ -2578,6 +2635,8 @@ impl Operation {
             Self::OpenPhpMyAdmin { .. } => "open_phpmyadmin",
             Self::ReportImportProgress { .. } => "report_import_progress",
             Self::ReportDbSizes => "report_db_sizes",
+            Self::MigrateTenantDatabases { .. } => "migrate_tenant_databases",
+            Self::RemoveDedicatedDb { .. } => "remove_dedicated_db",
             Self::EnsurePgServer => "ensure_pg_server",
             Self::ReportPgSizes => "report_pg_sizes",
             Self::UpsertDbUser { .. } => "upsert_db_user",
@@ -2857,6 +2916,18 @@ pub enum Output {
     /// Answer to [`Operation::DropDatabase`].
     DatabaseDropped {
         /// Whether there was one to remove.
+        existed: bool,
+    },
+    /// Answer to [`Operation::MigrateTenantDatabases`].
+    DbMigrated {
+        /// How many databases were copied.
+        databases: usize,
+        /// How many users were made on the target.
+        users: usize,
+    },
+    /// Answer to [`Operation::RemoveDedicatedDb`].
+    DedicatedDbRemoved {
+        /// Whether there was a server to remove.
         existed: bool,
     },
     /// Answer to [`Operation::ImportSql`].
@@ -3927,6 +3998,23 @@ mod tests {
             Operation::ReportDbSizes,
             Operation::EnsurePgServer,
             Operation::ReportPgSizes,
+            Operation::MigrateTenantDatabases {
+                username: "alice".into(),
+                engine: DbEngine::Postgres,
+                to_dedicated: true,
+                databases: vec!["alice_shop".into()],
+                users: vec!["alice_web".into()],
+                grants: vec![MigrateGrant {
+                    database: "alice_shop".into(),
+                    user: "alice_web".into(),
+                    access: "all".into(),
+                }],
+                remote_hosts: vec![],
+            },
+            Operation::RemoveDedicatedDb {
+                username: "alice".into(),
+                engine: DbEngine::Mysql,
+            },
             Operation::ImportSql {
                 username: "alice".into(),
                 database: "alice_shop".into(),
@@ -4132,7 +4220,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            82,
+            84,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }

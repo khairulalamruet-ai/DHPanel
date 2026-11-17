@@ -304,6 +304,29 @@ fn engine_of(text: &str) -> DbEngine {
     DbEngine::parse(text).unwrap_or_default()
 }
 
+/// Which server the tenant's databases of this kind are on: its own (its system name), or the
+/// node's shared one (`None`). While they are being moved there is no answer.
+async fn server_for(
+    state: &DatabasesState,
+    hosting: &Hosting,
+    engine: DbEngine,
+) -> Result<Option<String>, AppError> {
+    dhpanel_database::tenant_db::dedicated_for(
+        &state.db,
+        hosting.tenant.id,
+        &hosting.tenant.username,
+        engine.as_str(),
+    )
+    .await
+    .map_err(internal)?
+    .map_err(|_| {
+        AppError::conflict(
+            "database_server_moving",
+            "Your databases are being moved to another server; try again in a few minutes.",
+        )
+    })
+}
+
 /// A strong password made here (about 100 bits).
 fn generate_password() -> String {
     loop {
@@ -624,7 +647,7 @@ pub async fn create_database(
         &Operation::CreateDatabase {
             name: name.clone(),
             engine,
-            dedicated: None,
+            dedicated: server_for(&state, &h, engine).await?,
         },
         format!("dbcreate:{}", made.id.simple()),
         &who,
@@ -838,7 +861,7 @@ pub async fn delete_database(
         &Operation::DropDatabase {
             name: gone.name.clone(),
             engine: engine_of(&gone.engine),
-            dedicated: None,
+            dedicated: server_for(&state, &h, engine_of(&gone.engine)).await?,
         },
         format!("dbdrop:{}", gone.id.simple()),
         &who,
@@ -936,7 +959,7 @@ async fn queue_user(
             // Not in the ledger: the dispatcher opens the sealed one at send time.
             password: None::<DbPassword>,
             engine: engine_of(&user.engine),
-            dedicated: None,
+            dedicated: server_for(state, h, engine_of(&user.engine)).await?,
         },
         format!("dbuser:{}:{}", user.id.simple(), Uuid::now_v7().simple()),
         who,
@@ -1121,7 +1144,7 @@ pub async fn delete_user(
         &Operation::DropDbUser {
             name: gone.name.clone(),
             engine: engine_of(&gone.engine),
-            dedicated: None,
+            dedicated: server_for(&state, &h, engine_of(&gone.engine)).await?,
         },
         format!("dbuserdrop:{}", gone.id.simple()),
         &who,
@@ -1226,7 +1249,7 @@ pub async fn set_grant(
             user: user.name.clone(),
             access: access.as_str().to_owned(),
             engine: engine_of(&db.engine),
-            dedicated: None,
+            dedicated: server_for(&state, &h, engine_of(&db.engine)).await?,
         },
         format!(
             "dbgrant:{}:{}:{}",
@@ -1305,7 +1328,7 @@ pub async fn remove_grant(
             database: db.name.clone(),
             user: user.name.clone(),
             engine: engine_of(&db.engine),
-            dedicated: None,
+            dedicated: server_for(&state, &h, engine_of(&db.engine)).await?,
         },
         format!(
             "dbrevoke:{}:{}:{}",
@@ -1397,6 +1420,15 @@ pub async fn set_remote(
             "The user is not ready yet.",
         ));
     }
+    if server_for(&state, &h, engine_of(&user.engine))
+        .await?
+        .is_some()
+    {
+        return Err(AppError::conflict(
+            "remote_unavailable",
+            "A server of your own is reached from your own network only.",
+        ));
+    }
     if req.cidrs.len() > MAX_DB_REMOTE_HOSTS {
         return Err(AppError::validation(vec![FieldError::new(
             "cidrs",
@@ -1430,7 +1462,7 @@ pub async fn set_remote(
             name: user.name.clone(),
             cidrs: cidrs.clone(),
             engine: engine_of(&user.engine),
-            dedicated: None,
+            dedicated: server_for(&state, &h, engine_of(&user.engine)).await?,
         },
         format!("dbremote:{}:{}", user.id.simple(), Uuid::now_v7().simple()),
         &who,

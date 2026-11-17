@@ -1,23 +1,22 @@
 //! Which database server an operation is for (T07.12, T07.13): the node's MariaDB (what
-//! every operation meant before) or its PostgreSQL. The operation says; this module hands it to
-//! the code of that server.
+//! every operation meant before) or its PostgreSQL, the node's shared server or a tenant's own.
+//! The operation says; this module runs the code of that server with that server's names (see
+//! [`super::dbserver`]).
 
 use std::sync::Arc;
 
-use dhpanel_node_protocol::{AgentError, DbEngine, ErrorCode, Operation, Output};
+use dhpanel_node_protocol::{AgentError, DbEngine, Operation, Output};
 
-use super::{db, pg, tenant::TenantContext};
+use super::{db, dbserver, pg, sqlexport, sqlimport, tenant::TenantContext};
 
-/// The engine of an operation, refusing what this node cannot do.
-fn engine(op: &Operation) -> Result<DbEngine, AgentError> {
-    match op.db_target() {
-        Some((_, Some(_))) => Err(AgentError::new(
-            ErrorCode::InvalidArguments,
-            "a tenant's own database server is not supported by this node",
-        )),
-        Some((engine, None)) => Ok(engine),
-        None => Ok(DbEngine::Mysql),
-    }
+/// The tenant whose own server an operation is for (none: the shared one).
+fn tenant_of(op: &Operation) -> Option<String> {
+    op.db_target()
+        .and_then(|(_, dedicated)| dedicated.map(str::to_owned))
+}
+
+fn engine(op: &Operation) -> DbEngine {
+    op.db_target().map_or(DbEngine::Mysql, |(engine, _)| engine)
 }
 
 macro_rules! route {
@@ -30,9 +29,10 @@ macro_rules! route {
             context: Arc<TenantContext>,
             op: Operation,
         ) -> Result<Output, AgentError> {
-            match engine(&op)? {
-                DbEngine::Mysql => $mysql(context, op).await,
-                DbEngine::Postgres => $postgres(context, op).await,
+            let tenant = tenant_of(&op);
+            match engine(&op) {
+                DbEngine::Mysql => dbserver::scope(tenant, $mysql(context, op)).await,
+                DbEngine::Postgres => dbserver::scope(tenant, $postgres(context, op)).await,
             }
         }
     };
@@ -59,3 +59,5 @@ route!(
     db::allow_tenant_databases,
     pg::allow_tenant
 );
+route!(import_sql, sqlimport::import_sql, sqlimport::import_sql);
+route!(export_sql, sqlexport::export_sql, sqlexport::export_sql);

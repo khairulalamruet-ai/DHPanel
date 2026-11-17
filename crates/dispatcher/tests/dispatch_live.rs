@@ -2516,3 +2516,198 @@ async fn a_git_deploy_is_live_when_the_node_says_so_failed_with_its_reason_and_g
     agent_stop.send(true).unwrap();
     agent.await.unwrap();
 }
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs PostgreSQL"]
+async fn a_plan_with_dedicated_databases_moves_a_tenants_databases_and_back(pool: PgPool) {
+    let p = plane(&pool).await;
+    let d = Dispatcher::new(p.ops.clone(), p.gateway.clone(), None, dispatch_settings());
+    let mut registry = Registry::new();
+    registry.register("migrate_tenant_databases", |_| async move {
+        Ok(Output::DbMigrated {
+            databases: 1,
+            users: 1,
+        })
+    });
+    registry.register("drop_database", |_| async move {
+        Ok(Output::DatabaseDropped { existed: true })
+    });
+    registry.register("drop_db_user", |_| async move {
+        Ok(Output::DbUserDropped { existed: true })
+    });
+    registry.register("remove_dedicated_db", |_| async move {
+        Ok(Output::DedicatedDbRemoved { existed: true })
+    });
+    let node = make_node_with(&p, &pool, "moves", registry).await;
+    let (agent_stop, agent) = node.start_agent(p.addr);
+    wait_connected(&p, node.id).await;
+    let results = p.gateway.take_results().expect("results taken once");
+    tokio::spawn(d.clone().run(results, p.stop.subscribe()));
+
+    let account: Uuid = sqlx::query_scalar(
+        "INSERT INTO accounts (kind, username, email, password_hash)
+         VALUES ('client', 'dina', 'dina@example.com',
+                 '$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHQ$aGFzaGhhc2hoYXNoaGFzaA') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let plan: Uuid = sqlx::query_scalar("SELECT id FROM plans WHERE is_default")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let tenant: Uuid = sqlx::query_scalar(
+        "INSERT INTO tenants (owner_account_id, node_id, plan_id, username, uid, status)
+         VALUES ($1, $2, $3, 'dina', 10004, 'active') RETURNING id",
+    )
+    .bind(account)
+    .bind(node.id)
+    .bind(plan)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let database: Uuid = sqlx::query_scalar(
+        "INSERT INTO databases (tenant_id, name, status) VALUES ($1, 'dina_shop', 'ready') RETURNING id",
+    )
+    .bind(tenant)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let user: Uuid = sqlx::query_scalar(
+        "INSERT INTO db_users (tenant_id, name, status) VALUES ($1, 'dina_web', 'ready') RETURNING id",
+    )
+    .bind(tenant)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO db_grants (tenant_id, database_id, user_id, access) VALUES ($1, $2, $3, 'all')")
+        .bind(tenant)
+        .bind(database)
+        .bind(user)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO db_remote_hosts (user_id, cidr) VALUES ($1, '203.0.113.7/32')")
+        .bind(user)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let state = || {
+        let pool = pool.clone();
+        async move {
+            dhpanel_database::tenant_db::state(&pool, tenant, "mysql")
+                .await
+                .unwrap()
+        }
+    };
+
+    // The plan has no such feature: nothing moves.
+    d.reconcile_db_isolation().await;
+    assert_eq!(state().await, "shared");
+
+    // The plan gets it: the databases are moved by one operation carrying all there is.
+    sqlx::query(
+        "UPDATE feature_sets SET all_features = false, features = ARRAY['databases', 'db_dedicated']::feature_key[]
+         WHERE id = (SELECT feature_set_id FROM plans WHERE id = $1)",
+    )
+    .bind(plan)
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert!(d.reconcile_db_isolation().await >= 1);
+    assert_eq!(state().await, "moving_to_dedicated");
+    let payload: serde_json::Value = sqlx::query_scalar(
+        "SELECT payload FROM operations WHERE kind = 'migrate_tenant_databases'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(payload["to_dedicated"], true);
+    assert_eq!(payload["databases"], serde_json::json!(["dina_shop"]));
+    assert_eq!(payload["users"], serde_json::json!(["dina_web"]));
+    assert_eq!(payload["grants"][0]["access"], "all");
+    assert_eq!(
+        payload["remote_hosts"][0]["cidrs"],
+        serde_json::json!(["203.0.113.7/32"])
+    );
+    assert!(payload.get("password").is_none());
+    // While it runs, new work for the tenant is told to wait.
+    assert!(
+        dhpanel_database::tenant_db::dedicated_for(&pool, tenant, "dina", "mysql")
+            .await
+            .unwrap()
+            .is_err()
+    );
+    // The node did it: the tenant is switched, and the old copies are asked to go.
+    let mut switched = String::new();
+    for _ in 0..100 {
+        d.reconcile_db_isolation().await;
+        switched = state().await;
+        if switched == "dedicated" {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert_eq!(switched, "dedicated");
+    assert_eq!(
+        dhpanel_database::tenant_db::dedicated_for(&pool, tenant, "dina", "mysql")
+            .await
+            .unwrap(),
+        Ok(Some("dina".to_owned()))
+    );
+    let cleanup: Vec<String> = sqlx::query_scalar(
+        "SELECT kind FROM operations WHERE kind IN ('drop_database', 'drop_db_user') ORDER BY kind",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(cleanup, ["drop_database", "drop_db_user"]);
+    let dropped: serde_json::Value =
+        sqlx::query_scalar("SELECT payload FROM operations WHERE kind = 'drop_database'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(
+        dropped.get("dedicated").is_none(),
+        "the old copy is on the shared server: {dropped}"
+    );
+    // PostgreSQL has nothing: it was switched too, with nothing to move.
+    assert_eq!(
+        dhpanel_database::tenant_db::state(&pool, tenant, "postgres")
+            .await
+            .unwrap(),
+        "dedicated"
+    );
+
+    // The plan loses it: a short while later the databases come back.
+    sqlx::query("UPDATE feature_sets SET features = ARRAY['databases']::feature_key[] WHERE id = (SELECT feature_set_id FROM plans WHERE id = $1)")
+        .bind(plan)
+        .execute(&pool)
+        .await
+        .unwrap();
+    d.reconcile_db_isolation().await;
+    assert_eq!(state().await, "dedicated", "not at once: moves are spaced");
+    sqlx::query("UPDATE tenant_db_servers SET updated_at = now() - interval '1 hour'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    d.reconcile_db_isolation().await;
+    assert_eq!(state().await, "moving_to_shared");
+    for _ in 0..100 {
+        d.reconcile_db_isolation().await;
+        if state().await == "shared" {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert_eq!(state().await, "shared");
+    let removals: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM operations WHERE kind = 'remove_dedicated_db' AND payload ->> 'engine' = 'mysql'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(removals >= 1);
+    agent_stop.send(true).unwrap();
+    agent.await.unwrap();
+}

@@ -130,6 +130,25 @@ pub fn public_port() -> u16 {
         .unwrap_or(DEFAULT_PUBLIC_PORT)
 }
 
+/// The server's container, for the server this task works on (the shared one, or a tenant's own).
+#[must_use]
+pub fn container_name() -> String {
+    super::dbserver::container(super::dbserver::Kind::Postgres, CONTAINER)
+}
+
+/// The loopback port of the server this task works on.
+///
+/// # Errors
+/// The disk failing, when a tenant's own server has no port yet.
+pub fn server_port(context: &TenantContext) -> Result<u16, AgentError> {
+    match super::dbserver::current() {
+        Some(tenant) => {
+            super::dbserver::dedicated_port(context, super::dbserver::Kind::Postgres, &tenant)
+        }
+        None => Ok(port()),
+    }
+}
+
 fn invalid(message: &str) -> AgentError {
     AgentError::new(ErrorCode::InvalidArguments, message.to_owned())
 }
@@ -214,7 +233,12 @@ struct UserHosts {
 static HBA: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 fn conf_dir(context: &TenantContext) -> PathBuf {
-    context.vhosts_root.with_file_name("pg-conf")
+    match super::dbserver::current() {
+        Some(tenant) => context
+            .vhosts_root
+            .with_file_name(format!("pg-conf-{tenant}")),
+        None => context.vhosts_root.with_file_name("pg-conf"),
+    }
 }
 
 /// The text of `pg_hba.conf`: the superuser (from anywhere: the port is on loopback and
@@ -282,7 +306,7 @@ async fn change_hosts(
     write_hosts(&dir, &hosts)?;
     if context
         .docker
-        .inspect(&name(CONTAINER)?)
+        .inspect(&name(&container_name())?)
         .await
         .is_ok_and(|i| i.running)
     {
@@ -298,7 +322,10 @@ async fn change_hosts(
 
 /// The superuser's password, from the secret store.
 fn root_password(context: &TenantContext) -> Result<String, AgentError> {
-    secret_file(&secrets_dir(context), "postgres-root")
+    secret_file(
+        &secrets_dir(context),
+        &super::dbserver::secret_name(super::dbserver::Kind::Postgres),
+    )
 }
 
 /// A connection as the superuser to one database, from the agent's secret store.
@@ -307,7 +334,7 @@ pub(super) async fn connect(
     database: &str,
 ) -> Result<tokio_postgres::Client, AgentError> {
     let password = root_password(context)?;
-    connect_as(&password, "postgres", database).await
+    connect_as(&password, "postgres", database, server_port(context)?).await
 }
 
 /// A connection as one user to one database on the loopback port.
@@ -315,11 +342,12 @@ pub(super) async fn connect_as(
     password: &str,
     user: &str,
     database: &str,
+    port: u16,
 ) -> Result<tokio_postgres::Client, AgentError> {
     let mut config = tokio_postgres::Config::new();
     config
         .host("127.0.0.1")
-        .port(port())
+        .port(port)
         .user(user)
         .password(password)
         .dbname(database)
@@ -374,7 +402,12 @@ pub async fn ensure_server(context: &TenantContext) -> Result<bool, AgentError> 
 pub async fn ensure_server_with(context: &TenantContext, public: bool) -> Result<bool, AgentError> {
     let password = root_password(context)?;
     let docker = &context.docker;
-    let container = name(CONTAINER)?;
+    let container = name(&container_name())?;
+    let dedicated = super::dbserver::current();
+    let server_port = server_port(context)?;
+    if dedicated.is_some() && public {
+        return Err(invalid("a tenant's own database server has no public port"));
+    }
     let wanted_label = public_port().to_string();
     let mut existing = docker.inspect(&container).await;
     if let Ok(info) = &existing
@@ -410,17 +443,26 @@ pub async fn ensure_server_with(context: &TenantContext, public: bool) -> Result
                 .current(Role::Pg)
                 .map_err(|e| AgentError::new(ErrorCode::Internal, e.to_string()))?
                 .clone();
-            let network = name(NETWORK)?;
+            let network = match &dedicated {
+                Some(tenant) => name(&format!("dh-{tenant}-pgnet"))?,
+                None => name(NETWORK)?,
+            };
             docker
                 .ensure_network(&network, false)
                 .await
                 .map_err(|e| docker_error(&e))?;
-            let volume = name(VOLUME)?;
+            let volume = name(&super::dbserver::volume(
+                super::dbserver::Kind::Postgres,
+                VOLUME,
+            ))?;
             docker
                 .create_volume(&volume)
                 .await
                 .map_err(|e| docker_error(&e))?;
-            let conf_volume = name("dh-pg-conf")?;
+            let conf_volume = name(&match &dedicated {
+                Some(tenant) => format!("dh-{tenant}-pg-conf"),
+                None => "dh-pg-conf".to_owned(),
+            })?;
             let dir = conf_dir(context);
             let root = dir.parent().unwrap_or(&dir);
             docker
@@ -457,9 +499,11 @@ pub async fn ensure_server_with(context: &TenantContext, public: bool) -> Result
                 Capability::Setgid,
                 Capability::Setuid,
             ];
-            spec.memory_bytes = 1024 * MIB;
-            spec.cpu_millis = 2000;
-            spec.pids_limit = 512;
+            // A tenant's own server is smaller than the node's shared one.
+            let share = if dedicated.is_some() { 2 } else { 1 };
+            spec.memory_bytes = 1024 * MIB / share;
+            spec.cpu_millis = 2000 / share as u32;
+            spec.pids_limit = 512 / share as u32;
             spec.tmpfs = vec![
                 Tmpfs {
                     target: "/tmp".into(),
@@ -486,7 +530,7 @@ pub async fn ensure_server_with(context: &TenantContext, public: bool) -> Result
             let bad = || AgentError::new(ErrorCode::Internal, "bad address");
             spec.ports = vec![PublishedPort {
                 container_port: 5432,
-                host_port: port(),
+                host_port: server_port,
                 host_ip: "127.0.0.1".parse().map_err(|_| bad())?,
             }];
             if public {
@@ -513,6 +557,12 @@ pub async fn ensure_server_with(context: &TenantContext, public: bool) -> Result
         .start(&container)
         .await
         .map_err(|e| docker_error(&e))?;
+    if created && let Some(tenant) = &dedicated {
+        let network =
+            network_name(&TenantUsername::parse(tenant).map_err(|e| invalid(&e.to_string()))?)
+                .map_err(|e| invalid(&e.to_string()))?;
+        let _ = docker.connect_network(&container, &network, ALIAS).await;
+    }
     wait_ready(context).await?;
     if created {
         // The server's own databases are nobody else's business.
@@ -551,7 +601,7 @@ pub async fn ensure_pg_server(
 async fn connect_tenant(context: &TenantContext, network: &Name) -> Result<(), AgentError> {
     match context
         .docker
-        .connect_network(&name(CONTAINER)?, network, ALIAS)
+        .connect_network(&name(&container_name())?, network, ALIAS)
         .await
     {
         Ok(()) => Ok(()),
@@ -960,6 +1010,14 @@ pub async fn upsert_db_user(
 
 /// A password as the server keeps it (SCRAM-SHA-256), so that the password itself is never
 /// in a statement. The text is checked to be what such a verifier looks like.
+fn verifier_is_plain(text: &str) -> bool {
+    text.starts_with("SCRAM-SHA-256$")
+        && text.len() < 300
+        && text.bytes().all(|b| {
+            b.is_ascii_alphanumeric() || matches!(b, b'$' | b':' | b'=' | b'+' | b'/' | b'-')
+        })
+}
+
 fn verifier(password: &str) -> Result<String, AgentError> {
     let text = postgres_protocol::password::scram_sha_256(password.as_bytes());
     let plain = text.starts_with("SCRAM-SHA-256$")
@@ -974,6 +1032,75 @@ fn verifier(password: &str) -> Result<String, AgentError> {
             "the password verifier is not usable",
         ))
     }
+}
+
+/// The SCRAM verifier of a user's password as the server holds it.
+///
+/// # Errors
+/// The server failing.
+pub(super) async fn user_verifier(
+    context: &TenantContext,
+    name: &str,
+) -> Result<Option<String>, AgentError> {
+    identifier(name)?;
+    let conn = connect(context, "postgres").await?;
+    let row = conn
+        .query_opt(
+            "SELECT rolpassword FROM pg_authid WHERE rolname = $1",
+            &[&name],
+        )
+        .await
+        .map_err(|e| sql_error(&e))?;
+    Ok(row
+        .and_then(|r| r.get::<_, Option<String>>(0))
+        .filter(|v| verifier_is_plain(v)))
+}
+
+/// Makes a user with a verifier that came from another server (or gives an existing user that
+/// verifier), allowed in from its tenant's network.
+///
+/// # Errors
+/// The server failing, or the tenant's network not found.
+pub(super) async fn set_user_verifier(
+    context: &TenantContext,
+    tenant: &TenantUsername,
+    name: &str,
+    verifier: &str,
+) -> Result<(), AgentError> {
+    let quoted = identifier(name)?;
+    if !verifier_is_plain(verifier) {
+        return Err(AgentError::new(
+            ErrorCode::Internal,
+            "the password verifier is not usable",
+        ));
+    }
+    let range = tenant_range(context, tenant).await?;
+    let network = network_name(tenant).map_err(|e| invalid(&e.to_string()))?;
+    ensure_server(context).await?;
+    connect_tenant(context, &network).await?;
+    let conn = connect(context, "postgres").await?;
+    let verb = if role_exists(&conn, name).await? {
+        "ALTER"
+    } else {
+        "CREATE"
+    };
+    run(
+        &conn,
+        &format!(
+            "{verb} ROLE {quoted} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS CONNECTION LIMIT 50 PASSWORD '{verifier}'"
+        ),
+    )
+    .await?;
+    change_hosts(context, |h| {
+        h.users.entry(name.to_owned()).or_default().own = Some(range);
+    })
+    .await
+}
+
+/// Removes a tenant's own server's files and ports from the node's state (the containers are
+/// the caller's).
+pub(super) fn forget_state(context: &TenantContext) {
+    let _ = std::fs::remove_dir_all(conf_dir(context));
 }
 
 /// Takes away every access level a user has in a database.

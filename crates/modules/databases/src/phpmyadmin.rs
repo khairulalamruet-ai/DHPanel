@@ -124,6 +124,15 @@ pub async fn open_phpmyadmin(
             "A web client for PostgreSQL databases is not available yet; connect with your own client.",
         ));
     }
+    if super::server_for(&state, &h, dhpanel_node_protocol::DbEngine::Mysql)
+        .await?
+        .is_some()
+    {
+        return Err(AppError::conflict(
+            "web_client_unavailable",
+            "A web client is not available for a database on a server of your own; connect with your own client.",
+        ));
+    }
     if db.status != "ready" {
         return Err(AppError::conflict(
             "database_not_ready",

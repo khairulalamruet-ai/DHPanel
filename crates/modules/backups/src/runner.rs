@@ -161,10 +161,14 @@ async fn send_queued(db: &PgPool) -> Result<(), TickError> {
         let Some(tenant) = tenants::get(db, tenant_id).await? else {
             continue;
         };
+        // Only databases on the node's shared MariaDB are dumped by the node today: PostgreSQL
+        // ones and those on a server of the tenant's own are not.
+        let shared_mysql =
+            dhpanel_database::tenant_db::state(db, tenant.id, "mysql").await? == "shared";
         let databases: Vec<String> = dhpanel_database::databases::list(db, tenant.id)
             .await?
             .into_iter()
-            .filter(|d| d.status == "ready")
+            .filter(|d| d.status == "ready" && d.engine == "mysql" && shared_mysql)
             .map(|d| d.name)
             .collect();
         let op = Operation::CreateBackup {

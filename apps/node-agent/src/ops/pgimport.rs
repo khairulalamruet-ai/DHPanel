@@ -98,6 +98,7 @@ pub(super) async fn import_file(
     let password =
         random_password().map_err(|e| failed(&format!("cannot make a password: {}", e.kind())))?;
     let account = format!("{database}__imp");
+    let port = pg::server_port(context)?;
     let admin = pg::connect(context, "postgres").await?;
     let created = pg::create_temporary_role(
         context,
@@ -123,7 +124,7 @@ pub(super) async fn import_file(
         let handle = tokio::runtime::Handle::current();
         tokio::task::spawn_blocking(move || {
             execute(
-                &handle, &path, &db_name, &account2, &password2, gzip, import_id,
+                &handle, port, &path, &db_name, &account2, &password2, gzip, import_id,
             )
         })
         .await
@@ -139,8 +140,10 @@ pub(super) async fn import_file(
     Ok(statements)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn execute(
     handle: &tokio::runtime::Handle,
+    port: u16,
     path: &Path,
     database: &str,
     account: &str,
@@ -157,7 +160,7 @@ fn execute(
         Box::new(counting)
     };
     let client = handle
-        .block_on(pg::connect_as(password, account, database))
+        .block_on(pg::connect_as(password, account, database, port))
         .map_err(|e| failed(&e.message).retryable())?;
     let mut splitter = PgSplitter::new(MAX_STATEMENT_BYTES);
     let mut count = 0u64;

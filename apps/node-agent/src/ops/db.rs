@@ -129,27 +129,54 @@ pub fn secret_file(dir: &Path, file: &str) -> Result<String, AgentError> {
     Ok(secret)
 }
 
+/// The name of the server's container for the server this task works on.
+#[must_use]
+pub fn container_name() -> String {
+    super::dbserver::container(super::dbserver::Kind::Mariadb, CONTAINER)
+}
+
+/// The loopback port of the server this task works on (the shared one, or a tenant's own).
+///
+/// # Errors
+/// The disk failing, when a tenant's own server has no port yet.
+pub fn server_port(context: &TenantContext) -> Result<u16, AgentError> {
+    match super::dbserver::current() {
+        Some(tenant) => {
+            super::dbserver::dedicated_port(context, super::dbserver::Kind::Mariadb, &tenant)
+        }
+        None => Ok(port()),
+    }
+}
+
+/// The administrator password of the server this task works on.
+fn server_password(context: &TenantContext) -> Result<String, AgentError> {
+    secret_file(
+        &secrets_dir(context),
+        &super::dbserver::secret_name(super::dbserver::Kind::Mariadb),
+    )
+}
+
 pub(super) fn name(text: &str) -> Result<Name, AgentError> {
     Name::parse(text).map_err(|e| AgentError::new(ErrorCode::Internal, e.to_string()))
 }
 
 /// The connection options for the root account on the loopback port.
-fn root_opts(password: &str) -> mysql_async::Opts {
+fn root_opts(password: &str, port: u16) -> mysql_async::Opts {
     mysql_async::OptsBuilder::default()
         .ip_or_hostname("127.0.0.1")
-        .tcp_port(port())
+        .tcp_port(port)
         .user(Some("root"))
         .pass(Some(password))
         .into()
 }
 
 /// Waits until the server answers a statement.
-async fn wait_ready(password: &str) -> Result<(), AgentError> {
+async fn wait_ready(password: &str, port: u16) -> Result<(), AgentError> {
     use mysql_async::prelude::Queryable as _;
     let deadline = tokio::time::Instant::now() + READY_TIMEOUT;
     loop {
         let attempt = async {
-            let mut conn = mysql_async::Conn::new(root_opts(password)).await?;
+            let mut conn = mysql_async::Conn::new(root_opts(password, port)).await?;
             conn.query_drop("SELECT 1").await?;
             conn.disconnect().await
         };
@@ -181,9 +208,17 @@ pub async fn ensure_server(context: &TenantContext) -> Result<bool, AgentError> 
 /// # Errors
 /// As [`ensure_server`].
 pub async fn ensure_server_with(context: &TenantContext, public: bool) -> Result<bool, AgentError> {
-    let password = root_password(&secrets_dir(context))?;
+    let password = server_password(context)?;
     let docker = &context.docker;
-    let container = name(CONTAINER)?;
+    let container = name(&container_name())?;
+    let dedicated = super::dbserver::current();
+    let server_port = server_port(context)?;
+    if dedicated.is_some() && public {
+        return Err(AgentError::new(
+            ErrorCode::InvalidArguments,
+            "a tenant's own database server has no public port",
+        ));
+    }
     let wanted_label = public_port().to_string();
     let mut existing = docker.inspect(&container).await;
     if let Ok(info) = &existing
@@ -213,12 +248,20 @@ pub async fn ensure_server_with(context: &TenantContext, public: bool) -> Result
                 .current(Role::Db)
                 .map_err(|e| AgentError::new(ErrorCode::Internal, e.to_string()))?
                 .clone();
-            let network = name(NETWORK)?;
+            // The server has a network of its own that tenants are added to (the shared one, or
+            // one tenant's own server, which only that tenant is added to).
+            let network = match &dedicated {
+                Some(tenant) => name(&format!("dh-{tenant}-dbnet"))?,
+                None => name(NETWORK)?,
+            };
             docker
                 .ensure_network(&network, false)
                 .await
                 .map_err(|e| docker_error(&e))?;
-            let volume = name(VOLUME)?;
+            let volume = name(&super::dbserver::volume(
+                super::dbserver::Kind::Mariadb,
+                VOLUME,
+            ))?;
             docker
                 .create_volume(&volume)
                 .await
@@ -244,9 +287,11 @@ pub async fn ensure_server_with(context: &TenantContext, public: bool) -> Result
                 Capability::Setgid,
                 Capability::Setuid,
             ];
-            spec.memory_bytes = 1024 * MIB;
-            spec.cpu_millis = 2000;
-            spec.pids_limit = 512;
+            // A tenant's own server is smaller than the node's shared one.
+            let share = if dedicated.is_some() { 2 } else { 1 };
+            spec.memory_bytes = 1024 * MIB / share;
+            spec.cpu_millis = 2000 / share as u32;
+            spec.pids_limit = 512 / share as u32;
             spec.tmpfs = vec![
                 Tmpfs {
                     target: "/tmp".into(),
@@ -266,7 +311,7 @@ pub async fn ensure_server_with(context: &TenantContext, public: bool) -> Result
             let bad = || AgentError::new(ErrorCode::Internal, "bad address");
             spec.ports = vec![PublishedPort {
                 container_port: 3306,
-                host_port: port(),
+                host_port: server_port,
                 host_ip: "127.0.0.1".parse().map_err(|_| bad())?,
             }];
             if public {
@@ -293,14 +338,23 @@ pub async fn ensure_server_with(context: &TenantContext, public: bool) -> Result
         .start(&container)
         .await
         .map_err(|e| docker_error(&e))?;
-    wait_ready(&password).await?;
+    if created && let Some(tenant) = &dedicated {
+        // Found as `db` on the tenant's network, like the shared server.
+        let network = network_name(
+            &TenantUsername::parse(tenant)
+                .map_err(|e| AgentError::new(ErrorCode::InvalidArguments, e.to_string()))?,
+        )
+        .map_err(|e| AgentError::new(ErrorCode::InvalidArguments, e.to_string()))?;
+        let _ = docker.connect_network(&container, &network, ALIAS).await;
+    }
+    wait_ready(&password, server_port).await?;
     Ok(created)
 }
 
 /// A connection as the server's root, from the agent's secret store.
 async fn root_conn(context: &TenantContext) -> Result<mysql_async::Conn, AgentError> {
-    let password = root_password(&secrets_dir(context))?;
-    mysql_async::Conn::new(root_opts(&password))
+    let password = server_password(context)?;
+    mysql_async::Conn::new(root_opts(&password, server_port(context)?))
         .await
         .map_err(|e| sql_error(&e))
 }
@@ -553,6 +607,80 @@ pub async fn upsert_db_user(
     }
     let _ = conn.disconnect().await;
     Ok(Output::DbUserSet { created, host })
+}
+
+/// The password hash of a user at its tenant's network, as the server holds it (so that the
+/// user can be made again on another server with the same password).
+///
+/// # Errors
+/// The server failing.
+pub(super) async fn user_hash(
+    context: &TenantContext,
+    tenant: &TenantUsername,
+    name: &str,
+) -> Result<Option<String>, AgentError> {
+    use mysql_async::prelude::Queryable as _;
+    user_literal(name)?;
+    let own = tenant_host(context, tenant).await?;
+    let mut conn = root_conn(context).await?;
+    let hash: Option<String> = conn
+        .exec_first(
+            "SELECT Password FROM mysql.user WHERE User = ? AND Host = ?",
+            (name, &own),
+        )
+        .await
+        .map_err(|e| sql_error(&e))?;
+    let _ = conn.disconnect().await;
+    Ok(hash.filter(|h| {
+        h.len() == 41 && h.starts_with('*') && h[1..].bytes().all(|b| b.is_ascii_hexdigit())
+    }))
+}
+
+/// Makes a user at its tenant's network with a password hash that came from another server,
+/// or gives an existing one that hash.
+///
+/// # Errors
+/// The server failing, or the tenant's network not found.
+pub(super) async fn set_user_hash(
+    context: &TenantContext,
+    tenant: &TenantUsername,
+    name: &str,
+    hash: &str,
+) -> Result<(), AgentError> {
+    use mysql_async::prelude::Queryable as _;
+    let user = user_literal(name)?;
+    let valid = hash.len() == 41
+        && hash.starts_with('*')
+        && hash[1..].bytes().all(|b| b.is_ascii_hexdigit());
+    if !valid {
+        return Err(AgentError::new(
+            ErrorCode::Internal,
+            "the password hash is not usable",
+        ));
+    }
+    let network = network_name(tenant)
+        .map_err(|e| AgentError::new(ErrorCode::InvalidArguments, e.to_string()))?;
+    let own = tenant_host(context, tenant).await?;
+    let quoted_host = host_literal(&own)?;
+    ensure_server(context).await?;
+    connect_tenant(context, &network).await?;
+    let mut conn = root_conn(context).await?;
+    let existing = hosts_of(&mut conn, name).await?;
+    if existing.contains(&own) {
+        conn.query_drop(format!(
+            "ALTER USER {user}@{quoted_host} IDENTIFIED BY PASSWORD '{hash}'"
+        ))
+        .await
+        .map_err(|e| sql_error(&e))?;
+    } else {
+        conn.query_drop(format!(
+            "CREATE USER {user}@{quoted_host} IDENTIFIED BY PASSWORD '{hash}' WITH MAX_USER_CONNECTIONS 50"
+        ))
+        .await
+        .map_err(|e| sql_error(&e))?;
+    }
+    let _ = conn.disconnect().await;
+    Ok(())
 }
 
 /// A host the server holds, as a literal: the ones this agent made are digits,
@@ -935,7 +1063,7 @@ pub async fn ensure_db_server(
 async fn connect_tenant(context: &TenantContext, network: &Name) -> Result<(), AgentError> {
     match context
         .docker
-        .connect_network(&name(CONTAINER)?, network, ALIAS)
+        .connect_network(&name(&container_name())?, network, ALIAS)
         .await
     {
         Ok(()) => Ok(()),

@@ -537,7 +537,7 @@ pub async fn complete_import(
             gzip: import.gzip,
             token: None,
             engine,
-            dedicated: None,
+            dedicated: super::server_for(&state, &h, engine).await?,
         },
         format!("import:{id}"),
         &who,

@@ -577,6 +577,23 @@ async fn queue_setup(
             }
             dbstore::AddError::Database(db) => internal(db),
         };
+        let dedicated = match dhpanel_database::tenant_db::dedicated_for(
+            &state.db,
+            tenant.id,
+            &tenant.username,
+            "mysql",
+        )
+        .await
+        .map_err(internal)?
+        {
+            Ok(d) => d,
+            Err(_) => {
+                return Err(AppError::conflict(
+                    "database_server_moving",
+                    "Your databases are being moved to another server; try again in a few minutes.",
+                ));
+            }
+        };
         let db = dbstore::create(&mut tx, tenant.id, name, "mysql")
             .await
             .map_err(taken)?;
@@ -604,7 +621,7 @@ async fn queue_setup(
                 Operation::CreateDatabase {
                     name: name.to_owned(),
                     engine: DbEngine::Mysql,
-                    dedicated: None,
+                    dedicated: dedicated.clone(),
                 },
                 format!("dbcreate:{}", db.id.simple()),
             ),
@@ -614,7 +631,7 @@ async fn queue_setup(
                     name: name.to_owned(),
                     password: None::<DbPassword>,
                     engine: DbEngine::Mysql,
-                    dedicated: None,
+                    dedicated: dedicated.clone(),
                 },
                 format!("dbuser:{}:{}", user.id.simple(), Uuid::now_v7().simple()),
             ),

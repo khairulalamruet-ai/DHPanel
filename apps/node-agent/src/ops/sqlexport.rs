@@ -87,15 +87,18 @@ pub async fn export_sql(context: Arc<TenantContext>, op: Operation) -> Result<Ou
     result.map(|size_bytes| Output::SqlExported { size_bytes })
 }
 
-async fn run(
+/// Dumps one database of the server this task works on into a gzip file, as a temporary
+/// account that can only read it (removed again, whatever the outcome).
+///
+/// # Errors
+/// The server failing, or the disk.
+pub(super) async fn dump_to_file(
     context: &TenantContext,
     engine: dhpanel_node_protocol::DbEngine,
     database: &str,
-    export_id: Uuid,
-    url: &str,
-    token: &str,
+    tag: &str,
     path: &Path,
-) -> Result<u64, AgentError> {
+) -> Result<(), AgentError> {
     if engine == dhpanel_node_protocol::DbEngine::Postgres {
         // A temporary account that can only read this database, for the dump only.
         super::pg::ensure_server(context).await?;
@@ -116,12 +119,31 @@ async fn run(
         let _ = super::pg::finish_temporary_role(context, database, &account, false).await;
         dumped?;
     } else {
-        let (account, password) =
-            reader_account(context, database, &export_id.simple().to_string()[..12]).await?;
+        let (account, password) = reader_account(context, database, tag).await?;
         let dumped = dump(context, engine, database, &account, &password, path).await;
         drop_account(context, &account).await;
         dumped?;
     }
+    Ok(())
+}
+
+async fn run(
+    context: &TenantContext,
+    engine: dhpanel_node_protocol::DbEngine,
+    database: &str,
+    export_id: Uuid,
+    url: &str,
+    token: &str,
+    path: &Path,
+) -> Result<u64, AgentError> {
+    dump_to_file(
+        context,
+        engine,
+        database,
+        &export_id.simple().to_string()[..12],
+        path,
+    )
+    .await?;
     let (url, token, path) = (url.to_owned(), token.to_owned(), path.to_owned());
     tokio::task::spawn_blocking(move || upload(&url, &token, &path))
         .await
@@ -214,14 +236,14 @@ async fn dump(
         Ok(raw)
     });
     let ran = if engine == dhpanel_node_protocol::DbEngine::Postgres {
-        let container = dhpanel_docker_manager::Name::parse(super::pg::CONTAINER)
+        let container = dhpanel_docker_manager::Name::parse(&super::pg::container_name())
             .map_err(|e| failed(&e.to_string()))?;
         context
             .docker
             .dump_pg_database(&container, database, account, password, tx, MAX_DURATION)
             .await
     } else {
-        let container = dhpanel_docker_manager::Name::parse(db::CONTAINER)
+        let container = dhpanel_docker_manager::Name::parse(&db::container_name())
             .map_err(|e| failed(&e.to_string()))?;
         context
             .docker

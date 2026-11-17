@@ -484,7 +484,7 @@ pub(super) async fn import_file(
             password.clone(),
         );
         let handle = tokio::runtime::Handle::current();
-        let port = db::port();
+        let port = db::server_port(context)?;
         tokio::task::spawn_blocking(move || {
             execute(
                 &handle, port, &path, &db_name, &account2, &password2, gzip, import_id,

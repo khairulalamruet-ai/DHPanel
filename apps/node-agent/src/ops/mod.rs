@@ -27,7 +27,9 @@ pub mod cacheaddon;
 pub mod capabilities;
 pub mod cron;
 pub mod db;
+pub mod dbmigrate;
 pub mod dbroute;
+pub mod dbserver;
 pub mod files;
 pub mod ftp;
 pub mod gitdeploy;
@@ -162,11 +164,11 @@ impl Registry {
             });
             registry.register("import_sql", {
                 let context = context.clone();
-                move |op| sqlimport::import_sql(context.clone(), op)
+                move |op| dbroute::import_sql(context.clone(), op)
             });
             registry.register("export_sql", {
                 let context = context.clone();
-                move |op| sqlexport::export_sql(context.clone(), op)
+                move |op| dbroute::export_sql(context.clone(), op)
             });
             registry.register("upsert_ftp_account", {
                 let context = context.clone();
@@ -334,6 +336,14 @@ impl Registry {
             registry.register("report_import_progress", {
                 let context = context.clone();
                 move |op| sqlimport::report_import_progress(context.clone(), op)
+            });
+            registry.register("migrate_tenant_databases", {
+                let context = context.clone();
+                move |op| dbmigrate::migrate(context.clone(), op)
+            });
+            registry.register("remove_dedicated_db", {
+                let context = context.clone();
+                move |op| dbmigrate::remove(context.clone(), op)
             });
             registry.register("ensure_pg_server", {
                 let context = context.clone();

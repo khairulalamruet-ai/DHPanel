@@ -15,6 +15,7 @@
 //! (`dh:ops` and `dh:ops:<op_id>`, a small JSON event without output) so that
 //! the panel can update live; a failing publish never affects the ledger.
 
+pub mod dbisolation;
 pub mod routes;
 
 use std::time::Duration;
@@ -184,7 +185,7 @@ impl Dispatcher {
                 _ = tick.tick() => { self.tick().await; }
                 _ = capabilities.tick() => { self.request_capabilities().await; }
                 _ = purges.tick() => { self.request_purges().await; }
-                _ = routes.tick() => { self.expire_previews().await; self.request_route_syncs().await; self.request_error_pages().await; self.request_user_agents().await; self.request_firewalls().await; self.request_scans().await; self.request_signature_updates().await; self.request_image_checks().await; self.request_app_installs().await; self.settle_cache_instances().await; self.settle_runtime_apps().await; self.settle_git_deploys().await; self.request_import_progress().await; self.request_cron_runs().await; self.request_metrics().await; self.request_services().await; }
+                _ = routes.tick() => { self.expire_previews().await; self.request_route_syncs().await; self.request_error_pages().await; self.request_user_agents().await; self.request_firewalls().await; self.request_scans().await; self.request_signature_updates().await; self.request_image_checks().await; self.request_app_installs().await; self.settle_cache_instances().await; self.settle_runtime_apps().await; self.settle_git_deploys().await; self.request_import_progress().await; self.request_cron_runs().await; self.request_metrics().await; self.request_services().await; self.reconcile_db_isolation().await; }
                 _ = certificates.tick() => { self.request_certificates().await; self.request_db_sizes().await; }
                 _ = expiry.tick() => { self.announce_expiring().await; }
                 Some(report) = results.recv() => self.handle_result(report).await,

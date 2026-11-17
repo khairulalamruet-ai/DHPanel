@@ -951,6 +951,8 @@ pub async fn delete_tenant(
             delete_files(&context, &id, &username, uid).await?;
         }
     }
+    // The tenant's own database servers, if it has any, are on its network.
+    super::dbmigrate::remove_all(&context, username.as_str()).await?;
     let network = network_name(&username).map_err(|e| invalid_arg(&e.to_string()))?;
     let volume = files_volume_name(&username).map_err(|e| invalid_arg(&e.to_string()))?;
     gone_is_fine(docker.remove_volume(&volume).await)?;

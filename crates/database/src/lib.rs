@@ -53,6 +53,7 @@ pub mod routes;
 pub mod runtime_apps;
 pub mod settings;
 pub mod skeleton;
+pub mod tenant_db;
 pub mod tenants;
 pub mod usage;
 pub mod user_agents;

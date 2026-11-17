@@ -232,7 +232,12 @@ pub async fn start_export(
             url: format!("{agent_url}/api/v1/public/exports/{id}"),
             token: None,
             engine: dhpanel_node_protocol::DbEngine::parse(&db.engine).unwrap_or_default(),
-            dedicated: None,
+            dedicated: super::server_for(
+                &state,
+                &h,
+                dhpanel_node_protocol::DbEngine::parse(&db.engine).unwrap_or_default(),
+            )
+            .await?,
         },
         format!("export:{id}"),
         &who,

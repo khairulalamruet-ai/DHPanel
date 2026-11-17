@@ -1344,6 +1344,52 @@ impl DockerManager {
         }
     }
 
+    /// Takes a container of ours off one of our networks. Not being on it is fine.
+    ///
+    /// # Errors
+    /// [`DockerError::NotFound`], [`DockerError::NotManaged`], or an API error.
+    pub async fn disconnect_network(
+        &self,
+        container: &Name,
+        network: &Name,
+    ) -> Result<(), DockerError> {
+        self.require_managed_container(container).await?;
+        let net = self
+            .docker
+            .inspect_network(network.as_str(), None)
+            .await
+            .map_err(map_error)?;
+        if net
+            .labels
+            .as_ref()
+            .and_then(|l| l.get(MANAGED_LABEL))
+            .map(String::as_str)
+            != Some("true")
+        {
+            return Err(DockerError::NotManaged);
+        }
+        match self
+            .docker
+            .disconnect_network(
+                network.as_str(),
+                bollard::models::NetworkDisconnectRequest {
+                    container: container.as_str().to_owned(),
+                    force: Some(false),
+                },
+            )
+            .await
+        {
+            Ok(()) => Ok(()),
+            // Not connected to it.
+            Err(BollardError::DockerResponseServerError { message, .. })
+                if message.contains("not connected") =>
+            {
+                Ok(())
+            }
+            Err(e) => Err(map_error(e)),
+        }
+    }
+
     /// The address range (CIDR) of one of our networks.
     ///
     /// # Errors

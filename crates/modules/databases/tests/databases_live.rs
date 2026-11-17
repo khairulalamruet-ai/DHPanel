@@ -2100,3 +2100,134 @@ async fn a_postgresql_database_needs_the_feature_and_only_meets_users_of_its_own
     assert_eq!(access["engine"], "postgres");
     assert_eq!(access["cidrs"], json!(["203.0.113.7/32"]));
 }
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn databases_of_a_tenant_with_its_own_server_are_made_there_and_wait_while_they_move(
+    pool: PgPool,
+) {
+    let e = env(&pool).await;
+    let (alice, tenant) = client(&pool, "alice", 10_000).await;
+    let a = e.sign_in(alice).await;
+    sqlx::query(
+        "UPDATE feature_sets SET all_features = false, features = ARRAY['domains', 'databases', 'db_remote']::feature_key[]
+         WHERE id = (SELECT feature_set_id FROM plans WHERE is_default)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    // On the shared server nothing says whose server it is.
+    let (status, _) = e
+        .call(
+            &a,
+            "POST",
+            "/api/v1/client/databases",
+            Some(json!({"name": "one"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let shared: Value = sqlx::query_scalar(
+        "SELECT payload FROM operations WHERE kind = 'create_database' AND payload ->> 'name' = 'alice_one'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(shared.get("dedicated").is_none(), "{shared}");
+    node_answers(&pool, "create_database", "alice_one", true).await;
+
+    // The tenant's own server: new databases and users are made there.
+    dhpanel_database::tenant_db::set_state(&pool, tenant, "mysql", "dedicated", None)
+        .await
+        .unwrap();
+    let (status, _) = e
+        .call(
+            &a,
+            "POST",
+            "/api/v1/client/databases",
+            Some(json!({"name": "two"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let own: Value = sqlx::query_scalar(
+        "SELECT payload FROM operations WHERE kind = 'create_database' AND payload ->> 'name' = 'alice_two'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(own["dedicated"], "alice");
+    node_answers(&pool, "create_database", "alice_two", true).await;
+    let (_, made) = e
+        .call(
+            &a,
+            "POST",
+            "/api/v1/client/db-users",
+            Some(json!({"name": "web"})),
+        )
+        .await;
+    let user = made["user"]["id"].as_str().unwrap().to_owned();
+    let ledger: Value = sqlx::query_scalar(
+        "SELECT payload FROM operations WHERE kind = 'upsert_db_user' AND payload ->> 'name' = 'alice_web'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(ledger["dedicated"], "alice");
+    node_answers(&pool, "upsert_db_user", "alice_web", true).await;
+    // phpMyAdmin and remote addresses are for the shared server.
+    let two = e.call(&a, "GET", "/api/v1/client/databases", None).await.1["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["name"] == "alice_two")
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let (status, body) = e
+        .call(
+            &a,
+            "POST",
+            &format!("/api/v1/client/databases/{two}/phpmyadmin"),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    let (status, body) = e
+        .call(
+            &a,
+            "PUT",
+            &format!("/api/v1/client/db-users/{user}/remote-hosts"),
+            Some(json!({"cidrs": ["203.0.113.7/32"]})),
+        )
+        .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "remote_unavailable")
+    );
+
+    // While the move runs, work waits.
+    dhpanel_database::tenant_db::set_state(&pool, tenant, "mysql", "moving_to_shared", None)
+        .await
+        .unwrap();
+    let (status, body) = e
+        .call(
+            &a,
+            "POST",
+            "/api/v1/client/databases",
+            Some(json!({"name": "three"})),
+        )
+        .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::CONFLICT, "database_server_moving")
+    );
+    let (status, _) = e
+        .call(
+            &a,
+            "DELETE",
+            &format!("/api/v1/client/databases/{two}"),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+}
