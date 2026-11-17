@@ -2,6 +2,8 @@
 //! Ignored by default; run with DATABASE_URL (superuser), REDIS_URL and `--include-ignored`.
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+mod common;
+
 use std::{io::Write as _, path::PathBuf, sync::Arc};
 
 use axum::{
@@ -48,6 +50,10 @@ struct Browser {
 }
 
 async fn env(pool: &PgPool) -> Env {
+    env_with(pool, false).await
+}
+
+async fn env_with(pool: &PgPool, local: bool) -> Env {
     let url = std::env::var("REDIS_URL").expect("REDIS_URL must be set");
     let redis = RedisHandle::new(&SecretString::from(url)).expect("valid REDIS_URL");
     let sessions = SessionStore::new(redis, pool.clone(), SessionConfig::default());
@@ -68,6 +74,8 @@ async fn env(pool: &PgPool) -> Env {
                     sessions: sessions.clone(),
                     spool_dir: spool.clone(),
                     loopback: Default::default(),
+                    max_backup_bytes: 1 << 30,
+                    allow_local_sources: local,
                 })),
                 ..ModuleRoutes::none()
             }
@@ -357,7 +365,7 @@ async fn bad_requests_and_missing_files_are_refused_or_fail_cleanly(pool: PgPool
         ),
         (
             start("a.tar.gz", "alice", json!({"remote_host": "198.51.100.7"})),
-            "remote_host",
+            "auth_method",
         ),
         (
             start("a.tar.gz", "alice", json!({"on_conflict": "overwrite"})),
@@ -502,4 +510,132 @@ async fn a_failed_import_goes_on_from_its_step_and_a_dry_run_starts_over(pool: P
     assert!(s[1].get("details").is_none());
     // A transfer that is running cannot be resumed again.
     assert!(!store::resume(&pool, made.id).await.unwrap());
+}
+
+async fn wait_for_end(e: &Env, root: &Browser, id: &str) -> Value {
+    for _ in 0..80 {
+        let (_, t) = e
+            .call(
+                root,
+                "GET",
+                &format!("/api/v1/admin/migration/transfers/{id}"),
+                None,
+            )
+            .await;
+        if t["status"] != "running" && t["status"] != "pending" {
+            return t;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    }
+    panic!("the transfer did not end");
+}
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn a_backup_is_fetched_from_a_server_and_the_login_is_kept_nowhere(pool: PgPool) {
+    let e = env_with(&pool, true).await;
+    let root = e
+        .sign_in(account(&pool, "admin", "rootuser", &["super_admin"]).await)
+        .await;
+    let (port, fingerprint) = common::serve(cpmove()).await;
+    let path = "/api/v1/admin/migration/transfers";
+    let body = |extra: Value| {
+        let mut b = json!({
+            "source_type": "cpanel", "tenant_username": "alice",
+            "target_domain": "alice.example.org", "dry_run": true,
+            "remote_host": "127.0.0.1", "remote_ssh_port": port, "remote_user": "alice",
+            "auth_method": "password", "password": common::PASSWORD,
+            "remote_backup_path": common::PATH
+        });
+        for (k, v) in extra.as_object().unwrap() {
+            b[k] = v.clone();
+        }
+        b
+    };
+
+    // Without the host key nothing is sent: the transfer fails and names the key it saw.
+    let (status, made) = e.call(&root, "POST", path, Some(body(json!({})))).await;
+    assert_eq!(status, StatusCode::CREATED, "{made}");
+    assert_eq!(made["source_host"], "127.0.0.1");
+    let first = made["id"].as_str().unwrap().to_owned();
+    let failed = wait_for_end(&e, &root, &first).await;
+    assert_eq!(failed["status"], "failed", "{failed}");
+    let why = failed["error_message"].as_str().unwrap();
+    assert!(
+        why.contains(&fingerprint) && why.contains("host_key_sha256"),
+        "{why}"
+    );
+    // It cannot be run again without the login, which was kept nowhere.
+    let (status, got) = e
+        .call(&root, "POST", &format!("{path}/{first}/retry"), None)
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{got}");
+    assert_eq!(code(&got), "login_needed");
+
+    // With it, the backup comes over and is planned.
+    let (status, made) = e
+        .call(
+            &root,
+            "POST",
+            path,
+            Some(body(json!({"host_key_sha256": fingerprint}))),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{made}");
+    let id = made["id"].as_str().unwrap().to_owned();
+    let done = wait_for_end(&e, &root, &id).await;
+    assert_eq!(done["status"], "completed", "{done}");
+    assert_eq!(done["plan"]["ok"], true, "{done}");
+    assert!(done["logs"].to_string().contains("Fetched"), "{done}");
+    let saved = done["backup_file"].as_str().unwrap();
+    assert!(saved.starts_with("remote-") && e.spool.join("migration").join(saved).exists());
+
+    // The password is in no row: not in the transfers, not in the audit trail.
+    for table in ["migration_transfers", "audit_logs"] {
+        let sql = format!("SELECT count(*) FROM {table} t WHERE row_to_json(t)::text LIKE $1");
+        let hits: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(sql))
+            .bind(format!("%{}%", common::PASSWORD))
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(hits, 0, "{table} holds the password");
+    }
+
+    // A wrong password fails with a message that does not repeat it.
+    let (_, wrong) = e
+        .call(
+            &root,
+            "POST",
+            path,
+            Some(body(
+                json!({"host_key_sha256": fingerprint, "password": "hunter2-wrong"}),
+            )),
+        )
+        .await;
+    let ended = wait_for_end(&e, &root, wrong["id"].as_str().unwrap()).await;
+    assert_eq!(ended["status"], "failed");
+    assert!(!ended.to_string().contains("hunter2-wrong"));
+
+    // A server on this machine is refused when the panel is not in test mode.
+    let strict = env_with(&pool, false).await;
+    let root2 = strict
+        .sign_in(account(&pool, "admin", "second", &["super_admin"]).await)
+        .await;
+    let (_, refused) = strict
+        .call(
+            &root2,
+            "POST",
+            path,
+            Some(body(json!({"host_key_sha256": fingerprint}))),
+        )
+        .await;
+    let ended = wait_for_end(&strict, &root2, refused["id"].as_str().unwrap()).await;
+    assert_eq!(ended["status"], "failed");
+    assert!(
+        ended["error_message"]
+            .as_str()
+            .unwrap()
+            .contains("cannot be used"),
+        "{ended}"
+    );
 }

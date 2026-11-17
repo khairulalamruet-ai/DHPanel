@@ -222,6 +222,11 @@ pub async fn run(state: MigrationState, id: Uuid) {
     }
 }
 
+/// Ends a transfer as failed, with the reason.
+pub async fn fail_transfer(state: &MigrationState, t: &Transfer, message: &str) {
+    fail(state, t, message).await;
+}
+
 async fn fail(state: &MigrationState, t: &Transfer, message: &str) {
     let _ = store::append_log(&state.db, t.id, &[format!("Failed: {message}")]).await;
     let _ = store::set_progress(

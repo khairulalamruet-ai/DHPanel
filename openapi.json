@@ -23597,21 +23597,37 @@
       },
       "CreateTransfer": {
         "type": "object",
-        "description": "A transfer to start.",
+        "description": "A transfer to start. The backup is a file in the import folder (`backup_file`) or is fetched\nfrom another server over SSH (`remote_host` and what goes with it). The password or key is\nused for that one connection and is kept nowhere.",
         "required": [
           "source_type",
-          "backup_file",
           "tenant_username",
           "target_domain"
         ],
         "properties": {
+          "auth_method": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`password` or `ssh_key`."
+          },
           "backup_file": {
-            "type": "string",
-            "description": "The backup's file name in the import folder."
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The backup's file name in the import folder (not with `remote_host`)."
           },
           "dry_run": {
             "type": "boolean",
             "description": "Only plan (default `true`). With `false` the plan is carried out when nothing stands in\nits way."
+          },
+          "host_key_sha256": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The server's host key fingerprint (`SHA256:...`). Without it nothing is sent to the\nserver: the transfer fails and says which fingerprint the server showed."
           },
           "on_conflict": {
             "type": [
@@ -23620,16 +23636,63 @@
             ],
             "description": "`fail` (default), `rename` or `skip`."
           },
+          "password": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "password",
+            "description": "The password (`auth_method` `password`)."
+          },
+          "remote_backup_path": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The backup's path on the server."
+          },
           "remote_host": {
             "type": [
               "string",
               "null"
             ],
-            "description": "Fetching the backup from another server is not available yet (T15.05): must be absent."
+            "description": "Fetch the backup from this server."
+          },
+          "remote_ssh_port": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Its SSH port (default 22).",
+            "minimum": 0
+          },
+          "remote_user": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The login name on it."
           },
           "source_type": {
             "type": "string",
             "description": "`cpanel` or `cyberpanel` (`openpanel` and `dhpanel_archive` are not readable yet)."
+          },
+          "ssh_key": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "password",
+            "description": "The private key (`auth_method` `ssh_key`)."
+          },
+          "ssh_key_passphrase": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "password",
+            "description": "The key's passphrase, when it has one."
           },
           "target_domain": {
             "type": "string",

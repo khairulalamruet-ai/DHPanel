@@ -447,6 +447,8 @@ pub fn mount(
                                 sessions: sessions.clone(),
                                 spool_dir: spool_dir.clone(),
                                 loopback: loopback.clone(),
+                                max_backup_bytes: 100 * 1024 * 1024 * 1024,
+                                allow_local_sources: false,
                             },
                         )),
                         ..ModuleRoutes::none()

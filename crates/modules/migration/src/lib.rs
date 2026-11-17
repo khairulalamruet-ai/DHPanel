@@ -16,6 +16,7 @@
 use std::{fs::File, io::BufReader, path::PathBuf};
 
 pub mod exec;
+pub mod remote;
 
 use axum::{
     Json, Router,
@@ -57,6 +58,10 @@ pub struct MigrationState {
     pub spool_dir: PathBuf,
     /// How the executor uses the panel's own API.
     pub loopback: exec::Loopback,
+    /// The biggest backup that is fetched from another server, in bytes.
+    pub max_backup_bytes: u64,
+    /// Whether a server on this machine's own networks may be fetched from (tests only).
+    pub allow_local_sources: bool,
 }
 
 impl FromRef<MigrationState> for PgPool {
@@ -403,6 +408,147 @@ async fn start(state: &MigrationState, t: &Transfer) -> Result<(), AppError> {
     Ok(())
 }
 
+/// Checks the fields that go with `remote_host` and makes the source.
+fn remote_source(
+    req: &CreateTransfer,
+    errors: &mut Vec<FieldError>,
+    allow_local: bool,
+) -> Option<remote::Source> {
+    use secrecy::SecretString;
+    let mut bad = |field: &str, code: &'static str, message: &'static str| {
+        errors.push(FieldError::new(field, code, message));
+    };
+    let host = req.remote_host.as_deref().unwrap_or_default().trim();
+    if host.is_empty()
+        || host.len() > 253
+        || !host
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b':' | b'_'))
+    {
+        bad(
+            "remote_host",
+            "invalid_host",
+            "Use a host name or an address.",
+        );
+    }
+    let port = req.remote_ssh_port.unwrap_or(22);
+    if port == 0 {
+        bad(
+            "remote_ssh_port",
+            "invalid_port",
+            "Use a port from 1 to 65535.",
+        );
+    }
+    let user = req.remote_user.as_deref().unwrap_or_default();
+    if user.is_empty()
+        || user.len() > 64
+        || !user
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_'))
+    {
+        bad(
+            "remote_user",
+            "invalid_user",
+            "Use the login name on the server.",
+        );
+    }
+    let path = req.remote_backup_path.as_deref().unwrap_or_default();
+    if path.is_empty() || path.len() > 1024 || path.contains('\0') {
+        bad(
+            "remote_backup_path",
+            "invalid_path",
+            "Give the backup's path on the server.",
+        );
+    }
+    if let Some(k) = req.host_key_sha256.as_deref()
+        && (!k.starts_with("SHA256:") || k.len() > 80)
+    {
+        bad(
+            "host_key_sha256",
+            "invalid_fingerprint",
+            "Use the fingerprint as SHA256:...",
+        );
+    }
+    let credential = match req.auth_method.as_deref() {
+        Some("password") => req
+            .password
+            .as_deref()
+            .filter(|p| !p.is_empty() && p.len() <= 1024)
+            .map(|p| remote::Credential::Password(SecretString::from(p.to_owned()))),
+        Some("ssh_key") => req
+            .ssh_key
+            .as_deref()
+            .filter(|k| !k.is_empty() && k.len() <= 16 * 1024)
+            .map(|k| remote::Credential::Key {
+                pem: SecretString::from(k.to_owned()),
+                passphrase: req
+                    .ssh_key_passphrase
+                    .as_deref()
+                    .filter(|p| !p.is_empty())
+                    .map(|p| SecretString::from(p.to_owned())),
+            }),
+        _ => None,
+    };
+    if credential.is_none() {
+        bad(
+            "auth_method",
+            "invalid_login",
+            "Use password with a password, or ssh_key with a private key.",
+        );
+    }
+    Some(remote::Source {
+        host: host.to_owned(),
+        port,
+        user: user.to_owned(),
+        credential: credential?,
+        host_key: req.host_key_sha256.clone(),
+        path: path.to_owned(),
+        allow_local,
+    })
+}
+
+/// Fetches the backup of a transfer, then plans (and for a real import, runs) it.
+async fn fetch_then_start(state: MigrationState, t: Transfer, source: remote::Source) {
+    let dest = state.spool_dir.join("migration").join(&t.backup_file);
+    let _ = tokio::fs::create_dir_all(state.spool_dir.join("migration")).await;
+    let _ = store::append_log(
+        &state.db,
+        t.id,
+        &[format!(
+            "Connecting to {}:{} as {}.",
+            source.host, source.port, source.user
+        )],
+    )
+    .await;
+    let (db, id) = (state.db.clone(), t.id);
+    let progress = move |bytes: u64| {
+        let (db, line) = (
+            db.clone(),
+            format!("Received {} MiB.", bytes / (1024 * 1024)),
+        );
+        tokio::spawn(async move {
+            let _ = store::append_log(&db, id, &[line]).await;
+        });
+    };
+    match remote::fetch(source, &dest, state.max_backup_bytes, progress).await {
+        Ok(done) => {
+            let _ = store::append_log(
+                &state.db,
+                t.id,
+                &[format!(
+                    "Fetched {} byte(s). The server's host key is {}.",
+                    done.bytes, done.host_key
+                )],
+            )
+            .await;
+            if start(&state, &t).await.is_err() {
+                exec::fail_transfer(&state, &t, "the plan could not be made").await;
+            }
+        }
+        Err(e) => exec::fail_transfer(&state, &t, &e.to_string()).await,
+    }
+}
+
 // ---------------------------------------------------------------------- handlers
 
 /// The transfers, newest first.
@@ -444,13 +590,16 @@ pub async fn show(
     Ok(Json(view(t)))
 }
 
-/// A transfer to start.
-#[derive(Debug, Deserialize, ToSchema)]
+/// A transfer to start. The backup is a file in the import folder (`backup_file`) or is fetched
+/// from another server over SSH (`remote_host` and what goes with it). The password or key is
+/// used for that one connection and is kept nowhere.
+#[derive(Deserialize, ToSchema)]
 pub struct CreateTransfer {
     /// `cpanel` or `cyberpanel` (`openpanel` and `dhpanel_archive` are not readable yet).
     pub source_type: String,
-    /// The backup's file name in the import folder.
-    pub backup_file: String,
+    /// The backup's file name in the import folder (not with `remote_host`).
+    #[serde(default)]
+    pub backup_file: Option<String>,
     /// The account's name here.
     pub tenant_username: String,
     /// The main domain here.
@@ -462,9 +611,37 @@ pub struct CreateTransfer {
     /// `fail` (default), `rename` or `skip`.
     #[serde(default)]
     pub on_conflict: Option<String>,
-    /// Fetching the backup from another server is not available yet (T15.05): must be absent.
+    /// Fetch the backup from this server.
     #[serde(default)]
     pub remote_host: Option<String>,
+    /// Its SSH port (default 22).
+    #[serde(default)]
+    pub remote_ssh_port: Option<u16>,
+    /// The login name on it.
+    #[serde(default)]
+    pub remote_user: Option<String>,
+    /// `password` or `ssh_key`.
+    #[serde(default)]
+    pub auth_method: Option<String>,
+    /// The password (`auth_method` `password`).
+    #[serde(default)]
+    #[schema(format = Password)]
+    pub password: Option<String>,
+    /// The private key (`auth_method` `ssh_key`).
+    #[serde(default)]
+    #[schema(format = Password)]
+    pub ssh_key: Option<String>,
+    /// The key's passphrase, when it has one.
+    #[serde(default)]
+    #[schema(format = Password)]
+    pub ssh_key_passphrase: Option<String>,
+    /// The backup's path on the server.
+    #[serde(default)]
+    pub remote_backup_path: Option<String>,
+    /// The server's host key fingerprint (`SHA256:...`). Without it nothing is sent to the
+    /// server: the transfer fails and says which fingerprint the server showed.
+    #[serde(default)]
+    pub host_key_sha256: Option<String>,
 }
 
 fn yes() -> bool {
@@ -495,13 +672,19 @@ pub async fn create(
             "Only cpanel and cyberpanel backups can be read.",
         ));
     }
-    if !valid_file_name(&req.backup_file) {
-        errors.push(FieldError::new(
-            "backup_file",
-            "invalid_file_name",
-            "Use the file's name in the import folder (letters, digits, . _ -).",
-        ));
-    }
+    let remote = if req.remote_host.is_some() {
+        remote_source(&req, &mut errors, state.allow_local_sources)
+    } else {
+        match req.backup_file.as_deref() {
+            Some(f) if valid_file_name(f) => {}
+            _ => errors.push(FieldError::new(
+                "backup_file",
+                "invalid_file_name",
+                "Use the file's name in the import folder (letters, digits, . _ -).",
+            )),
+        }
+        None
+    };
     if dhpanel_domain::TenantUsername::parse(&req.tenant_username.to_ascii_lowercase()).is_err() {
         errors.push(FieldError::new(
             "tenant_username",
@@ -524,13 +707,6 @@ pub async fn create(
             "Use fail, rename or skip.",
         ));
     }
-    if req.remote_host.is_some() {
-        errors.push(FieldError::new(
-            "remote_host",
-            "remote_fetch_unavailable",
-            "Fetching a backup from another server is not available yet; put the file in the import folder.",
-        ));
-    }
     if !errors.is_empty() {
         return Err(AppError::validation(errors));
     }
@@ -540,12 +716,17 @@ pub async fn create(
             "This panel cannot run imports.",
         ));
     }
+    let fetched_name = format!("remote-{}.tar.gz", Uuid::new_v4().simple());
+    let backup_file = match &remote {
+        Some(_) => fetched_name.as_str(),
+        None => req.backup_file.as_deref().unwrap_or_default(),
+    };
     let t = store::insert(
         &state.db,
         &NewTransfer {
             source_type: &req.source_type,
-            source_host: None,
-            backup_file: &req.backup_file,
+            source_host: req.remote_host.as_deref(),
+            backup_file,
             tenant_username: &req.tenant_username.to_ascii_lowercase(),
             target_domain: &req.target_domain.to_ascii_lowercase(),
             dry_run: req.dry_run,
@@ -558,7 +739,26 @@ pub async fn create(
     dhpanel_audit::insert(&state.db, &audit("migration.transfer_started", &who, t.id))
         .await
         .map_err(internal)?;
-    start(&state, &t).await?;
+    match remote {
+        // The fetch takes as long as the backup is big: it goes on in the background, and then
+        // the plan is made. The login lives in that task only.
+        Some(source) => {
+            let progress = Progress {
+                status: "running",
+                progress_percent: 0,
+                current_step: "Fetching the backup",
+                size_bytes: None,
+                steps: &json!([]),
+                plan: None,
+                error_message: None,
+            };
+            store::set_progress(&state.db, t.id, &progress)
+                .await
+                .map_err(internal)?;
+            tokio::spawn(fetch_then_start(state.clone(), t.clone(), source));
+        }
+        None => start(&state, &t).await?,
+    }
     let done = store::get(&state.db, t.id)
         .await
         .map_err(internal)?
@@ -586,6 +786,20 @@ pub async fn retry(
         .await
         .map_err(internal)?
         .ok_or_else(|| AppError::not_found("transfer"))?;
+    // The login of a transfer from a server was kept nowhere: without the file it cannot be
+    // fetched again.
+    if existing.source_host.is_some()
+        && !state
+            .spool_dir
+            .join("migration")
+            .join(&existing.backup_file)
+            .exists()
+    {
+        return Err(AppError::conflict(
+            "login_needed",
+            "The backup was not fetched and the login was not kept: start a new transfer.",
+        ));
+    }
     // A real import that got as far as its steps goes on from the step that stopped it.
     let resumed = !existing.dry_run
         && state.loopback.0.get().is_some()
