@@ -513,7 +513,7 @@ impl ContainerSpec {
             .map(|t| {
                 (
                     t.target.clone(),
-                    format!("rw,noexec,nosuid,nodev,size={}", t.size_bytes),
+                    format!("rw,noexec,nosuid,nodev,mode=1777,size={}", t.size_bytes),
                 )
             })
             .collect::<std::collections::HashMap<_, _>>();
@@ -780,7 +780,7 @@ mod tests {
         );
         assert_eq!(
             host.tmpfs.unwrap()["/tmp"],
-            "rw,noexec,nosuid,nodev,size=16777216"
+            "rw,noexec,nosuid,nodev,mode=1777,size=16777216"
         );
 
         for bad in [

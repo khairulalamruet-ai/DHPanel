@@ -4374,3 +4374,169 @@ async fn a_preview_link_shows_the_site_until_it_expires(pool: PgPool) {
         .unwrap();
     assert!(swept > version);
 }
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn a_domains_page_cache_is_switched_purged_and_changes_the_web_file(pool: PgPool) {
+    let e = env(&pool).await;
+    let (alice, tenant) = client(&pool, "alice", 10_000).await;
+    let (bobby, _) = client(&pool, "bobby", 10_001).await;
+    let (a, b) = (e.sign_in(alice).await, e.sign_in(bobby).await);
+    let (_, main) = e
+        .call(Some(&a), "POST", CLIENT, Some(domain("example.com")), true)
+        .await;
+    let id = main["id"].as_str().unwrap().to_owned();
+    let path = format!("{CLIENT}/{id}/page-cache");
+    let purge = format!("{path}/purge");
+    let version = || {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_scalar::<_, i64>("SELECT routes_version FROM tenants WHERE id = $1")
+                .bind(tenant)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+        }
+    };
+    // Which web server file the tenant would get now.
+    let file = || {
+        let pool = pool.clone();
+        async move {
+            dhpanel_web_config::site_files(&pool, tenant, "alice", "active")
+                .await
+                .unwrap()
+                .into_iter()
+                .find(|(d, _)| d == "example.com")
+                .map(|(_, text)| text)
+                .unwrap_or_default()
+        }
+    };
+
+    // Off until someone switches it on; reading is always open.
+    let (status, off) = e.call(Some(&a), "GET", &path, None, false).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        off,
+        json!({"enabled": false, "ttl_minutes": 10, "purges": 0, "purged_at": null})
+    );
+    assert!(!file().await.contains("fastcgi_cache "));
+    // A purge of a cache that never existed has nothing to purge.
+    let (status, body) = e.call(Some(&a), "POST", &purge, None, true).await;
+    assert_eq!(
+        (status, body["errors"][0]["code"].clone()),
+        (StatusCode::UNPROCESSABLE_ENTITY, json!("cache_never_on"))
+    );
+
+    // Changing needs the feature in the plan.
+    sqlx::query(
+        "UPDATE feature_sets SET all_features = false, features = ARRAY['domains']::feature_key[]
+         WHERE id = (SELECT feature_set_id FROM plans WHERE is_default)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (status, body) = e
+        .call(Some(&a), "PUT", &path, Some(json!({"enabled": true})), true)
+        .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::FORBIDDEN, "feature_disabled")
+    );
+    sqlx::query(
+        "UPDATE feature_sets SET features = ARRAY['domains', 'web_policy']::feature_key[]
+         WHERE id = (SELECT feature_set_id FROM plans WHERE is_default)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // On: the file has the cache, for the time that was asked.
+    let before = version().await;
+    let (status, on) = e
+        .call(
+            Some(&a),
+            "PUT",
+            &path,
+            Some(json!({"enabled": true, "ttl_minutes": 30})),
+            true,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{on}");
+    assert_eq!(on["enabled"], json!(true));
+    assert_eq!(on["ttl_minutes"], json!(30));
+    assert!(version().await > before, "the web server gets it");
+    let text = file().await;
+    assert!(text.contains("fastcgi_cache_valid 200 301 30m;"), "{text}");
+    assert!(text.contains("fastcgi_cache_key \"1:"), "{text}");
+
+    // A purge: the key changes, the web server gets the file, and it shows.
+    let before = version().await;
+    let (status, purged) = e.call(Some(&a), "POST", &purge, None, true).await;
+    assert_eq!(status, StatusCode::OK, "{purged}");
+    assert_eq!(purged["purges"], json!(1));
+    assert!(purged["purged_at"].is_i64());
+    assert!(version().await > before);
+    assert!(file().await.contains("fastcgi_cache_key \"2:"));
+    // Switching off removes the cache from the file and keeps the count.
+    let (_, off_again) = e
+        .call(
+            Some(&a),
+            "PUT",
+            &path,
+            Some(json!({"enabled": false})),
+            true,
+        )
+        .await;
+    assert_eq!(off_again["enabled"], json!(false));
+    assert!(!file().await.contains("fastcgi_cache "));
+
+    // A time out of range is refused with the field named; nothing changed.
+    for ttl in [0, 1441] {
+        let (status, body) = e
+            .call(
+                Some(&a),
+                "PUT",
+                &path,
+                Some(json!({"enabled": true, "ttl_minutes": ttl})),
+                true,
+            )
+            .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+        assert_eq!(body["errors"][0]["field"], json!("ttl_minutes"));
+    }
+    assert_eq!(
+        e.call(
+            Some(&a),
+            "PUT",
+            &path,
+            Some(json!({"enabled": true, "x": 1})),
+            true
+        )
+        .await
+        .0,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+
+    // Not another account's.
+    for (method, p) in [("GET", &path), ("POST", &purge)] {
+        assert_eq!(
+            e.call(Some(&b), method, p, None, method == "POST").await.0,
+            StatusCode::NOT_FOUND,
+            "{method}"
+        );
+    }
+    let actions: Vec<String> = sqlx::query_scalar(
+        "SELECT action FROM audit_logs WHERE action LIKE 'domain.page_cache_%' ORDER BY id",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        actions,
+        [
+            "domain.page_cache_changed",
+            "domain.page_cache_purged",
+            "domain.page_cache_changed"
+        ]
+    );
+}

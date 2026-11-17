@@ -2761,6 +2761,226 @@
         ]
       }
     },
+    "/api/v1/admin/domains/{id}/page-cache": {
+      "get": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "Read a domain's page cache.",
+        "operationId": "adminGetDomainPageCache",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Domain id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The cache (off when never set)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageCacheView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such domain",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "Switch a domain's page cache on or off, and set how long a page stays fresh.",
+        "operationId": "adminSetDomainPageCache",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Domain id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetPageCache"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageCacheView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied`, `reauth_required`, `csrf_failed` or `feature_disabled`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such domain",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`invalid_cache_ttl` or `alias_has_no_cache`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/domains/{id}/page-cache/purge": {
+      "post": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "Purge a domain's page cache.",
+        "operationId": "adminPurgeDomainPageCache",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Domain id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Purged (the web server file is sent to the node)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageCacheView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied`, `reauth_required`, `csrf_failed` or `feature_disabled`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such domain",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`cache_never_on` or `alias_has_no_cache`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/domains/{id}/php": {
       "get": {
         "tags": [
@@ -15760,6 +15980,226 @@
         ]
       }
     },
+    "/api/v1/client/domains/{id}/page-cache": {
+      "get": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "Read the page cache of one of your domains.",
+        "operationId": "clientGetDomainPageCache",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Domain id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The cache (off when never set)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageCacheView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such domain (or it is not yours)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "Switch the page cache of one of your domains on or off.",
+        "operationId": "clientSetDomainPageCache",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Domain id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetPageCache"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageCacheView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only`, `csrf_failed` or `feature_disabled`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such domain (or it is not yours)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`invalid_cache_ttl` or `alias_has_no_cache`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/domains/{id}/page-cache/purge": {
+      "post": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "Purge the page cache of one of your domains.",
+        "operationId": "clientPurgeDomainPageCache",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Domain id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Purged (the web server file is sent to the node)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageCacheView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only`, `csrf_failed` or `feature_disabled`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such domain (or it is not yours)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`cache_never_on` or `alias_has_no_cache`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/client/domains/{id}/php": {
       "put": {
         "tags": [
@@ -27778,6 +28218,43 @@
           }
         }
       },
+      "PageCacheView": {
+        "type": "object",
+        "description": "A domain's page cache.",
+        "required": [
+          "enabled",
+          "ttl_minutes"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether it is on."
+          },
+          "purged_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "When it was last purged (seconds since 1970); `null` if never."
+          },
+          "purges": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many times it was purged (a purge is counted when the web server\nfile with it is made).",
+            "minimum": 0
+          },
+          "ttl_minutes": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Minutes a page stays fresh, 1 to 1440.",
+            "example": 10,
+            "maximum": 1440,
+            "minimum": 1
+          }
+        },
+        "additionalProperties": false
+      },
       "PageInput": {
         "type": "object",
         "description": "A page to keep.",
@@ -29915,6 +30392,31 @@
           "enabled": {
             "type": "boolean",
             "description": "On or off."
+          }
+        },
+        "additionalProperties": false
+      },
+      "SetPageCache": {
+        "type": "object",
+        "description": "What a person sends to change the cache.",
+        "required": [
+          "enabled"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether it is on."
+          },
+          "ttl_minutes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Minutes a page stays fresh, 1 to 1440 (10 when left out).",
+            "example": 10,
+            "maximum": 1440,
+            "minimum": 1
           }
         },
         "additionalProperties": false

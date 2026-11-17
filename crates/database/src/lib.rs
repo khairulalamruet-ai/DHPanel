@@ -41,6 +41,7 @@ pub mod nodes;
 pub mod notifications;
 pub mod operations;
 pub mod outbox;
+pub mod page_cache;
 pub mod permissions;
 pub mod php;
 pub mod plans;

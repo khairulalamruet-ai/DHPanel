@@ -16,6 +16,7 @@ use uuid::Uuid;
 /// * a domain whose docroot or name does not pass the checks is left out (the
 ///   others still get theirs), and so is what does not fit the node's limits.
 #[must_use]
+#[allow(clippy::too_many_arguments)] // each is one table of the tenant
 pub fn build(
     tenant_status: &str,
     template: &str,
@@ -24,6 +25,7 @@ pub fn build(
     domains: &[RoutedDomain],
     policies: &[(Uuid, DomainPolicy)],
     customs: &[(Uuid, String)],
+    caches: &[(Uuid, dhpanel_database::page_cache::PageCache)],
 ) -> Vec<(String, String)> {
     if !matches!(tenant_status, "active" | "suspended") {
         return Vec::new();
@@ -59,7 +61,19 @@ pub fn build(
                 )
                 .ok()
             })
-            .unwrap_or_default();
+            .unwrap_or_default()
+            .with_page_cache(
+                caches
+                    .iter()
+                    .find(|(id, _)| *id == d.id)
+                    .and_then(|(_, c)| {
+                        vhost::PageCache::parse(
+                            u16::try_from(c.ttl_minutes).ok()?,
+                            u32::try_from(c.generation).ok()?,
+                        )
+                        .ok()
+                    }),
+            );
         // The person's own block was checked when it was saved; one that no longer
         // passes (the rules got stricter) is left out, the site stays.
         let custom = customs
@@ -121,6 +135,9 @@ pub async fn site_files(
     let customs = dhpanel_database::domain_policies::custom_blocks_of_tenant(db, tenant_id)
         .await
         .map_err(|e| e.to_string())?;
+    let caches = dhpanel_database::page_cache::of_tenant(db, tenant_id)
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(build(
         status,
         &template,
@@ -129,6 +146,7 @@ pub async fn site_files(
         &domains,
         &policies,
         &customs,
+        &caches,
     ))
 }
 
@@ -171,6 +189,7 @@ mod tests {
             &[app, dom(2, "www.example.com", "addon", None, "site")],
             &[],
             &[],
+            &[],
         );
         assert_eq!(files.len(), 2);
         let by = |name: &str| files.iter().find(|(d, _)| d == name).unwrap().1.clone();
@@ -194,6 +213,7 @@ mod tests {
             &alice(),
             "8.4",
             &domains,
+            &[],
             &[],
             &[],
         );
@@ -221,7 +241,8 @@ mod tests {
                     "8.4",
                     &domains,
                     &[],
-                    &[]
+                    &[],
+                    &[],
                 )
                 .is_empty()
             );
@@ -234,7 +255,8 @@ mod tests {
                 "8.4",
                 &domains,
                 &[],
-                &[]
+                &[],
+                &[],
             )
             .len(),
             1
@@ -249,6 +271,7 @@ mod tests {
             &alice(),
             "8.4",
             &bad,
+            &[],
             &[],
             &[],
         );
@@ -267,6 +290,7 @@ mod tests {
             &alice(),
             "8.4",
             &domains,
+            &[],
             &[],
             &[],
         );
@@ -295,6 +319,7 @@ mod tests {
             &domains,
             &[(Uuid::from_u128(1), policy)],
             &[],
+            &[],
         );
         assert!(files[0].1.contains("add_header X-Test \"yes\" always;"));
         assert!(files[0].1.contains("rate=5r/s"));
@@ -311,6 +336,7 @@ mod tests {
             "8.4",
             &domains,
             &[(Uuid::from_u128(1), broken)],
+            &[],
             &[],
         );
         assert_eq!(files.len(), 2);
@@ -332,6 +358,7 @@ mod tests {
             &domains,
             &[],
             &[],
+            &[],
         );
         let of = |name: &str| &files.iter().find(|(d, _)| d == name).unwrap().1;
         assert!(of("example.com").contains("fastcgi_pass dh-alice-php:9000;"));
@@ -348,6 +375,7 @@ mod tests {
             &alice(),
             "8.3",
             &domains,
+            &[],
             &[],
             &[],
         );

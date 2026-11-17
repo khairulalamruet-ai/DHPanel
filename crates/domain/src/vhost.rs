@@ -555,6 +555,46 @@ pub struct Policy {
     pub rate_limit_per_second: Option<u16>,
     /// Response headers to add.
     pub headers: Vec<Header>,
+    /// The page cache of the site, when it is on (T12.11).
+    pub page_cache: Option<PageCache>,
+}
+
+/// Longest time a cached page is kept, in minutes (one day).
+pub const MAX_CACHE_MINUTES: u16 = 1440;
+
+/// A domain's page cache: pages the PHP site answers to visitors who are not
+/// signed in are kept by the web server for a while and given again.
+///
+/// Never cached: requests that are not `GET` or `HEAD`, requests with an
+/// `Authorization` header or a login/session cookie of the usual PHP
+/// applications, the sign-in and admin paths of WordPress, and every answer that
+/// sets a cookie or says `Cache-Control: private`/`no-cache` (nginx's own rule).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PageCache {
+    /// Minutes a page stays fresh, 1 to [`MAX_CACHE_MINUTES`].
+    pub ttl_minutes: u16,
+    /// Goes up each time the cache is purged: it is part of every key, so old
+    /// pages are never found again and leave the cache by themselves.
+    pub generation: u32,
+}
+
+impl PageCache {
+    /// Checks the time.
+    ///
+    /// # Errors
+    /// [`VhostError`] when the time is out of range.
+    pub fn parse(ttl_minutes: u16, generation: u32) -> Result<Self, VhostError> {
+        if ttl_minutes == 0 || ttl_minutes > MAX_CACHE_MINUTES {
+            return Err(err(
+                "invalid_cache_ttl",
+                format!("A page stays cached for 1 to {MAX_CACHE_MINUTES} minutes."),
+            ));
+        }
+        Ok(Self {
+            ttl_minutes,
+            generation,
+        })
+    }
 }
 
 impl Policy {
@@ -621,13 +661,21 @@ impl Policy {
         Ok(Self {
             rate_limit_per_second: rate_limit,
             headers,
+            page_cache: None,
         })
+    }
+
+    /// The same policy with the page cache on or off.
+    #[must_use]
+    pub fn with_page_cache(mut self, page_cache: Option<PageCache>) -> Self {
+        self.page_cache = page_cache;
+        self
     }
 
     /// Whether it changes nothing.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.rate_limit_per_second.is_none() && self.headers.is_empty()
+        self.rate_limit_per_second.is_none() && self.headers.is_empty() && self.page_cache.is_none()
     }
 
     /// The name of the rate limit zone: letters, digits and `_`, one per domain.
@@ -649,14 +697,37 @@ impl Policy {
     fn http_lines(&self, domain: &Fqdn) -> Vec<String> {
         // Behind the panel's own front web server the visitor's address is in
         // X-Forwarded-For, which that server sets itself.
-        self.rate_limit_per_second
+        let mut lines: Vec<String> = self
+            .rate_limit_per_second
             .map(|r| {
                 vec![format!(
                     "limit_req_zone $http_x_forwarded_for zone={}:1m rate={r}r/s;",
                     Self::zone(domain)
                 )]
             })
-            .unwrap_or_default()
+            .unwrap_or_default();
+        if self.page_cache.is_some() {
+            let z = Self::cache_zone(domain);
+            // Small, in the web container's own memory disk: eight megabytes a site.
+            lines.push(format!(
+                "fastcgi_cache_path /var/cache/nginx/{z} levels=1:2 keys_zone={z}:1m max_size=8m inactive=60m use_temp_path=off;"
+            ));
+            lines.push(format!(
+                "map $http_cookie $skip_cookie_{z} {{ default 0; ~*(wordpress_logged_in|wordpress_sec|wp-postpass|comment_author|woocommerce_items_in_cart|PHPSESSID|laravel_session|session) 1; }}"
+            ));
+            lines.push(format!(
+                "map $http_authorization $skip_auth_{z} {{ default 1; \"\" 0; }}"
+            ));
+            lines.push(format!(
+                "map $request_uri $skip_uri_{z} {{ default 0; ~*^/(wp-admin|wp-login\\.php|xmlrpc\\.php) 1; }}"
+            ));
+        }
+        lines
+    }
+
+    /// The name of the cache zone and of its directory.
+    fn cache_zone(domain: &Fqdn) -> String {
+        Self::zone(domain).replacen("rl_", "pc_", 1)
     }
 
     /// Lines for inside the `server` block.
@@ -672,6 +743,27 @@ impl Policy {
         }
         for h in &self.headers {
             lines.push(format!("add_header {} \"{}\" always;", h.name, h.value));
+        }
+        if let Some(cache) = self.page_cache {
+            let z = Self::cache_zone(domain);
+            lines.push(format!("fastcgi_cache {z};"));
+            lines.push(format!(
+                "fastcgi_cache_key \"{}:$scheme$host$request_uri\";",
+                cache.generation
+            ));
+            lines.push(format!(
+                "fastcgi_cache_valid 200 301 {}m;",
+                cache.ttl_minutes
+            ));
+            lines.push("fastcgi_cache_methods GET HEAD;".to_owned());
+            lines.push("fastcgi_cache_lock on;".to_owned());
+            lines.push(format!(
+                "fastcgi_cache_bypass $skip_cookie_{z} $skip_auth_{z} $skip_uri_{z};"
+            ));
+            lines.push(format!(
+                "fastcgi_no_cache $skip_cookie_{z} $skip_auth_{z} $skip_uri_{z};"
+            ));
+            lines.push("add_header X-Cache-Status $upstream_cache_status always;".to_owned());
         }
         lines
     }
@@ -747,6 +839,53 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn a_page_cache_adds_its_zone_keys_and_bypass_rules() {
+        let domain = fqdn("example.com");
+        let docroot = Docroot::parse("public_html").unwrap();
+        let render_with_cache = |generation: u32| {
+            let policy =
+                Policy::default().with_page_cache(Some(PageCache::parse(15, generation).unwrap()));
+            render(
+                DEFAULT_NGINX_TEMPLATE,
+                &Site {
+                    domain: &domain,
+                    aliases: &[],
+                    docroot: &docroot,
+                    php_upstream: "dh-alice-php:9000",
+                    policy: &policy,
+                    custom: "",
+                    proxy: None,
+                },
+            )
+            .unwrap()
+        };
+        let text = render_with_cache(1);
+        assert!(
+            text.contains("fastcgi_cache_path /var/cache/nginx/pc_example_com_"),
+            "{text}"
+        );
+        assert!(text.contains("fastcgi_cache_valid 200 301 15m;"));
+        assert!(text.contains("fastcgi_cache_key \"1:$scheme$host$request_uri\";"));
+        assert!(text.contains("fastcgi_cache_methods GET HEAD;"));
+        assert!(text.contains("wordpress_logged_in"));
+        assert!(text.contains("fastcgi_no_cache"));
+        // The node accepts what the panel makes.
+        check_site_config(&text).unwrap();
+        // A purge changes the key and nothing else.
+        let again = render_with_cache(2);
+        assert_ne!(text, again);
+        assert_eq!(
+            text.replace("\"1:$scheme", "\"2:$scheme"),
+            again,
+            "only the generation differs"
+        );
+        // Without a cache there is nothing of it.
+        assert!(!Policy::default().page_cache.is_some());
+        assert!(PageCache::parse(0, 1).is_err());
+        assert!(PageCache::parse(MAX_CACHE_MINUTES + 1, 1).is_err());
     }
 
     #[test]
