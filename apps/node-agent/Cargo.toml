@@ -43,6 +43,9 @@ flate2 = { version = "1", default-features = false, features = ["rust_backend"] 
 # Talks to the shared MariaDB server of the node (loopback only) to make databases and
 # users (T07.03). No TLS: the connection never leaves the host.
 mysql_async = { version = "0.37", default-features = false, features = ["minimal"] }
+# The PostgreSQL server of the node (T07.12): the client, and the SCRAM verifier a password is sent as.
+tokio-postgres = { version = "0.7", default-features = false }
+postgres-protocol = "0.6"
 x509-parser = { version = "0.18", features = ["verify"] }
 secrecy = "0.10"
 serde = { version = "1", features = ["derive"] }
