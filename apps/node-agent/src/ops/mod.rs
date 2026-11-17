@@ -52,6 +52,7 @@ pub mod sqlsplit;
 pub mod tenant;
 pub mod transfer;
 pub mod vhost;
+pub mod webmail;
 pub mod wpinstall;
 
 use std::{
@@ -334,6 +335,10 @@ impl Registry {
                 let context = context.clone();
                 move |op| pma::open_phpmyadmin(context.clone(), op)
             });
+            registry.register("open_webmail", {
+                let context = context.clone();
+                move |op| webmail::open_webmail(context.clone(), op)
+            });
             registry.register("report_import_progress", {
                 let context = context.clone();
                 move |op| sqlimport::report_import_progress(context.clone(), op)
@@ -482,6 +487,10 @@ impl Registry {
             self.register("set_phpmyadmin_host", {
                 let context = context.clone();
                 move |op| crate::web::set_phpmyadmin_host(context.clone(), op)
+            });
+            self.register("set_webmail_host", {
+                let context = context.clone();
+                move |op| crate::web::set_webmail_host(context.clone(), op)
             });
             self.register("set_error_pages", {
                 let context = context.clone();

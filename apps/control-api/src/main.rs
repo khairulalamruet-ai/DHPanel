@@ -447,6 +447,21 @@ async fn main() -> ExitCode {
             }
         }
     });
+    // Mail: what the mail servers have to be told, the DNS records mail needs, and the hold of a
+    // domain that sends too much (T13).
+    tokio::spawn({
+        let (db, settings) = (db.clone(), settings.clone());
+        async move {
+            let mut every = tokio::time::interval(std::time::Duration::from_secs(15));
+            every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                every.tick().await;
+                if let Err(error) = dhpanel_mod_mail::tick::tick(&db, &settings).await {
+                    tracing::warn!(%error, "the mail tick could not finish a round");
+                }
+            }
+        }
+    });
     tokio::spawn(modules::follow_enabled(
         db.clone(),
         mount.clone(),

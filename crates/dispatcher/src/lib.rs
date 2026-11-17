@@ -177,6 +177,8 @@ impl Dispatcher {
         routes.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut certificates = tokio::time::interval(self.settings.capabilities_check);
         certificates.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut mail_reports = tokio::time::interval(Duration::from_secs(60));
+        mail_reports.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut expiry = tokio::time::interval(self.settings.expiry_check);
         expiry.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
@@ -187,6 +189,7 @@ impl Dispatcher {
                 _ = purges.tick() => { self.request_purges().await; }
                 _ = routes.tick() => { self.expire_previews().await; self.request_route_syncs().await; self.request_error_pages().await; self.request_user_agents().await; self.request_firewalls().await; self.request_scans().await; self.request_signature_updates().await; self.request_image_checks().await; self.request_app_installs().await; self.settle_cache_instances().await; self.settle_runtime_apps().await; self.settle_git_deploys().await; self.request_import_progress().await; self.request_cron_runs().await; self.request_metrics().await; self.request_services().await; self.reconcile_db_isolation().await; }
                 _ = certificates.tick() => { self.request_certificates().await; self.request_db_sizes().await; }
+                _ = mail_reports.tick() => { self.request_mail_reports().await; }
                 _ = expiry.tick() => { self.announce_expiring().await; }
                 Some(report) = results.recv() => self.handle_result(report).await,
             }
@@ -1498,6 +1501,68 @@ impl Dispatcher {
         asked
     }
 
+    /// Asks each connected node whose mail server has domains what it holds: the size of every
+    /// mailbox and the outgoing queue (the key has a minute slot). Returns how many nodes were
+    /// asked.
+    pub async fn request_mail_reports(&self) -> usize {
+        let slot = u64::try_from(unix_now()).unwrap_or(0) / 60;
+        let mut asked = 0;
+        for node in self.gateway.connected_nodes() {
+            match dhpanel_database::mail::node_has_mail(self.ops.db(), node).await {
+                Ok(true) => {}
+                Ok(false) => continue,
+                Err(err) => {
+                    tracing::warn!(%node, error = %err, "could not look for mail domains");
+                    continue;
+                }
+            }
+            let request = dhpanel_operations::Request::new(
+                node,
+                dhpanel_node_protocol::Operation::ReportMail,
+                format!("mailreport:{slot}"),
+            );
+            match self.ops.enqueue(&request).await {
+                Ok(dhpanel_operations::Enqueued::Created(_)) => asked += 1,
+                Ok(dhpanel_operations::Enqueued::Existing(_)) => {}
+                Err(error) => tracing::warn!(%node, %error, "could not queue the mail report"),
+            }
+        }
+        asked
+    }
+
+    async fn store_mail_report(
+        &self,
+        node_id: Uuid,
+        usage: &[dhpanel_node_protocol::MailUsage],
+        queue: &[dhpanel_node_protocol::MailQueueItem],
+        total: u64,
+    ) {
+        let sizes: Vec<(String, i64)> = usage
+            .iter()
+            .map(|u| {
+                (
+                    u.address.clone(),
+                    i64::try_from(u.used_bytes).unwrap_or(i64::MAX),
+                )
+            })
+            .collect();
+        let items = serde_json::to_value(queue).unwrap_or_default();
+        let result = async {
+            dhpanel_database::mail::set_usage(self.ops.db(), node_id, &sizes).await?;
+            dhpanel_database::mail::save_queue(
+                self.ops.db(),
+                node_id,
+                &items,
+                i64::try_from(total).unwrap_or(i64::MAX),
+            )
+            .await
+        }
+        .await;
+        if let Err(err) = result {
+            tracing::warn!(%node_id, error = %err, "could not keep what a node's mail server reported");
+        }
+    }
+
     /// Asks every connected node how its core services are (the key has a thirty-second slot).
     /// A service that stopped is announced once, within about a minute. Returns how many
     /// operations were queued.
@@ -1935,6 +2000,15 @@ impl Dispatcher {
                 }
                 if let Some(dhpanel_node_protocol::Output::DbSizes { items }) = &output {
                     self.store_db_sizes(node_id, items).await;
+                }
+                if let Some(dhpanel_node_protocol::Output::MailReport {
+                    usage,
+                    queue,
+                    queue_total,
+                }) = &output
+                {
+                    self.store_mail_report(node_id, usage, queue, *queue_total)
+                        .await;
                 }
                 if let Some(dhpanel_node_protocol::Output::Services { items }) = &output {
                     self.store_services(node_id, items).await;

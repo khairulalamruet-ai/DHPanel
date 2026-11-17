@@ -30,6 +30,7 @@ pub mod git_deploys;
 pub mod images;
 pub mod imports;
 pub mod license;
+pub mod mail;
 pub mod malware;
 pub mod mfa;
 pub mod migration_transfers;

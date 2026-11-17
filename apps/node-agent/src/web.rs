@@ -163,6 +163,8 @@ pub struct WebContext {
     agents_file: PathBuf,
     /// The name phpMyAdmin is served under (one line), if any.
     pma_file: PathBuf,
+    /// The name webmail is served under (one line), if any.
+    webmail_file: PathBuf,
     agent: ureq::Agent,
     /// Docker, to learn on which loopback port a site's web container is published.
     docker: std::sync::OnceLock<dhpanel_docker_manager::DockerManager>,
@@ -187,6 +189,7 @@ impl WebContext {
             pages_file: state_dir.join("error-pages.json"),
             agents_file: state_dir.join("user-agent-blocklist.json"),
             pma_file: state_dir.join("phpmyadmin-host"),
+            webmail_file: state_dir.join("webmail-host"),
             agent,
             docker: std::sync::OnceLock::new(),
             busy: Mutex::new(()),
@@ -357,6 +360,19 @@ fn pma_upstream() -> String {
         .unwrap_or_else(|| "dh-pma:80".to_owned())
 }
 
+/// Where webmail's container listens, as the web server reaches it
+/// (`DHPANEL_AGENT_WEBMAIL_UPSTREAM`, default `dh-webmail:80`).
+fn webmail_upstream() -> String {
+    std::env::var("DHPANEL_AGENT_WEBMAIL_UPSTREAM")
+        .ok()
+        .filter(|u| {
+            u.len() <= 100
+                && u.bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b':'))
+        })
+        .unwrap_or_else(|| "dh-webmail:80".to_owned())
+}
+
 /// The name phpMyAdmin is served under, if one was set and still passes today's checks.
 fn load_pma_host(file: &Path) -> Option<String> {
     let text = std::fs::read_to_string(file).ok()?;
@@ -436,6 +452,12 @@ fn panel_route(site: &PanelSite, upstream: &str) -> Value {
 }
 
 fn pma_route(host: &str) -> Value {
+    host_route(host, &pma_upstream())
+}
+
+/// A name that goes to one container of the node's own (phpMyAdmin, webmail): plain HTTP goes to
+/// HTTPS, everything else to the container.
+fn host_route(host: &str, upstream: &str) -> Value {
     json!({
         "match": [{"host": [host]}],
         "handle": [{"handler": "subroute", "routes": [
@@ -456,7 +478,7 @@ fn pma_route(host: &str) -> Value {
                     "Referrer-Policy": ["no-referrer"]
                 }}
             }]},
-            {"handle": [{"handler": "reverse_proxy", "upstreams": [{"dial": pma_upstream()}]}]}
+            {"handle": [{"handler": "reverse_proxy", "upstreams": [{"dial": upstream}]}]}
         ]}],
         "terminal": true
     })
@@ -592,6 +614,7 @@ fn compile(
     settings: &Settings,
     pages: &Pages,
     pma_host: Option<&str>,
+    webmail_host: Option<&str>,
 ) -> Value {
     // phpMyAdmin's name first: no tenant's site can take it over.
     // The User-Agents that are refused come before everything, the phpMyAdmin name included.
@@ -627,6 +650,7 @@ fn compile(
         );
     }
     routes.extend(pma_host.map(pma_route));
+    routes.extend(webmail_host.map(|h| host_route(h, &webmail_upstream())));
     routes.extend(
         all.values()
             .flatten()
@@ -961,6 +985,7 @@ impl WebContext {
                 pages
             },
             load_pma_host(&self.pma_file).as_deref(),
+            load_pma_host(&self.webmail_file).as_deref(),
         );
         self.resolve_upstreams(&mut config).await;
         let wanted = config
@@ -1103,6 +1128,50 @@ pub async fn set_phpmyadmin_host(
             Err(AgentError::new(ErrorCode::Internal, message))
         }
         Err(_) => Ok(Output::PhpMyAdminHostSet { applied: false }),
+    }
+}
+
+/// `set_webmail_host`: the name webmail is served under (or none).
+///
+/// # Errors
+/// [`AgentError`]: a name that is not a host name or that a tenant's site already has (not
+/// retryable); kept for the next pass when Caddy cannot be reached.
+pub async fn set_webmail_host(
+    context: Arc<WebContext>,
+    op: Operation,
+) -> Result<Output, AgentError> {
+    let Operation::SetWebmailHost { host } = op else {
+        return Err(crate::ops::wrong_operation());
+    };
+    let _guard = context.busy.lock().await;
+    match host {
+        Some(host) => {
+            let host = Fqdn::parse(&host)
+                .map_err(|e| invalid(e.to_string()))?
+                .as_str()
+                .to_owned();
+            if load_all(&context.dir)
+                .values()
+                .flatten()
+                .any(|s| s.hosts.contains(&host))
+            {
+                return Err(invalid("a tenant's site already has this name"));
+            }
+            std::fs::write(&context.webmail_file, format!("{host}\n")).map_err(|e| {
+                AgentError::new(ErrorCode::Internal, format!("cannot keep the name: {e}"))
+                    .retryable()
+            })?;
+        }
+        None => {
+            let _ = std::fs::remove_file(&context.webmail_file);
+        }
+    }
+    match context.reconcile_locked().await {
+        Ok(_) => Ok(Output::WebmailHostSet { applied: true }),
+        Err(message) if message.starts_with("Caddy refused") => {
+            Err(AgentError::new(ErrorCode::Internal, message))
+        }
+        Err(_) => Ok(Output::WebmailHostSet { applied: false }),
     }
 }
 
@@ -1473,6 +1542,7 @@ mod tests {
                 },
                 &Pages::default(),
                 None,
+                None,
             )
         };
         let routes = |config: &Value| {
@@ -1644,7 +1714,14 @@ mod tests {
             "bobby".to_owned(),
             vec![site(&["bobs.net"], Some("dh-bobby-web:8080"))],
         );
-        let config = compile(&all, &BTreeSet::new(), &settings(), &Pages::default(), None);
+        let config = compile(
+            &all,
+            &BTreeSet::new(),
+            &settings(),
+            &Pages::default(),
+            None,
+            None,
+        );
         let server = &config["apps"]["http"]["servers"]["dhpanel"];
         assert_eq!(server["listen"], json!([":80", ":443"]));
         let routes = server["routes"].as_array().unwrap();
@@ -1683,8 +1760,22 @@ mod tests {
         assert!(!fixed.contains('{') && !fixed.contains('}'));
         // The same input gives the same output.
         assert_eq!(
-            compile(&all, &BTreeSet::new(), &settings(), &Pages::default(), None),
-            compile(&all, &BTreeSet::new(), &settings(), &Pages::default(), None)
+            compile(
+                &all,
+                &BTreeSet::new(),
+                &settings(),
+                &Pages::default(),
+                None,
+                None
+            ),
+            compile(
+                &all,
+                &BTreeSet::new(),
+                &settings(),
+                &Pages::default(),
+                None,
+                None
+            )
         );
         // Automatic HTTPS can be turned off.
         let off = compile(
@@ -1695,6 +1786,7 @@ mod tests {
                 ..settings()
             },
             &Pages::default(),
+            None,
             None,
         );
         assert_eq!(
@@ -1724,7 +1816,14 @@ mod tests {
             "alice".to_owned(),
             vec![secure, only_redirect, site(&["http-only.net"], None)],
         )]);
-        let config = compile(&all, &BTreeSet::new(), &settings(), &Pages::default(), None);
+        let config = compile(
+            &all,
+            &BTreeSet::new(),
+            &settings(),
+            &Pages::default(),
+            None,
+            None,
+        );
         let routes = config["apps"]["http"]["servers"]["dhpanel"]["routes"]
             .as_array()
             .unwrap();
@@ -1864,12 +1963,19 @@ mod tests {
     fn names_with_an_uploaded_certificate_are_left_out_of_caddys_own() {
         let all = BTreeMap::from([("alice".to_owned(), vec![site(&["a.org"], None)])]);
         let uploaded = BTreeSet::from(["a.org".to_owned()]);
-        let config = compile(&all, &uploaded, &settings(), &Pages::default(), None);
+        let config = compile(&all, &uploaded, &settings(), &Pages::default(), None, None);
         assert_eq!(
             config["apps"]["http"]["servers"][SERVER]["automatic_https"],
             json!({"disable_redirects": true, "skip_certificates": ["a.org"]})
         );
-        let none = compile(&all, &BTreeSet::new(), &settings(), &Pages::default(), None);
+        let none = compile(
+            &all,
+            &BTreeSet::new(),
+            &settings(),
+            &Pages::default(),
+            None,
+            None,
+        );
         assert_eq!(
             none["apps"]["http"]["servers"][SERVER]["automatic_https"],
             json!({"disable_redirects": true})
@@ -1879,13 +1985,21 @@ mod tests {
     #[test]
     fn phpmyadmin_comes_first_and_only_as_its_own_name() {
         let all = BTreeMap::new();
-        let none = compile(&all, &BTreeSet::new(), &settings(), &Pages::default(), None);
+        let none = compile(
+            &all,
+            &BTreeSet::new(),
+            &settings(),
+            &Pages::default(),
+            None,
+            None,
+        );
         let some = compile(
             &all,
             &BTreeSet::new(),
             &settings(),
             &Pages::default(),
             Some("pma.example.com"),
+            None,
         );
         let routes = |c: &Value| c["apps"]["http"]["servers"]["dhpanel"]["routes"].clone();
         assert_eq!(routes(&none).as_array().unwrap().len(), 1, "just the 404");

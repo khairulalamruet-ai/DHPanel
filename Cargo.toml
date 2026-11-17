@@ -106,6 +106,7 @@ dhpanel-license-client = { path = "crates/license-client" }
 dhpanel-mod-apps = { path = "crates/modules/apps" }
 dhpanel-mod-license = { path = "crates/modules/license" }
 dhpanel-mod-cron = { path = "crates/modules/cron" }
+dhpanel-mod-mail = { path = "crates/modules/mail" }
 dhpanel-mod-migration = { path = "crates/modules/migration" }
 dhpanel-import = { path = "crates/import" }
 dhpanel-mod-logs = { path = "crates/modules/logs" }

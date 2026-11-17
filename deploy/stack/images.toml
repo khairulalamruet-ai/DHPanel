@@ -171,3 +171,9 @@ role      = "mail"
 reference = "stalwartlabs/stalwart@sha256:5ebdf474b237161742fe4309396af4ae8797c938e8e6eb7e2d4837332c4f9851"
 tag       = "v1"
 note      = "Stalwart 1.1.1: the node's mail server (SMTP, IMAP, JMAP, spam filter) (T13.02)"
+
+[[image]]
+role      = "webmail"
+reference = "roundcube/roundcubemail@sha256:37a90cb245228080779462fd120db3d64335e1abbec33bda94ca18c9e163881b"
+tag       = "latest-apache"
+note      = "Roundcube 1.7.6 (Apache, PHP): the node's webmail, signed in by the panel's one-time link (T13.09)"

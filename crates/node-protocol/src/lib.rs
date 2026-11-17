@@ -1824,6 +1824,25 @@ pub enum Operation {
         /// How long the session lasts, in minutes (5..=720).
         session_minutes: u32,
     },
+    /// Sets (or, with no host, removes) the name webmail is served under: the web server routes
+    /// that name to the node's webmail container. Answered with [`Output::WebmailHostSet`].
+    #[serde(rename = "set_webmail_host")]
+    SetWebmailHost {
+        /// The host name, or none to switch it off.
+        host: Option<String>,
+    },
+    /// Lets one sign-in to webmail happen: makes sure webmail runs and keeps the credentials
+    /// of a sign-in as `address` (the mail server's administrator signing in as that mailbox)
+    /// where only the one-time sign-in page reads them, under the SHA-256 of the token the
+    /// client holds (the token itself never reaches the node). Answered with
+    /// [`Output::WebmailOpened`].
+    #[serde(rename = "open_webmail")]
+    OpenWebmail {
+        /// The mailbox's whole address.
+        address: String,
+        /// SHA-256 of the sign-in token, 64 lower-case hex digits.
+        token_hash: String,
+    },
     /// Fetches an uploaded file from the control plane (resuming a cut download, size
     /// checked) and puts it in the tenant's files as the tenant's own user, atomically
     /// and, unless `overwrite`, never over something. Answered with [`Output::FileFetched`].
@@ -2690,6 +2709,8 @@ impl Operation {
         "send_file",
         "set_phpmyadmin_host",
         "open_phpmyadmin",
+        "set_webmail_host",
+        "open_webmail",
         "report_import_progress",
         "report_db_sizes",
         "migrate_tenant_databases",
@@ -2828,6 +2849,8 @@ impl Operation {
             Self::SendFile { .. } => "send_file",
             Self::SetPhpMyAdminHost { .. } => "set_phpmyadmin_host",
             Self::OpenPhpMyAdmin { .. } => "open_phpmyadmin",
+            Self::SetWebmailHost { .. } => "set_webmail_host",
+            Self::OpenWebmail { .. } => "open_webmail",
             Self::ReportImportProgress { .. } => "report_import_progress",
             Self::ReportDbSizes => "report_db_sizes",
             Self::MigrateTenantDatabases { .. } => "migrate_tenant_databases",
@@ -3195,6 +3218,18 @@ pub enum Output {
     /// Answer to [`Operation::OpenPhpMyAdmin`].
     #[serde(rename = "phpmyadmin_opened")]
     PhpMyAdminOpened {
+        /// Until when the sign-in link works (Unix seconds).
+        link_expires_at: i64,
+    },
+    /// Answer to [`Operation::SetWebmailHost`].
+    #[serde(rename = "webmail_host_set")]
+    WebmailHostSet {
+        /// Whether the web server has the route now.
+        applied: bool,
+    },
+    /// Answer to [`Operation::OpenWebmail`].
+    #[serde(rename = "webmail_opened")]
+    WebmailOpened {
         /// Until when the sign-in link works (Unix seconds).
         link_expires_at: i64,
     },
@@ -4339,6 +4374,13 @@ mod tests {
                 token_hash: "0".repeat(64),
                 session_minutes: 60,
             },
+            Operation::SetWebmailHost {
+                host: Some("webmail.example.com".into()),
+            },
+            Operation::OpenWebmail {
+                address: "alice@example.com".into(),
+                token_hash: "0".repeat(64),
+            },
             Operation::FileOp {
                 tenant_id: id(),
                 uid: 10_000,
@@ -4515,7 +4557,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            93,
+            95,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }

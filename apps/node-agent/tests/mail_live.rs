@@ -8,7 +8,11 @@
 //! ```
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-use std::{path::PathBuf, process::Command, sync::Arc};
+use std::{
+    path::{Path, PathBuf},
+    process::Command,
+    sync::Arc,
+};
 
 use dhpanel_docker_manager::DockerManager;
 use dhpanel_node_agent::ops::{
@@ -17,10 +21,9 @@ use dhpanel_node_agent::ops::{
         report_mail, set_mail_autoresponder, set_mail_domain, set_mail_forwarders, upsert_mailbox,
     },
     tenant::TenantContext,
+    webmail,
 };
-use dhpanel_node_protocol::{
-    DbPassword, ErrorCode, MailForwarder, Operation, Output,
-};
+use dhpanel_node_protocol::{DbPassword, ErrorCode, MailForwarder, Operation, Output};
 
 fn docker_socket() -> PathBuf {
     let uid = std::fs::read_to_string("/proc/self/status")
@@ -80,6 +83,27 @@ elif cmd == "gtube":
 elif cmd == "read":
     time.sleep(2)
     print(json.dumps(headers(imap(sys.argv[2], sys.argv[3]))))
+elif cmd == "webmail":
+    # Opens webmail with a one-time link and says where it ended up (a mailbox view when it worked).
+    import urllib.request, urllib.error, http.cookiejar
+    jar = http.cookiejar.CookieJar()
+    web = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+    url = "http://dh-webmail:80/?_dhsignon=" + sys.argv[2]
+    deadline = time.time() + 300
+    while True:
+        try:
+            r = web.open(url, timeout=30)
+            body = r.read().decode(errors="replace")
+            print(json.dumps({"url": r.geturl(), "roundcube": "Roundcube" in body or "rcmail" in body}))
+            break
+        except urllib.error.HTTPError as e:
+            print(json.dumps({"http": e.code, "text": e.read().decode(errors="replace")[:200]}))
+            break
+        except Exception as e:
+            if time.time() > deadline:
+                print(json.dumps({"error": str(e)}))
+                break
+            time.sleep(3)
 elif cmd == "login":
     try:
         imap(sys.argv[2], sys.argv[3]); print(json.dumps("ok"))
@@ -87,7 +111,7 @@ elif cmd == "login":
         print(json.dumps("no"))
 "#;
 
-fn probe(script: &PathBuf, args: &[&str]) -> serde_json::Value {
+fn probe(script: &Path, args: &[&str]) -> serde_json::Value {
     let out = Command::new("docker")
         .args([
             "run",
@@ -104,8 +128,12 @@ fn probe(script: &PathBuf, args: &[&str]) -> serde_json::Value {
         .output()
         .unwrap();
     let text = String::from_utf8_lossy(&out.stdout).trim().to_owned();
-    serde_json::from_str(&text)
-        .unwrap_or_else(|e| panic!("probe {args:?}: {e}: {text} {}", String::from_utf8_lossy(&out.stderr)))
+    serde_json::from_str(&text).unwrap_or_else(|e| {
+        panic!(
+            "probe {args:?}: {e}: {text} {}",
+            String::from_utf8_lossy(&out.stderr)
+        )
+    })
 }
 
 fn heads(v: &serde_json::Value) -> Vec<(String, String)> {
@@ -142,9 +170,23 @@ async fn the_mail_server_is_set_up_and_takes_domains_mailboxes_forwarders_and_re
         docker: docker.clone(),
         vhosts_root: root.join("vhosts"),
     });
-    let _ = Command::new("docker").args(["rm", "-f", CONTAINER]).output();
+    let _ = Command::new("docker")
+        .args(["rm", "-f", CONTAINER, "dh-webmail"])
+        .output();
+    for v in [
+        "dh-webmail-sessions",
+        "dh-webmail-tasks",
+        "dh-webmail-config",
+        "dh-webmail-data",
+    ] {
+        let _ = Command::new("docker")
+            .args(["volume", "rm", "-f", v])
+            .output();
+    }
     for v in ["dh-mail-etc", "dh-mail-data"] {
-        let _ = Command::new("docker").args(["volume", "rm", "-f", v]).output();
+        let _ = Command::new("docker")
+            .args(["volume", "rm", "-f", v])
+            .output();
     }
 
     // The server starts, is set up once, and says so the second time.
@@ -154,15 +196,22 @@ async fn the_mail_server_is_set_up_and_takes_domains_mailboxes_forwarders_and_re
         private_key_pem: None,
     };
     assert_eq!(
-        ensure_mail_server(context.clone(), hello("mail.example.com")).await.unwrap(),
+        ensure_mail_server(context.clone(), hello("mail.example.com"))
+            .await
+            .unwrap(),
         Output::MailServerReady { created: true }
     );
     assert_eq!(
-        ensure_mail_server(context.clone(), hello("mail.example.com")).await.unwrap(),
+        ensure_mail_server(context.clone(), hello("mail.example.com"))
+            .await
+            .unwrap(),
         Output::MailServerReady { created: false }
     );
     assert_eq!(
-        ensure_mail_server(context.clone(), hello("not a name")).await.unwrap_err().code,
+        ensure_mail_server(context.clone(), hello("not a name"))
+            .await
+            .unwrap_err()
+            .code,
         ErrorCode::InvalidArguments
     );
     // The administrator's login is kept where only the agent reads it.
@@ -186,22 +235,36 @@ async fn the_mail_server_is_set_up_and_takes_domains_mailboxes_forwarders_and_re
     );
 
     // A domain: the records it needs for mail are given back.
-    let set_domain = |catch_all: Option<&str>, per_hour: Option<u32>, held: bool| Operation::SetMailDomain {
-        domain: "clientmail.org".into(),
-        catch_all: catch_all.map(str::to_owned),
-        per_hour,
-        held,
-    };
-    let Output::MailDomainSet { records } = set_mail_domain(context.clone(), set_domain(None, Some(100), false))
-        .await
-        .unwrap()
+    let set_domain =
+        |catch_all: Option<&str>, per_hour: Option<u32>, held: bool| Operation::SetMailDomain {
+            domain: "clientmail.org".into(),
+            catch_all: catch_all.map(str::to_owned),
+            per_hour,
+            held,
+        };
+    let Output::MailDomainSet { records } =
+        set_mail_domain(context.clone(), set_domain(None, Some(100), false))
+            .await
+            .unwrap()
     else {
         panic!("domain")
     };
     let mx = records.iter().find(|r| r.rtype == "MX").unwrap();
-    assert_eq!((mx.name.as_str(), mx.content.as_str(), mx.priority), ("@", "mail.example.com", Some(10)));
-    assert!(records.iter().any(|r| r.name == "@" && r.content.starts_with("v=spf1")), "{records:?}");
-    assert!(records.iter().any(|r| r.name == "_dmarc" && r.content.starts_with("v=DMARC1")));
+    assert_eq!(
+        (mx.name.as_str(), mx.content.as_str(), mx.priority),
+        ("@", "mail.example.com", Some(10))
+    );
+    assert!(
+        records
+            .iter()
+            .any(|r| r.name == "@" && r.content.starts_with("v=spf1")),
+        "{records:?}"
+    );
+    assert!(
+        records
+            .iter()
+            .any(|r| r.name == "_dmarc" && r.content.starts_with("v=DMARC1"))
+    );
     let dkim: Vec<_> = records
         .iter()
         .filter(|r| r.name.ends_with("._domainkey") && r.content.starts_with("v=DKIM1"))
@@ -209,7 +272,9 @@ async fn the_mail_server_is_set_up_and_takes_domains_mailboxes_forwarders_and_re
     assert_eq!(dkim.len(), 2, "an Ed25519 and an RSA key: {records:?}");
     // Again: the same records, nothing new made.
     let Output::MailDomainSet { records: again } =
-        set_mail_domain(context.clone(), set_domain(None, Some(100), false)).await.unwrap()
+        set_mail_domain(context.clone(), set_domain(None, Some(100), false))
+            .await
+            .unwrap()
     else {
         panic!("domain")
     };
@@ -230,28 +295,44 @@ async fn the_mail_server_is_set_up_and_takes_domains_mailboxes_forwarders_and_re
     }
 
     // Mailboxes: made, found again, quota kept, bad ones refused.
-    let mailbox = |local: &str, password: Option<&str>, quota: u64, aliases: &[&str]| Operation::UpsertMailbox {
-        domain: "clientmail.org".into(),
-        local: local.into(),
-        password: password.map(|p| DbPassword(p.into())),
-        quota_bytes: quota,
-        aliases: aliases.iter().map(|a| (*a).to_owned()).collect(),
+    let mailbox = |local: &str, password: Option<&str>, quota: u64, aliases: &[&str]| {
+        Operation::UpsertMailbox {
+            domain: "clientmail.org".into(),
+            local: local.into(),
+            password: password.map(|p| DbPassword(p.into())),
+            quota_bytes: quota,
+            aliases: aliases.iter().map(|a| (*a).to_owned()).collect(),
+        }
     };
     assert_eq!(
-        upsert_mailbox(context.clone(), mailbox("alice", Some("Alice-Pass-1234!"), 1 << 20, &["ally"]))
-            .await
-            .unwrap(),
+        upsert_mailbox(
+            context.clone(),
+            mailbox("alice", Some("Alice-Pass-1234!"), 1 << 20, &["ally"])
+        )
+        .await
+        .unwrap(),
         Output::MailboxSet { created: true }
     );
     assert_eq!(
-        upsert_mailbox(context.clone(), mailbox("alice", None, 1 << 20, &["ally"])).await.unwrap(),
+        upsert_mailbox(context.clone(), mailbox("alice", None, 1 << 20, &["ally"]))
+            .await
+            .unwrap(),
         Output::MailboxSet { created: false }
     );
     for (op, why) in [
-        (mailbox("bob", None, 1 << 20, &[]), "a new mailbox needs a password"),
+        (
+            mailbox("bob", None, 1 << 20, &[]),
+            "a new mailbox needs a password",
+        ),
         (mailbox("bob", Some("weak"), 1 << 20, &[]), "weak password"),
-        (mailbox("Bob Smith", Some("Bob-Pass-1234!"), 1 << 20, &[]), "bad name"),
-        (mailbox("bob", Some("Bob-Pass-1234!"), 1 << 20, &["x'y"]), "bad alias"),
+        (
+            mailbox("Bob Smith", Some("Bob-Pass-1234!"), 1 << 20, &[]),
+            "bad name",
+        ),
+        (
+            mailbox("bob", Some("Bob-Pass-1234!"), 1 << 20, &["x'y"]),
+            "bad alias",
+        ),
     ] {
         assert_eq!(
             upsert_mailbox(context.clone(), op).await.unwrap_err().code,
@@ -259,45 +340,189 @@ async fn the_mail_server_is_set_up_and_takes_domains_mailboxes_forwarders_and_re
             "{why}"
         );
     }
-    assert_eq!(probe(&script, &["login", "alice@clientmail.org", "Alice-Pass-1234!"]), "ok");
-    assert_eq!(probe(&script, &["login", "alice@clientmail.org", "Wrong-Pass-1234!"]), "no");
+    assert_eq!(
+        probe(
+            &script,
+            &["login", "alice@clientmail.org", "Alice-Pass-1234!"]
+        ),
+        "ok"
+    );
+    assert_eq!(
+        probe(
+            &script,
+            &["login", "alice@clientmail.org", "Wrong-Pass-1234!"]
+        ),
+        "no"
+    );
     // A new password is the one that works.
-    upsert_mailbox(context.clone(), mailbox("alice", Some("Alice-New-Pass-5678!"), 1 << 20, &["ally"]))
+    upsert_mailbox(
+        context.clone(),
+        mailbox("alice", Some("Alice-New-Pass-5678!"), 1 << 20, &["ally"]),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        probe(
+            &script,
+            &["login", "alice@clientmail.org", "Alice-Pass-1234!"]
+        ),
+        "no"
+    );
+    assert_eq!(
+        probe(
+            &script,
+            &["login", "alice@clientmail.org", "Alice-New-Pass-5678!"]
+        ),
+        "ok"
+    );
+
+    // Signing in as the user with the administrator's login (what a webmail single sign-on
+    // uses): the administrator's name after a `%`, with the administrator's secret.
+    let (admin_user, admin_secret) = admin.trim().split_once(':').unwrap();
+    assert_eq!(
+        probe(
+            &script,
+            &[
+                "login",
+                &format!("alice@clientmail.org%{admin_user}"),
+                admin_secret
+            ]
+        ),
+        "ok",
+        "the administrator can sign in as a mailbox"
+    );
+    assert_eq!(
+        probe(
+            &script,
+            &[
+                "login",
+                &format!("alice@clientmail.org%{admin_user}"),
+                "Wrong-Secret-1234!"
+            ]
+        ),
+        "no"
+    );
+    // Webmail: one link signs in as the mailbox, once.
+    {
+        use sha2::{Digest as _, Sha256};
+        let token = "5d".repeat(32);
+        let hash: String = Sha256::digest(token.as_bytes())
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        let bad = webmail::open_webmail(
+            context.clone(),
+            Operation::OpenWebmail {
+                address: "alice@clientmail.org".into(),
+                token_hash: "nope".into(),
+            },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(bad.code, ErrorCode::InvalidArguments);
+        let opened = webmail::open_webmail(
+            context.clone(),
+            Operation::OpenWebmail {
+                address: "alice@clientmail.org".into(),
+                token_hash: hash,
+            },
+        )
         .await
         .unwrap();
-    assert_eq!(probe(&script, &["login", "alice@clientmail.org", "Alice-Pass-1234!"]), "no");
-    assert_eq!(probe(&script, &["login", "alice@clientmail.org", "Alice-New-Pass-5678!"]), "ok");
-
+        assert!(matches!(opened, Output::WebmailOpened { .. }), "{opened:?}");
+        let shown = probe(&script, &["webmail", &token]);
+        assert!(
+            shown["url"]
+                .as_str()
+                .is_some_and(|u| u.contains("_task=mail"))
+                && shown["roundcube"] == true,
+            "webmail signs in: {shown}"
+        );
+        // The link does not work a second time.
+        let again = probe(&script, &["webmail", &token]);
+        assert_eq!(again["http"], 403, "{again}");
+        let _ = Command::new("docker")
+            .args(["rm", "-f", "dh-webmail"])
+            .output();
+    }
     // Mail arrives, also under an alias; a test spam is marked for what it is.
     let pw = "Alice-New-Pass-5678!";
-    assert_eq!(probe(&script, &["send", "alice@clientmail.org", "hello", "a normal message"]), "accepted");
-    assert_eq!(probe(&script, &["send", "ally@clientmail.org", "by alias", "to the other name"]), "accepted");
-    assert_eq!(probe(&script, &["gtube", "alice@clientmail.org"]), "accepted");
+    assert_eq!(
+        probe(
+            &script,
+            &["send", "alice@clientmail.org", "hello", "a normal message"]
+        ),
+        "accepted"
+    );
+    assert_eq!(
+        probe(
+            &script,
+            &[
+                "send",
+                "ally@clientmail.org",
+                "by alias",
+                "to the other name"
+            ]
+        ),
+        "accepted"
+    );
+    assert_eq!(
+        probe(&script, &["gtube", "alice@clientmail.org"]),
+        "accepted"
+    );
     // (Only the test spam; a normal message from a sender whose mail is in order is not spam.)
     let read = heads(&probe(&script, &["read", "alice@clientmail.org", pw]));
-    let subjects: Vec<&str> = read.iter().filter_map(|(_, h)| h.lines().find_map(|l| l.strip_prefix("Subject: "))).collect();
-    assert!(subjects.contains(&"hello") && subjects.contains(&"by alias"), "{subjects:?}");
-    let spam = read.iter().find(|(_, h)| h.contains("Subject: spam test")).expect("the test spam is kept");
+    let subjects: Vec<&str> = read
+        .iter()
+        .filter_map(|(_, h)| h.lines().find_map(|l| l.strip_prefix("Subject: ")))
+        .collect();
+    assert!(
+        subjects.contains(&"hello") && subjects.contains(&"by alias"),
+        "{subjects:?}"
+    );
+    let spam = read
+        .iter()
+        .find(|(_, h)| h.contains("Subject: spam test"))
+        .expect("the test spam is kept");
     assert_eq!(spam.0, "Junk Mail", "it is put with the junk");
-    assert!(spam.1.to_ascii_uppercase().contains("GTUBE"), "and says why: {}", spam.1.replace("\r\n", " | "));
+    assert!(
+        spam.1.to_ascii_uppercase().contains("GTUBE"),
+        "and says why: {}",
+        spam.1.replace("\r\n", " | ")
+    );
 
     // A message bigger than the mailbox may hold is not kept: it is refused, or it waits in the
     // queue to be tried again and, the server's schedule running out, is returned to its sender.
     // It is never silently lost, and it is not put in a mailbox that is full.
-    let big = probe(&script, &["send", "alice@clientmail.org", "too big", "x", "1500000"]);
+    let big = probe(
+        &script,
+        &["send", "alice@clientmail.org", "too big", "x", "1500000"],
+    );
     if !big.as_str().unwrap().starts_with("refused") {
         let mut waiting = false;
         for _ in 0..20 {
-            let Output::MailReport { queue, .. } = report_mail(context.clone(), Operation::ReportMail).await.unwrap() else {
+            let Output::MailReport { queue, .. } =
+                report_mail(context.clone(), Operation::ReportMail)
+                    .await
+                    .unwrap()
+            else {
                 panic!("report")
             };
-            if queue.iter().any(|m| m.recipients.iter().any(|r| r.contains("alice@clientmail.org")) && m.size_bytes > 1_000_000) {
+            if queue.iter().any(|m| {
+                m.recipients
+                    .iter()
+                    .any(|r| r.contains("alice@clientmail.org"))
+                    && m.size_bytes > 1_000_000
+            }) {
                 waiting = true;
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }
-        assert!(waiting, "a message that does not fit waits in the queue: {big}");
+        assert!(
+            waiting,
+            "a message that does not fit waits in the queue: {big}"
+        );
     }
     let after = heads(&probe(&script, &["read", "alice@clientmail.org", pw]));
     assert!(
@@ -305,14 +530,23 @@ async fn the_mail_server_is_set_up_and_takes_domains_mailboxes_forwarders_and_re
         "it was not kept"
     );
     // What waits to go out is cleared, so that the next check is about the next thing.
-    let Output::MailReport { queue, .. } = report_mail(context.clone(), Operation::ReportMail).await.unwrap() else {
+    let Output::MailReport { queue, .. } = report_mail(context.clone(), Operation::ReportMail)
+        .await
+        .unwrap()
+    else {
         panic!("report")
     };
     let ids: Vec<String> = queue.iter().map(|m| m.id.clone()).collect();
     if !ids.is_empty() {
-        mail_queue_action(context.clone(), Operation::MailQueueAction { action: "delete".into(), ids })
-            .await
-            .unwrap();
+        mail_queue_action(
+            context.clone(),
+            Operation::MailQueueAction {
+                action: "delete".into(),
+                ids,
+            },
+        )
+        .await
+        .unwrap();
     }
 
     // Forwarders and the catch-all.
@@ -327,19 +561,45 @@ async fn the_mail_server_is_set_up_and_takes_domains_mailboxes_forwarders_and_re
             .collect(),
     };
     assert_eq!(
-        set_mail_forwarders(context.clone(), forward(&[("sales", &["alice@clientmail.org"])])).await.unwrap(),
+        set_mail_forwarders(
+            context.clone(),
+            forward(&[("sales", &["alice@clientmail.org"])])
+        )
+        .await
+        .unwrap(),
         Output::MailForwardersSet { count: 1 }
     );
-    assert_eq!(probe(&script, &["send", "sales@clientmail.org", "via forwarder", "hi"]), "accepted");
-    set_mail_domain(context.clone(), set_domain(Some("alice@clientmail.org"), Some(100), false)).await.unwrap();
-    assert_eq!(probe(&script, &["send", "anything@clientmail.org", "caught", "hi"]), "accepted");
+    assert_eq!(
+        probe(
+            &script,
+            &["send", "sales@clientmail.org", "via forwarder", "hi"]
+        ),
+        "accepted"
+    );
+    set_mail_domain(
+        context.clone(),
+        set_domain(Some("alice@clientmail.org"), Some(100), false),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        probe(
+            &script,
+            &["send", "anything@clientmail.org", "caught", "hi"]
+        ),
+        "accepted"
+    );
     let read = heads(&probe(&script, &["read", "alice@clientmail.org", pw]));
     let all: String = read.iter().map(|(_, h)| h.as_str()).collect();
     assert!(all.contains("Subject: via forwarder"), "{all}");
     assert!(all.contains("Subject: caught"), "{all}");
     // Taken away, the forwarder no longer takes mail (the catch-all would, so it goes too).
-    set_mail_domain(context.clone(), set_domain(None, Some(100), false)).await.unwrap();
-    set_mail_forwarders(context.clone(), forward(&[])).await.unwrap();
+    set_mail_domain(context.clone(), set_domain(None, Some(100), false))
+        .await
+        .unwrap();
+    set_mail_forwarders(context.clone(), forward(&[]))
+        .await
+        .unwrap();
     let gone = probe(&script, &["send", "sales@clientmail.org", "after", "hi"]);
     assert!(gone.as_str().unwrap().starts_with("refused"), "{gone}");
 
@@ -359,14 +619,32 @@ async fn the_mail_server_is_set_up_and_takes_domains_mailboxes_forwarders_and_re
     .await
     .unwrap();
     // Somebody who writes gets the reply (here a local user, who is sure to be believed).
-    upsert_mailbox(context.clone(), mailbox("carol", Some("Carol-Pass-1234!"), 1 << 20, &[])).await.unwrap();
+    upsert_mailbox(
+        context.clone(),
+        mailbox("carol", Some("Carol-Pass-1234!"), 1 << 20, &[]),
+    )
+    .await
+    .unwrap();
     assert_eq!(
-        probe(&script, &["sendauth", "carol@clientmail.org", "Carol-Pass-1234!", "alice@clientmail.org", "ping", "are you there"]),
+        probe(
+            &script,
+            &[
+                "sendauth",
+                "carol@clientmail.org",
+                "Carol-Pass-1234!",
+                "alice@clientmail.org",
+                "ping",
+                "are you there"
+            ]
+        ),
         "accepted"
     );
     let mut replied = false;
     for _ in 0..20 {
-        let carol = heads(&probe(&script, &["read", "carol@clientmail.org", "Carol-Pass-1234!"]));
+        let carol = heads(&probe(
+            &script,
+            &["read", "carol@clientmail.org", "Carol-Pass-1234!"],
+        ));
         if carol.iter().any(|(_, h)| h.contains("Subject: Away")) {
             replied = true;
             break;
@@ -389,18 +667,46 @@ async fn the_mail_server_is_set_up_and_takes_domains_mailboxes_forwarders_and_re
     .await
     .unwrap();
     // Mailboxes show their size, and a message that is on its way out shows in the queue.
-    let Output::MailReport { usage, .. } = report_mail(context.clone(), Operation::ReportMail).await.unwrap() else {
+    let Output::MailReport { usage, .. } = report_mail(context.clone(), Operation::ReportMail)
+        .await
+        .unwrap()
+    else {
         panic!("report")
     };
-    assert!(usage.iter().find(|u| u.address == "alice@clientmail.org").unwrap().used_bytes > 0);
+    assert!(
+        usage
+            .iter()
+            .find(|u| u.address == "alice@clientmail.org")
+            .unwrap()
+            .used_bytes
+            > 0
+    );
     // (Held for an hour by the sender's own request, so that it is still there to be seen.)
-    probe(&script, &["sendauth", "carol@clientmail.org", "Carol-Pass-1234!", "someone@external.example", "outgoing", "to the world", "hold"]);
+    probe(
+        &script,
+        &[
+            "sendauth",
+            "carol@clientmail.org",
+            "Carol-Pass-1234!",
+            "someone@external.example",
+            "outgoing",
+            "to the world",
+            "hold",
+        ],
+    );
     let mut queued = Vec::new();
     for _ in 0..20 {
-        let Output::MailReport { queue, .. } = report_mail(context.clone(), Operation::ReportMail).await.unwrap() else {
+        let Output::MailReport { queue, .. } = report_mail(context.clone(), Operation::ReportMail)
+            .await
+            .unwrap()
+        else {
             panic!("report")
         };
-        if queue.iter().any(|m| m.recipients.iter().any(|r| r.contains("someone@external.example"))) {
+        if queue.iter().any(|m| {
+            m.recipients
+                .iter()
+                .any(|r| r.contains("someone@external.example"))
+        }) {
             queued = queue;
             break;
         }
@@ -411,7 +717,10 @@ async fn the_mail_server_is_set_up_and_takes_domains_mailboxes_forwarders_and_re
     let ids: Vec<String> = queued.iter().map(|m| m.id.clone()).collect();
     let Output::MailQueueChanged { count } = mail_queue_action(
         context.clone(),
-        Operation::MailQueueAction { action: "flush".into(), ids: ids.clone() },
+        Operation::MailQueueAction {
+            action: "flush".into(),
+            ids: ids.clone(),
+        },
     )
     .await
     .unwrap() else {
@@ -419,19 +728,39 @@ async fn the_mail_server_is_set_up_and_takes_domains_mailboxes_forwarders_and_re
     };
     assert!(count <= ids.len());
     assert_eq!(
-        mail_queue_action(context.clone(), Operation::MailQueueAction { action: "burn".into(), ids: vec![] })
-            .await
-            .unwrap_err()
-            .code,
+        mail_queue_action(
+            context.clone(),
+            Operation::MailQueueAction {
+                action: "burn".into(),
+                ids: vec![]
+            }
+        )
+        .await
+        .unwrap_err()
+        .code,
         ErrorCode::InvalidArguments
     );
-    mail_queue_action(context.clone(), Operation::MailQueueAction { action: "delete".into(), ids })
+    mail_queue_action(
+        context.clone(),
+        Operation::MailQueueAction {
+            action: "delete".into(),
+            ids,
+        },
+    )
+    .await
+    .unwrap();
+    let Output::MailReport { queue, .. } = report_mail(context.clone(), Operation::ReportMail)
         .await
-        .unwrap();
-    let Output::MailReport { queue, .. } = report_mail(context.clone(), Operation::ReportMail).await.unwrap() else {
+        .unwrap()
+    else {
         panic!("report")
     };
-    assert!(queue.iter().all(|m| !m.sender.contains("alice@clientmail.org")), "{queue:?}");
+    assert!(
+        queue
+            .iter()
+            .all(|m| !m.sender.contains("alice@clientmail.org")),
+        "{queue:?}"
+    );
 
     // The outgoing limit: set, held, lifted.
     let admin_login = admin.trim();
@@ -442,9 +771,19 @@ async fn the_mail_server_is_set_up_and_takes_domains_mailboxes_forwarders_and_re
             "methodCalls": [["x:MtaOutboundThrottle/get", {"ids": null}, "c1"]],
         });
         let out = Command::new("curl")
-            .args(["-s", "-u", &format!("{user}:{secret}"), "-H", "Content-Type: application/json",
-                   "-d", &body.to_string(),
-                   &format!("http://127.0.0.1:{}/jmap/", dhpanel_node_agent::ops::mail::api_port())])
+            .args([
+                "-s",
+                "-u",
+                &format!("{user}:{secret}"),
+                "-H",
+                "Content-Type: application/json",
+                "-d",
+                &body.to_string(),
+                &format!(
+                    "http://127.0.0.1:{}/jmap/",
+                    dhpanel_node_agent::ops::mail::api_port()
+                ),
+            ])
             .output()
             .unwrap();
         let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
@@ -453,50 +792,100 @@ async fn the_mail_server_is_set_up_and_takes_domains_mailboxes_forwarders_and_re
             .unwrap()
             .iter()
             .find(|t| t["description"] == "dhpanel:clientmail.org")
-            .map(|t| (t["rate"]["count"].as_u64().unwrap(), t["rate"]["period"].as_u64().unwrap()));
+            .map(|t| {
+                (
+                    t["rate"]["count"].as_u64().unwrap(),
+                    t["rate"]["period"].as_u64().unwrap(),
+                )
+            });
         assert_eq!(found, expected);
     };
     limit(Some((100, 3_600_000)));
-    set_mail_domain(context.clone(), set_domain(None, Some(20), false)).await.unwrap();
+    set_mail_domain(context.clone(), set_domain(None, Some(20), false))
+        .await
+        .unwrap();
     limit(Some((20, 3_600_000)));
-    set_mail_domain(context.clone(), set_domain(None, Some(20), true)).await.unwrap();
+    set_mail_domain(context.clone(), set_domain(None, Some(20), true))
+        .await
+        .unwrap();
     limit(Some((1, 86_400_000)));
-    set_mail_domain(context.clone(), set_domain(None, None, false)).await.unwrap();
+    set_mail_domain(context.clone(), set_domain(None, None, false))
+        .await
+        .unwrap();
     limit(None);
 
     // Removing: the mailbox, then the domain with what is left.
     assert_eq!(
-        drop_mailbox(context.clone(), Operation::DropMailbox { domain: "clientmail.org".into(), local: "alice".into() })
-            .await
-            .unwrap(),
+        drop_mailbox(
+            context.clone(),
+            Operation::DropMailbox {
+                domain: "clientmail.org".into(),
+                local: "alice".into()
+            }
+        )
+        .await
+        .unwrap(),
         Output::MailboxDropped { existed: true }
     );
     assert_eq!(
-        drop_mailbox(context.clone(), Operation::DropMailbox { domain: "clientmail.org".into(), local: "alice".into() })
-            .await
-            .unwrap(),
+        drop_mailbox(
+            context.clone(),
+            Operation::DropMailbox {
+                domain: "clientmail.org".into(),
+                local: "alice".into()
+            }
+        )
+        .await
+        .unwrap(),
         Output::MailboxDropped { existed: false }
     );
-    upsert_mailbox(context.clone(), mailbox("carol", Some("Carol-Pass-1234!"), 1 << 20, &[])).await.unwrap();
+    upsert_mailbox(
+        context.clone(),
+        mailbox("carol", Some("Carol-Pass-1234!"), 1 << 20, &[]),
+    )
+    .await
+    .unwrap();
     assert_eq!(
-        remove_mail_domain(context.clone(), Operation::RemoveMailDomain { domain: "clientmail.org".into() })
-            .await
-            .unwrap(),
+        remove_mail_domain(
+            context.clone(),
+            Operation::RemoveMailDomain {
+                domain: "clientmail.org".into()
+            }
+        )
+        .await
+        .unwrap(),
         Output::MailDomainRemoved { existed: true }
     );
     assert_eq!(
-        remove_mail_domain(context.clone(), Operation::RemoveMailDomain { domain: "clientmail.org".into() })
-            .await
-            .unwrap(),
+        remove_mail_domain(
+            context.clone(),
+            Operation::RemoveMailDomain {
+                domain: "clientmail.org".into()
+            }
+        )
+        .await
+        .unwrap(),
         Output::MailDomainRemoved { existed: false }
     );
-    assert_eq!(probe(&script, &["login", "carol@clientmail.org", "Carol-Pass-1234!"]), "no");
+    assert_eq!(
+        probe(
+            &script,
+            &["login", "carol@clientmail.org", "Carol-Pass-1234!"]
+        ),
+        "no"
+    );
 
     // Clean up.
-    let _ = Command::new("docker").args(["rm", "-f", CONTAINER]).output();
+    let _ = Command::new("docker")
+        .args(["rm", "-f", CONTAINER])
+        .output();
     for v in ["dh-mail-etc", "dh-mail-data"] {
-        let _ = Command::new("docker").args(["volume", "rm", "-f", v]).output();
+        let _ = Command::new("docker")
+            .args(["volume", "rm", "-f", v])
+            .output();
     }
-    let _ = Command::new("docker").args(["network", "rm", "dh-mail-net"]).output();
+    let _ = Command::new("docker")
+        .args(["network", "rm", "dh-mail-net"])
+        .output();
     let _ = std::fs::remove_dir_all(&root);
 }

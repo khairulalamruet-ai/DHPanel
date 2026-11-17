@@ -22,7 +22,7 @@ use std::{
 };
 
 use dhpanel_docker_manager::{
-    Capability, ContainerSpec, DockerError, Name, Network, PublishedPort, Restart, Tmpfs, VolumeMount,
+    Capability, ContainerSpec, DockerError, Network, PublishedPort, Restart, Tmpfs, VolumeMount,
 };
 use dhpanel_domain::Fqdn;
 use dhpanel_node_protocol::{
@@ -39,7 +39,7 @@ use super::{
 
 /// The mail server's container.
 pub const CONTAINER: &str = "dh-mail";
-const NETWORK: &str = "dh-mail-net";
+pub(super) const NETWORK: &str = "dh-mail-net";
 const ETC_VOLUME: &str = "dh-mail-etc";
 const DATA_VOLUME: &str = "dh-mail-data";
 /// The loopback port of the management API unless `DHPANEL_AGENT_MAIL_API_PORT` says another.
@@ -207,7 +207,12 @@ impl Jmap {
             .await?;
         Ok(answer["ids"]
             .as_array()
-            .map(|a| a.iter().filter_map(Value::as_str).map(str::to_owned).collect())
+            .map(|a| {
+                a.iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect()
+            })
             .unwrap_or_default())
     }
 
@@ -261,17 +266,19 @@ fn local_of(text: &str) -> Result<String, AgentError> {
     let ok = !text.is_empty()
         && text.len() <= 64
         && text.starts_with(|c: char| c.is_ascii_alphanumeric())
-        && text
-            .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'.' | b'_' | b'-'));
+        && text.bytes().all(|b| {
+            b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'.' | b'_' | b'-')
+        });
     if ok {
         Ok(text.to_owned())
     } else {
-        Err(invalid("a mailbox name is lower-case letters, digits and . _ -"))
+        Err(invalid(
+            "a mailbox name is lower-case letters, digits and . _ -",
+        ))
     }
 }
 
-fn address_of(text: &str) -> Result<String, AgentError> {
+pub(super) fn address_of(text: &str) -> Result<String, AgentError> {
     let (local, domain) = text
         .split_once('@')
         .ok_or_else(|| invalid("an address needs an @"))?;
@@ -282,6 +289,16 @@ fn address_of(text: &str) -> Result<String, AgentError> {
 
 fn mail_hostname_ok(text: &str) -> Result<String, AgentError> {
     domain_of(text)
+}
+
+/// The administrator's name and secret, from the secret store: what a webmail single sign-on
+/// signs in with, as `address%name`. `None` when the mail server was never set up here.
+pub(super) fn admin_credentials(context: &TenantContext) -> Option<(String, String)> {
+    let file = super::db::secrets_dir(context).join("stalwart-admin");
+    let text = std::fs::read_to_string(file).ok()?;
+    text.trim()
+        .split_once(':')
+        .map(|(user, secret)| (user.to_owned(), secret.to_owned()))
 }
 
 /// The administrator's login, from the secret store.
@@ -367,7 +384,8 @@ fn self_signed(hostname: &str) -> Result<(String, String), AgentError> {
 async fn install_certificate(jmap: &Jmap, cert: &str, key: &str) -> Result<(), AgentError> {
     let old = jmap.ids("Certificate", json!({})).await?;
     if !old.is_empty() {
-        jmap.set("x:Certificate/set", json!({ "destroy": old })).await?;
+        jmap.set("x:Certificate/set", json!({ "destroy": old }))
+            .await?;
     }
     jmap.set(
         "x:Certificate/set",
@@ -455,7 +473,10 @@ pub async fn ensure_server(
                 .map_err(|e| docker_error(&e))?;
             let (etc, data) = (name(ETC_VOLUME)?, name(DATA_VOLUME)?);
             for v in [&etc, &data] {
-                docker.create_volume(v).await.map_err(|e| docker_error(&e))?;
+                docker
+                    .create_volume(v)
+                    .await
+                    .map_err(|e| docker_error(&e))?;
             }
             let image = pull_with_fallback(docker, &allowlist, &image).await?;
             // The server runs as its own user (2000), and a new volume belongs to root: made
@@ -574,8 +595,12 @@ pub async fn ensure_server(
             .await?;
         let made = &done["updated"]["singleton"];
         let (user, secret) = (
-            made["username"].as_str().ok_or_else(|| failed("the bootstrap gave no administrator"))?,
-            made["secret"].as_str().ok_or_else(|| failed("the bootstrap gave no administrator"))?,
+            made["username"]
+                .as_str()
+                .ok_or_else(|| failed("the bootstrap gave no administrator"))?,
+            made["secret"]
+                .as_str()
+                .ok_or_else(|| failed("the bootstrap gave no administrator"))?,
         );
         keep_admin(context, user, secret)?;
         restart(context).await?;
@@ -601,9 +626,8 @@ pub async fn ensure_server(
 
 /// The login of an administrator whose server is set up.
 fn login(context: &TenantContext) -> Result<Jmap, AgentError> {
-    admin_login(context)?.ok_or_else(|| {
-        failed("the mail server is not set up on this node yet").retryable()
-    })
+    admin_login(context)?
+        .ok_or_else(|| failed("the mail server is not set up on this node yet").retryable())
 }
 
 /// `ensure_mail_server`.
@@ -625,7 +649,11 @@ pub async fn ensure_mail_server(
     let pair = match (&certificate_pem, &private_key_pem) {
         (Some(c), Some(k)) => Some((c.as_str(), k.0.as_str())),
         (None, None) => None,
-        _ => return Err(invalid("a certificate needs its key and the other way round")),
+        _ => {
+            return Err(invalid(
+                "a certificate needs its key and the other way round",
+            ));
+        }
     };
     let created = ensure_server(&context, &hostname, pair).await?;
     Ok(Output::MailServerReady { created })
@@ -862,7 +890,8 @@ pub async fn remove_mail_domain(
     // Its mailboxes and lists first: the server will not drop a domain that has them.
     let accounts = jmap.ids("Account", json!({ "domainId": id })).await?;
     if !accounts.is_empty() {
-        jmap.set("x:Account/set", json!({ "destroy": accounts })).await?;
+        jmap.set("x:Account/set", json!({ "destroy": accounts }))
+            .await?;
     }
     let lists: Vec<String> = lists_of(&jmap, &id)
         .await?
@@ -870,7 +899,8 @@ pub async fn remove_mail_domain(
         .filter_map(|l| l["id"].as_str().map(str::to_owned))
         .collect();
     if !lists.is_empty() {
-        jmap.set("x:MailingList/set", json!({ "destroy": lists })).await?;
+        jmap.set("x:MailingList/set", json!({ "destroy": lists }))
+            .await?;
     }
     set_throttle(&jmap, &domain, None, false).await?;
     // The domain's DKIM keys (made by the server) are linked to it.
@@ -978,7 +1008,8 @@ pub async fn drop_mailbox(
     };
     match jmap.account_id(&local, &domain_id).await? {
         Some(id) => {
-            jmap.set("x:Account/set", json!({ "destroy": [id] })).await?;
+            jmap.set("x:Account/set", json!({ "destroy": [id] }))
+                .await?;
             Ok(Output::MailboxDropped { existed: true })
         }
         None => Ok(Output::MailboxDropped { existed: false }),
@@ -1006,11 +1037,7 @@ pub async fn set_mail_forwarders(
     context: Arc<TenantContext>,
     op: Operation,
 ) -> Result<Output, AgentError> {
-    let Operation::SetMailForwarders {
-        domain,
-        forwarders,
-    } = op
-    else {
+    let Operation::SetMailForwarders { domain, forwarders } = op else {
         return Err(super::wrong_operation());
     };
     let domain = domain_of(&domain)?;
@@ -1138,7 +1165,11 @@ pub async fn set_mail_autoresponder(
         .into_iter()
         .next()
         .ok_or_else(|| failed("the mail server gave no answer"))?;
-    if first[0] == "error" || first[1]["notUpdated"].as_object().is_some_and(|o| !o.is_empty()) {
+    if first[0] == "error"
+        || first[1]["notUpdated"]
+            .as_object()
+            .is_some_and(|o| !o.is_empty())
+    {
         return Err(failed("the mail server refused the automatic reply"));
     }
     Ok(Output::MailAutoresponderSet)
@@ -1155,10 +1186,7 @@ fn seconds_of(text: &str) -> i64 {
 ///
 /// # Errors
 /// The server failing.
-pub async fn report_mail(
-    context: Arc<TenantContext>,
-    op: Operation,
-) -> Result<Output, AgentError> {
+pub async fn report_mail(context: Arc<TenantContext>, op: Operation) -> Result<Output, AgentError> {
     let Operation::ReportMail = op else {
         return Err(super::wrong_operation());
     };
@@ -1274,9 +1302,9 @@ pub async fn mail_queue_action(
                     tokio::time::sleep(Duration::from_secs(2)).await;
                 }
             }
-            return Ok(Output::MailQueueChanged {
+            Ok(Output::MailQueueChanged {
                 count: ids.len() - left.len(),
-            });
+            })
         }
         "flush" => {
             let now = rfc3339(
@@ -1297,13 +1325,14 @@ pub async fn mail_queue_action(
                 let answer = jmap
                     .one("x:QueuedMessage/set", json!({ "update": update }))
                     .await?;
-                done = answer["updated"].as_object().map_or(0, serde_json::Map::len);
+                done = answer["updated"]
+                    .as_object()
+                    .map_or(0, serde_json::Map::len);
             }
-            return Ok(Output::MailQueueChanged { count: done });
+            Ok(Output::MailQueueChanged { count: done })
         }
-        _ => return Err(invalid("the action is flush or delete")),
+        _ => Err(invalid("the action is flush or delete")),
     }
-    Ok(Output::MailQueueChanged { count: ids.len() })
 }
 
 /// Where the mail server's secrets are (for tests).
@@ -1324,17 +1353,35 @@ mod tests {
         assert_eq!(base64(b"fo"), "Zm8=");
         assert_eq!(base64(b"foo"), "Zm9v");
         assert_eq!(base64(b"foobar"), "Zm9vYmFy");
-        assert_eq!(base64(b"admin@example.com:KMTUaTmmO4plmMQo"), "YWRtaW5AZXhhbXBsZS5jb206S01UVWFUbW1PNHBsbU1Rbw==");
+        assert_eq!(
+            base64(b"admin@example.com:KMTUaTmmO4plmMQo"),
+            "YWRtaW5AZXhhbXBsZS5jb206S01UVWFUbW1PNHBsbU1Rbw=="
+        );
     }
 
     #[test]
     fn names_that_reach_the_server_are_plain() {
         assert_eq!(local_of("info.sales-1").unwrap(), "info.sales-1");
-        for bad in ["", "Info", "a b", "a'b", "a@b", "-a", "a\"", &"x".repeat(65)] {
+        for bad in [
+            "",
+            "Info",
+            "a b",
+            "a'b",
+            "a@b",
+            "-a",
+            "a\"",
+            &"x".repeat(65),
+        ] {
             assert!(local_of(bad).is_err(), "{bad}");
         }
         assert_eq!(address_of("info@example.com").unwrap(), "info@example.com");
-        for bad in ["info", "info@", "@example.com", "in'fo@example.com", "info@exa mple.com"] {
+        for bad in [
+            "info",
+            "info@",
+            "@example.com",
+            "in'fo@example.com",
+            "info@exa mple.com",
+        ] {
             assert!(address_of(bad).is_err(), "{bad}");
         }
         assert!(domain_of("clientmail.org").is_ok());
@@ -1353,14 +1400,28 @@ mta-sts.clientmail.org. IN CNAME mail.example.com.\n\
 _mta-sts.clientmail.org. IN TXT \"v=STSv1; id=1\"\n\
 other.example. IN TXT \"v=spf1 -all\"\n";
         let records = dns_records(zone, "clientmail.org");
-        let find = |name: &str| records.iter().filter(|r| r.name == name).collect::<Vec<_>>();
+        let find = |name: &str| {
+            records
+                .iter()
+                .filter(|r| r.name == name)
+                .collect::<Vec<_>>()
+        };
         assert_eq!(records.len(), 5, "{records:?}");
         assert_eq!(find("@").len(), 2);
         let mx = records.iter().find(|r| r.rtype == "MX").unwrap();
-        assert_eq!((mx.content.as_str(), mx.priority), ("mail.example.com", Some(10)));
-        let spf = records.iter().find(|r| r.content.starts_with("v=spf1")).unwrap();
+        assert_eq!(
+            (mx.content.as_str(), mx.priority),
+            ("mail.example.com", Some(10))
+        );
+        let spf = records
+            .iter()
+            .find(|r| r.content.starts_with("v=spf1"))
+            .unwrap();
         assert_eq!(spf.content, "v=spf1 mx -all");
-        assert_eq!(find("v1-rsa-20261117._domainkey")[0].content, "v=DKIM1; k=rsa; h=sha256; p=MIIBCDEF");
+        assert_eq!(
+            find("v1-rsa-20261117._domainkey")[0].content,
+            "v=DKIM1; k=rsa; h=sha256; p=MIIBCDEF"
+        );
         assert!(find("_dmarc")[0].content.starts_with("v=DMARC1; p=reject"));
     }
 

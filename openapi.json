@@ -4218,6 +4218,399 @@
         ]
       }
     },
+    "/api/v1/admin/email/deliverability": {
+      "get": {
+        "tags": [
+          "email"
+        ],
+        "summary": "How the mail domains stand: their MX, SPF, DKIM and DMARC records against what the mail\nserver asks for.",
+        "operationId": "adminMailDeliverability",
+        "responses": {
+          "200": {
+            "description": "One entry per mail domain",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DeliverabilityView"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/email/domains": {
+      "get": {
+        "tags": [
+          "email"
+        ],
+        "summary": "Every mail domain.",
+        "operationId": "adminListMailDomains",
+        "responses": {
+          "200": {
+            "description": "The mail domains",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MailDomainView"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/email/domains/{id}/hold": {
+      "post": {
+        "tags": [
+          "email"
+        ],
+        "summary": "Hold a domain's outgoing mail (a limit of one message a day).",
+        "operationId": "adminHoldMailDomain",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Mail domain id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HoldRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Held",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailDomainView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such mail domain",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/email/domains/{id}/release": {
+      "post": {
+        "tags": [
+          "email"
+        ],
+        "summary": "Let a held domain send again.",
+        "operationId": "adminReleaseMailDomain",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Mail domain id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Released",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailDomainView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such mail domain",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/email/queue": {
+      "get": {
+        "tags": [
+          "email"
+        ],
+        "summary": "The outgoing mail queue of every node, as it was last reported.",
+        "operationId": "adminMailQueue",
+        "responses": {
+          "200": {
+            "description": "The queue",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/QueueItemView"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/email/queue/flush": {
+      "post": {
+        "tags": [
+          "email"
+        ],
+        "summary": "Retry every queued message now.",
+        "operationId": "adminFlushMailQueue",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Asked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueChanged"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/email/queue/{id}": {
+      "delete": {
+        "tags": [
+          "email"
+        ],
+        "summary": "Remove one queued message.",
+        "operationId": "adminDeleteQueuedMail",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The queue's id for the message",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Asked"
+          },
+          "404": {
+            "description": "No such message",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/email/servers": {
+      "get": {
+        "tags": [
+          "email"
+        ],
+        "summary": "The nodes' mail servers.",
+        "operationId": "adminListMailServers",
+        "responses": {
+          "200": {
+            "description": "The servers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ServerView"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/email/servers/{node_id}": {
+      "put": {
+        "tags": [
+          "email"
+        ],
+        "summary": "Name a node's mail server.",
+        "operationId": "adminSetMailServer",
+        "parameters": [
+          {
+            "name": "node_id",
+            "in": "path",
+            "description": "Node id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Set",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Not a name",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/error-pages": {
       "get": {
         "tags": [
@@ -22054,6 +22447,714 @@
         ]
       }
     },
+    "/api/v1/email/autoresponders": {
+      "get": {
+        "tags": [
+          "email"
+        ],
+        "summary": "The automatic replies of the account.",
+        "operationId": "clientListAutoresponders",
+        "parameters": [
+          {
+            "name": "domain",
+            "in": "path",
+            "description": "Only this domain.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The replies",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AutoresponderView"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "email"
+        ],
+        "summary": "Set a mailbox's automatic reply.",
+        "operationId": "clientSetAutoresponder",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AutoresponderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Set",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutoresponderView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such mailbox",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A field is not valid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/email/autoresponders/{id}": {
+      "delete": {
+        "tags": [
+          "email"
+        ],
+        "summary": "Turn a mailbox's automatic reply off.",
+        "operationId": "clientDeleteAutoresponder",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The mailbox's id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Off"
+          },
+          "404": {
+            "description": "No such reply",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/email/config": {
+      "get": {
+        "tags": [
+          "email"
+        ],
+        "summary": "What to set a mail program to.",
+        "operationId": "clientMailConfig",
+        "parameters": [
+          {
+            "name": "domain",
+            "in": "path",
+            "description": "Only this domain.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientConfig"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/email/forwarders": {
+      "get": {
+        "tags": [
+          "email"
+        ],
+        "summary": "The forwarders of the account.",
+        "operationId": "clientListForwarders",
+        "parameters": [
+          {
+            "name": "domain",
+            "in": "path",
+            "description": "Only this domain.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The forwarders",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ForwarderView"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "email"
+        ],
+        "summary": "Make a forwarder.",
+        "operationId": "clientCreateForwarder",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ForwarderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Made",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForwarderView"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`address_taken`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "An address is not valid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/email/forwarders/{id}": {
+      "delete": {
+        "tags": [
+          "email"
+        ],
+        "summary": "Remove a forwarder.",
+        "operationId": "clientDeleteForwarder",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Forwarder id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed"
+          },
+          "404": {
+            "description": "No such forwarder",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/email/mailboxes": {
+      "get": {
+        "tags": [
+          "email"
+        ],
+        "summary": "The mailboxes of the account.",
+        "operationId": "clientListMailboxes",
+        "parameters": [
+          {
+            "name": "domain",
+            "in": "path",
+            "description": "Only this domain.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The mailboxes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MailboxView"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only` or `feature_disabled`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "email"
+        ],
+        "summary": "Make a mailbox.",
+        "operationId": "clientCreateMailbox",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MailboxRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Made",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailboxView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only`, `csrf_failed` or `feature_disabled`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`address_taken`, `limit_reached` or `not_configured`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The name, domain, password or size are not valid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/email/mailboxes/{id}": {
+      "delete": {
+        "tags": [
+          "email"
+        ],
+        "summary": "Remove a mailbox with its mail.",
+        "operationId": "clientDeleteMailbox",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Mailbox id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Being removed"
+          },
+          "404": {
+            "description": "No such mailbox",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/email/mailboxes/{id}/password": {
+      "post": {
+        "tags": [
+          "email"
+        ],
+        "summary": "Change a mailbox's password.",
+        "operationId": "clientChangeMailboxPassword",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Mailbox id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Changed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Done"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such mailbox",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The password is not strong enough",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/email/mailboxes/{id}/webmail": {
+      "post": {
+        "tags": [
+          "email"
+        ],
+        "summary": "Open webmail as a mailbox, with one click.",
+        "operationId": "clientOpenWebmail",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Mailbox id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The link",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebmailLink"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only` or `feature_disabled`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such mailbox",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`not_configured` or `mailbox_not_ready`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`too_many_signins`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The node is busy or webmail could not start",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/public/auth/impersonate": {
       "post": {
         "tags": [
@@ -23690,6 +24791,102 @@
           }
         }
       },
+      "AutoresponderRequest": {
+        "type": "object",
+        "description": "An automatic reply to set.",
+        "required": [
+          "email",
+          "domain",
+          "subject",
+          "body"
+        ],
+        "properties": {
+          "body": {
+            "type": "string",
+            "description": "The text of the reply (up to 5000 characters)."
+          },
+          "domain": {
+            "type": "string",
+            "description": "The domain."
+          },
+          "email": {
+            "type": "string",
+            "description": "The mailbox."
+          },
+          "end_date": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Until when; no end when left out."
+          },
+          "start_date": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "From when (`2026-12-24` or a full time); at once when left out."
+          },
+          "subject": {
+            "type": "string",
+            "description": "The subject of the reply (up to 200 characters)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "AutoresponderView": {
+        "type": "object",
+        "description": "An automatic reply.",
+        "required": [
+          "id",
+          "email",
+          "domain",
+          "subject",
+          "body",
+          "is_active"
+        ],
+        "properties": {
+          "body": {
+            "type": "string",
+            "description": "The text of the reply."
+          },
+          "domain": {
+            "type": "string",
+            "description": "The domain."
+          },
+          "email": {
+            "type": "string",
+            "description": "The mailbox."
+          },
+          "end_date": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Until when."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Id (the mailbox's)."
+          },
+          "is_active": {
+            "type": "boolean",
+            "description": "Whether it replies now."
+          },
+          "start_date": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "From when."
+          },
+          "subject": {
+            "type": "string",
+            "description": "The subject of the reply."
+          }
+        }
+      },
       "BackupCodes": {
         "type": "object",
         "description": "Backup codes, shown exactly once.",
@@ -24540,6 +25737,67 @@
           "failed",
           "timeout"
         ]
+      },
+      "ClientConfig": {
+        "type": "object",
+        "description": "What a mail program needs to know.",
+        "required": [
+          "incoming_server",
+          "incoming_imap_port",
+          "incoming_pop3_port",
+          "incoming_security",
+          "outgoing_server",
+          "outgoing_smtp_port",
+          "outgoing_submission_port",
+          "outgoing_security",
+          "auth_required"
+        ],
+        "properties": {
+          "auth_required": {
+            "type": "boolean",
+            "description": "Always true: the full address and the password."
+          },
+          "incoming_imap_port": {
+            "type": "integer",
+            "format": "int32",
+            "description": "IMAP over TLS.",
+            "minimum": 0
+          },
+          "incoming_pop3_port": {
+            "type": "integer",
+            "format": "int32",
+            "description": "POP3 (0: the server does not offer it).",
+            "minimum": 0
+          },
+          "incoming_security": {
+            "type": "string",
+            "description": "How the connection is secured."
+          },
+          "incoming_server": {
+            "type": "string",
+            "description": "The server to read mail from."
+          },
+          "outgoing_security": {
+            "type": "string",
+            "description": "How the connection is secured."
+          },
+          "outgoing_server": {
+            "type": "string",
+            "description": "The server to send mail through."
+          },
+          "outgoing_smtp_port": {
+            "type": "integer",
+            "format": "int32",
+            "description": "SMTP over TLS (submission).",
+            "minimum": 0
+          },
+          "outgoing_submission_port": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Submission with STARTTLS (0: the server does not offer it).",
+            "minimum": 0
+          }
+        }
       },
       "ClientView": {
         "type": "object",
@@ -25548,6 +26806,60 @@
           }
         }
       },
+      "DeliverabilityView": {
+        "type": "object",
+        "description": "How one domain's mail stands.",
+        "required": [
+          "domain",
+          "spf_status",
+          "dkim_status",
+          "dmarc_status",
+          "mx_status",
+          "rbl_blacklisted",
+          "rbl_listings",
+          "recommendations"
+        ],
+        "properties": {
+          "dkim_status": {
+            "type": "string",
+            "description": "`pass`, `fail` or `missing`."
+          },
+          "dmarc_status": {
+            "type": "string",
+            "description": "`pass`, `fail` or `missing`."
+          },
+          "domain": {
+            "type": "string",
+            "description": "The domain."
+          },
+          "mx_status": {
+            "type": "string",
+            "description": "`pass` or `fail`."
+          },
+          "rbl_blacklisted": {
+            "type": "boolean",
+            "description": "Whether the mail server's address is on a blacklist (not checked yet: always false)."
+          },
+          "rbl_listings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The blacklists it is on."
+          },
+          "recommendations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "What to do about what is wrong."
+          },
+          "spf_status": {
+            "type": "string",
+            "description": "`pass`, `neutral`, `fail` or `missing`."
+          }
+        }
+      },
       "DestinationList": {
         "type": "object",
         "description": "The destinations.",
@@ -25893,6 +27205,19 @@
               "$ref": "#/components/schemas/DomainWaf"
             },
             "description": "By name."
+          }
+        }
+      },
+      "Done": {
+        "type": "object",
+        "description": "What a change that needs no answer says.",
+        "required": [
+          "success"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "description": "Always true."
           }
         }
       },
@@ -26540,6 +27865,64 @@
           }
         }
       },
+      "ForwarderRequest": {
+        "type": "object",
+        "description": "A forwarder to make.",
+        "required": [
+          "source",
+          "destination",
+          "domain"
+        ],
+        "properties": {
+          "destination": {
+            "type": "string",
+            "description": "Where it goes: a full address."
+          },
+          "domain": {
+            "type": "string",
+            "description": "The domain."
+          },
+          "source": {
+            "type": "string",
+            "description": "The address that sends on, `sales@example.com` (`*@example.com` for the catch-all)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ForwarderView": {
+        "type": "object",
+        "description": "A forwarder.",
+        "required": [
+          "id",
+          "source",
+          "destination",
+          "domain",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "description": "When it was made."
+          },
+          "destination": {
+            "type": "string",
+            "description": "Where it goes."
+          },
+          "domain": {
+            "type": "string",
+            "description": "The domain."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Id."
+          },
+          "source": {
+            "type": "string",
+            "description": "The address that sends on (`*@domain` is the catch-all)."
+          }
+        }
+      },
       "FromTo": {
         "type": "object",
         "description": "From and to.",
@@ -26874,6 +28257,20 @@
             "type": "string",
             "description": "The value: printable ASCII without `\"`, `\\` and `$`.",
             "example": "SAMEORIGIN"
+          }
+        },
+        "additionalProperties": false
+      },
+      "HoldRequest": {
+        "type": "object",
+        "description": "Why a domain is held.",
+        "required": [
+          "reason"
+        ],
+        "properties": {
+          "reason": {
+            "type": "string",
+            "description": "The reason, shown to the account (up to 300 characters)."
           }
         },
         "additionalProperties": false
@@ -27663,6 +29060,167 @@
           }
         },
         "additionalProperties": false
+      },
+      "MailDomainView": {
+        "type": "object",
+        "description": "A mail domain.",
+        "required": [
+          "id",
+          "domain",
+          "state",
+          "held",
+          "dns_applied"
+        ],
+        "properties": {
+          "dns_applied": {
+            "type": "boolean",
+            "description": "Whether the DNS records are in the zone."
+          },
+          "domain": {
+            "type": "string",
+            "description": "The domain."
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the mail server refused the last change."
+          },
+          "held": {
+            "type": "boolean",
+            "description": "Whether outgoing mail is held."
+          },
+          "held_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it is held."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Id."
+          },
+          "per_hour": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Most messages an hour."
+          },
+          "state": {
+            "type": "string",
+            "description": "`pending`, `active`, `error` or `removing`."
+          },
+          "tenant_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The hosting account (none once it is deleted)."
+          }
+        }
+      },
+      "MailboxRequest": {
+        "type": "object",
+        "description": "A mailbox to make.",
+        "required": [
+          "username",
+          "domain",
+          "password"
+        ],
+        "properties": {
+          "domain": {
+            "type": "string",
+            "description": "One of the account's domains.",
+            "example": "example.com"
+          },
+          "password": {
+            "type": "string",
+            "description": "The password (12 to 128 printable characters, three kinds of them)."
+          },
+          "quota_mb": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Quota in megabytes (the panel's default when left out)."
+          },
+          "username": {
+            "type": "string",
+            "description": "The part before the `@` (lower-case letters, digits and `. _ -`).",
+            "example": "info"
+          }
+        },
+        "additionalProperties": false
+      },
+      "MailboxView": {
+        "type": "object",
+        "description": "A mailbox.",
+        "required": [
+          "id",
+          "email",
+          "username",
+          "domain",
+          "quota_mb",
+          "used_bytes",
+          "created_at",
+          "webmail_url",
+          "status"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "description": "When it was made."
+          },
+          "domain": {
+            "type": "string",
+            "description": "The domain."
+          },
+          "email": {
+            "type": "string",
+            "description": "The whole address."
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the mail server refused the last change."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Id."
+          },
+          "quota_mb": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Quota in megabytes."
+          },
+          "status": {
+            "type": "string",
+            "description": "`pending` (the mail server is being told), `active` or `error`."
+          },
+          "used_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Bytes stored."
+          },
+          "username": {
+            "type": "string",
+            "description": "The part before the `@`."
+          },
+          "webmail_url": {
+            "type": "string",
+            "description": "Where webmail is (empty when there is none)."
+          }
+        }
       },
       "Me": {
         "type": "object",
@@ -28729,6 +30287,20 @@
           }
         }
       },
+      "PasswordRequest": {
+        "type": "object",
+        "description": "A new password.",
+        "required": [
+          "password"
+        ],
+        "properties": {
+          "password": {
+            "type": "string",
+            "description": "The password (12 to 128 printable characters, three kinds of them)."
+          }
+        },
+        "additionalProperties": false
+      },
       "Pending": {
         "type": "object",
         "description": "Work that is still going on.",
@@ -29397,6 +30969,79 @@
           }
         },
         "additionalProperties": false
+      },
+      "QueueChanged": {
+        "type": "object",
+        "description": "What a queue action did.",
+        "required": [
+          "success",
+          "count"
+        ],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "description": "How many messages it was asked about.",
+            "minimum": 0
+          },
+          "success": {
+            "type": "boolean",
+            "description": "Always true."
+          }
+        }
+      },
+      "QueueItemView": {
+        "type": "object",
+        "description": "A message in the outgoing queue.",
+        "required": [
+          "id",
+          "sender",
+          "recipient",
+          "status",
+          "queued_at",
+          "retries",
+          "size_bytes"
+        ],
+        "properties": {
+          "error_message": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the last try failed."
+          },
+          "id": {
+            "type": "string",
+            "description": "The queue's id for it."
+          },
+          "queued_at": {
+            "type": "string",
+            "description": "When it was queued."
+          },
+          "recipient": {
+            "type": "string",
+            "description": "The recipients, separated by commas."
+          },
+          "retries": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many times it was tried.",
+            "minimum": 0
+          },
+          "sender": {
+            "type": "string",
+            "description": "The sender."
+          },
+          "size_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Its size in bytes.",
+            "minimum": 0
+          },
+          "status": {
+            "type": "string",
+            "description": "`queued` or `deferred`."
+          }
+        }
       },
       "QuietRequest": {
         "type": "object",
@@ -30482,6 +32127,54 @@
             "format": "int64",
             "description": "Seconds since boot.",
             "minimum": 0
+          }
+        }
+      },
+      "ServerRequest": {
+        "type": "object",
+        "description": "A name for a node's mail server.",
+        "required": [
+          "hostname"
+        ],
+        "properties": {
+          "hostname": {
+            "type": "string",
+            "description": "The name (it must point at the node).",
+            "example": "mail.example.com"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ServerView": {
+        "type": "object",
+        "description": "A node's mail server.",
+        "required": [
+          "node_id",
+          "hostname"
+        ],
+        "properties": {
+          "applied_hostname": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The name it has been told."
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the node refused."
+          },
+          "hostname": {
+            "type": "string",
+            "description": "The name it should say it is."
+          },
+          "node_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The node."
           }
         }
       },
@@ -32767,6 +34460,26 @@
           }
         }
       },
+      "WebmailLink": {
+        "type": "object",
+        "description": "A link into webmail.",
+        "required": [
+          "url",
+          "expires_at"
+        ],
+        "properties": {
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Until when the link can be opened (RFC 3339, UTC)."
+          },
+          "url": {
+            "type": "string",
+            "description": "Open this address (it works once).",
+            "example": "https://webmail.example.com/?_dhsignon=..."
+          }
+        }
+      },
       "WpAnswer": {
         "type": "object",
         "description": "The answer of a WordPress action.",
@@ -33196,6 +34909,10 @@
     {
       "name": "cron",
       "description": "Cron jobs"
+    },
+    {
+      "name": "email",
+      "description": "Email"
     },
     {
       "name": "migration",

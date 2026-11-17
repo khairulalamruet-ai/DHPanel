@@ -1,0 +1,25 @@
+# Email: mailboxes, forwarders and automatic replies of a hosting account on the node's mail
+# server (Stalwart), the DNS records mail needs, the outgoing queue and abuse control
+# (crates/modules/mail).
+[module]
+name       = "mail"
+version    = "0.1.0"
+title      = { en = "Email", bn = "ইমেইল" }
+category   = "mail"
+core       = false
+depends_on = ["auth", "rbac", "audit", "system", "plans", "users", "domains"]
+
+[permissions]
+keys = ["admin.email.read", "admin.email.manage"]
+
+[features]
+keys = ["email", "webmail"]
+
+# A plan without these keys gets the default.
+[limits]
+max_email_accounts = { type = "int", default = 10, unlimited = -1 }
+mail_per_hour      = { type = "int", default = 200, unlimited = -1 }
+
+[ui]
+admin_nav  = { group = "System", order = 40, icon = "mail" }
+client_nav = { group = "Email", order = 10, icon = "mail" }

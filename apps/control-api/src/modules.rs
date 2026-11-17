@@ -27,6 +27,7 @@ const EMBEDDED: &[(&str, &str)] = &[
     ("files", dhpanel_mod_files::MANIFEST),
     ("backups", dhpanel_mod_backups::MANIFEST),
     ("cron", dhpanel_mod_cron::MANIFEST),
+    ("mail", dhpanel_mod_mail::MANIFEST),
     ("migration", dhpanel_mod_migration::MANIFEST),
     ("logs", dhpanel_mod_logs::MANIFEST),
     ("usage", dhpanel_mod_usage::MANIFEST),
@@ -77,6 +78,7 @@ impl Module for Wired {
             "databases" => serde_json::from_str(dhpanel_mod_databases::SETTINGS_SCHEMA).ok(),
             "files" => serde_json::from_str(dhpanel_mod_files::SETTINGS_SCHEMA).ok(),
             "cron" => serde_json::from_str(dhpanel_mod_cron::SETTINGS_SCHEMA).ok(),
+            "mail" => serde_json::from_str(dhpanel_mod_mail::SETTINGS_SCHEMA).ok(),
             _ => None,
         }
     }
@@ -471,6 +473,32 @@ pub fn mount(
                         None => ModuleRoutes::none(),
                     })
                 }
+                "mail" => {
+                    let (db, sessions, late_settings, master_key) = (
+                        db.clone(),
+                        sessions.clone(),
+                        late_settings.clone(),
+                        master_key.clone(),
+                    );
+                    Box::new(move || match late_settings.get() {
+                        Some(settings) => {
+                            let state = dhpanel_mod_mail::MailState {
+                                db: db.clone(),
+                                sessions: sessions.clone(),
+                                settings: settings.clone(),
+                                master_key: master_key.clone(),
+                            };
+                            ModuleRoutes {
+                                admin: Some(
+                                    dhpanel_mod_mail::admin_router().with_state(state.clone()),
+                                ),
+                                client: Some(dhpanel_mod_mail::client_router().with_state(state)),
+                                ..ModuleRoutes::none()
+                            }
+                        }
+                        None => ModuleRoutes::none(),
+                    })
+                }
                 "logs" => {
                     let (db, sessions) = (db.clone(), sessions.clone());
                     Box::new(move || ModuleRoutes {
@@ -830,6 +858,7 @@ mod tests {
                 "files",
                 "backups",
                 "cron",
+                "mail",
                 "migration",
                 "logs",
                 "usage",
@@ -865,6 +894,7 @@ mod tests {
                 "services",
                 "usage",
                 "apps",
+                "mail",
                 "security"
             ]
         );
@@ -889,6 +919,7 @@ mod tests {
                 "services",
                 "usage",
                 "apps",
+                "mail",
                 "security"
             ]
         );
@@ -948,12 +979,14 @@ mod tests {
             p::AppsManage::KEY,
             p::LicenseRead::KEY,
             p::LicenseManage::KEY,
+            p::EmailRead::KEY,
+            p::EmailManage::KEY,
         ] {
             assert!(declared.iter().any(|d| d == key), "{key} is in no manifest");
         }
         assert_eq!(
             declared.len(),
-            35,
+            37,
             "a manifest declares a key the code does not know: {declared:?}"
         );
     }

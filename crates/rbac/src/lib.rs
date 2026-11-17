@@ -145,6 +145,15 @@ pub mod permissions {
         pub BackupsManage = "admin.backups.manage"
     );
     crate::permission!(
+        /// See the mail domains, the outgoing mail queue and how well mail is delivered.
+        pub EmailRead = "admin.email.read"
+    );
+    crate::permission!(
+        /// Hold and release a domain's mail, retry or remove queued messages, and name the
+        /// mail servers.
+        pub EmailManage = "admin.email.manage"
+    );
+    crate::permission!(
         /// Read the control plane's own log.
         pub LogsRead = "admin.logs.read"
     );

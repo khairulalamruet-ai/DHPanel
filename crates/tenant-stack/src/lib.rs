@@ -53,6 +53,8 @@ pub enum Role {
     Pg,
     /// The node's mail server (not part of a tenant's stack; T13.02).
     Mail,
+    /// The node's webmail, Roundcube (not part of a tenant's stack; T13.09).
+    Webmail,
     /// The node's SFTP and FTPS server (not part of a tenant's stack).
     Sftp,
     /// The node's malware scanner, run for one scan at a time (not part of a tenant's stack).
@@ -87,6 +89,7 @@ impl Role {
             Self::Pma => "pma",
             Self::Pg => "pg",
             Self::Mail => "mail",
+            Self::Webmail => "webmail",
             Self::Sftp => "sftp",
             Self::Clamav => "clamav",
             Self::Trivy => "trivy",
@@ -771,6 +774,7 @@ pub fn render(tenant: &Tenant<'_>, allowlist: &Allowlist) -> Result<Stack, Stack
             | Role::Pma
             | Role::Pg
             | Role::Mail
+            | Role::Webmail
             | Role::Sftp
             | Role::Clamav
             | Role::Trivy
@@ -955,9 +959,9 @@ mod tests {
             (web.clone(), "no image for the `php`"),
             (
                 format!(
-                    "{web}{php}[[image]]\nrole = \"mail\"\nreference = \"x@sha256:{digest}\"\n"
+                    "{web}{php}[[image]]\nrole = \"bogus\"\nreference = \"x@sha256:{digest}\"\n"
                 ),
-                "mail",
+                "bogus",
             ),
             (
                 format!(

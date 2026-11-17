@@ -1250,6 +1250,7 @@ dependencies = [
  "dhpanel-mod-files",
  "dhpanel-mod-license",
  "dhpanel-mod-logs",
+ "dhpanel-mod-mail",
  "dhpanel-mod-migration",
  "dhpanel-mod-nodes",
  "dhpanel-mod-notifications",
@@ -1810,6 +1811,36 @@ dependencies = [
  "sqlx",
  "tokio",
  "tower",
+ "utoipa",
+ "uuid",
+]
+
+[[package]]
+name = "dhpanel-mod-mail"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "dhpanel-audit",
+ "dhpanel-auth-core",
+ "dhpanel-cache",
+ "dhpanel-database",
+ "dhpanel-domain",
+ "dhpanel-http-kit",
+ "dhpanel-kernel",
+ "dhpanel-mod-auth",
+ "dhpanel-node-protocol",
+ "dhpanel-rbac",
+ "dhpanel-session",
+ "dhpanel-settings",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "tower",
+ "tracing",
  "utoipa",
  "uuid",
 ]

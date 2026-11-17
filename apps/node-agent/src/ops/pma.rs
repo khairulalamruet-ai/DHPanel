@@ -60,7 +60,7 @@ fn accounts_dir(context: &TenantContext) -> PathBuf {
     base(context).join("accounts")
 }
 
-fn disk(what: &str, err: &std::io::Error) -> AgentError {
+pub(super) fn disk(what: &str, err: &std::io::Error) -> AgentError {
     failed(&format!("{what}: {}", err.kind())).retryable()
 }
 
@@ -233,13 +233,13 @@ async fn ensure_container(context: &TenantContext) -> Result<(), AgentError> {
     Ok(())
 }
 
-fn set_mode(path: &Path, mode: u32) -> Result<(), AgentError> {
+pub(super) fn set_mode(path: &Path, mode: u32) -> Result<(), AgentError> {
     use std::os::unix::fs::PermissionsExt as _;
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
         .map_err(|e| disk("cannot set the folder's rights", &e))
 }
 
-fn base64(bytes: &[u8]) -> String {
+pub(super) fn base64(bytes: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {
@@ -262,7 +262,7 @@ fn base64(bytes: &[u8]) -> String {
     out
 }
 
-fn now() -> i64 {
+pub(super) fn now() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
@@ -365,7 +365,7 @@ pub async fn open_phpmyadmin(
 
 /// A file that the container's page can read (and move away) but that is not
 /// listed for anyone else on the machine: the folder is the agent's own.
-fn write_private(path: &Path, text: &str) -> std::io::Result<()> {
+pub(super) fn write_private(path: &Path, text: &str) -> std::io::Result<()> {
     use std::{
         io::Write as _,
         os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _},
@@ -440,5 +440,6 @@ pub async fn sweep_forever(context: Arc<TenantContext>) {
         tick.tick().await;
         sweep(&context).await;
         super::transfer::sweep(&context);
+        super::webmail::sweep(&context);
     }
 }

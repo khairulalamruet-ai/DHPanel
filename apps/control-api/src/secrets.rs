@@ -54,6 +54,42 @@ pub fn operation_secrets(
                         dedicated,
                     });
                 }
+                // A mailbox's password: sealed by the API, opened here for this one message.
+                // Without one (it was delivered already) the mail server keeps the password
+                // the mailbox has.
+                Operation::UpsertMailbox {
+                    domain,
+                    local,
+                    password: None,
+                    quota_bytes,
+                    aliases,
+                } => {
+                    let found = dhpanel_database::mail::sealed_password_of(&db, &domain, &local)
+                        .await
+                        .map_err(|_| "could not read a mailbox password".to_owned())?;
+                    let password = match found {
+                        Some((mailbox_id, sealed)) => {
+                            let bytes = master_key
+                                .open(
+                                    &dhpanel_database::mail::password_context(mailbox_id),
+                                    &sealed,
+                                )
+                                .map_err(|_| "a mailbox password does not open".to_owned())?;
+                            Some(dhpanel_node_protocol::DbPassword(
+                                String::from_utf8(bytes)
+                                    .map_err(|_| "a mailbox password is not text".to_owned())?,
+                            ))
+                        }
+                        None => None,
+                    };
+                    return Ok(Operation::UpsertMailbox {
+                        domain,
+                        local,
+                        password,
+                        quota_bytes,
+                        aliases,
+                    });
+                }
                 // The two passwords of a WordPress install: sealed by the API, opened here
                 // for this one message.
                 Operation::InstallWordPress {
@@ -668,6 +704,93 @@ mod tests {
             .await
             .unwrap();
         assert!(fill(op).await.is_err());
+    }
+
+    /// A mailbox's password is not in the ledger and is opened for the one message; once the
+    /// node has it (the row is gone) the operation goes without one.
+    #[sqlx::test(migrations = "../../migrations")]
+    #[ignore = "needs PostgreSQL"]
+    async fn a_mailboxs_password_is_put_back_when_the_operation_is_sent(pool: PgPool) {
+        let key = MasterKey::from_bytes(&[5u8; 32]);
+        let account: Uuid = sqlx::query_scalar(
+            "INSERT INTO accounts (kind, username, email, password_hash)
+             VALUES ('client', 'gus', 'gus@example.com',
+                     '$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHQ$aGFzaGhhc2hoYXNoaGFzaA')
+             RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let node: Uuid =
+            sqlx::query_scalar("INSERT INTO nodes (name) VALUES ('node1') RETURNING id")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let plan: Uuid = sqlx::query_scalar("SELECT id FROM plans WHERE is_default")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let tenant: Uuid = sqlx::query_scalar(
+            "INSERT INTO tenants (owner_account_id, node_id, plan_id, username, uid, status)
+             VALUES ($1, $2, $3, 'gus', 10007, 'active') RETURNING id",
+        )
+        .bind(account)
+        .bind(node)
+        .bind(plan)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let domain: Uuid = sqlx::query_scalar(
+            "INSERT INTO domains (tenant_id, fqdn, kind) VALUES ($1, 'gus-mail.org', 'primary')
+             RETURNING id",
+        )
+        .bind(tenant)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let md = dhpanel_database::mail::ensure_domain(
+            &pool,
+            tenant,
+            domain,
+            "gus-mail.org",
+            node,
+            None,
+        )
+        .await
+        .unwrap();
+        let mailbox = Uuid::new_v4();
+        let sealed = key
+            .seal(
+                &dhpanel_database::mail::password_context(mailbox),
+                b"Mailbox-Pass-77!",
+            )
+            .unwrap();
+        dhpanel_database::mail::create_mailbox(&pool, mailbox, tenant, md.id, "gus", 100, &sealed)
+            .await
+            .unwrap();
+        let op = Operation::UpsertMailbox {
+            domain: "gus-mail.org".into(),
+            local: "gus".into(),
+            password: None,
+            quota_bytes: 100 << 20,
+            aliases: Vec::new(),
+        };
+        let fill = operation_secrets(pool.clone(), key.clone());
+        let Operation::UpsertMailbox { password, .. } = fill(op.clone()).await.unwrap() else {
+            panic!("the same kind of operation");
+        };
+        assert_eq!(
+            password,
+            Some(dhpanel_node_protocol::DbPassword("Mailbox-Pass-77!".into()))
+        );
+        // The node has it: nothing is put in any more.
+        dhpanel_database::mail::mailbox_applied(&pool, mailbox, 1)
+            .await
+            .unwrap();
+        let Operation::UpsertMailbox { password, .. } = fill(op).await.unwrap() else {
+            panic!("the same kind of operation");
+        };
+        assert_eq!(password, None);
     }
 
     /// The token of a private repository is not in the ledger and is opened for the one message.

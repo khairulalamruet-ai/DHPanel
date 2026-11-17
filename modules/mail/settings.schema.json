@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Email",
+  "description": "The name of the mail server and the rules for mailboxes and abuse.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "hostname": {
+      "type": "string",
+      "title": "Mail server name",
+      "default": "",
+      "maxLength": 253,
+      "x-scope": "global",
+      "x-title": { "en": "Mail server name", "bn": "মেইল সার্ভারের নাম" },
+      "x-description": {
+        "en": "The name the mail server says it is (for example mail.example.com). It must point to the node, and the domains' MX records point to it. Mail is not set up until it is set.",
+        "bn": "মেইল সার্ভার নিজেকে যে নামে পরিচয় দেয় (যেমন mail.example.com)। নামটি node-এর দিকে যেতে হবে, ডোমেইনের MX record এটিকে দেখায়। এটি না দিলে মেইল চালু হয় না।"
+      }
+    },
+    "webmail_host": {
+      "type": "string",
+      "title": "Webmail name",
+      "default": "",
+      "maxLength": 253,
+      "x-scope": "global",
+      "x-title": { "en": "Webmail name", "bn": "ওয়েবমেইলের নাম" },
+      "x-description": {
+        "en": "The name webmail is served under (for example webmail.example.com). It must point to the node. Mailboxes open it with one click; it is off while empty.",
+        "bn": "ওয়েবমেইল যে নামে চলে (যেমন webmail.example.com)। নামটি node-এর দিকে যেতে হবে। মেইলবক্স এক ক্লিকে এটি খোলে; খালি থাকলে বন্ধ।"
+      }
+    },
+    "default_quota_mb": {
+      "type": "integer",
+      "title": "Default mailbox size (MB)",
+      "default": 1024,
+      "minimum": 1,
+      "maximum": 1048576,
+      "x-scope": "global",
+      "x-title": { "en": "Default mailbox size (MB)", "bn": "মেইলবক্সের ডিফল্ট আকার (MB)" },
+      "x-description": {
+        "en": "The quota of a mailbox made without one.",
+        "bn": "কোটা না দিয়ে বানানো মেইলবক্সের কোটা।"
+      }
+    },
+    "abuse_queue_threshold": {
+      "type": "integer",
+      "title": "Queued messages that hold a domain",
+      "default": 500,
+      "minimum": 10,
+      "maximum": 1000000,
+      "x-scope": "global",
+      "x-title": { "en": "Queued messages that hold a domain", "bn": "যত queued মেইলে ডোমেইন hold হয়" },
+      "x-description": {
+        "en": "A domain with more messages than this waiting in the outgoing queue is held: its mail is limited to one a day, the queued messages are removed, and the account and the administrators are told.",
+        "bn": "outgoing queue-তে এর বেশি মেইল জমলে ডোমেইন hold হয়: দিনে একটির বেশি পাঠানো যায় না, queued মেইল মুছে যায়, আর ক্লায়েন্ট ও অ্যাডমিনকে জানানো হয়।"
+      }
+    }
+  }
+}
