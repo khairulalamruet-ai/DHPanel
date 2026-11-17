@@ -22,6 +22,7 @@
 //! what answers on `example.com/blog`. The installers (T12.02, T12.05) create the rows and
 //! move them from `installing` to `active` or `failed`; this module shows them.
 
+pub mod gitdeploy;
 pub mod runtime;
 
 use std::sync::Arc;
@@ -84,10 +85,16 @@ impl FromRef<AppsState> for SessionStore {
     }
 }
 
+/// The routes of the apps module that need no session (the webhook of a git deploy).
+pub fn public_router() -> Router<AppsState> {
+    gitdeploy::public_router()
+}
+
 /// Routes for hosting accounts.
 pub fn client_router() -> Router<AppsState> {
     Router::new()
         .merge(runtime::router())
+        .merge(gitdeploy::router())
         .route("/api/v1/client/apps", get(client_list))
         .route("/api/v1/client/apps/{id}", get(client_get))
         .route(
@@ -1770,12 +1777,14 @@ pub async fn cache_remove(
         cache_list, cache_set, cache_remove, wp_overview, wp_update_plugins,
         wp_update_themes, wp_update_core, wp_maintenance, wp_admin_password, wp_operation, wp_scan,
         wp_harden, runtime::runtimes, runtime::list, runtime::create, runtime::update,
-        runtime::redeploy, runtime::remove
+        runtime::redeploy, runtime::remove, gitdeploy::list, gitdeploy::create,
+        gitdeploy::deploy_now, gitdeploy::rotate_secret, gitdeploy::remove, gitdeploy::webhook
     ),
     components(schemas(
         AppView, AppList, InstallWordPress, CacheView, CacheList, SetCache, CatalogEntry, CatalogList, InstallApp, WpAnswer, WpSlug, WpVersion, WpMaintenance,
         runtime::RuntimeAppView, runtime::RuntimeAppList, runtime::SetRuntimeApp,
-        runtime::Runtimes, runtime::Redeploy,
+        runtime::Runtimes, runtime::Redeploy, gitdeploy::GitDeployView, gitdeploy::GitDeployList,
+        gitdeploy::CreateGitDeploy, gitdeploy::WebhookAnswer,
         WpNewPassword, Pending, WpHarden, dhpanel_node_protocol::WpOverview,
         dhpanel_node_protocol::WpItem, dhpanel_node_protocol::WpScan
     )),

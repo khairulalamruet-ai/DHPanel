@@ -2036,6 +2036,52 @@ pub enum Operation {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         env: Option<RuntimeEnv>,
     },
+    /// Deploys a site or an application from a git repository: fetches `branch` of the
+    /// repository over http(s) into a new release folder (`.dh-releases/<name>/<time>` below the
+    /// web directory), runs the build steps in a sandbox (each a list of words, no shell), then
+    /// switches `dest` to the new release with one rename and keeps the last few releases. When
+    /// `restart_app` names one of the tenant's applications it is restarted. Everything runs in
+    /// one-off containers as the tenant's user. Answered with [`Output::GitDeployed`].
+    RunGitDeploy {
+        /// The deploy's id.
+        deploy_id: Uuid,
+        /// The tenant.
+        tenant_id: Uuid,
+        /// The tenant's system name.
+        username: String,
+        /// The tenant's numeric user id.
+        uid: u32,
+        /// A short name (used for the release folder).
+        name: String,
+        /// The repository, `https://…` without a login.
+        repo_url: String,
+        /// The branch.
+        branch: String,
+        /// The folder below the web directory that becomes the link to the release.
+        dest: String,
+        /// `node` or `python` when there are build steps.
+        build_kind: Option<String>,
+        /// The runtime's version for the build.
+        build_version: Option<String>,
+        /// The build steps, each one a list of words.
+        build_steps: Vec<Vec<String>>,
+        /// The name of an application to restart afterwards.
+        restart_app: Option<String>,
+        /// A token for a private repository; absent in the ledger, present on the wire.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        token: Option<DbPassword>,
+    },
+    /// Removes what a deploy kept on the node (its releases stay: they are the account's files
+    /// only until the link is removed by the account). Safe to repeat. Answered with
+    /// [`Output::GitDeployRemoved`].
+    RemoveGitDeploy {
+        /// The tenant.
+        tenant_id: Uuid,
+        /// The tenant's system name.
+        username: String,
+        /// The deploy's short name.
+        name: String,
+    },
     /// Removes one of a tenant's own applications. Safe to repeat. Answered with
     /// [`Output::RuntimeAppRemoved`].
     RemoveRuntimeApp {
@@ -2262,6 +2308,8 @@ impl Operation {
         "remove_cache_instance",
         "set_runtime_app",
         "remove_runtime_app",
+        "run_git_deploy",
+        "remove_git_deploy",
         "scan_image",
         "check_image_updates",
         "inventory_wordpress",
@@ -2346,6 +2394,8 @@ impl Operation {
             Self::RemoveCacheInstance { .. } => "remove_cache_instance",
             Self::SetRuntimeApp { .. } => "set_runtime_app",
             Self::RemoveRuntimeApp { .. } => "remove_runtime_app",
+            Self::RunGitDeploy { .. } => "run_git_deploy",
+            Self::RemoveGitDeploy { .. } => "remove_git_deploy",
             Self::ScanImage { .. } => "scan_image",
             Self::CheckImageUpdates { .. } => "check_image_updates",
             Self::InventoryWordPress { .. } => "inventory_wordpress",
@@ -2565,6 +2615,15 @@ pub enum Output {
         /// `name:port` the web server reaches it by.
         host: String,
     },
+    /// Answer to [`Operation::RunGitDeploy`].
+    GitDeployed {
+        /// The commit that is now live.
+        commit: String,
+        /// The end of what the fetch and the build printed.
+        log: String,
+    },
+    /// Answer to [`Operation::RemoveGitDeploy`].
+    GitDeployRemoved,
     /// Answer to [`Operation::RemoveRuntimeApp`].
     RuntimeAppRemoved {
         /// Whether there was one.
@@ -3871,6 +3930,26 @@ mod tests {
                 username: "alice".into(),
                 name: "api".into(),
             },
+            Operation::RunGitDeploy {
+                deploy_id: id(),
+                tenant_id: id(),
+                username: "alice".into(),
+                uid: 10_000,
+                name: "site".into(),
+                repo_url: "https://git.example.com/alice/site.git".into(),
+                branch: "main".into(),
+                dest: "site".into(),
+                build_kind: Some("node".into()),
+                build_version: Some("24".into()),
+                build_steps: vec![vec!["npm".into(), "ci".into()]],
+                restart_app: None,
+                token: None,
+            },
+            Operation::RemoveGitDeploy {
+                tenant_id: id(),
+                username: "alice".into(),
+                name: "site".into(),
+            },
         ] {
             let wire = serde_json::to_value(&op).unwrap();
             assert_eq!(wire["type"], op.type_name());
@@ -3878,7 +3957,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            78,
+            80,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }

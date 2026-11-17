@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE git_deploys\n            SET status = 'ok', op_id = NULL, last_commit = $2, last_log = $3, last_error = NULL,\n                last_deployed_at = now(), updated_at = now()\n          WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b1eec7edc336e546d8764f2d121beea0e813e98b016b7380154055b87cdecfec"
+}

@@ -67,6 +67,9 @@ pub enum Role {
     Node,
     /// A tenant's own Python application (T12.08; not part of the default stack).
     Python,
+    /// Git, run once per deploy of a tenant's site from a repository (T12.09; not part of the
+    /// default stack).
+    Git,
 }
 
 impl Role {
@@ -86,6 +89,7 @@ impl Role {
             Self::Memcached => "memcached",
             Self::Node => "node",
             Self::Python => "python",
+            Self::Git => "git",
         }
     }
 }
@@ -766,7 +770,8 @@ pub fn render(tenant: &Tenant<'_>, allowlist: &Allowlist) -> Result<Stack, Stack
             | Role::Redis
             | Role::Memcached
             | Role::Node
-            | Role::Python => {
+            | Role::Python
+            | Role::Git => {
                 continue;
             }
         }

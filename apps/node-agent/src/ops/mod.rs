@@ -29,6 +29,7 @@ pub mod cron;
 pub mod db;
 pub mod files;
 pub mod ftp;
+pub mod gitdeploy;
 pub mod imagescan;
 pub mod logs;
 pub mod metrics;
@@ -213,6 +214,14 @@ impl Registry {
             registry.register("remove_cache_instance", {
                 let context = context.clone();
                 move |op| cacheaddon::remove_cache_instance(context.clone(), op)
+            });
+            registry.register("run_git_deploy", {
+                let context = context.clone();
+                move |op| gitdeploy::run_git_deploy(context.clone(), op)
+            });
+            registry.register("remove_git_deploy", {
+                let context = context.clone();
+                move |op| gitdeploy::remove_git_deploy(context.clone(), op)
             });
             registry.register("set_runtime_app", {
                 let context = context.clone();

@@ -2346,3 +2346,172 @@ async fn an_application_is_ready_when_the_node_says_so_failed_with_its_reason_an
     agent_stop.send(true).unwrap();
     agent.await.unwrap();
 }
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs PostgreSQL"]
+async fn a_git_deploy_is_live_when_the_node_says_so_failed_with_its_reason_and_gone_when_removed(
+    pool: PgPool,
+) {
+    let p = plane(&pool).await;
+    let d = Dispatcher::new(p.ops.clone(), p.gateway.clone(), None, dispatch_settings());
+    let mut registry = Registry::new();
+    registry.register("run_git_deploy", |op| async move {
+        let Operation::RunGitDeploy { name, .. } = op else {
+            unreachable!()
+        };
+        if name == "broken" {
+            return Err(AgentError::new(
+                ErrorCode::Internal,
+                "fetching the repository failed (exit code 128): not found",
+            ));
+        }
+        Ok(Output::GitDeployed {
+            commit: "0123456789abcdef0123456789abcdef01234567".into(),
+            log: "$ git clone main\nok".into(),
+        })
+    });
+    registry.register("remove_git_deploy", |_| async move {
+        Ok(Output::GitDeployRemoved)
+    });
+    let node = make_node_with(&p, &pool, "gitdeploy", registry).await;
+    let (agent_stop, agent) = node.start_agent(p.addr);
+    wait_connected(&p, node.id).await;
+    let results = p.gateway.take_results().expect("results taken once");
+    tokio::spawn(d.clone().run(results, p.stop.subscribe()));
+    let account: Uuid = sqlx::query_scalar(
+        "INSERT INTO accounts (kind, username, email, password_hash)
+         VALUES ('client', 'gus', 'gus@example.com',
+                 '$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHQ$aGFzaGhhc2hoYXNoaGFzaA') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let plan: Uuid = sqlx::query_scalar("SELECT id FROM plans WHERE is_default")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let tenant: Uuid = sqlx::query_scalar(
+        "INSERT INTO tenants (owner_account_id, node_id, plan_id, username, uid, status)
+         VALUES ($1, $2, $3, 'gus', 10007, 'active') RETURNING id",
+    )
+    .bind(account)
+    .bind(node.id)
+    .bind(plan)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let mut ids = Vec::new();
+    for name in ["site", "broken"] {
+        let id: Uuid = sqlx::query_scalar(
+            "INSERT INTO git_deploys (tenant_id, name, repo_url, dest, sealed_webhook, status)
+             VALUES ($1, $2, 'https://git.example.com/a/b.git', $2, '\\x00', 'deploying') RETURNING id",
+        )
+        .bind(tenant)
+        .bind(name)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let op = match p
+            .ops
+            .enqueue(&Request::new(
+                node.id,
+                Operation::RunGitDeploy {
+                    deploy_id: id,
+                    tenant_id: tenant,
+                    username: "gus".into(),
+                    uid: 10_007,
+                    name: name.into(),
+                    repo_url: "https://git.example.com/a/b.git".into(),
+                    branch: "main".into(),
+                    dest: name.into(),
+                    build_kind: None,
+                    build_version: None,
+                    build_steps: Vec::new(),
+                    restart_app: None,
+                    token: None,
+                },
+                format!("gd-{name}"),
+            ))
+            .await
+            .unwrap()
+        {
+            dhpanel_operations::Enqueued::Created(op)
+            | dhpanel_operations::Enqueued::Existing(op) => op.id,
+        };
+        sqlx::query("UPDATE git_deploys SET op_id = $2 WHERE id = $1")
+            .bind(id)
+            .bind(op)
+            .execute(&pool)
+            .await
+            .unwrap();
+        ids.push(id);
+    }
+    let state = |pool: PgPool, name: &'static str| async move {
+        sqlx::query_as::<_, (String, Option<String>, Option<String>, Option<String>)>(
+            "SELECT status, last_commit, last_log, last_error FROM git_deploys WHERE name = $1",
+        )
+        .bind(name)
+        .fetch_optional(&pool)
+        .await
+        .unwrap()
+    };
+    let (mut site, mut broken) = (None, None);
+    for _ in 0..100 {
+        d.settle_git_deploys().await;
+        site = state(pool.clone(), "site").await;
+        broken = state(pool.clone(), "broken").await;
+        if site.as_ref().is_some_and(|s| s.0 == "ok")
+            && broken.as_ref().is_some_and(|s| s.0 == "failed")
+        {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let site = site.unwrap();
+    assert_eq!(site.0, "ok");
+    assert_eq!(
+        site.1.as_deref(),
+        Some("0123456789abcdef0123456789abcdef01234567")
+    );
+    assert!(site.2.unwrap().contains("git clone"));
+    let broken = broken.unwrap();
+    assert_eq!((broken.0.as_str(), broken.1), ("failed", None));
+    assert!(broken.3.unwrap().contains("exit code 128"));
+    // Removing: the row goes.
+    let op = match p
+        .ops
+        .enqueue(&Request::new(
+            node.id,
+            Operation::RemoveGitDeploy {
+                tenant_id: tenant,
+                username: "gus".into(),
+                name: "site".into(),
+            },
+            "gd-remove".to_owned(),
+        ))
+        .await
+        .unwrap()
+    {
+        dhpanel_operations::Enqueued::Created(op) | dhpanel_operations::Enqueued::Existing(op) => {
+            op.id
+        }
+    };
+    sqlx::query("UPDATE git_deploys SET op_id = $2, status = 'removing' WHERE id = $1")
+        .bind(ids[0])
+        .bind(op)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let mut gone = None;
+    for _ in 0..100 {
+        d.settle_git_deploys().await;
+        gone = state(pool.clone(), "site").await;
+        if gone.is_none() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert_eq!(gone, None);
+    agent_stop.send(true).unwrap();
+    agent.await.unwrap();
+}

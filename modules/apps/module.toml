@@ -15,7 +15,7 @@ admin_nav  = { group = "Hosting", order = 40, icon = "layers" }
 client_nav = { group = "Apps", order = 10, icon = "layers" }
 
 [features]
-keys = ["cache", "runtime_apps"]
+keys = ["cache", "runtime_apps", "git_deploy"]
 
 # Memory all of an account's cache servers together may use, in MiB (a plan without this key
 # gets the default).
@@ -26,3 +26,6 @@ cache_memory_mb = { type = "int", default = 64, unlimited = -1 }
 # use together, in MiB (a plan without these keys gets the defaults).
 max_runtime_apps  = { type = "int", default = 3, unlimited = -1 }
 runtime_memory_mb = { type = "int", default = 1024, unlimited = -1 }
+
+# Sites and applications deployed from a git repository.
+max_git_deploys   = { type = "int", default = 5, unlimited = -1 }

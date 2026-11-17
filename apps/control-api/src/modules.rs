@@ -567,8 +567,8 @@ pub fn mount(
                         };
                         ModuleRoutes {
                             admin: Some(dhpanel_mod_apps::admin_router().with_state(state.clone())),
-                            client: Some(dhpanel_mod_apps::client_router().with_state(state)),
-                            ..ModuleRoutes::none()
+                            client: Some(dhpanel_mod_apps::client_router().with_state(state.clone())),
+                            public: Some(dhpanel_mod_apps::public_router().with_state(state)),
                         }
                     })
                 }

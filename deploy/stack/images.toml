@@ -151,3 +151,11 @@ version   = "3.12"
 reference = "python@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b"
 tag       = "3.12-slim"
 note      = "Python 3.12.16, Debian slim"
+
+# Git, run in a one-off container to fetch a repository for a tenant's deploy (T12.09). It runs
+# as the tenant's own user; the repository is fetched over http(s) only.
+[[image]]
+role      = "git"
+reference = "alpine/git@sha256:2306e2b05ee0ef99f5d25b0779f645b24ae9f91ba187107503592fcdfe78da3a"
+tag       = "latest"
+note      = "git 2.54 on Alpine"

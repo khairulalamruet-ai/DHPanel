@@ -18098,6 +18098,291 @@
         ]
       }
     },
+    "/api/v1/client/git-deploys": {
+      "get": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "The account's deploys.",
+        "operationId": "clientListGitDeploys",
+        "responses": {
+          "200": {
+            "description": "The deploys",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitDeployList"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only` or `feature_disabled`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "Make a deploy: the repository, the branch, how it is built and where it goes. The answer\nhas the webhook's secret, shown only this once.",
+        "operationId": "clientCreateGitDeploy",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateGitDeploy"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Made (and queued unless `deploy_now` is false)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitDeployView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only` or `feature_disabled`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`limit_reached`, `deploy_taken` or `tenant_not_running`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid input",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/git-deploys/{id}": {
+      "delete": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "Remove a deploy (the releases and the link stay in your files).",
+        "operationId": "clientRemoveGitDeploy",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Deploy id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Queued"
+          },
+          "404": {
+            "description": "No such deploy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/git-deploys/{id}/deploy": {
+      "post": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "Deploy again now.",
+        "operationId": "clientRunGitDeploy",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Deploy id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitDeployView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such deploy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`deploy_running`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/git-deploys/{id}/webhook-secret": {
+      "post": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "Make a new webhook secret (the old one stops working); it is shown once, in the answer.",
+        "operationId": "clientRotateGitWebhookSecret",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Deploy id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The deploy with its new secret",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitDeployView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such deploy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/client/imports": {
       "get": {
         "tags": [
@@ -20449,6 +20734,59 @@
         }
       }
     },
+    "/api/v1/public/git-webhook/{id}": {
+      "post": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "A push to the repository starts the deploy. Signed with the deploy's secret; a push to\nanother branch, a ping, or a deploy that is already running starts nothing.",
+        "operationId": "gitWebhook",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Deploy id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Answered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookAnswer"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "A deploy was started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookAnswer"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`bad_signature`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/public/health": {
       "get": {
         "tags": [
@@ -22750,6 +23088,83 @@
         },
         "additionalProperties": false
       },
+      "CreateGitDeploy": {
+        "type": "object",
+        "description": "A deploy to make.",
+        "required": [
+          "name",
+          "repo_url",
+          "dest"
+        ],
+        "properties": {
+          "app_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "One of the account's applications (see `/runtime-apps`) to restart after each deploy."
+          },
+          "branch": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The branch (default `main`)."
+          },
+          "build_kind": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`node` or `python`; needed when there are build steps."
+          },
+          "build_steps": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Commands that build the release, one line each, words without a shell\n(for example `npm ci`, `npm run build`). At most 5."
+          },
+          "build_version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The runtime's version (the newest when not given)."
+          },
+          "deploy_now": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Deploy at once (default: yes)."
+          },
+          "dest": {
+            "type": "string",
+            "description": "The folder below the web directory that becomes the link to the release in use (it must\nnot exist as a real folder yet)."
+          },
+          "name": {
+            "type": "string",
+            "description": "Short name (2-32 of a-z, 0-9, `-`)."
+          },
+          "repo_url": {
+            "type": "string",
+            "description": "The repository: `https://…`, without a login."
+          },
+          "token": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A token for a private repository (`token`, or `user:token`)."
+          }
+        },
+        "additionalProperties": false
+      },
       "CreatePackage": {
         "type": "object",
         "description": "A package to create.",
@@ -24389,6 +24804,145 @@
           "status": {
             "type": "string",
             "description": "`pending`, `ready`, `failed` or `deleting`."
+          }
+        }
+      },
+      "GitDeployList": {
+        "type": "object",
+        "description": "The account's deploys.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GitDeployView"
+            },
+            "description": "The deploys."
+          },
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "How many the plan allows; `None` when unlimited."
+          }
+        }
+      },
+      "GitDeployView": {
+        "type": "object",
+        "description": "A deploy of the account.",
+        "required": [
+          "id",
+          "name",
+          "repo_url",
+          "branch",
+          "dest",
+          "build_steps",
+          "has_token",
+          "status",
+          "webhook_path"
+        ],
+        "properties": {
+          "app_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The application restarted after a deploy."
+          },
+          "branch": {
+            "type": "string",
+            "description": "The branch."
+          },
+          "build_kind": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The runtime of the build."
+          },
+          "build_steps": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The build steps."
+          },
+          "build_version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The runtime's version."
+          },
+          "dest": {
+            "type": "string",
+            "description": "The folder (below the web directory) that links to the release in use."
+          },
+          "has_token": {
+            "type": "boolean",
+            "description": "Whether a token for a private repository is kept."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Id."
+          },
+          "last_commit": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The commit that is live."
+          },
+          "last_deployed_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "When the last deploy went live (Unix seconds)."
+          },
+          "last_error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the last deploy failed."
+          },
+          "last_log": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The end of the last deploy's log."
+          },
+          "name": {
+            "type": "string",
+            "description": "Short name."
+          },
+          "repo_url": {
+            "type": "string",
+            "description": "The repository."
+          },
+          "status": {
+            "type": "string",
+            "description": "`idle`, `deploying`, `ok`, `failed` or `removing`."
+          },
+          "webhook_path": {
+            "type": "string",
+            "description": "The address the repository's host calls on a push."
+          },
+          "webhook_secret": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The webhook's secret: only in the answer that made it (or made a new one)."
           }
         }
       },
@@ -30172,6 +30726,26 @@
           "state": {
             "type": "string",
             "description": "`queued`, `running`, `done` or `failed`."
+          }
+        }
+      },
+      "WebhookAnswer": {
+        "type": "object",
+        "description": "What the webhook answers.",
+        "required": [
+          "deployed"
+        ],
+        "properties": {
+          "deployed": {
+            "type": "boolean",
+            "description": "Whether a deploy was started."
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why not, when not."
           }
         }
       },

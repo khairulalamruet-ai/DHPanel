@@ -1,0 +1,225 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, tenant_id, name, repo_url, branch, dest, build_steps, build_kind,\n                  build_version, app_id, sealed_token, sealed_webhook, status, op_id,\n                  last_commit, last_log, last_error,\n                  extract(epoch FROM last_deployed_at)::bigint AS last_deployed_at\n           FROM git_deploys WHERE op_id IS NOT NULL AND status IN ('deploying', 'removing')",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "git_deploys",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "git_deploys",
+            "name": "tenant_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "git_deploys",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "repo_url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "git_deploys",
+            "name": "repo_url"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "branch",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "git_deploys",
+            "name": "branch"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "dest",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "git_deploys",
+            "name": "dest"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "build_steps",
+        "type_info": "TextArray",
+        "origin": {
+          "Table": {
+            "table": "git_deploys",
+            "name": "build_steps"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "build_kind",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "git_deploys",
+            "name": "build_kind"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "build_version",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "git_deploys",
+            "name": "build_version"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "app_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "git_deploys",
+            "name": "app_id"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "sealed_token",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "git_deploys",
+            "name": "sealed_token"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "sealed_webhook",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "git_deploys",
+            "name": "sealed_webhook"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "git_deploys",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "op_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "git_deploys",
+            "name": "op_id"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "last_commit",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "git_deploys",
+            "name": "last_commit"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "last_log",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "git_deploys",
+            "name": "last_log"
+          }
+        }
+      },
+      {
+        "ordinal": 16,
+        "name": "last_error",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "git_deploys",
+            "name": "last_error"
+          }
+        }
+      },
+      {
+        "ordinal": 17,
+        "name": "last_deployed_at",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      null
+    ]
+  },
+  "hash": "db39f7c804e4b9d7e6169b4b10256ab05cd578836a3dc6bb33843a06585a23aa"
+}

@@ -74,7 +74,13 @@ async fn env(pool: &PgPool) -> Env {
                     wait: std::time::Duration::from_millis(300),
                     catalog: std::sync::Arc::new(dhpanel_catalog::Catalog::embedded().unwrap()),
                 })),
-                ..ModuleRoutes::none()
+                public: Some(dhpanel_mod_apps::public_router().with_state(AppsState {
+                    db: pool.clone(),
+                    sessions: sessions.clone(),
+                    master_key: dhpanel_auth_core::secretbox::MasterKey::from_bytes(&[42; 32]),
+                    wait: std::time::Duration::from_millis(300),
+                    catalog: std::sync::Arc::new(dhpanel_catalog::Catalog::embedded().unwrap()),
+                })),
             }
         }),
     });
@@ -1194,4 +1200,293 @@ async fn domain_of(pool: &PgPool, account: Uuid, fqdn: &str) -> Uuid {
         .await
         .unwrap();
     domain(pool, tenant, fqdn).await
+}
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn a_deploy_from_git_is_asked_for_by_the_owner_and_started_by_a_signed_push(pool: PgPool) {
+    use axum::{body::Body, http::Request};
+    use tower::ServiceExt as _;
+    let e = env(&pool).await;
+    let (alice_account, alice) = client(&pool, "alice", 10_000).await;
+    let (bob_account, _bob) = client(&pool, "bob", 10_001).await;
+    let a = e.sign_in(alice_account).await;
+    let b = e.sign_in(bob_account).await;
+    let path = "/api/v1/client/git-deploys";
+    sqlx::query("UPDATE feature_sets SET all_features = false, features = ARRAY['files']::feature_key[] WHERE id = (SELECT feature_set_id FROM plans WHERE is_default)").execute(&pool).await.unwrap();
+    let (status, body) = e.call(&a, "GET", path, None).await;
+    assert_eq!(
+        (status, body["code"].as_str()),
+        (StatusCode::FORBIDDEN, Some("feature_disabled"))
+    );
+    sqlx::query("UPDATE feature_sets SET features = features || ARRAY['git_deploy', 'runtime_apps']::feature_key[] WHERE id = (SELECT feature_set_id FROM plans WHERE is_default)").execute(&pool).await.unwrap();
+    sqlx::query("UPDATE tenants SET status = 'active'")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // Input that is not valid.
+    let ok = json!({"name": "site", "repo_url": "https://github.com/alice/site.git", "dest": "site",
+                    "build_steps": ["npm ci", "npm run build"], "build_kind": "node", "token": "ghp_secrettoken123"});
+    for (what, change) in [
+        ("name", json!({"name": "S"})),
+        (
+            "http",
+            json!({"repo_url": "http://github.com/alice/site.git"}),
+        ),
+        (
+            "login",
+            json!({"repo_url": "https://user:pw@github.com/alice/site.git"}),
+        ),
+        ("ssh", json!({"repo_url": "git@github.com:alice/site.git"})),
+        ("branch", json!({"branch": "--upload-pack=x"})),
+        ("dest", json!({"dest": "../etc"})),
+        ("release folder", json!({"dest": ".dh-releases/x"})),
+        (
+            "steps",
+            json!({"build_steps": ["a", "b", "c", "d", "e", "f"]}),
+        ),
+        ("quote", json!({"build_steps": ["npm 'x"]})),
+        ("kind", json!({"build_kind": "ruby"})),
+        ("version", json!({"build_version": "99"})),
+        ("app", json!({"app_id": Uuid::now_v7()})),
+        ("unknown field", json!({"privileged": true})),
+    ] {
+        let mut body = ok.clone();
+        for (k, v) in change.as_object().unwrap() {
+            body[k] = v.clone();
+        }
+        let (status, got) = e.call(&a, "POST", path, Some(body)).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{what}: {got}");
+    }
+
+    // A good one: queued, the webhook secret is shown once, the token and the secret are sealed.
+    let (status, made) = e.call(&a, "POST", path, Some(ok.clone())).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{made}");
+    assert_eq!(
+        (
+            made["status"].as_str(),
+            made["has_token"].as_bool(),
+            made["branch"].as_str()
+        ),
+        (Some("deploying"), Some(true), Some("main"))
+    );
+    let id = made["id"].as_str().unwrap().to_owned();
+    let secret = made["webhook_secret"]
+        .as_str()
+        .expect("shown once")
+        .to_owned();
+    assert!(secret.len() >= 32);
+    assert_eq!(
+        made["webhook_path"],
+        format!("/api/v1/public/git-webhook/{id}")
+    );
+    let payload: String =
+        sqlx::query_scalar("SELECT payload::text FROM operations WHERE kind = 'run_git_deploy'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(
+        !payload.contains("ghp_secrettoken123") && !payload.contains(&secret),
+        "{payload}"
+    );
+    assert!(
+        payload.contains("\"npm\"") && payload.contains("\"build\""),
+        "the steps are split into words: {payload}"
+    );
+    let (_, again) = e.call(&a, "GET", path, None).await;
+    assert!(
+        again["items"][0]["webhook_secret"].is_null(),
+        "not shown again"
+    );
+    assert_eq!(again["limit"], 5);
+    // The same name or folder twice; a deploy that is running cannot be started again.
+    let (status, got) = e.call(&a, "POST", path, Some(ok.clone())).await;
+    assert_eq!(
+        (status, got["code"].as_str()),
+        (StatusCode::CONFLICT, Some("deploy_taken")),
+        "{got}"
+    );
+    let (status, got) = e
+        .call(&a, "POST", &format!("{path}/{id}/deploy"), None)
+        .await;
+    assert_eq!(
+        (status, got["code"].as_str()),
+        (StatusCode::CONFLICT, Some("deploy_running")),
+        "{got}"
+    );
+
+    // Another account sees none of it.
+    let (_, theirs) = e.call(&b, "GET", path, None).await;
+    assert_eq!(theirs["items"].as_array().unwrap().len(), 0);
+    for (method, p) in [
+        ("POST", format!("{path}/{id}/deploy")),
+        ("POST", format!("{path}/{id}/webhook-secret")),
+        ("DELETE", format!("{path}/{id}")),
+    ] {
+        let (status, got) = e.call(&b, method, &p, None).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{method}: {got}");
+    }
+
+    // The webhook: no session, the signature is the proof.
+    sqlx::query("UPDATE git_deploys SET status = 'idle', op_id = NULL")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let push = |headers: Vec<(&'static str, String)>, body: String| {
+        let app = e.app.clone();
+        let uri = format!("/api/v1/public/git-webhook/{id}");
+        async move {
+            let mut req = Request::builder().method("POST").uri(uri);
+            for (k, v) in headers {
+                req = req.header(k, v);
+            }
+            let res = app
+                .oneshot(req.body(Body::from(body)).unwrap())
+                .await
+                .unwrap();
+            let status = res.status();
+            let bytes = axum::body::to_bytes(res.into_body(), 1 << 16)
+                .await
+                .unwrap();
+            (
+                status,
+                serde_json::from_slice::<serde_json::Value>(&bytes).unwrap_or_default(),
+            )
+        }
+    };
+    let sign = |secret: &str, body: &str| {
+        let key = ring::hmac::Key::new(ring::hmac::HMAC_SHA256, secret.as_bytes());
+        let hex: String = ring::hmac::sign(&key, body.as_bytes())
+            .as_ref()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        vec![
+            ("x-hub-signature-256", format!("sha256={hex}")),
+            ("x-github-event", "push".to_owned()),
+        ]
+    };
+    let on_main = r#"{"ref":"refs/heads/main"}"#.to_owned();
+    let (status, got) = push(vec![], on_main.clone()).await;
+    assert_eq!(
+        (status, got["code"].as_str()),
+        (StatusCode::UNAUTHORIZED, Some("bad_signature")),
+        "{got}"
+    );
+    let (status, _) = push(sign("not-the-secret", &on_main), on_main.clone()).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let before: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM operations WHERE kind = 'run_git_deploy'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    // Another branch, a ping: nothing starts.
+    let other = r#"{"ref":"refs/heads/dev"}"#.to_owned();
+    let (status, got) = push(sign(&secret, &other), other.clone()).await;
+    assert_eq!(
+        (status, got["deployed"].as_bool(), got["reason"].as_str()),
+        (StatusCode::OK, Some(false), Some("another branch"))
+    );
+    let mut ping = sign(&secret, "{}");
+    ping[1] = ("x-github-event", "ping".to_owned());
+    let (status, got) = push(ping, "{}".to_owned()).await;
+    assert_eq!(
+        (status, got["deployed"].as_bool()),
+        (StatusCode::OK, Some(false))
+    );
+    let after: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM operations WHERE kind = 'run_git_deploy'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(before, after);
+    // A push to the branch starts it; a second one while it runs does not.
+    let (status, got) = push(sign(&secret, &on_main), on_main.clone()).await;
+    assert_eq!(
+        (status, got["deployed"].as_bool()),
+        (StatusCode::ACCEPTED, Some(true)),
+        "{got}"
+    );
+    let (status, got) = push(sign(&secret, &on_main), on_main.clone()).await;
+    assert_eq!(
+        (status, got["deployed"].as_bool(), got["reason"].as_str()),
+        (StatusCode::OK, Some(false), Some("a deploy is running"))
+    );
+    // GitLab's way.
+    sqlx::query("UPDATE git_deploys SET status = 'idle', op_id = NULL")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, got) = push(vec![("x-gitlab-token", secret.clone())], on_main.clone()).await;
+    assert_eq!(
+        (status, got["deployed"].as_bool()),
+        (StatusCode::ACCEPTED, Some(true)),
+        "{got}"
+    );
+    // A deploy that does not exist answers like a wrong signature.
+    let (status, _) = e
+        .call(
+            &a,
+            "POST",
+            &format!("{path}/{}/deploy", Uuid::now_v7()),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // A new secret: the old one stops working.
+    sqlx::query("UPDATE git_deploys SET status = 'idle', op_id = NULL")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, rotated) = e
+        .call(&a, "POST", &format!("{path}/{id}/webhook-secret"), None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{rotated}");
+    let new_secret = rotated["webhook_secret"].as_str().unwrap().to_owned();
+    assert_ne!(new_secret, secret);
+    let (status, _) = push(sign(&secret, &on_main), on_main.clone()).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, _) = push(sign(&new_secret, &on_main), on_main.clone()).await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+
+    // A suspended account's push does nothing.
+    sqlx::query("UPDATE git_deploys SET status = 'idle', op_id = NULL")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE tenants SET status = 'suspended' WHERE id = $1")
+        .bind(alice)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, got) = push(sign(&new_secret, &on_main), on_main.clone()).await;
+    assert_eq!(
+        (status, got["deployed"].as_bool()),
+        (StatusCode::OK, Some(false))
+    );
+    sqlx::query("UPDATE tenants SET status = 'active' WHERE id = $1")
+        .bind(alice)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // Removal is queued.
+    sqlx::query("UPDATE git_deploys SET status = 'idle', op_id = NULL")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, _) = e.call(&a, "DELETE", &format!("{path}/{id}"), None).await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    let (kind, st): (String, String) = sqlx::query_as(
+        "SELECT o.kind, g.status FROM git_deploys g JOIN operations o ON o.id = g.op_id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        (kind.as_str(), st.as_str()),
+        ("remove_git_deploy", "removing")
+    );
 }

@@ -184,7 +184,7 @@ impl Dispatcher {
                 _ = tick.tick() => { self.tick().await; }
                 _ = capabilities.tick() => { self.request_capabilities().await; }
                 _ = purges.tick() => { self.request_purges().await; }
-                _ = routes.tick() => { self.expire_previews().await; self.request_route_syncs().await; self.request_error_pages().await; self.request_user_agents().await; self.request_firewalls().await; self.request_scans().await; self.request_signature_updates().await; self.request_image_checks().await; self.request_app_installs().await; self.settle_cache_instances().await; self.settle_runtime_apps().await; self.request_import_progress().await; self.request_cron_runs().await; self.request_metrics().await; self.request_services().await; }
+                _ = routes.tick() => { self.expire_previews().await; self.request_route_syncs().await; self.request_error_pages().await; self.request_user_agents().await; self.request_firewalls().await; self.request_scans().await; self.request_signature_updates().await; self.request_image_checks().await; self.request_app_installs().await; self.settle_cache_instances().await; self.settle_runtime_apps().await; self.settle_git_deploys().await; self.request_import_progress().await; self.request_cron_runs().await; self.request_metrics().await; self.request_services().await; }
                 _ = certificates.tick() => { self.request_certificates().await; self.request_db_sizes().await; }
                 _ = expiry.tick() => { self.announce_expiring().await; }
                 Some(report) = results.recv() => self.handle_result(report).await,
@@ -1057,6 +1057,66 @@ impl Dispatcher {
             match result {
                 Ok(()) => moved += 1,
                 Err(err) => tracing::warn!(error = %err, "could not keep an application's state"),
+            }
+        }
+        moved
+    }
+
+    /// Writes down what the nodes answered about deploys from git (T12.09): a release that is
+    /// live (with its commit and the end of its log), a deploy that failed (with the reason), a
+    /// deploy that was removed leaves the table. Returns how many rows moved.
+    pub async fn settle_git_deploys(&self) -> usize {
+        let db = self.ops.db();
+        let rows = match dhpanel_database::git_deploys::awaiting(db).await {
+            Ok(r) => r,
+            Err(err) => {
+                tracing::warn!(error = %err, "could not look for deploys under way");
+                return 0;
+            }
+        };
+        let mut moved = 0;
+        for row in rows {
+            let Some(op_id) = row.op_id else { continue };
+            let Ok(Some(op)) = self.ops.get(op_id).await else {
+                continue;
+            };
+            let result = match op.status {
+                dhpanel_database::operations::Status::Succeeded if row.status == "removing" => {
+                    dhpanel_database::git_deploys::forget(db, row.id).await
+                }
+                dhpanel_database::operations::Status::Succeeded => {
+                    let answer = op.output.and_then(|o| {
+                        serde_json::from_value::<dhpanel_node_protocol::Output>(o).ok()
+                    });
+                    match answer {
+                        Some(dhpanel_node_protocol::Output::GitDeployed { commit, log }) => {
+                            dhpanel_database::git_deploys::deployed(db, row.id, &commit, &log).await
+                        }
+                        _ => {
+                            dhpanel_database::git_deploys::failed(
+                                db,
+                                row.id,
+                                "the node's answer is unreadable",
+                            )
+                            .await
+                        }
+                    }
+                }
+                dhpanel_database::operations::Status::Failed => {
+                    let message = op
+                        .error
+                        .as_ref()
+                        .and_then(|e| e.get("message"))
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("the node could not do it")
+                        .to_owned();
+                    dhpanel_database::git_deploys::failed(db, row.id, &message).await
+                }
+                _ => continue,
+            };
+            match result {
+                Ok(()) => moved += 1,
+                Err(err) => tracing::warn!(error = %err, "could not keep a deploy's state"),
             }
         }
         moved

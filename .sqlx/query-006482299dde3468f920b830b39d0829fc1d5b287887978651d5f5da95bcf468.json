@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT sealed_webhook FROM git_deploys WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "sealed_webhook",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "git_deploys",
+            "name": "sealed_webhook"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "006482299dde3468f920b830b39d0829fc1d5b287887978651d5f5da95bcf468"
+}

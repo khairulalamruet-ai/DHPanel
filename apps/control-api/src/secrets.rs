@@ -194,6 +194,57 @@ pub fn operation_secrets(
                         password,
                     });
                 }
+                // The token for a private repository: sealed by the API, opened here for
+                // this one message.
+                Operation::RunGitDeploy {
+                    deploy_id,
+                    tenant_id,
+                    username,
+                    uid,
+                    name,
+                    repo_url,
+                    branch,
+                    dest,
+                    build_kind,
+                    build_version,
+                    build_steps,
+                    restart_app,
+                    token: None,
+                } => {
+                    let sealed = dhpanel_database::git_deploys::sealed_token(&db, deploy_id)
+                        .await
+                        .map_err(|_| "could not read a deploy's token".to_owned())?;
+                    let token = match sealed {
+                        None => None,
+                        Some(sealed) => {
+                            let bytes = master_key
+                                .open(
+                                    &dhpanel_database::git_deploys::token_context(deploy_id),
+                                    &sealed,
+                                )
+                                .map_err(|_| "a deploy's token does not open".to_owned())?;
+                            Some(dhpanel_node_protocol::DbPassword(
+                                String::from_utf8(bytes)
+                                    .map_err(|_| "a deploy's token is not text".to_owned())?,
+                            ))
+                        }
+                    };
+                    return Ok(Operation::RunGitDeploy {
+                        deploy_id,
+                        tenant_id,
+                        username,
+                        uid,
+                        name,
+                        repo_url,
+                        branch,
+                        dest,
+                        build_kind,
+                        build_version,
+                        build_steps,
+                        restart_app,
+                        token,
+                    });
+                }
                 // An application's environment: sealed by the API, opened here for this one
                 // message.
                 Operation::SetRuntimeApp {
@@ -602,5 +653,95 @@ mod tests {
             .await
             .unwrap();
         assert!(fill(op).await.is_err());
+    }
+
+    /// The token of a private repository is not in the ledger and is opened for the one message.
+    #[sqlx::test(migrations = "../../migrations")]
+    #[ignore = "needs PostgreSQL"]
+    async fn a_deploys_token_is_put_back_when_the_operation_is_sent(pool: PgPool) {
+        let key = MasterKey::from_bytes(&[9u8; 32]);
+        let account: Uuid = sqlx::query_scalar(
+            "INSERT INTO accounts (kind, username, email, password_hash)
+             VALUES ('client', 'gus', 'gus@example.com',
+                     '$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHQ$aGFzaGhhc2hoYXNoaGFzaA')
+             RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let node: Uuid =
+            sqlx::query_scalar("INSERT INTO nodes (name) VALUES ('node1') RETURNING id")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let plan: Uuid = sqlx::query_scalar("SELECT id FROM plans WHERE is_default")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let tenant: Uuid = sqlx::query_scalar(
+            "INSERT INTO tenants (owner_account_id, node_id, plan_id, username, uid, status)
+             VALUES ($1, $2, $3, 'gus', 10007, 'active') RETURNING id",
+        )
+        .bind(account)
+        .bind(node)
+        .bind(plan)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let deploy: Uuid = sqlx::query_scalar(
+            "INSERT INTO git_deploys (tenant_id, name, repo_url, dest, sealed_webhook)
+             VALUES ($1, 'site', 'https://git.example.com/a/b.git', 'site', '\\x00') RETURNING id",
+        )
+        .bind(tenant)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let sealed = key
+            .seal(
+                &dhpanel_database::git_deploys::token_context(deploy),
+                b"ghp_tokenvalue",
+            )
+            .unwrap();
+        sqlx::query("UPDATE git_deploys SET sealed_token = $2 WHERE id = $1")
+            .bind(deploy)
+            .bind(&sealed)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let op = Operation::RunGitDeploy {
+            deploy_id: deploy,
+            tenant_id: tenant,
+            username: "gus".into(),
+            uid: 10_007,
+            name: "site".into(),
+            repo_url: "https://git.example.com/a/b.git".into(),
+            branch: "main".into(),
+            dest: "site".into(),
+            build_kind: None,
+            build_version: None,
+            build_steps: Vec::new(),
+            restart_app: None,
+            token: None,
+        };
+        let Operation::RunGitDeploy { token, .. } =
+            operation_secrets(pool.clone(), key.clone())(op.clone())
+                .await
+                .unwrap()
+        else {
+            panic!("the same kind of operation");
+        };
+        assert_eq!(token.map(|t| t.0), Some("ghp_tokenvalue".to_owned()));
+        // Without a token the message goes without one.
+        sqlx::query("UPDATE git_deploys SET sealed_token = NULL WHERE id = $1")
+            .bind(deploy)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let Operation::RunGitDeploy { token, .. } =
+            operation_secrets(pool.clone(), key)(op).await.unwrap()
+        else {
+            panic!("the same kind of operation");
+        };
+        assert!(token.is_none());
     }
 }

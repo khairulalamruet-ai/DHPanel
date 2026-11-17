@@ -1346,6 +1346,7 @@ dependencies = [
  "dhpanel-rbac",
  "dhpanel-session",
  "dhpanel-tenant-stack",
+ "ring",
  "secrecy",
  "serde",
  "serde_json",
