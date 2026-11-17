@@ -2263,6 +2263,7 @@ async fn an_application_is_ready_when_the_node_says_so_failed_with_its_reason_an
                     port: 3000,
                     memory_mb: 256,
                     env: None,
+                    image: None,
                 },
                 format!("rt-{name}"),
             ))

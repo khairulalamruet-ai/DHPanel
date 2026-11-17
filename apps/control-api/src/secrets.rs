@@ -261,6 +261,7 @@ pub fn operation_secrets(
                     port,
                     memory_mb,
                     env: None,
+                    image,
                 } => {
                     let sealed = dhpanel_database::runtime_apps::sealed_env(&db, app_id)
                         .await
@@ -298,6 +299,7 @@ pub fn operation_secrets(
                         port,
                         memory_mb,
                         env: Some(dhpanel_node_protocol::RuntimeEnv(env)),
+                        image,
                     });
                 }
                 // A WordPress user's new password: sealed by the API, opened here for this
@@ -629,6 +631,7 @@ mod tests {
             port: 3000,
             memory_mb: 256,
             env: None,
+            image: None,
         };
         let fill = operation_secrets(pool.clone(), key.clone());
         let Operation::SetRuntimeApp { env, .. } = fill(op.clone()).await.unwrap() else {

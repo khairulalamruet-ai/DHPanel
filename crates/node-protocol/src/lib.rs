@@ -2016,9 +2016,9 @@ pub enum Operation {
         username: String,
         /// The tenant's numeric user id.
         uid: u32,
-        /// `node` or `python`.
+        /// `node`, `python` or `container`.
         kind: String,
-        /// The runtime's version (`24`, `3.13`).
+        /// The runtime's version (`24`, `3.13`); `0` for a container.
         version: String,
         /// The application's short name.
         name: String,
@@ -2035,6 +2035,10 @@ pub enum Operation {
         /// Its environment; absent in the ledger, present on the wire.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         env: Option<RuntimeEnv>,
+        /// For `kind` `container`: the approved image to run, `repo@sha256:<digest>`. The
+        /// image's own start-up is used (no command), without the account's files.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        image: Option<String>,
     },
     /// Deploys a site or an application from a git repository: fetches `branch` of the
     /// repository over http(s) into a new release folder (`.dh-releases/<name>/<time>` below the
@@ -3924,6 +3928,7 @@ mod tests {
                 port: 3000,
                 memory_mb: 256,
                 env: None,
+                image: None,
             },
             Operation::RemoveRuntimeApp {
                 tenant_id: id(),

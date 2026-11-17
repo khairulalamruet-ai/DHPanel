@@ -1229,6 +1229,226 @@
         ]
       }
     },
+    "/api/v1/admin/container-images": {
+      "get": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "The catalog, with each image's reference.",
+        "operationId": "adminListContainerImages",
+        "responses": {
+          "200": {
+            "description": "The catalog",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ImageView"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "Approve an image.",
+        "operationId": "adminAddContainerImage",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetImage"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Added",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageView"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`image_taken`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid input",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/container-images/{id}": {
+      "put": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "Change what clients see of an image, or stop offering it (running containers keep running).",
+        "operationId": "adminChangeContainerImage",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Image id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetImage"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Changed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such image",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`image_taken`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid input",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "Remove an image no container runs.",
+        "operationId": "adminRemoveContainerImage",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Image id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed"
+          },
+          "404": {
+            "description": "No such image",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`image_in_use`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/databases/biggest": {
       "get": {
         "tags": [
@@ -12924,6 +13144,246 @@
         ]
       }
     },
+    "/api/v1/client/container-apps": {
+      "get": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "The account's containers.",
+        "operationId": "clientListContainerApps",
+        "responses": {
+          "200": {
+            "description": "The containers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ContainerView"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only` or `feature_disabled`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "Run a container from an approved image.",
+        "operationId": "clientCreateContainerApp",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateContainer"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContainerView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only` or `feature_disabled`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`limit_reached`, `app_taken` or `tenant_not_running`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid input, or a field that is not allowed (for example `privileged` or a mount)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/container-apps/{id}": {
+      "put": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "Change a container and run it again with the changes.",
+        "operationId": "clientChangeContainerApp",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Container id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangeContainer"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContainerView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such container",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`limit_reached`, `app_taken` or `tenant_not_running`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid input",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/container-images": {
+      "get": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "The images a client may run.",
+        "operationId": "clientListContainerImages",
+        "responses": {
+          "200": {
+            "description": "The approved images",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ImageView"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only` or `feature_disabled`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/client/containers/{name}/restart": {
       "post": {
         "tags": [
@@ -23006,6 +23466,58 @@
           }
         }
       },
+      "ChangeContainer": {
+        "type": "object",
+        "description": "Changes to a container (it is run again with them).",
+        "properties": {
+          "domain_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The domain that shows it."
+          },
+          "env": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "The environment; when given it replaces the whole environment.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "image_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Another approved image."
+          },
+          "memory_mb": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Memory limit in MiB."
+          },
+          "port": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The port it listens on."
+          }
+        },
+        "additionalProperties": false
+      },
       "ChangeDestination": {
         "type": "object",
         "description": "What to change; what is left out stays.",
@@ -23291,6 +23803,87 @@
         },
         "additionalProperties": false
       },
+      "ContainerView": {
+        "type": "object",
+        "description": "A container of the account.",
+        "required": [
+          "id",
+          "name",
+          "port",
+          "memory_mb",
+          "env_names",
+          "status"
+        ],
+        "properties": {
+          "domain": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "That domain's name."
+          },
+          "domain_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The domain that shows it."
+          },
+          "env_names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The names of its environment variables (the values are never shown)."
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it failed."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Id (the application's)."
+          },
+          "image": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The image's name."
+          },
+          "image_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The image's id."
+          },
+          "memory_mb": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Memory limit, MiB."
+          },
+          "name": {
+            "type": "string",
+            "description": "Short name."
+          },
+          "port": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The port it listens on."
+          },
+          "status": {
+            "type": "string",
+            "description": "`pending`, `ready`, `failed` or `removing`."
+          }
+        }
+      },
       "CreateAdministrator": {
         "type": "object",
         "description": "New administrator.",
@@ -23375,6 +23968,63 @@
           "username": {
             "type": "string",
             "description": "Login name."
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreateContainer": {
+        "type": "object",
+        "description": "A container to run. Nothing here lets a client widen what the container may do: there is no\nfield for it, and an unknown field is refused.",
+        "required": [
+          "name",
+          "image_id"
+        ],
+        "properties": {
+          "domain_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The domain that shows it (one of the account's; one application each)."
+          },
+          "env": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "The environment, name to value.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "image_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The approved image (see `/container-images`)."
+          },
+          "memory_mb": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Memory limit in MiB; the image's own when left out."
+          },
+          "name": {
+            "type": "string",
+            "description": "Short name (2-32 of a-z, 0-9, `-`)."
+          },
+          "port": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The port it listens on; the image's own when left out."
           }
         },
         "additionalProperties": false
@@ -25425,91 +26075,49 @@
       },
       "ImageView": {
         "type": "object",
-        "description": "An image of the allow-list and what is known about it.",
+        "description": "An approved image.",
         "required": [
-          "reference",
-          "role",
+          "id",
+          "name",
+          "default_port",
+          "default_memory_mb",
           "note",
-          "update_available"
+          "enabled"
         ],
         "properties": {
-          "checked_at": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64",
-            "description": "When the registry was asked (Unix seconds)."
-          },
-          "critical": {
-            "type": [
-              "integer",
-              "null"
-            ],
+          "default_memory_mb": {
+            "type": "integer",
             "format": "int32",
-            "description": "Findings by severity (`null`: not scanned)."
+            "description": "The memory it starts with (MiB)."
           },
-          "high": {
-            "type": [
-              "integer",
-              "null"
-            ],
+          "default_port": {
+            "type": "integer",
             "format": "int32",
-            "description": "Findings by severity."
+            "description": "The port it listens on."
           },
-          "latest_digest": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "What the registry says the tag is now."
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether clients may choose it."
           },
-          "low": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int32",
-            "description": "Findings by severity."
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Id."
           },
-          "medium": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int32",
-            "description": "Findings by severity."
+          "name": {
+            "type": "string",
+            "description": "What clients see."
           },
           "note": {
             "type": "string",
-            "description": "What it is."
+            "description": "A note for clients."
           },
           "reference": {
-            "type": "string",
-            "description": "The pinned reference (`name@sha256:…`)."
-          },
-          "role": {
-            "type": "string",
-            "description": "The role it plays (`web`, `php`, `db`, …)."
-          },
-          "scanned_at": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64",
-            "description": "When it was scanned (Unix seconds); `null`: not yet."
-          },
-          "tag": {
             "type": [
               "string",
               "null"
             ],
-            "description": "The moving tag it was pinned from."
-          },
-          "update_available": {
-            "type": "boolean",
-            "description": "A newer image exists: the tag now has another digest than the pin."
+            "description": "`repo@sha256:<digest>`; shown to administrators only."
           }
         }
       },
@@ -29215,6 +29823,55 @@
             ],
             "format": "int32",
             "description": "Memory it may use, in MiB (64 when absent)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "SetImage": {
+        "type": "object",
+        "description": "An image to approve, or the changes to one.",
+        "required": [
+          "name",
+          "default_port"
+        ],
+        "properties": {
+          "default_memory_mb": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The memory it starts with, MiB (32-4096; default 256)."
+          },
+          "default_port": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The port it listens on (1024-65535)."
+          },
+          "enabled": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether clients may choose it (default yes)."
+          },
+          "name": {
+            "type": "string",
+            "description": "What clients see (1-61 characters: letters, digits, space, `.`, `_`, `-`)."
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A note for clients (at most 500 characters)."
+          },
+          "reference": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`repo@sha256:<digest>`: pinned by digest. Not changeable: add another image instead."
           }
         },
         "additionalProperties": false

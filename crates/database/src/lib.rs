@@ -15,6 +15,7 @@ pub mod apps;
 pub mod backups;
 pub mod cache_instances;
 pub mod certificates;
+pub mod container_images;
 pub mod cron_jobs;
 pub mod databases;
 pub mod dns;

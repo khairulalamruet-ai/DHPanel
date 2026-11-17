@@ -110,6 +110,7 @@ async fn node_and_python_applications_run_on_the_tenants_network_and_answer_by_n
                 "GREETING".into(),
                 "it's \"quoted\" $(whoami) `id`".into(),
             )])),
+            image: None,
         }
     };
 

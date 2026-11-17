@@ -8,7 +8,7 @@ core       = false
 depends_on = ["auth", "rbac", "audit", "system", "plans", "users", "domains", "databases"]
 
 [permissions]
-keys = ["admin.apps.read"]
+keys = ["admin.apps.read", "admin.apps.manage"]
 
 [ui]
 admin_nav  = { group = "Hosting", order = 40, icon = "layers" }

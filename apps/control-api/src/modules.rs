@@ -945,6 +945,7 @@ mod tests {
             p::SecurityRead::KEY,
             p::SecurityManage::KEY,
             p::AppsRead::KEY,
+            p::AppsManage::KEY,
             p::LicenseRead::KEY,
             p::LicenseManage::KEY,
         ] {
@@ -952,7 +953,7 @@ mod tests {
         }
         assert_eq!(
             declared.len(),
-            34,
+            35,
             "a manifest declares a key the code does not know: {declared:?}"
         );
     }

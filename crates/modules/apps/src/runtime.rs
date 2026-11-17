@@ -38,9 +38,9 @@ use uuid::Uuid;
 use super::{AppsState, OPERATION_ATTEMPTS, OPERATION_TTL_SECS, bad, client_tenant, internal};
 
 /// Most applications an account has when its plan does not say.
-const DEFAULT_MAX_APPS: i64 = 3;
+pub(crate) const DEFAULT_MAX_APPS: i64 = 3;
 /// Memory all of an account's applications may use together, when its plan does not say (MiB).
-const DEFAULT_MEMORY_MB: i64 = 1024;
+pub(crate) const DEFAULT_MEMORY_MB: i64 = 1024;
 
 /// Routes with full paths; merged into the apps module's client router.
 pub fn router() -> Router<AppsState> {
@@ -96,7 +96,7 @@ pub struct RuntimeAppList {
     pub limit: Option<i64>,
 }
 
-async fn view_all(
+pub(crate) async fn view_all(
     state: &AppsState,
     rows: Vec<store::RuntimeApp>,
 ) -> Result<Vec<RuntimeAppView>, AppError> {
@@ -130,7 +130,7 @@ async fn view_all(
         .collect())
 }
 
-fn limit_of(plan: &plans::Plan, key: &str, default: i64) -> Option<i64> {
+pub(crate) fn limit_of(plan: &plans::Plan, key: &str, default: i64) -> Option<i64> {
     let value = plan
         .limits
         .get(key)
@@ -139,7 +139,7 @@ fn limit_of(plan: &plans::Plan, key: &str, default: i64) -> Option<i64> {
     (value >= 0).then_some(value)
 }
 
-async fn feature(
+pub(crate) async fn feature(
     state: &AppsState,
     who: &Principal,
 ) -> Result<(tenants::Tenant, plans::Plan), AppError> {
@@ -245,7 +245,7 @@ pub struct SetRuntimeApp {
     pub domain_id: Option<Uuid>,
 }
 
-fn check_env(env: &BTreeMap<String, String>) -> Result<(), AppError> {
+pub(crate) fn check_env(env: &BTreeMap<String, String>) -> Result<(), AppError> {
     if env.len() > 50 {
         return Err(bad("env", "At most 50 variables."));
     }
@@ -289,7 +289,7 @@ fn valid_dir(dir: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-' | b'/'))
 }
 
-fn valid_name(name: &str) -> bool {
+pub(crate) fn valid_name(name: &str) -> bool {
     (2..=32).contains(&name.len())
         && name.starts_with(|c: char| c.is_ascii_lowercase())
         && !name.ends_with('-')
@@ -348,15 +348,30 @@ pub async fn list(
 }
 
 /// Queues the node's work for an application, inside the caller's transaction.
-async fn queue_set(
+pub(crate) async fn queue_set(
     conn: &mut PgConnection,
     who: &Principal,
     tenant: &tenants::Tenant,
     app: &store::RuntimeApp,
     install: bool,
 ) -> Result<Uuid, AppError> {
-    let command =
-        split_command(&app.start_command, app.port).map_err(|why| bad("start_command", why))?;
+    // A container runs an approved image as it is: no command, no install, no files.
+    let image = if app.kind == "container" {
+        Some(
+            dhpanel_database::container_images::of_app(conn, app.id)
+                .await
+                .map_err(internal)?
+                .ok_or_else(|| bad("image_id", "The image of this container is gone."))?
+                .reference,
+        )
+    } else {
+        None
+    };
+    let command = if image.is_some() {
+        Vec::new()
+    } else {
+        split_command(&app.start_command, app.port).map_err(|why| bad("start_command", why))?
+    };
     let op = Operation::SetRuntimeApp {
         app_id: app.id,
         tenant_id: tenant.id,
@@ -371,6 +386,7 @@ async fn queue_set(
         port: u16::try_from(app.port).unwrap_or(3000),
         memory_mb: u32::try_from(app.memory_mb).unwrap_or(256),
         env: None,
+        image,
     };
     let payload = serde_json::to_value(&op).map_err(internal)?;
     let queued = operations::enqueue_in(
@@ -498,7 +514,7 @@ fn check(req: &SetRuntimeApp, existing: Option<&store::RuntimeApp>) -> Result<Ch
     })
 }
 
-fn write_error(e: store::WriteError) -> AppError {
+pub(crate) fn write_error(e: store::WriteError) -> AppError {
     match e {
         store::WriteError::Taken => AppError::conflict(
             "app_taken",
@@ -510,7 +526,11 @@ fn write_error(e: store::WriteError) -> AppError {
 }
 
 /// Seals an environment to an application.
-fn seal(state: &AppsState, id: Uuid, env: &BTreeMap<String, String>) -> Result<Vec<u8>, AppError> {
+pub(crate) fn seal(
+    state: &AppsState,
+    id: Uuid,
+    env: &BTreeMap<String, String>,
+) -> Result<Vec<u8>, AppError> {
     let json = serde_json::to_vec(env).map_err(internal)?;
     state
         .master_key
@@ -603,7 +623,7 @@ pub async fn create(
     answer(&state, &tenant, id, StatusCode::ACCEPTED).await
 }
 
-async fn load_in(
+pub(crate) async fn load_in(
     conn: &mut PgConnection,
     tenant_id: Uuid,
     id: Uuid,
@@ -614,7 +634,7 @@ async fn load_in(
         .ok_or_else(|| AppError::not_found("application"))
 }
 
-async fn answer(
+pub(crate) async fn answer(
     state: &AppsState,
     tenant: &tenants::Tenant,
     id: Uuid,
@@ -655,6 +675,12 @@ pub async fn update(
         .map_err(internal)?
         .filter(|a| a.status != "removing")
         .ok_or_else(|| AppError::not_found("application"))?;
+    if existing.kind == "container" {
+        return Err(bad(
+            "kind",
+            "A container is changed through /api/v1/client/container-apps/{id}.",
+        ));
+    }
     if req.name.as_deref().is_some_and(|n| n != existing.name)
         || req.kind.as_deref().is_some_and(|k| k != existing.kind)
     {

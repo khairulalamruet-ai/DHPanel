@@ -22,6 +22,7 @@
 //! what answers on `example.com/blog`. The installers (T12.02, T12.05) create the rows and
 //! move them from `installing` to `active` or `failed`; this module shows them.
 
+pub mod containers;
 pub mod gitdeploy;
 pub mod runtime;
 
@@ -94,6 +95,7 @@ pub fn public_router() -> Router<AppsState> {
 pub fn client_router() -> Router<AppsState> {
     Router::new()
         .merge(runtime::router())
+        .merge(containers::client_router())
         .merge(gitdeploy::router())
         .route("/api/v1/client/apps", get(client_list))
         .route("/api/v1/client/apps/{id}", get(client_get))
@@ -145,7 +147,9 @@ pub fn client_router() -> Router<AppsState> {
 
 /// Routes for administrators.
 pub fn admin_router() -> Router<AppsState> {
-    Router::new().route("/api/v1/admin/tenants/{id}/apps", get(admin_list))
+    Router::new()
+        .route("/api/v1/admin/tenants/{id}/apps", get(admin_list))
+        .merge(containers::admin_router())
 }
 
 fn internal(err: impl Into<Box<dyn std::error::Error + Send + Sync + 'static>>) -> AppError {
@@ -1777,13 +1781,17 @@ pub async fn cache_remove(
         cache_list, cache_set, cache_remove, wp_overview, wp_update_plugins,
         wp_update_themes, wp_update_core, wp_maintenance, wp_admin_password, wp_operation, wp_scan,
         wp_harden, runtime::runtimes, runtime::list, runtime::create, runtime::update,
-        runtime::redeploy, runtime::remove, gitdeploy::list, gitdeploy::create,
+        runtime::redeploy, runtime::remove, containers::admin_list, containers::admin_add,
+        containers::admin_change, containers::admin_remove, containers::client_images,
+        containers::client_list, containers::client_create, containers::client_update,
+        gitdeploy::list, gitdeploy::create,
         gitdeploy::deploy_now, gitdeploy::rotate_secret, gitdeploy::remove, gitdeploy::webhook
     ),
     components(schemas(
         AppView, AppList, InstallWordPress, CacheView, CacheList, SetCache, CatalogEntry, CatalogList, InstallApp, WpAnswer, WpSlug, WpVersion, WpMaintenance,
         runtime::RuntimeAppView, runtime::RuntimeAppList, runtime::SetRuntimeApp,
-        runtime::Runtimes, runtime::Redeploy, gitdeploy::GitDeployView, gitdeploy::GitDeployList,
+        runtime::Runtimes, runtime::Redeploy, containers::ImageView, containers::SetImage,
+        containers::ContainerView, containers::CreateContainer, containers::ChangeContainer, gitdeploy::GitDeployView, gitdeploy::GitDeployList,
         gitdeploy::CreateGitDeploy, gitdeploy::WebhookAnswer,
         WpNewPassword, Pending, WpHarden, dhpanel_node_protocol::WpOverview,
         dhpanel_node_protocol::WpItem, dhpanel_node_protocol::WpScan

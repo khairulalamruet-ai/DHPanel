@@ -177,6 +177,10 @@ pub mod permissions {
         pub AppsRead = "admin.apps.read"
     );
     crate::permission!(
+        /// Choose which container images clients may run.
+        pub AppsManage = "admin.apps.manage"
+    );
+    crate::permission!(
         /// See the panel's settings.
         pub SettingsRead = "admin.settings.read"
     );

@@ -133,6 +133,95 @@ fn install_script(kind: &str) -> &'static str {
     }
 }
 
+/// A container of an approved image (T12.12). The image's own start-up is used; the account's
+/// files are not mounted. It is built the way every container here is: no capabilities, no new
+/// privileges, a memory limit, a limit on processes, the account's own network and nothing
+/// else (the container description has no way to ask for more). A volume of its own, `/data`, is
+/// kept between restarts.
+#[allow(clippy::too_many_arguments)]
+async fn set_container(
+    context: &Arc<TenantContext>,
+    app_id: uuid::Uuid,
+    username: &str,
+    uid: u32,
+    name: &str,
+    image: Option<&str>,
+    port: u16,
+    memory_mb: u32,
+    env: RuntimeEnv,
+) -> Result<Output, AgentError> {
+    let username = TenantUsername::parse(username).map_err(|e| invalid(&e.to_string()))?;
+    if uid < 10_000 || !valid_name(name) || port < 1024 || !(32..=4096).contains(&memory_mb) {
+        return Err(invalid("the container's settings are not valid"));
+    }
+    valid_env(&env)?;
+    let image = dhpanel_docker_manager::ImageRef::parse(
+        image.ok_or_else(|| invalid("a container needs an image"))?,
+    )
+    .map_err(|e| invalid(&e.to_string()))?;
+    let docker = &context.docker;
+    docker
+        .pull_image(&image)
+        .await
+        .map_err(|e| docker_error(&e))?;
+    let container = container_name(&username, name)?;
+    let network = network_name(&username).map_err(|e| invalid(&e.to_string()))?;
+    docker
+        .ensure_network(&network, false)
+        .await
+        .map_err(|e| docker_error(&e))?;
+    match docker.remove(&container, true).await {
+        Ok(()) | Err(DockerError::NotFound) => {}
+        Err(e) => return Err(docker_error(&e)),
+    }
+    let mut spec = ContainerSpec::new(container.clone(), image);
+    spec.cpu_millis = 1000;
+    spec.pids_limit = 256;
+    spec.tenant = None;
+    // An image may write anywhere in its own file system (it is thrown away with the
+    // container); what it keeps goes to /data.
+    spec.writable_root = true;
+    spec.role = Some("container".to_owned());
+    spec.network = Network::Named(network);
+    spec.memory_bytes = u64::from(memory_mb) * 1024 * 1024;
+    spec.restart = Restart::UnlessStopped;
+    spec.tmpfs = vec![Tmpfs {
+        target: "/tmp".into(),
+        size_bytes: 64 * 1024 * 1024,
+    }];
+    let data = db::name(&format!("dh-{}-app-{name}-data", username.as_str()))?;
+    docker
+        .create_volume(&data)
+        .await
+        .map_err(|e| docker_error(&e))?;
+    spec.volumes = vec![VolumeMount {
+        volume: data,
+        target: "/data".into(),
+        read_only: false,
+    }];
+    for (key, value) in env.0 {
+        spec.env.insert(key, value);
+    }
+    spec.env.insert("PORT".into(), port.to_string());
+    spec.labels
+        .insert("app".into(), app_id.simple().to_string());
+    docker
+        .create_container(&spec)
+        .await
+        .map_err(|e| docker_error(&e))?;
+    docker
+        .start(&container)
+        .await
+        .map_err(|e| docker_error(&e))?;
+    if let Err(why) = wait_up(docker, &container).await {
+        let _ = docker.remove(&container, true).await;
+        return Err(why);
+    }
+    Ok(Output::RuntimeAppSet {
+        host: format!("{}:{port}", container.as_str()),
+    })
+}
+
 /// `set_runtime_app`.
 ///
 /// # Errors
@@ -157,10 +246,25 @@ pub async fn set_runtime_app(
         port,
         memory_mb,
         env,
+        image,
     } = op
     else {
         return Err(super::wrong_operation());
     };
+    if kind == "container" {
+        return set_container(
+            &context,
+            app_id,
+            &username,
+            uid,
+            &name,
+            image.as_deref(),
+            port,
+            memory_mb,
+            env.unwrap_or(RuntimeEnv(Vec::new())),
+        )
+        .await;
+    }
     let role = role_of(&kind)?;
     let username = TenantUsername::parse(&username).map_err(|e| invalid(&e.to_string()))?;
     if uid < 10_000
@@ -412,6 +516,13 @@ pub async fn remove_runtime_app(
     let _ = docker
         .remove_volume(&db::name(&format!(
             "dh-{}-app-{name}-env",
+            username.as_str()
+        ))?)
+        .await;
+    // A container's own data goes with it.
+    let _ = docker
+        .remove_volume(&db::name(&format!(
+            "dh-{}-app-{name}-data",
             username.as_str()
         ))?)
         .await;
