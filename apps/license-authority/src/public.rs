@@ -190,7 +190,11 @@ async fn take_nonce(db: &sqlx::PgPool, installation_id: Uuid, nonce: &str) -> Re
     }
 }
 
-fn check_signature(public_key: &[u8], message: &[u8], signature: &str) -> Result<(), AppError> {
+pub(crate) fn check_signature(
+    public_key: &[u8],
+    message: &[u8],
+    signature: &str,
+) -> Result<(), AppError> {
     let sig = URL_SAFE_NO_PAD
         .decode(signature)
         .map_err(|_| AppError::authentication_failed("bad_signature", "The proof is not valid."))?;
@@ -507,6 +511,25 @@ async fn activate(
         req.domain.as_deref(),
     )
     .await?;
+    // A new installation also proves, from outside, that its panel answers at its domain.
+    if state.settings.domain_proof
+        && !sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS (SELECT 1 FROM installations WHERE id = $1)",
+        )
+        .bind(req.installation_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(db)?
+    {
+        crate::domain_proof::verify(
+            &state,
+            req.installation_id,
+            &public_key,
+            req.domain.as_deref().unwrap_or_default(),
+            &held.bound().ips,
+        )
+        .await?;
+    }
     // The installation: new, or the same key as before (a different key under the same id
     // would be somebody else claiming it).
     let known: Option<Vec<u8>> =

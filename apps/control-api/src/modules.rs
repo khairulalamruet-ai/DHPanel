@@ -533,6 +533,13 @@ pub fn mount(
                                 service: service.clone(),
                             },
                         )),
+                        public: Some(dhpanel_mod_license::public_router().with_state(
+                            dhpanel_mod_license::LicenseState {
+                                db: db.clone(),
+                                sessions: sessions.clone(),
+                                service: service.clone(),
+                            },
+                        )),
                         ..ModuleRoutes::none()
                     })
                 }

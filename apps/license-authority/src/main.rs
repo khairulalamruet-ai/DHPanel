@@ -82,6 +82,7 @@ async fn main() -> ExitCode {
         signer: Arc::new(std::sync::RwLock::new(Arc::new(key))),
         settings: Settings::from_config(&config),
         hasher,
+        prover: dhpanel_license_authority::domain_proof::default_prover(),
     };
     let listener = match tokio::net::TcpListener::bind(config.bind).await {
         Ok(l) => l,

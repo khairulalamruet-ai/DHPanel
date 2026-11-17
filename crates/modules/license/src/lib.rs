@@ -43,6 +43,72 @@ use uuid::Uuid;
 /// The module's manifest.
 pub const MANIFEST: &str = include_str!("../../../../modules/license/module.toml");
 
+/// The route the license authority calls to check that this panel answers at its domain (no
+/// session: the authority has none). It only signs a nonce for the panel's own domain, with a
+/// signature that is no good for anything else.
+pub fn public_router() -> Router<LicenseState> {
+    Router::new().route("/api/v1/public/license-proof", get(proof))
+}
+
+/// The query of the domain check.
+#[derive(Deserialize, utoipa::IntoParams)]
+pub struct ProofQuery {
+    /// The authority's challenge: 16 to 64 letters, digits, `-` or `_`.
+    nonce: String,
+}
+
+/// This installation's signature of the authority's challenge for its domain.
+#[derive(Serialize, ToSchema)]
+pub struct ProofView {
+    /// This installation.
+    installation_id: Uuid,
+    /// The domain it is served at.
+    domain: String,
+    /// Ed25519 signature (base64url) over the challenge, the installation and the domain.
+    signature: String,
+}
+
+/// The authority's domain check: signs a challenge for the panel's own domain.
+#[utoipa::path(
+    get,
+    path = "/api/v1/public/license-proof",
+    tag = "license",
+    operation_id = "licenseDomainProof",
+    params(ProofQuery),
+    responses(
+        (status = 200, description = "The signed proof", body = ProofView),
+        (status = 404, description = "Licensing is off or no domain is configured", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 422, description = "A challenge that is not valid", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+pub async fn proof(
+    State(state): State<LicenseState>,
+    axum::extract::Query(q): axum::extract::Query<ProofQuery>,
+) -> Result<Json<ProofView>, AppError> {
+    let ok = (16..=64).contains(&q.nonce.len())
+        && q.nonce
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+    if !ok {
+        return Err(AppError::validation(vec![FieldError::new(
+            "nonce",
+            "invalid",
+            "16 to 64 letters, digits, - or _.",
+        )]));
+    }
+    state
+        .service
+        .domain_proof(&q.nonce)
+        .map(|p| {
+            Json(ProofView {
+                installation_id: p.installation_id,
+                domain: p.domain,
+                signature: p.signature,
+            })
+        })
+        .ok_or_else(|| AppError::not_found("license proof"))
+}
+
 /// What the module's handlers share.
 #[derive(Clone)]
 pub struct LicenseState {
@@ -373,8 +439,8 @@ pub async fn restrict(State(r): State<Restrictor>, request: Request, next: Next)
 /// The module's OpenAPI document.
 #[derive(OpenApi)]
 #[openapi(
-    paths(show, activate, refresh, deactivate, recovery_request),
-    components(schemas(LicenseView, ActivateRequest, RecoveryRequest)),
+    paths(show, activate, refresh, deactivate, recovery_request, proof),
+    components(schemas(LicenseView, ActivateRequest, RecoveryRequest, ProofView)),
     tags((name = "license", description = "This installation's license"))
 )]
 pub struct LicenseApi;

@@ -6,7 +6,12 @@ use std::sync::Arc;
 
 use dhpanel_auth_core::password::{Argon2Params, PasswordHasher};
 use dhpanel_license::{Expect, FileSigningKey, PublicKeys, SigningKey as _};
-use dhpanel_license_authority::{LaState, Settings, config::LaConfig, register_key, router};
+use dhpanel_license_authority::{
+    LaState, Settings,
+    config::LaConfig,
+    domain_proof::{Answer, BoxFuture, DomainProver, default_prover},
+    register_key, router,
+};
 use dhpanel_license_client::{
     ClientError, Identity, LicenseClient, Mode, Policy, Stored, evaluate,
 };
@@ -22,6 +27,15 @@ struct Authority {
 }
 
 async fn serve(pool: &PgPool, register: bool) -> Authority {
+    serve_with(pool, register, default_prover(), false).await
+}
+
+async fn serve_with(
+    pool: &PgPool,
+    register: bool,
+    prover: Arc<dyn DomainProver>,
+    require_domain_proof: bool,
+) -> Authority {
     let dir = std::env::temp_dir().join(format!("dh-la-client-{}", Uuid::new_v4().simple()));
     std::fs::create_dir_all(&dir).unwrap();
     let key = FileSigningKey::generate_to_file(
@@ -35,12 +49,14 @@ async fn serve(pool: &PgPool, register: bool) -> Authority {
     let keys = PublicKeys::new().with(key.kid(), key.public_key()).unwrap();
     let config = LaConfig {
         signing_key_file: dir.join("license-1.key"),
+        require_domain_proof,
         ..LaConfig::default()
     };
     let state = LaState {
         db: pool.clone(),
         signer: Arc::new(std::sync::RwLock::new(Arc::new(key))),
         settings: Settings::from_config(&config),
+        prover,
         hasher: Arc::new(
             PasswordHasher::new(Argon2Params {
                 memory_kib: 19 * 1024,
@@ -325,4 +341,140 @@ fn client_refresh(url: &str, keys: PublicKeys, dir: &std::path::Path) -> Result<
     .with_host("web1", "panel.example")
     .refresh()
     .map(|_| ())
+}
+
+/// What the authority's outside check finds at the panel's domain.
+type AnswerFn = Box<dyn Fn(&str, &str) -> Result<Answer, String> + Send + Sync>;
+
+struct Fake {
+    answer: std::sync::Mutex<AnswerFn>,
+    seen: std::sync::Mutex<Vec<(String, Vec<std::net::IpAddr>)>>,
+}
+
+impl DomainProver for Fake {
+    fn fetch<'a>(
+        &'a self,
+        domain: &'a str,
+        nonce: &'a str,
+        allowed: &'a [std::net::IpAddr],
+    ) -> BoxFuture<'a, Result<Answer, String>> {
+        self.seen
+            .lock()
+            .unwrap()
+            .push((domain.to_owned(), allowed.to_vec()));
+        let r = (self.answer.lock().unwrap())(domain, nonce);
+        Box::pin(async move { r })
+    }
+}
+
+fn answer_from(dir: std::path::PathBuf, domain: &'static str) -> AnswerFn {
+    Box::new(move |_, nonce| {
+        let c = LicenseClient::new(
+            "http://127.0.0.1:1",
+            PublicKeys::new(),
+            Identity::load_or_create(&dir).unwrap(),
+            "dhpanel-la",
+            "dhpanel",
+        )
+        .unwrap()
+        .with_host("web1", domain);
+        let p = c.domain_proof(nonce).map_err(|e| e.to_string())?;
+        Ok(Answer {
+            installation_id: p.installation_id,
+            domain: p.domain,
+            signature: p.signature,
+        })
+    })
+}
+
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "needs PostgreSQL"]
+async fn a_new_installation_must_be_answered_for_at_its_domain_when_the_check_is_on(pool: PgPool) {
+    // The panel answers for the right installation: activation goes through; the authority was
+    // told to connect only to the license's bound address.
+    let identity_dir = std::env::temp_dir().join(format!("dh-proof-{}", Uuid::new_v4().simple()));
+    let honest = Arc::new(Fake {
+        answer: std::sync::Mutex::new(answer_from(identity_dir.clone(), "panel.example")),
+        seen: Default::default(),
+    });
+    let a = serve_with(&pool, true, honest.clone(), true).await;
+    let token = admin_token(&pool, &a).await;
+    let (_license, key) = make_license(&a, &token, 3).await;
+    let (url, keys) = (a.url.clone(), a.keys.clone());
+    let dir = identity_dir.clone();
+    let k = key.clone();
+    let ok = tokio::task::spawn_blocking(move || {
+        client_for(&url, keys, &dir)
+            .activate(&k)
+            .map(|r| r.license.plan)
+    })
+    .await
+    .unwrap();
+    assert_eq!(ok.unwrap(), "Pro");
+    {
+        let seen = honest.seen.lock().unwrap();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].0, "panel.example");
+        assert_eq!(
+            seen[0].1,
+            vec!["127.0.0.1".parse::<std::net::IpAddr>().unwrap()]
+        );
+    }
+    // The same installation again (refresh of the activation): no second outside check.
+    let (url, keys, dir2, k) = (
+        a.url.clone(),
+        a.keys.clone(),
+        identity_dir.clone(),
+        key.clone(),
+    );
+    tokio::task::spawn_blocking(move || client_for(&url, keys, &dir2).activate(&k).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(honest.seen.lock().unwrap().len(), 1);
+
+    // A domain that does not answer, one that answers with another installation's key, and one
+    // that answers for another domain: all refused, and nothing is registered.
+    let stranger = std::env::temp_dir().join(format!("dh-proof-{}", Uuid::new_v4().simple()));
+    let someone_else = std::env::temp_dir().join(format!("dh-proof-{}", Uuid::new_v4().simple()));
+    let cases: Vec<(&str, AnswerFn)> = vec![
+        ("down", Box::new(|_, _| Err("connection refused".into()))),
+        (
+            "other key",
+            answer_from(someone_else.clone(), "panel.example"),
+        ),
+        (
+            "other domain",
+            answer_from(stranger.clone(), "elsewhere.example"),
+        ),
+    ];
+    for (name, answer) in cases {
+        *honest.answer.lock().unwrap() = answer;
+        let (url, keys, dir, key) = (a.url.clone(), a.keys.clone(), stranger.clone(), key.clone());
+        let refused = tokio::task::spawn_blocking(move || {
+            client_for(&url, keys, &dir).activate(&key).map(|_| ())
+        })
+        .await
+        .unwrap();
+        assert!(
+            matches!(refused, Err(ClientError::Refused { ref code, .. }) if code == "domain_proof_failed"),
+            "{name}: {refused:?}"
+        );
+    }
+    let installations: i64 = sqlx::query_scalar("SELECT count(*) FROM installations")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(installations, 1, "only the proven installation exists");
+}
+
+fn client_for(url: &str, keys: PublicKeys, dir: &std::path::Path) -> LicenseClient {
+    LicenseClient::new(
+        url,
+        keys,
+        Identity::load_or_create(dir).unwrap(),
+        "dhpanel-la",
+        "dhpanel",
+    )
+    .unwrap()
+    .with_host("web1", "panel.example")
 }

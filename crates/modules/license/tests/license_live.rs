@@ -103,6 +103,7 @@ async fn authority() -> Authority {
         db: la_db.clone(),
         signer: Arc::new(std::sync::RwLock::new(Arc::new(key))),
         settings: Settings::from_config(&config),
+        prover: dhpanel_license_authority::domain_proof::default_prover(),
         hasher: hasher.clone(),
     };
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -264,6 +265,13 @@ async fn env(pool: &PgPool, service: Arc<LicenseService>) -> Env {
                     sessions: sessions.clone(),
                     service: service.clone(),
                 })),
+                public: Some(
+                    dhpanel_mod_license::public_router().with_state(LicenseState {
+                        db: pool.clone(),
+                        sessions: sessions.clone(),
+                        service: service.clone(),
+                    }),
+                ),
                 // Stand-ins for the rest of the panel, so that the restricted mode has something to close.
                 client: Some(
                     Router::new()
@@ -273,7 +281,6 @@ async fn env(pool: &PgPool, service: Arc<LicenseService>) -> Env {
                         )
                         .route("/api/v1/client/site", get(|| async { "site" })),
                 ),
-                ..ModuleRoutes::none()
             }
         }),
     });
@@ -388,6 +395,46 @@ async fn the_panel_activates_a_license_shows_it_and_follows_the_authority(pool: 
     let service = Arc::new(LicenseService::new(pool.clone(), &config_for(Some(&a))).unwrap());
     let e = env(&pool, service.clone()).await;
     let root = e.sign_in(admin(&pool).await).await;
+    // The authority's domain check: the panel signs a challenge for its own domain, with no
+    // session, and only a proper challenge.
+    let probe = |nonce: String| {
+        let app = e.app.clone();
+        async move {
+            let res = app
+                .oneshot(
+                    Request::builder()
+                        .uri(format!("/api/v1/public/license-proof?nonce={nonce}"))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let status = res.status();
+            let bytes = axum::body::to_bytes(res.into_body(), 1 << 16)
+                .await
+                .unwrap();
+            (
+                status,
+                serde_json::from_slice::<Value>(&bytes).unwrap_or(Value::Null),
+            )
+        }
+    };
+    let (status, p) = probe("a".repeat(32)).await;
+    assert_eq!(status, StatusCode::OK, "{p}");
+    assert_eq!(p["domain"], "panel.example");
+    assert_eq!(
+        p["installation_id"],
+        service.installation_id().unwrap().to_string()
+    );
+    assert!(p["signature"].as_str().unwrap().len() > 60);
+    assert_eq!(
+        probe("short".into()).await.0,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(
+        probe(format!("{}!", "a".repeat(32))).await.0,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
     // Before a key is entered: licensed nothing, and nothing is closed.
     service.evaluate_and_save().await.unwrap();
     let (status, v) = e.call(&root, "GET", "/api/v1/admin/license", None).await;

@@ -40,6 +40,10 @@ pub struct LaConfig {
     /// The reverse proxies in front of the authority (their addresses). The address of a
     /// request is read from `X-Forwarded-For` only when the connection is from one of these.
     pub trusted_proxies: Vec<std::net::IpAddr>,
+    /// Whether an installation's first activation must also prove, from outside, that its panel
+    /// answers at the domain it claims. Needs the panel to be reachable on https at the
+    /// license's bound address.
+    pub require_domain_proof: bool,
     /// Log format: `json` or `pretty`.
     pub log_format: String,
     /// Log filter directives.
@@ -67,6 +71,7 @@ impl Default for LaConfig {
                 std::net::IpAddr::from([127, 0, 0, 1]),
                 std::net::IpAddr::from([0, 0, 0, 0, 0, 0, 0, 1]),
             ],
+            require_domain_proof: false,
             log_format: "json".to_owned(),
             log_filter: "info".to_owned(),
         }

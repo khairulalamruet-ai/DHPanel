@@ -128,6 +128,13 @@ impl LicenseService {
         })
     }
 
+    /// This installation's answer to the authority's domain check, or `None` when licensing is
+    /// off or the panel has no domain configured.
+    #[must_use]
+    pub fn domain_proof(&self, nonce: &str) -> Option<dhpanel_license_client::DomainProof> {
+        self.client.as_ref()?.domain_proof(nonce).ok()
+    }
+
     /// Whether licensing is on.
     #[must_use]
     pub fn enabled(&self) -> bool {

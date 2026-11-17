@@ -71,6 +71,17 @@ impl ClientError {
     }
 }
 
+/// The answer to the authority's domain check (see [`LicenseClient::domain_proof`]).
+#[derive(Debug, Clone, Serialize)]
+pub struct DomainProof {
+    /// This installation.
+    pub installation_id: Uuid,
+    /// The domain signed for.
+    pub domain: String,
+    /// The signature, base64url.
+    pub signature: String,
+}
+
 /// A client of one authority, for one installation.
 pub struct LicenseClient {
     base: String,
@@ -208,6 +219,24 @@ impl LicenseClient {
         self.hostname = hostname.to_owned();
         self.domain = domain.to_owned();
         self
+    }
+
+    /// The answer to the authority's domain check: this installation's signature of the
+    /// authority's `nonce` for the domain it is served at.
+    ///
+    /// # Errors
+    /// [`ClientError::Invalid`] when no domain is configured; [`ClientError::Identity`].
+    pub fn domain_proof(&self, nonce: &str) -> Result<DomainProof, ClientError> {
+        let domain = dhpanel_license::normalize_name(&self.domain);
+        if domain.is_empty() {
+            return Err(ClientError::Invalid("no domain is configured".into()));
+        }
+        let signature = self.identity.prove("domain", nonce, Some(&domain))?;
+        Ok(DomainProof {
+            installation_id: self.identity.installation_id,
+            domain,
+            signature,
+        })
     }
 
     /// What is signed together with the nonce, so that the host name and domain a request

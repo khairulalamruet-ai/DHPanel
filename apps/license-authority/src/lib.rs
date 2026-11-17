@@ -8,6 +8,7 @@
 pub mod admin;
 pub mod binding;
 pub mod config;
+pub mod domain_proof;
 pub mod integrity;
 pub mod public;
 
@@ -45,6 +46,9 @@ pub struct Settings {
     /// The reverse proxies in front of the authority: only from these is `X-Forwarded-For`
     /// believed, to learn the address a request really comes from.
     pub trusted_proxies: Vec<std::net::IpAddr>,
+    /// Whether the first activation of an installation also has to prove, from outside, that
+    /// the panel answers at the domain it claims ([`domain_proof`]).
+    pub domain_proof: bool,
 }
 
 impl Settings {
@@ -62,6 +66,7 @@ impl Settings {
                 std::path::Path::to_path_buf,
             ),
             trusted_proxies: c.trusted_proxies.clone(),
+            domain_proof: c.require_domain_proof,
         }
     }
 }
@@ -77,6 +82,8 @@ pub struct LaState {
     pub settings: Settings,
     /// Hashes and checks admin passwords.
     pub hasher: Arc<PasswordHasher>,
+    /// Fetches a panel's proof that it answers at its domain.
+    pub prover: Arc<dyn domain_proof::DomainProver>,
 }
 
 impl LaState {
@@ -97,6 +104,12 @@ impl FromRef<LaState> for PgPool {
     fn from_ref(s: &LaState) -> Self {
         s.db.clone()
     }
+}
+
+/// A name as it is compared everywhere in the binding: lower case, no trailing dot.
+#[must_use]
+pub fn binding_name(name: &str) -> String {
+    dhpanel_license::normalize_name(name)
 }
 
 /// The SHA-256 of a text (license keys and bearer tokens are only ever kept as this).

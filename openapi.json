@@ -20120,6 +20120,58 @@
         }
       }
     },
+    "/api/v1/public/license-proof": {
+      "get": {
+        "tags": [
+          "license"
+        ],
+        "summary": "The authority's domain check: signs a challenge for the panel's own domain.",
+        "operationId": "licenseDomainProof",
+        "parameters": [
+          {
+            "name": "nonce",
+            "in": "path",
+            "description": "The authority's challenge: 16 to 64 letters, digits, `-` or `_`.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The signed proof",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProofView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Licensing is off or no domain is configured",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A challenge that is not valid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/public/nodes/enroll": {
       "post": {
         "tags": [
@@ -26458,6 +26510,30 @@
             "format": "int32",
             "description": "The user id it runs as.",
             "minimum": 0
+          }
+        }
+      },
+      "ProofView": {
+        "type": "object",
+        "description": "This installation's signature of the authority's challenge for its domain.",
+        "required": [
+          "installation_id",
+          "domain",
+          "signature"
+        ],
+        "properties": {
+          "domain": {
+            "type": "string",
+            "description": "The domain it is served at."
+          },
+          "installation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "This installation."
+          },
+          "signature": {
+            "type": "string",
+            "description": "Ed25519 signature (base64url) over the challenge, the installation and the domain."
           }
         }
       },

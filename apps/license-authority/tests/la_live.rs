@@ -43,6 +43,7 @@ async fn env(pool: &PgPool) -> Env {
         db: pool.clone(),
         signer: Arc::new(std::sync::RwLock::new(Arc::new(key))),
         settings: Settings::from_config(&config),
+        prover: dhpanel_license_authority::domain_proof::default_prover(),
         hasher: Arc::new(
             PasswordHasher::new(Argon2Params {
                 memory_kib: 19 * 1024,

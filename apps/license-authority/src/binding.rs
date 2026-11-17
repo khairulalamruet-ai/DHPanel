@@ -247,6 +247,7 @@ mod tests {
             nonce_ttl: std::time::Duration::from_secs(1),
             key_dir: std::path::PathBuf::new(),
             trusted_proxies: vec!["127.0.0.1".parse().unwrap(), "::1".parse().unwrap()],
+            domain_proof: false,
         }
     }
 
