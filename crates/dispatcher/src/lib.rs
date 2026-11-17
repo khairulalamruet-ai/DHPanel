@@ -1208,6 +1208,8 @@ impl Dispatcher {
                         database: state.database,
                         user: state.user,
                         access: "all".to_owned(),
+                        engine: dhpanel_node_protocol::DbEngine::Mysql,
+                        dedicated: None,
                     },
                     format!("appgrant:{}", app.id.simple()),
                 );
@@ -1459,24 +1461,37 @@ impl Dispatcher {
             / self.settings.certificates_every.as_secs().max(1);
         let mut asked = 0;
         for node in self.gateway.connected_nodes() {
-            // Only nodes that have databases are worth asking.
-            match dhpanel_database::databases::node_has_databases(self.ops.db(), node).await {
-                Ok(true) => {}
-                Ok(false) => continue,
-                Err(err) => {
-                    tracing::warn!(%node, error = %err, "could not look for databases");
-                    continue;
+            // Only nodes that have databases are worth asking, once for each kind of server.
+            for (engine, op, key) in [
+                (
+                    "mysql",
+                    dhpanel_node_protocol::Operation::ReportDbSizes,
+                    "dbsizes",
+                ),
+                (
+                    "postgres",
+                    dhpanel_node_protocol::Operation::ReportPgSizes,
+                    "pgsizes",
+                ),
+            ] {
+                match dhpanel_database::databases::node_has_databases(self.ops.db(), node, engine)
+                    .await
+                {
+                    Ok(true) => {}
+                    Ok(false) => continue,
+                    Err(err) => {
+                        tracing::warn!(%node, error = %err, "could not look for databases");
+                        continue;
+                    }
                 }
-            }
-            let request = dhpanel_operations::Request::new(
-                node,
-                dhpanel_node_protocol::Operation::ReportDbSizes,
-                format!("dbsizes:{slot}"),
-            );
-            match self.ops.enqueue(&request).await {
-                Ok(dhpanel_operations::Enqueued::Created(_)) => asked += 1,
-                Ok(dhpanel_operations::Enqueued::Existing(_)) => {}
-                Err(error) => tracing::warn!(%node, %error, "could not queue the size report"),
+                let request = dhpanel_operations::Request::new(node, op, format!("{key}:{slot}"));
+                match self.ops.enqueue(&request).await {
+                    Ok(dhpanel_operations::Enqueued::Created(_)) => asked += 1,
+                    Ok(dhpanel_operations::Enqueued::Existing(_)) => {}
+                    Err(error) => {
+                        tracing::warn!(%node, %error, "could not queue the size report");
+                    }
+                }
             }
         }
         asked

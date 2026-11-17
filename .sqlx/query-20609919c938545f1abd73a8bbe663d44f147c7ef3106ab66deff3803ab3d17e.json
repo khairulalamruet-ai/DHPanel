@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO db_users (tenant_id, name) VALUES ($1, $2)\n         RETURNING id, tenant_id, name, status",
+  "query": "SELECT id, tenant_id, name, status, engine FROM db_users WHERE tenant_id = $1 AND id = $2",
   "describe": {
     "columns": [
       {
@@ -46,20 +46,32 @@
             "name": "status"
           }
         }
+      },
+      {
+        "ordinal": 4,
+        "name": "engine",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "db_users",
+            "name": "engine"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
         "Uuid",
-        "Text"
+        "Uuid"
       ]
     },
     "nullable": [
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "e4502612f1254e1cd69959b4ae5caae73af77ffe89a82f5ff33e83d6d02ef23a"
+  "hash": "20609919c938545f1abd73a8bbe663d44f147c7ef3106ab66deff3803ab3d17e"
 }

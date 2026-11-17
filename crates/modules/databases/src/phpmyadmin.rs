@@ -118,6 +118,12 @@ pub async fn open_phpmyadmin(
         .await
         .map_err(internal)?
         .ok_or_else(|| AppError::not_found("database"))?;
+    if db.engine != "mysql" {
+        return Err(AppError::conflict(
+            "web_client_unavailable",
+            "A web client for PostgreSQL databases is not available yet; connect with your own client.",
+        ));
+    }
     if db.status != "ready" {
         return Err(AppError::conflict(
             "database_not_ready",

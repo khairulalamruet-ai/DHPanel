@@ -509,6 +509,11 @@ pub async fn complete_import(
         .map_err(internal)?;
     let hash = Sha256::digest(token.as_bytes());
     let tenant_name = TenantUsername::parse(&h.tenant.username).map_err(internal)?;
+    let engine = dhpanel_database::databases::engine_of(&state.db, h.tenant.id, &import.database)
+        .await
+        .map_err(internal)?
+        .and_then(|e| dhpanel_node_protocol::DbEngine::parse(&e))
+        .unwrap_or_default();
     let mut tx = state.db.begin().await.map_err(internal)?;
     if !store::queue(&mut tx, id, &hash, &sealed)
         .await
@@ -531,6 +536,8 @@ pub async fn complete_import(
             sha256: import.sha256.clone(),
             gzip: import.gzip,
             token: None,
+            engine,
+            dedicated: None,
         },
         format!("import:{id}"),
         &who,

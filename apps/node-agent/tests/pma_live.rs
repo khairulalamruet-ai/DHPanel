@@ -80,7 +80,11 @@ async fn a_link_signs_one_client_in_once_with_rights_on_one_database() {
     for name in ["pmatest_mine", "pmatest_theirs"] {
         create_database(
             context.clone(),
-            Operation::CreateDatabase { name: name.into() },
+            Operation::CreateDatabase {
+                name: name.into(),
+                engine: dhpanel_node_protocol::DbEngine::Mysql,
+                dedicated: None,
+            },
         )
         .await
         .unwrap();

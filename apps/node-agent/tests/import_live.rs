@@ -221,6 +221,8 @@ impl Args {
             sha256: self.sha.clone(),
             gzip: self.gzip,
             token: self.token.clone().map(DbPassword),
+            engine: dhpanel_node_protocol::DbEngine::Mysql,
+            dedicated: None,
         }
     }
 }
@@ -260,7 +262,11 @@ async fn dumps_are_downloaded_checked_and_run_with_the_rights_of_one_database() 
     ] {
         create_database(
             context.clone(),
-            Operation::CreateDatabase { name: name.into() },
+            Operation::CreateDatabase {
+                name: name.into(),
+                engine: dhpanel_node_protocol::DbEngine::Mysql,
+                dedicated: None,
+            },
         )
         .await
         .unwrap();

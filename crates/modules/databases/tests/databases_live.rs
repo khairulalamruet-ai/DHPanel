@@ -1897,3 +1897,206 @@ async fn the_administrator_sees_databases_per_node_and_the_biggest_ones(pool: Pg
         .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
 }
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn a_postgresql_database_needs_the_feature_and_only_meets_users_of_its_own_server(
+    pool: PgPool,
+) {
+    let e = env(&pool).await;
+    let (alice, _tenant) = client(&pool, "alice", 10_000).await;
+    let a = e.sign_in(alice).await;
+    sqlx::query(
+        "UPDATE feature_sets SET all_features = false, features = ARRAY['domains', 'databases']::feature_key[]
+         WHERE id = (SELECT feature_set_id FROM plans WHERE is_default)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    // Without the feature in the plan: refused, and a made-up engine is refused too.
+    let (status, body) = e
+        .call(
+            &a,
+            "POST",
+            "/api/v1/client/databases",
+            Some(json!({"name": "pgshop", "engine": "postgres"})),
+        )
+        .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::FORBIDDEN, "feature_disabled")
+    );
+    let (status, body) = e
+        .call(
+            &a,
+            "POST",
+            "/api/v1/client/databases",
+            Some(json!({"name": "x", "engine": "oracle"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["errors"][0]["code"], "unknown_engine");
+    sqlx::query(
+        "UPDATE feature_sets SET features = ARRAY['domains', 'databases', 'db_postgres']::feature_key[]
+         WHERE id = (SELECT feature_set_id FROM plans WHERE is_default)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // A PostgreSQL database and user; the node is told which server.
+    let (status, pg) = e
+        .call(
+            &a,
+            "POST",
+            "/api/v1/client/databases",
+            Some(json!({"name": "pgshop", "engine": "postgres"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{pg}");
+    assert_eq!(pg["engine"], "postgres");
+    let queued: Value = sqlx::query_scalar(
+        "SELECT payload FROM operations WHERE kind = 'create_database' AND payload ->> 'name' = 'alice_pgshop'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(queued["engine"], "postgres");
+    node_answers(&pool, "create_database", "alice_pgshop", true).await;
+    // A MariaDB database says nothing of an engine on the wire (what every node knows).
+    let (_, my) = e
+        .call(
+            &a,
+            "POST",
+            "/api/v1/client/databases",
+            Some(json!({"name": "mysqlshop"})),
+        )
+        .await;
+    assert_eq!(my["engine"], "mysql");
+    let queued: Value = sqlx::query_scalar(
+        "SELECT payload FROM operations WHERE kind = 'create_database' AND payload ->> 'name' = 'alice_mysqlshop'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(queued.get("engine").is_none(), "{queued}");
+    node_answers(&pool, "create_database", "alice_mysqlshop", true).await;
+    // A PostgreSQL name is at most 58 characters, with the prefix.
+    let (status, body) = e
+        .call(
+            &a,
+            "POST",
+            "/api/v1/client/databases",
+            Some(json!({"name": "y".repeat(54), "engine": "postgres"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["errors"][0]["code"], "db_name_too_long");
+
+    let (status, made) = e
+        .call(
+            &a,
+            "POST",
+            "/api/v1/client/db-users",
+            Some(json!({"name": "pgweb", "engine": "postgres"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{made}");
+    assert_eq!(made["user"]["engine"], "postgres");
+    let ledger: Value = sqlx::query_scalar(
+        "SELECT payload FROM operations WHERE kind = 'upsert_db_user' AND payload ->> 'name' = 'alice_pgweb'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(ledger["engine"], "postgres");
+    assert!(ledger.get("password").is_none(), "{ledger}");
+    node_answers(&pool, "upsert_db_user", "alice_pgweb", true).await;
+    let (_, mysql_user) = e
+        .call(
+            &a,
+            "POST",
+            "/api/v1/client/db-users",
+            Some(json!({"name": "myweb"})),
+        )
+        .await;
+    node_answers(&pool, "upsert_db_user", "alice_myweb", true).await;
+    let my_user = mysql_user["user"]["id"].as_str().unwrap().to_owned();
+    let pg_user = made["user"]["id"].as_str().unwrap().to_owned();
+    let (pg_id, my_id) = (
+        pg["id"].as_str().unwrap().to_owned(),
+        my["id"].as_str().unwrap().to_owned(),
+    );
+
+    // A grant joins a database and a user of the same server only.
+    for (db, user) in [(&pg_id, &my_user), (&my_id, &pg_user)] {
+        let (status, body) = e
+            .call(
+                &a,
+                "PUT",
+                &format!("/api/v1/client/databases/{db}/grants/{user}"),
+                Some(json!({"access": "read_only"})),
+            )
+            .await;
+        assert_eq!(
+            (status, code(&body)),
+            (StatusCode::CONFLICT, "engine_mismatch")
+        );
+    }
+    let (status, body) = e
+        .call(
+            &a,
+            "PUT",
+            &format!("/api/v1/client/databases/{pg_id}/grants/{pg_user}"),
+            Some(json!({"access": "read_write"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let grant: Value = sqlx::query_scalar("SELECT payload FROM operations WHERE kind = 'grant_db'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(grant["engine"], "postgres");
+
+    // There is no web client for PostgreSQL yet, and it says so.
+    let (status, body) = e
+        .call(
+            &a,
+            "POST",
+            &format!("/api/v1/client/databases/{pg_id}/phpmyadmin"),
+            None,
+        )
+        .await;
+    assert!(
+        status == StatusCode::CONFLICT
+            && matches!(
+                code(&body),
+                "web_client_unavailable" | "phpmyadmin_unavailable"
+            ),
+        "{status} {body}"
+    );
+    // Remote access for a PostgreSQL user is told to the PostgreSQL server alone.
+    sqlx::query(
+        "UPDATE feature_sets SET features = ARRAY['domains', 'databases', 'db_postgres', 'db_remote']::feature_key[]
+         WHERE id = (SELECT feature_set_id FROM plans WHERE is_default)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (status, body) = e
+        .call(
+            &a,
+            "PUT",
+            &format!("/api/v1/client/db-users/{pg_user}/remote-hosts"),
+            Some(json!({"cidrs": ["203.0.113.7/32"]})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let access: Value =
+        sqlx::query_scalar("SELECT payload FROM operations WHERE kind = 'set_db_remote_access'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(access["engine"], "postgres");
+    assert_eq!(access["cidrs"], json!(["203.0.113.7/32"]));
+}

@@ -22658,6 +22658,14 @@
           "name"
         ],
         "properties": {
+          "engine": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`mysql` (MariaDB, the default) or `postgres` (needs the `db_postgres` feature).",
+            "example": "mysql"
+          },
           "name": {
             "type": "string",
             "description": "The name; the account's prefix is put in front when it is not there.",
@@ -22673,6 +22681,14 @@
           "name"
         ],
         "properties": {
+          "engine": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`mysql` (MariaDB, the default) or `postgres` (needs the `db_postgres` feature).",
+            "example": "mysql"
+          },
           "name": {
             "type": "string",
             "description": "The name; the account's prefix is put in front when it is not there.",
@@ -24985,10 +25001,16 @@
           "id",
           "name",
           "status",
+          "engine",
           "size_bytes",
           "users"
         ],
         "properties": {
+          "engine": {
+            "type": "string",
+            "description": "The server it lives on: `mysql` (MariaDB) or `postgres`.",
+            "example": "mysql"
+          },
           "id": {
             "type": "string",
             "format": "uuid",
@@ -25076,6 +25098,7 @@
           "id",
           "name",
           "status",
+          "engine",
           "databases",
           "remote_hosts"
         ],
@@ -25086,6 +25109,11 @@
               "$ref": "#/components/schemas/UserGrantView"
             },
             "description": "What it may use."
+          },
+          "engine": {
+            "type": "string",
+            "description": "The server it lives on: `mysql` (MariaDB) or `postgres`.",
+            "example": "mysql"
           },
           "id": {
             "type": "string",

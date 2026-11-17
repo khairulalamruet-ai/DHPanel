@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT EXISTS (SELECT 1 FROM databases d JOIN tenants t ON t.id = d.tenant_id\n                          WHERE t.node_id = $1) AS \"has!\"",
+  "query": "SELECT EXISTS (SELECT 1 FROM databases d JOIN tenants t ON t.id = d.tenant_id\n                          WHERE t.node_id = $1 AND d.engine = $2) AS \"has!\"",
   "describe": {
     "columns": [
       {
@@ -12,12 +12,13 @@
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Uuid",
+        "Text"
       ]
     },
     "nullable": [
       null
     ]
   },
-  "hash": "ed9e11400d7eb89294cf5263e29fd4e6854a431b5bf72218a262f1f4a9c68704"
+  "hash": "e06adcecd030cd1ca93bc8bdc71da6a3321e4a1d9f61bd5cda98ddb03f300c8e"
 }

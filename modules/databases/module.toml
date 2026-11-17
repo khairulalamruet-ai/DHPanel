@@ -1,5 +1,5 @@
-# Databases: MySQL-compatible databases, their users and grants, in the node's
-# shared MariaDB (crates/modules/databases).
+# Databases: MySQL-compatible databases and PostgreSQL databases, their users and grants, in
+# the node's shared MariaDB and PostgreSQL (crates/modules/databases).
 [module]
 name       = "databases"
 version    = "0.1.0"
@@ -12,7 +12,7 @@ depends_on = ["auth", "rbac", "audit", "system", "plans", "users"]
 keys = ["admin.databases.read", "admin.databases.manage"]
 
 [features]
-keys = ["databases", "db_remote"]
+keys = ["databases", "db_remote", "db_postgres"]
 
 # A plan without these keys gets the defaults.
 [limits]

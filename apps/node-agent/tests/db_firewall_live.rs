@@ -84,7 +84,10 @@ async fn the_public_port_lets_in_only_the_listed_addresses() {
     });
     let me = own_address();
     let port = public_port();
-    let access = |cidrs: Vec<String>| Operation::SetDbRemoteAccess { cidrs };
+    let access = |cidrs: Vec<String>| Operation::SetDbRemoteAccess {
+        cidrs,
+        engine: dhpanel_node_protocol::DbEngine::Mysql,
+    };
 
     ensure_db_server(context.clone(), Operation::EnsureDbServer)
         .await

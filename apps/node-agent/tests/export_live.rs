@@ -124,6 +124,8 @@ fn op(database: &str, url: &str, token: Option<&str>, id: Uuid) -> Operation {
         export_id: id,
         url: url.into(),
         token: token.map(|t| DbPassword(t.into())),
+        engine: dhpanel_node_protocol::DbEngine::Mysql,
+        dedicated: None,
     }
 }
 
@@ -156,7 +158,11 @@ async fn a_database_is_dumped_compressed_and_sent_in_chunks_and_the_dump_loads_e
     for name in ["exptest_src", "exptest_copy"] {
         create_database(
             context.clone(),
-            Operation::CreateDatabase { name: name.into() },
+            Operation::CreateDatabase {
+                name: name.into(),
+                engine: dhpanel_node_protocol::DbEngine::Mysql,
+                dedicated: None,
+            },
         )
         .await
         .unwrap();
@@ -303,6 +309,8 @@ async fn a_database_is_dumped_compressed_and_sent_in_chunks_and_the_dump_loads_e
                 .collect(),
             gzip: true,
             token: Some(DbPassword("any".into())),
+            engine: dhpanel_node_protocol::DbEngine::Mysql,
+            dedicated: None,
         },
     )
     .await

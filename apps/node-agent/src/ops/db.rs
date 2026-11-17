@@ -91,12 +91,21 @@ fn random_secret() -> std::io::Result<String> {
 /// # Errors
 /// The disk failing (retryable).
 pub fn root_password(dir: &Path) -> Result<String, AgentError> {
+    secret_file(dir, "mariadb-root")
+}
+
+/// A random secret kept in the agent's secret store under this file name (0600, in a 0700
+/// directory): read if it is there and long enough, made first if not.
+///
+/// # Errors
+/// The disk failing (retryable).
+pub fn secret_file(dir: &Path, file: &str) -> Result<String, AgentError> {
     std::fs::DirBuilder::new()
         .recursive(true)
         .mode(0o700)
         .create(dir)
         .map_err(|e| disk("prepare the secret store", &e))?;
-    let path = dir.join("mariadb-root");
+    let path = dir.join(file);
     if let Ok(text) = std::fs::read_to_string(&path) {
         let text = text.trim().to_owned();
         if text.len() >= 32 {
@@ -104,7 +113,7 @@ pub fn root_password(dir: &Path) -> Result<String, AgentError> {
         }
     }
     let secret = random_secret().map_err(|e| disk("make a password", &e))?;
-    let tmp = dir.join(".mariadb-root.tmp");
+    let tmp = dir.join(format!(".{file}.tmp"));
     let _ = std::fs::remove_file(&tmp);
     let write = || -> std::io::Result<()> {
         let mut out = std::fs::OpenOptions::new()
@@ -337,7 +346,7 @@ pub async fn create_database(
     op: Operation,
 ) -> Result<Output, AgentError> {
     use mysql_async::prelude::Queryable as _;
-    let Operation::CreateDatabase { name } = op else {
+    let Operation::CreateDatabase { name, .. } = op else {
         return Err(super::wrong_operation());
     };
     let quoted = identifier(&name)?;
@@ -373,7 +382,7 @@ pub async fn drop_database(
     op: Operation,
 ) -> Result<Output, AgentError> {
     use mysql_async::prelude::Queryable as _;
-    let Operation::DropDatabase { name } = op else {
+    let Operation::DropDatabase { name, .. } = op else {
         return Err(super::wrong_operation());
     };
     let quoted = identifier(&name)?;
@@ -482,6 +491,7 @@ pub async fn upsert_db_user(
         username,
         name,
         password,
+        ..
     } = op
     else {
         return Err(super::wrong_operation());
@@ -562,6 +572,7 @@ pub async fn grant_db(context: Arc<TenantContext>, op: Operation) -> Result<Outp
         database,
         user,
         access,
+        ..
     } = op
     else {
         return Err(super::wrong_operation());
@@ -613,7 +624,7 @@ async fn revoke_all(
 /// # Errors
 /// As [`grant_db`].
 pub async fn revoke_db(context: Arc<TenantContext>, op: Operation) -> Result<Output, AgentError> {
-    let Operation::RevokeDb { database, user } = op else {
+    let Operation::RevokeDb { database, user, .. } = op else {
         return Err(super::wrong_operation());
     };
     let db = identifier(&database)?;
@@ -747,6 +758,7 @@ pub async fn set_db_remote_hosts(
         username,
         name,
         cidrs,
+        ..
     } = op
     else {
         return Err(super::wrong_operation());
@@ -835,7 +847,7 @@ pub async fn set_db_remote_access(
     context: Arc<TenantContext>,
     op: Operation,
 ) -> Result<Output, AgentError> {
-    let Operation::SetDbRemoteAccess { cidrs } = op else {
+    let Operation::SetDbRemoteAccess { cidrs, .. } = op else {
         return Err(super::wrong_operation());
     };
     let invalid = |m: &str| AgentError::new(ErrorCode::InvalidArguments, m.to_owned());
@@ -884,7 +896,7 @@ pub async fn drop_db_user(
     op: Operation,
 ) -> Result<Output, AgentError> {
     use mysql_async::prelude::Queryable as _;
-    let Operation::DropDbUser { name } = op else {
+    let Operation::DropDbUser { name, .. } = op else {
         return Err(super::wrong_operation());
     };
     let who = user_literal(&name)?;
@@ -943,7 +955,7 @@ pub async fn allow_tenant_databases(
     context: Arc<TenantContext>,
     op: Operation,
 ) -> Result<Output, AgentError> {
-    let Operation::AllowTenantDatabases { username } = op else {
+    let Operation::AllowTenantDatabases { username, .. } = op else {
         return Err(super::wrong_operation());
     };
     let username = TenantUsername::parse(&username)

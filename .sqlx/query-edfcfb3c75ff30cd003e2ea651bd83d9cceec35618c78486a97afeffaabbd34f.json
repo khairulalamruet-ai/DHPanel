@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT s.id, s.tenant_id, t.node_id, t.uid, s.folder, s.quarantine\n           FROM malware_scans s JOIN tenants t ON t.id = s.tenant_id\n           WHERE s.state = 'queued' AND t.status IN ('active', 'suspended')\n           ORDER BY s.requested_at LIMIT $1",
+  "query": "SELECT id, tenant_id, name, status, engine, size_bytes,\n                  extract(epoch FROM size_checked_at)::bigint AS size_checked_at\n           FROM databases WHERE tenant_id = $1 AND id = $2",
   "describe": {
     "columns": [
       {
@@ -9,7 +9,7 @@
         "type_info": "Uuid",
         "origin": {
           "Table": {
-            "table": "malware_scans",
+            "table": "databases",
             "name": "id"
           }
         }
@@ -20,59 +20,66 @@
         "type_info": "Uuid",
         "origin": {
           "Table": {
-            "table": "malware_scans",
+            "table": "databases",
             "name": "tenant_id"
           }
         }
       },
       {
         "ordinal": 2,
-        "name": "node_id",
-        "type_info": "Uuid",
+        "name": "name",
+        "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "tenants",
-            "name": "node_id"
+            "table": "databases",
+            "name": "name"
           }
         }
       },
       {
         "ordinal": 3,
-        "name": "uid",
-        "type_info": "Int4",
+        "name": "status",
+        "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "tenants",
-            "name": "uid"
+            "table": "databases",
+            "name": "status"
           }
         }
       },
       {
         "ordinal": 4,
-        "name": "folder",
+        "name": "engine",
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "malware_scans",
-            "name": "folder"
+            "table": "databases",
+            "name": "engine"
           }
         }
       },
       {
         "ordinal": 5,
-        "name": "quarantine",
-        "type_info": "Bool",
+        "name": "size_bytes",
+        "type_info": "Int8",
         "origin": {
           "Table": {
-            "table": "malware_scans",
-            "name": "quarantine"
+            "table": "databases",
+            "name": "size_bytes"
           }
         }
+      },
+      {
+        "ordinal": 6,
+        "name": "size_checked_at",
+        "type_info": "Int8",
+        "origin": "Expression"
       }
     ],
     "parameters": {
       "Left": [
-        "Int8"
+        "Uuid",
+        "Uuid"
       ]
     },
     "nullable": [
@@ -80,9 +87,10 @@
       false,
       false,
       false,
-      true,
-      false
+      false,
+      false,
+      null
     ]
   },
-  "hash": "c75760af4093b002916fad3ad99785a1065f0407491f197e1d8bdc3000427268"
+  "hash": "edfcfb3c75ff30cd003e2ea651bd83d9cceec35618c78486a97afeffaabbd34f"
 }

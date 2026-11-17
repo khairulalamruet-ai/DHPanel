@@ -135,6 +135,7 @@ async fn the_database_server_is_reached_from_its_tenants_network_and_nowhere_els
         context.clone(),
         Operation::AllowTenantDatabases {
             username: a.as_str().to_owned(),
+            engine: dhpanel_node_protocol::DbEngine::Mysql,
         },
     )
     .await
@@ -150,6 +151,7 @@ async fn the_database_server_is_reached_from_its_tenants_network_and_nowhere_els
         context.clone(),
         Operation::AllowTenantDatabases {
             username: a.as_str().to_owned(),
+            engine: dhpanel_node_protocol::DbEngine::Mysql,
         },
     )
     .await
@@ -169,6 +171,7 @@ async fn the_database_server_is_reached_from_its_tenants_network_and_nowhere_els
         context.clone(),
         Operation::AllowTenantDatabases {
             username: "nobodyhere".into(),
+            engine: dhpanel_node_protocol::DbEngine::Mysql,
         },
     )
     .await
@@ -179,7 +182,11 @@ async fn the_database_server_is_reached_from_its_tenants_network_and_nowhere_els
     {
         use dhpanel_node_agent::ops::db::{create_database, drop_database};
         use mysql_async::prelude::Queryable as _;
-        let create = |name: &str| Operation::CreateDatabase { name: name.into() };
+        let create = |name: &str| Operation::CreateDatabase {
+            name: name.into(),
+            engine: dhpanel_node_protocol::DbEngine::Mysql,
+            dedicated: None,
+        };
         assert_eq!(
             create_database(context.clone(), create("alice_shop"))
                 .await
@@ -223,8 +230,16 @@ async fn the_database_server_is_reached_from_its_tenants_network_and_nowhere_els
             "A",
         ] {
             for op in [
-                Operation::CreateDatabase { name: bad.into() },
-                Operation::DropDatabase { name: bad.into() },
+                Operation::CreateDatabase {
+                    name: bad.into(),
+                    engine: dhpanel_node_protocol::DbEngine::Mysql,
+                    dedicated: None,
+                },
+                Operation::DropDatabase {
+                    name: bad.into(),
+                    engine: dhpanel_node_protocol::DbEngine::Mysql,
+                    dedicated: None,
+                },
             ] {
                 let err = match op {
                     Operation::CreateDatabase { .. } => create_database(context.clone(), op).await,
@@ -244,7 +259,9 @@ async fn the_database_server_is_reached_from_its_tenants_network_and_nowhere_els
             drop_database(
                 context.clone(),
                 Operation::DropDatabase {
-                    name: "alice_shop".into()
+                    name: "alice_shop".into(),
+                    engine: dhpanel_node_protocol::DbEngine::Mysql,
+                    dedicated: None,
                 }
             )
             .await
@@ -255,7 +272,9 @@ async fn the_database_server_is_reached_from_its_tenants_network_and_nowhere_els
             drop_database(
                 context.clone(),
                 Operation::DropDatabase {
-                    name: "alice_shop".into()
+                    name: "alice_shop".into(),
+                    engine: dhpanel_node_protocol::DbEngine::Mysql,
+                    dedicated: None,
                 }
             )
             .await
@@ -281,7 +300,11 @@ async fn the_database_server_is_reached_from_its_tenants_network_and_nowhere_els
         for name in ["dbtest_shop", "dbtest_blog"] {
             create_database(
                 context.clone(),
-                Operation::CreateDatabase { name: name.into() },
+                Operation::CreateDatabase {
+                    name: name.into(),
+                    engine: dhpanel_node_protocol::DbEngine::Mysql,
+                    dedicated: None,
+                },
             )
             .await
             .unwrap();
@@ -313,6 +336,8 @@ async fn the_database_server_is_reached_from_its_tenants_network_and_nowhere_els
             username: a.as_str().to_owned(),
             name: "dbtest_web".into(),
             password: password.map(|p| dhpanel_node_protocol::DbPassword(p.into())),
+            engine: dhpanel_node_protocol::DbEngine::Mysql,
+            dedicated: None,
         };
         let upsert = |op: Operation| upsert_db_user(context.clone(), op);
         // A new user needs a password, and a good one.
@@ -344,6 +369,8 @@ async fn the_database_server_is_reached_from_its_tenants_network_and_nowhere_els
             database: db.into(),
             user: "dbtest_web".into(),
             access: access.into(),
+            engine: dhpanel_node_protocol::DbEngine::Mysql,
+            dedicated: None,
         };
         let g = |op: Operation| grant_db(context.clone(), op);
         g(grant("read_write", "dbtest_shop")).await.unwrap();
@@ -419,11 +446,15 @@ async fn the_database_server_is_reached_from_its_tenants_network_and_nowhere_els
                 database: "dbtest_shop".into(),
                 user: "nobody_here".into(),
                 access: "all".into(),
+                engine: dhpanel_node_protocol::DbEngine::Mysql,
+                dedicated: None,
             },
             Operation::GrantDb {
                 database: "dbtest_shop".into(),
                 user: "u'@'%' --".into(),
                 access: "all".into(),
+                engine: dhpanel_node_protocol::DbEngine::Mysql,
+                dedicated: None,
             },
         ] {
             assert_eq!(g(op).await.unwrap_err().code, ErrorCode::InvalidArguments);
@@ -434,6 +465,8 @@ async fn the_database_server_is_reached_from_its_tenants_network_and_nowhere_els
             Operation::RevokeDb {
                 database: "dbtest_shop".into(),
                 user: "dbtest_web".into(),
+                engine: dhpanel_node_protocol::DbEngine::Mysql,
+                dedicated: None,
             },
         )
         .await
@@ -443,6 +476,8 @@ async fn the_database_server_is_reached_from_its_tenants_network_and_nowhere_els
             Operation::RevokeDb {
                 database: "dbtest_shop".into(),
                 user: "dbtest_web".into(),
+                engine: dhpanel_node_protocol::DbEngine::Mysql,
+                dedicated: None,
             },
         )
         .await
@@ -481,6 +516,8 @@ async fn the_database_server_is_reached_from_its_tenants_network_and_nowhere_els
                 username: a.as_str().to_owned(),
                 name: "dbtest_web".into(),
                 cidrs,
+                engine: dhpanel_node_protocol::DbEngine::Mysql,
+                dedicated: None,
             };
             assert!(
                 !sql(30, &far1, second, "SELECT 1").await,
@@ -575,6 +612,8 @@ async fn the_database_server_is_reached_from_its_tenants_network_and_nowhere_els
             Operation::RevokeDb {
                 database: "dbtest_blog".into(),
                 user: "dbtest_web".into(),
+                engine: dhpanel_node_protocol::DbEngine::Mysql,
+                dedicated: None,
             },
         )
         .await
@@ -585,6 +624,8 @@ async fn the_database_server_is_reached_from_its_tenants_network_and_nowhere_els
             context.clone(),
             Operation::DropDatabase {
                 name: "dbtest_blog".into(),
+                engine: dhpanel_node_protocol::DbEngine::Mysql,
+                dedicated: None,
             },
         )
         .await
@@ -593,6 +634,8 @@ async fn the_database_server_is_reached_from_its_tenants_network_and_nowhere_els
             context.clone(),
             Operation::CreateDatabase {
                 name: "dbtest_blog".into(),
+                engine: dhpanel_node_protocol::DbEngine::Mysql,
+                dedicated: None,
             },
         )
         .await
@@ -609,6 +652,8 @@ async fn the_database_server_is_reached_from_its_tenants_network_and_nowhere_els
             context.clone(),
             Operation::DropDbUser {
                 name: "dbtest_web".into(),
+                engine: dhpanel_node_protocol::DbEngine::Mysql,
+                dedicated: None,
             },
         )
         .await
@@ -619,6 +664,8 @@ async fn the_database_server_is_reached_from_its_tenants_network_and_nowhere_els
             context.clone(),
             Operation::DropDbUser {
                 name: "dbtest_web".into(),
+                engine: dhpanel_node_protocol::DbEngine::Mysql,
+                dedicated: None,
             },
         )
         .await

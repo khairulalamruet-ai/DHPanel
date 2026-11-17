@@ -19,8 +19,10 @@ use crate::{protocol::ErrorCode, tenant::Failure};
 
 /// Where `nft` is.
 const NFT: &str = "/usr/sbin/nft";
-/// The table the helper owns.
+/// The table the helper owns for the MariaDB server's public port.
 pub const TABLE: &str = "dhpanel_db";
+/// The table the helper owns for the PostgreSQL server's public port.
+pub const TABLE_PG: &str = "dhpanel_pg";
 /// Most ranges in one request.
 pub const MAX_CIDRS: usize = 2000;
 
@@ -61,15 +63,21 @@ pub fn valid_cidr(text: &str) -> bool {
 /// a port number are put into the text.
 #[must_use]
 pub fn ruleset(port: u16, cidrs: &[String]) -> String {
+    ruleset_in(TABLE, port, cidrs)
+}
+
+/// [`ruleset`] in one of the helper's two tables.
+#[must_use]
+pub fn ruleset_in(table: &str, port: u16, cidrs: &[String]) -> String {
     let elements = if cidrs.is_empty() {
         String::new()
     } else {
         format!("        elements = {{ {} }}\n", cidrs.join(", "))
     };
     format!(
-        "table inet {TABLE}\n\
-         delete table inet {TABLE}\n\
-         table inet {TABLE} {{\n\
+        "table inet {table}\n\
+         delete table inet {table}\n\
+         table inet {table} {{\n\
          \x20   set allowed {{\n\
          \x20       type ipv4_addr\n\
          \x20       flags interval\n\
@@ -90,6 +98,14 @@ pub fn ruleset(port: u16, cidrs: &[String]) -> String {
 /// # Errors
 /// [`Failure`] with a fixed message: a bad range, or `nft` failing.
 pub fn set(port: u16, cidrs: &[String]) -> Result<(), Failure> {
+    set_in(TABLE, port, cidrs)
+}
+
+/// [`set`] in one of the helper's two tables (`table` is one of [`TABLE`], [`TABLE_PG`]).
+///
+/// # Errors
+/// [`Failure`] with a fixed message: a bad range, or `nft` failing.
+pub fn set_in(table: &'static str, port: u16, cidrs: &[String]) -> Result<(), Failure> {
     if cidrs.len() > MAX_CIDRS {
         return Err((ErrorCode::InvalidArguments, "too many address ranges"));
     }
@@ -105,7 +121,7 @@ pub fn set(port: u16, cidrs: &[String]) -> Result<(), Failure> {
             unique.push(cidr.clone());
         }
     }
-    let script = ruleset(port, &unique);
+    let script = ruleset_in(table, port, &unique);
     let failed = |_: std::io::Error| (ErrorCode::Failed, "cannot run the packet filter tool");
     let mut child = Command::new(NFT)
         .args(["-f", "-"])

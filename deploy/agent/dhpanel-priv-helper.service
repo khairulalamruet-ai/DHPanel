@@ -11,7 +11,7 @@ Type=simple
 User=root
 # The agent's group: the folder files wait in (shared with the agent) is open to it only.
 SupplementaryGroups=dhpanel-agent
-ExecStart=/usr/local/bin/dhpanel-priv-helper --socket /run/dhpanel/priv-helper.sock --agent-user dhpanel-agent --tenants-root /srv/tenants --db-port 13306
+ExecStart=/usr/local/bin/dhpanel-priv-helper --socket /run/dhpanel/priv-helper.sock --agent-user dhpanel-agent --tenants-root /srv/tenants --db-port 13306 --pg-port 15432
 # The directory tenants live in is created by install.sh before the service is
 # started: the sandbox's mount namespace is built before any ExecStartPre runs,
 # so the path must already exist. It is the only place besides /run/dhpanel the

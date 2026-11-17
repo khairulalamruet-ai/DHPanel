@@ -27,6 +27,7 @@ pub mod cacheaddon;
 pub mod capabilities;
 pub mod cron;
 pub mod db;
+pub mod dbroute;
 pub mod files;
 pub mod ftp;
 pub mod gitdeploy;
@@ -34,6 +35,9 @@ pub mod imagescan;
 pub mod logs;
 pub mod metrics;
 pub mod nodeservices;
+pub mod pg;
+pub mod pgimport;
+pub mod pgsplit;
 pub mod pma;
 pub mod runtimeapp;
 pub mod scan;
@@ -138,23 +142,23 @@ impl Registry {
             });
             registry.register("create_database", {
                 let context = context.clone();
-                move |op| db::create_database(context.clone(), op)
+                move |op| dbroute::create_database(context.clone(), op)
             });
             registry.register("drop_database", {
                 let context = context.clone();
-                move |op| db::drop_database(context.clone(), op)
+                move |op| dbroute::drop_database(context.clone(), op)
             });
             registry.register("upsert_db_user", {
                 let context = context.clone();
-                move |op| db::upsert_db_user(context.clone(), op)
+                move |op| dbroute::upsert_db_user(context.clone(), op)
             });
             registry.register("grant_db", {
                 let context = context.clone();
-                move |op| db::grant_db(context.clone(), op)
+                move |op| dbroute::grant_db(context.clone(), op)
             });
             registry.register("revoke_db", {
                 let context = context.clone();
-                move |op| db::revoke_db(context.clone(), op)
+                move |op| dbroute::revoke_db(context.clone(), op)
             });
             registry.register("import_sql", {
                 let context = context.clone();
@@ -331,25 +335,33 @@ impl Registry {
                 let context = context.clone();
                 move |op| sqlimport::report_import_progress(context.clone(), op)
             });
+            registry.register("ensure_pg_server", {
+                let context = context.clone();
+                move |op| pg::ensure_pg_server(context.clone(), op)
+            });
+            registry.register("report_pg_sizes", {
+                let context = context.clone();
+                move |op| pg::report_sizes(context.clone(), op)
+            });
             registry.register("report_db_sizes", {
                 let context = context.clone();
                 move |op| db::report_db_sizes(context.clone(), op)
             });
             registry.register("set_db_remote_hosts", {
                 let context = context.clone();
-                move |op| db::set_db_remote_hosts(context.clone(), op)
+                move |op| dbroute::set_db_remote_hosts(context.clone(), op)
             });
             registry.register("set_db_remote_access", {
                 let context = context.clone();
-                move |op| db::set_db_remote_access(context.clone(), op)
+                move |op| dbroute::set_db_remote_access(context.clone(), op)
             });
             registry.register("drop_db_user", {
                 let context = context.clone();
-                move |op| db::drop_db_user(context.clone(), op)
+                move |op| dbroute::drop_db_user(context.clone(), op)
             });
             registry.register("allow_tenant_databases", {
                 let context = context.clone();
-                move |op| db::allow_tenant_databases(context.clone(), op)
+                move |op| dbroute::allow_tenant_databases(context.clone(), op)
             });
             registry.register("restart_service", {
                 let context = context.clone();

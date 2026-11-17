@@ -823,6 +823,107 @@ impl DockerManager {
         Ok((done.exit_code.unwrap_or(-1), stderr))
     }
 
+    /// Dumps one database with `pg_dump` run inside the database container
+    /// and sends what it prints to `sink`, a piece at a time. The command is fixed;
+    /// only `database` and `user` (plain identifiers, checked here) and the
+    /// password (passed in the command's environment, never its arguments) vary.
+    ///
+    /// Returns the exit code and what the command said on stderr (clipped).
+    ///
+    /// # Errors
+    /// [`DockerError::NotFound`], [`DockerError::NotManaged`], [`DockerError::Conflict`]
+    /// (not running, or a name that is not a plain identifier), an API error, or
+    /// [`DockerError::Unavailable`] when the receiver is gone or `limit` passes.
+    pub async fn dump_pg_database(
+        &self,
+        container: &Name,
+        database: &str,
+        user: &str,
+        password: &str,
+        sink: tokio::sync::mpsc::Sender<Vec<u8>>,
+        limit: Duration,
+    ) -> Result<(i64, String), DockerError> {
+        let plain = |s: &str| {
+            !s.is_empty()
+                && s.len() <= 64
+                && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+        };
+        if !plain(database) || !plain(user) || password.is_empty() || password.contains('\0') {
+            return Err(DockerError::Conflict("bad dump arguments".into()));
+        }
+        let info = self.require_managed_container(container).await?;
+        if !info.running {
+            return Err(DockerError::Conflict("the container is not running".into()));
+        }
+        // A plain-text dump the importer can read back: no owners and no privileges (the
+        // server it goes to has other roles), `COPY` for the rows.
+        let cmd: Vec<String> = [
+            "pg_dump",
+            "--host=127.0.0.1",
+            "--no-owner",
+            "--no-privileges",
+            "--encoding=UTF8",
+            "--no-password",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .chain([format!("--username={user}"), format!("--dbname={database}")])
+        .collect();
+        let created = self
+            .docker
+            .create_exec(
+                container.as_str(),
+                CreateExecOptions {
+                    attach_stdout: Some(true),
+                    attach_stderr: Some(true),
+                    cmd: Some(cmd),
+                    env: Some(vec![format!("PGPASSWORD={password}")]),
+                    ..Default::default()
+                },
+            )
+            .await
+            .map_err(map_error)?;
+        let started = self
+            .docker
+            .start_exec(&created.id, None)
+            .await
+            .map_err(map_error)?;
+        let mut stderr = String::new();
+        if let StartExecResults::Attached {
+            output: mut stream, ..
+        } = started
+        {
+            let read = async {
+                while let Some(chunk) = stream.next().await {
+                    match chunk.map_err(map_error)? {
+                        bollard::container::LogOutput::StdOut { message } => {
+                            sink.send(message.to_vec()).await.map_err(|_| {
+                                DockerError::Unavailable("nothing is taking the dump".into())
+                            })?;
+                        }
+                        bollard::container::LogOutput::StdErr { message }
+                            if stderr.len() < MAX_EXEC_OUTPUT =>
+                        {
+                            stderr.push_str(&String::from_utf8_lossy(&message));
+                        }
+                        _ => {}
+                    }
+                }
+                Ok::<(), DockerError>(())
+            };
+            tokio::time::timeout(limit, read)
+                .await
+                .map_err(|_| DockerError::Unavailable("the dump took too long".into()))??;
+        }
+        stderr.truncate(stderr.floor_char_boundary(MAX_EXEC_OUTPUT));
+        let done = self
+            .docker
+            .inspect_exec(&created.id)
+            .await
+            .map_err(map_error)?;
+        Ok((done.exit_code.unwrap_or(-1), stderr))
+    }
+
     /// The end of a container's log: at most `tail` lines at or after `since_ms` (Unix
     /// milliseconds; `0` for any), oldest first, each with its time and stream. Only
     /// containers of ours. About 1 MiB of text is kept, the newest; the answer says when older lines were dropped.

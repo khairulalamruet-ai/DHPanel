@@ -25,6 +25,8 @@ pub fn operation_secrets(
                     username,
                     name,
                     password: None,
+                    engine,
+                    dedicated,
                 } => {
                     let found = dhpanel_database::databases::sealed_password_of(&db, &name)
                         .await
@@ -48,6 +50,8 @@ pub fn operation_secrets(
                         username,
                         name,
                         password,
+                        engine,
+                        dedicated,
                     });
                 }
                 // The two passwords of a WordPress install: sealed by the API, opened here
@@ -348,6 +352,8 @@ pub fn operation_secrets(
                     sha256,
                     gzip,
                     token: None,
+                    engine,
+                    dedicated,
                 } => {
                     let sealed = dhpanel_database::imports::sealed_token_of(&db, import_id)
                         .await
@@ -371,6 +377,8 @@ pub fn operation_secrets(
                             String::from_utf8(bytes)
                                 .map_err(|_| "an import token is not text".to_owned())?,
                         )),
+                        engine,
+                        dedicated,
                     });
                 }
                 // The same for the upload credential of an SQL export.
@@ -380,6 +388,8 @@ pub fn operation_secrets(
                     export_id,
                     url,
                     token: None,
+                    engine,
+                    dedicated,
                 } => {
                     let sealed = dhpanel_database::exports::sealed_token_of(&db, export_id)
                         .await
@@ -400,6 +410,8 @@ pub fn operation_secrets(
                             String::from_utf8(bytes)
                                 .map_err(|_| "an export token is not text".to_owned())?,
                         )),
+                        engine,
+                        dedicated,
                     });
                 }
                 // An FTP account's password: sealed by the API, opened here for this one

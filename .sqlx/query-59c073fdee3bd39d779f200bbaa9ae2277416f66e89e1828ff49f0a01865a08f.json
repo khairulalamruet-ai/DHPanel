@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, tenant_id, name, status FROM db_users WHERE tenant_id = $1 AND id = $2",
+  "query": "UPDATE db_users SET status = 'deleting'\n         WHERE tenant_id = $1 AND id = $2 AND status <> 'deleting'\n         RETURNING id, tenant_id, name, status, engine",
   "describe": {
     "columns": [
       {
@@ -46,6 +46,17 @@
             "name": "status"
           }
         }
+      },
+      {
+        "ordinal": 4,
+        "name": "engine",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "db_users",
+            "name": "engine"
+          }
+        }
       }
     ],
     "parameters": {
@@ -58,8 +69,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "24efe83fae0fa1b22d1a964e78fe6e10c15096560decdc0b7875ef83df4efea2"
+  "hash": "59c073fdee3bd39d779f200bbaa9ae2277416f66e89e1828ff49f0a01865a08f"
 }

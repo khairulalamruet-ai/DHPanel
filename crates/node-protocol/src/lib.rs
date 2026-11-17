@@ -881,6 +881,44 @@ impl std::fmt::Debug for RuntimeEnv {
     }
 }
 
+/// Which kind of database server an operation is for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DbEngine {
+    /// The node's MariaDB server (what every operation meant before PostgreSQL).
+    #[default]
+    Mysql,
+    /// The node's PostgreSQL server.
+    Postgres,
+}
+
+impl DbEngine {
+    /// Whether it is the default (so that it is left out of what is written).
+    #[must_use]
+    pub fn is_mysql(&self) -> bool {
+        matches!(self, Self::Mysql)
+    }
+
+    /// The name kept in the database and shown.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Mysql => "mysql",
+            Self::Postgres => "postgres",
+        }
+    }
+
+    /// Reads the name kept in the database.
+    #[must_use]
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "mysql" => Some(Self::Mysql),
+            "postgres" => Some(Self::Postgres),
+            _ => None,
+        }
+    }
+}
+
 /// The size of one database.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -1352,12 +1390,24 @@ pub enum Operation {
     CreateDatabase {
         /// The whole name, `alice_shop`.
         name: String,
+        /// Which server (the node's shared MariaDB when left out).
+        #[serde(default, skip_serializing_if = "DbEngine::is_mysql")]
+        engine: DbEngine,
+        /// The tenant whose own server it is (the node's shared one when left out).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        dedicated: Option<String>,
     },
     /// Remove a database and everything in it. Safe to repeat. Answered with
     /// [`Output::DatabaseDropped`].
     DropDatabase {
         /// The whole name.
         name: String,
+        /// Which server (the node's shared MariaDB when left out).
+        #[serde(default, skip_serializing_if = "DbEngine::is_mysql")]
+        engine: DbEngine,
+        /// The tenant whose own server it is (the node's shared one when left out).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        dedicated: Option<String>,
     },
     /// Make a database user, or change its password, for connections from the
     /// tenant's own network only (never from `%`). The user is created with the
@@ -1371,6 +1421,12 @@ pub enum Operation {
         /// The password; absent in the ledger, present on the wire.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         password: Option<DbPassword>,
+        /// Which server (the node's shared MariaDB when left out).
+        #[serde(default, skip_serializing_if = "DbEngine::is_mysql")]
+        engine: DbEngine,
+        /// The tenant whose own server it is (the node's shared one when left out).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        dedicated: Option<String>,
     },
     /// Give a user an access level in one database (replacing what it had there):
     /// `read_only`, `read_write` or `all`, each a fixed list of privileges, never
@@ -1383,6 +1439,12 @@ pub enum Operation {
         user: String,
         /// The access level.
         access: String,
+        /// Which server (the node's shared MariaDB when left out).
+        #[serde(default, skip_serializing_if = "DbEngine::is_mysql")]
+        engine: DbEngine,
+        /// The tenant whose own server it is (the node's shared one when left out).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        dedicated: Option<String>,
     },
     /// Take a user's access to one database away. Safe to repeat. Answered with
     /// [`Output::DbRevoked`].
@@ -1391,6 +1453,12 @@ pub enum Operation {
         database: String,
         /// The user's whole name.
         user: String,
+        /// Which server (the node's shared MariaDB when left out).
+        #[serde(default, skip_serializing_if = "DbEngine::is_mysql")]
+        engine: DbEngine,
+        /// The tenant whose own server it is (the node's shared one when left out).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        dedicated: Option<String>,
     },
     /// Set the addresses a database user may connect from besides its tenant's own
     /// network (IPv4 `a.b.c.d/n`, at most [`MAX_DB_REMOTE_HOSTS`], none wider than
@@ -1404,6 +1472,12 @@ pub enum Operation {
         name: String,
         /// The addresses or ranges.
         cidrs: Vec<String>,
+        /// Which server (the node's shared MariaDB when left out).
+        #[serde(default, skip_serializing_if = "DbEngine::is_mysql")]
+        engine: DbEngine,
+        /// The tenant whose own server it is (the node's shared one when left out).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        dedicated: Option<String>,
     },
     /// Set which addresses may reach the node's database server from outside the
     /// node: the union of every remote address of every user on the node (IPv4
@@ -1415,16 +1489,32 @@ pub enum Operation {
     SetDbRemoteAccess {
         /// The allowed addresses and ranges.
         cidrs: Vec<String>,
+        /// Which server (the node's shared MariaDB when left out).
+        #[serde(default, skip_serializing_if = "DbEngine::is_mysql")]
+        engine: DbEngine,
     },
     /// Remove a database user (from every address it could connect from). Safe to
     /// repeat. Answered with [`Output::DbUserDropped`].
     DropDbUser {
         /// The user's whole name.
         name: String,
+        /// Which server (the node's shared MariaDB when left out).
+        #[serde(default, skip_serializing_if = "DbEngine::is_mysql")]
+        engine: DbEngine,
+        /// The tenant whose own server it is (the node's shared one when left out).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        dedicated: Option<String>,
     },
     /// Measure the size of every database on the node's shared server (data and
     /// indexes). Answered with [`Output::DbSizes`].
     ReportDbSizes,
+    /// Make sure the node's PostgreSQL server runs: its volume, its superuser password
+    /// (made on first use, kept in the agent's secret store, never sent anywhere), and
+    /// the container, published on the node's loopback address only. Safe to repeat.
+    /// Answered with [`Output::DbServerReady`].
+    EnsurePgServer,
+    /// [`Operation::ReportDbSizes`] for the node's PostgreSQL server.
+    ReportPgSizes,
     /// Fetch an SQL dump from the control plane and run it in one of the tenant's
     /// databases, as a temporary account that has rights in that database only. The
     /// file is checked (size and SHA-256) before anything runs, may be gzip
@@ -1449,6 +1539,12 @@ pub enum Operation {
         /// The credential for the download; absent in the ledger, present on the wire.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         token: Option<DbPassword>,
+        /// Which server (the node's shared MariaDB when left out).
+        #[serde(default, skip_serializing_if = "DbEngine::is_mysql")]
+        engine: DbEngine,
+        /// The tenant whose own server it is (the node's shared one when left out).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        dedicated: Option<String>,
     },
     /// Dumps one database (structure, data, views, triggers, routines, events),
     /// gzip-compresses it and sends it to the control plane in chunks of at most
@@ -1466,6 +1562,12 @@ pub enum Operation {
         /// The credential for the upload; absent in the ledger, present on the wire.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         token: Option<DbPassword>,
+        /// Which server (the node's shared MariaDB when left out).
+        #[serde(default, skip_serializing_if = "DbEngine::is_mysql")]
+        engine: DbEngine,
+        /// The tenant whose own server it is (the node's shared one when left out).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        dedicated: Option<String>,
     },
     /// Sets (or, with no host, removes) the name phpMyAdmin is served under: the
     /// web server routes that name to the node's phpMyAdmin container. Answered with
@@ -1837,6 +1939,9 @@ pub enum Operation {
     AllowTenantDatabases {
         /// The tenant's system name.
         username: String,
+        /// Which server (the node's shared MariaDB when left out).
+        #[serde(default, skip_serializing_if = "DbEngine::is_mysql")]
+        engine: DbEngine,
     },
     /// Restart one of the tenant's own services: its web server (`web`) or all its
     /// PHP containers (`php`): stopped with a short grace period, started, and
@@ -2346,6 +2451,8 @@ impl Operation {
         "open_phpmyadmin",
         "report_import_progress",
         "report_db_sizes",
+        "ensure_pg_server",
+        "report_pg_sizes",
         "upsert_db_user",
         "grant_db",
         "revoke_db",
@@ -2364,6 +2471,45 @@ impl Operation {
         "resume_tenant",
         "delete_tenant",
     ];
+
+    /// For an operation that acts on a database server: which kind, and whose own server it is
+    /// (`None`: the node's shared one).
+    #[must_use]
+    pub fn db_target(&self) -> Option<(DbEngine, Option<&str>)> {
+        match self {
+            Self::CreateDatabase {
+                engine, dedicated, ..
+            }
+            | Self::DropDatabase {
+                engine, dedicated, ..
+            }
+            | Self::UpsertDbUser {
+                engine, dedicated, ..
+            }
+            | Self::GrantDb {
+                engine, dedicated, ..
+            }
+            | Self::RevokeDb {
+                engine, dedicated, ..
+            }
+            | Self::SetDbRemoteHosts {
+                engine, dedicated, ..
+            }
+            | Self::DropDbUser {
+                engine, dedicated, ..
+            }
+            | Self::ImportSql {
+                engine, dedicated, ..
+            }
+            | Self::ExportSql {
+                engine, dedicated, ..
+            } => Some((*engine, dedicated.as_deref())),
+            Self::SetDbRemoteAccess { engine, .. } | Self::AllowTenantDatabases { engine, .. } => {
+                Some((*engine, None))
+            }
+            _ => None,
+        }
+    }
 
     /// The operation's wire name.
     #[must_use]
@@ -2432,6 +2578,8 @@ impl Operation {
             Self::OpenPhpMyAdmin { .. } => "open_phpmyadmin",
             Self::ReportImportProgress { .. } => "report_import_progress",
             Self::ReportDbSizes => "report_db_sizes",
+            Self::EnsurePgServer => "ensure_pg_server",
+            Self::ReportPgSizes => "report_pg_sizes",
             Self::UpsertDbUser { .. } => "upsert_db_user",
             Self::GrantDb { .. } => "grant_db",
             Self::RevokeDb { .. } => "revoke_db",
@@ -3777,6 +3925,8 @@ mod tests {
             Operation::SetErrorPages { pages: vec![] },
             Operation::EnsureDbServer,
             Operation::ReportDbSizes,
+            Operation::EnsurePgServer,
+            Operation::ReportPgSizes,
             Operation::ImportSql {
                 username: "alice".into(),
                 database: "alice_shop".into(),
@@ -3786,6 +3936,8 @@ mod tests {
                 sha256: "0".repeat(64),
                 gzip: false,
                 token: None,
+                engine: DbEngine::Mysql,
+                dedicated: None,
             },
             Operation::ExportSql {
                 username: "alice".into(),
@@ -3793,6 +3945,8 @@ mod tests {
                 export_id: id(),
                 url: "https://panel.example.com/api/v1/public/exports/x".into(),
                 token: None,
+                engine: DbEngine::Mysql,
+                dedicated: None,
             },
             Operation::SetPhpMyAdminHost {
                 host: Some("pma.example.com".into()),
@@ -3863,37 +4017,53 @@ mod tests {
             Operation::ReportImportProgress { import_id: id() },
             Operation::CreateDatabase {
                 name: "alice_shop".into(),
+                engine: DbEngine::Mysql,
+                dedicated: None,
             },
             Operation::DropDatabase {
                 name: "alice_shop".into(),
+                engine: DbEngine::Mysql,
+                dedicated: None,
             },
             Operation::UpsertDbUser {
                 username: "alice".into(),
                 name: "alice_web".into(),
                 password: None,
+                engine: DbEngine::Mysql,
+                dedicated: None,
             },
             Operation::GrantDb {
                 database: "alice_shop".into(),
                 user: "alice_web".into(),
                 access: "all".into(),
+                engine: DbEngine::Mysql,
+                dedicated: None,
             },
             Operation::RevokeDb {
                 database: "alice_shop".into(),
                 user: "alice_web".into(),
+                engine: DbEngine::Mysql,
+                dedicated: None,
             },
             Operation::SetDbRemoteHosts {
                 username: "alice".into(),
                 name: "alice_web".into(),
                 cidrs: vec!["203.0.113.7/32".into()],
+                engine: DbEngine::Mysql,
+                dedicated: None,
             },
             Operation::SetDbRemoteAccess {
                 cidrs: vec!["203.0.113.7/32".into()],
+                engine: DbEngine::Mysql,
             },
             Operation::DropDbUser {
                 name: "alice_web".into(),
+                engine: DbEngine::Mysql,
+                dedicated: None,
             },
             Operation::AllowTenantDatabases {
                 username: "alice".into(),
+                engine: DbEngine::Mysql,
             },
             Operation::AttachDomain {
                 username: "alice".into(),
@@ -3962,7 +4132,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            80,
+            82,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }
@@ -4020,6 +4190,8 @@ mod tests {
             username: "alice".into(),
             name: "alice_web".into(),
             password: Some(DbPassword("Sup3r-secret-pass".into())),
+            engine: DbEngine::Mysql,
+            dedicated: None,
         };
         assert!(!format!("{op:?}").contains("secret"));
         let wire = serde_json::to_string(&op).unwrap();
@@ -4028,6 +4200,8 @@ mod tests {
             username: "alice".into(),
             name: "alice_web".into(),
             password: None,
+            engine: DbEngine::Mysql,
+            dedicated: None,
         };
         assert!(!serde_json::to_string(&ledger).unwrap().contains("password"));
         let back: Operation =

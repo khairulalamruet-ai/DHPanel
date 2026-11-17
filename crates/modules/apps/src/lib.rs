@@ -46,7 +46,7 @@ use dhpanel_database::{
 };
 use dhpanel_domain::TenantUsername;
 use dhpanel_http_kit::{AppError, FieldError, ProblemDetails};
-use dhpanel_node_protocol::{DbPassword, Operation};
+use dhpanel_node_protocol::{DbEngine, DbPassword, Operation};
 use dhpanel_rbac::{Principal, Require, permissions::AppsRead};
 use dhpanel_session::SessionStore;
 use serde::{Deserialize, Serialize};
@@ -577,10 +577,10 @@ async fn queue_setup(
             }
             dbstore::AddError::Database(db) => internal(db),
         };
-        let db = dbstore::create(&mut tx, tenant.id, name)
+        let db = dbstore::create(&mut tx, tenant.id, name, "mysql")
             .await
             .map_err(taken)?;
-        let user = dbstore::create_user(&mut tx, tenant.id, name)
+        let user = dbstore::create_user(&mut tx, tenant.id, name, "mysql")
             .await
             .map_err(taken)?;
         let password = generate_password();
@@ -603,6 +603,8 @@ async fn queue_setup(
             (
                 Operation::CreateDatabase {
                     name: name.to_owned(),
+                    engine: DbEngine::Mysql,
+                    dedicated: None,
                 },
                 format!("dbcreate:{}", db.id.simple()),
             ),
@@ -611,6 +613,8 @@ async fn queue_setup(
                     username: tenant.username.clone(),
                     name: name.to_owned(),
                     password: None::<DbPassword>,
+                    engine: DbEngine::Mysql,
+                    dedicated: None,
                 },
                 format!("dbuser:{}:{}", user.id.simple(), Uuid::now_v7().simple()),
             ),

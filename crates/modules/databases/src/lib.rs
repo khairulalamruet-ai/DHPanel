@@ -45,7 +45,7 @@ use dhpanel_database::{
 };
 use dhpanel_domain::databases::{Access, check_password, full_name, host_for_remote};
 use dhpanel_http_kit::{AppError, FieldError, ProblemDetails};
-use dhpanel_node_protocol::{DbPassword, MAX_DB_REMOTE_HOSTS, Operation};
+use dhpanel_node_protocol::{DbEngine, DbPassword, MAX_DB_REMOTE_HOSTS, Operation};
 use dhpanel_rbac::{Principal, Require, permissions::DatabasesRead};
 use dhpanel_session::{SessionStore, rfc3339};
 use dhpanel_settings::{Scope, SettingsRegistry};
@@ -265,6 +265,45 @@ fn name_error(err: dhpanel_domain::databases::DbNameError) -> AppError {
     AppError::validation(vec![FieldError::new("name", err.code(), err.to_string())])
 }
 
+/// The server a new database or user is on, checked against the plan.
+async fn chosen_engine(
+    state: &DatabasesState,
+    hosting: &Hosting,
+    given: Option<&str>,
+) -> Result<DbEngine, AppError> {
+    let engine = match given {
+        None => DbEngine::Mysql,
+        Some(text) => DbEngine::parse(text).ok_or_else(|| {
+            AppError::validation(vec![FieldError::new(
+                "engine",
+                "unknown_engine",
+                "The engine is mysql or postgres.",
+            )])
+        })?,
+    };
+    if engine == DbEngine::Postgres {
+        require_feature(state, hosting, "db_postgres", "PostgreSQL is").await?;
+    }
+    Ok(engine)
+}
+
+/// A PostgreSQL name is at most 59 characters (the server's 63, less what the node adds).
+fn check_engine_name(engine: DbEngine, name: &str) -> Result<(), AppError> {
+    if engine == DbEngine::Postgres && name.len() > 59 {
+        return Err(AppError::validation(vec![FieldError::new(
+            "name",
+            "db_name_too_long",
+            "A PostgreSQL name is at most 59 characters, with the account's prefix.",
+        )]));
+    }
+    Ok(())
+}
+
+/// The engine of a stored row.
+fn engine_of(text: &str) -> DbEngine {
+    DbEngine::parse(text).unwrap_or_default()
+}
+
 /// A strong password made here (about 100 bits).
 fn generate_password() -> String {
     loop {
@@ -301,6 +340,9 @@ pub struct DatabaseView {
     pub name: String,
     /// `pending`, `ready`, `failed` or `deleting`.
     pub status: String,
+    /// The server it lives on: `mysql` (MariaDB) or `postgres`.
+    #[schema(example = "mysql")]
+    pub engine: String,
     /// Size as last measured, in bytes (measured every few minutes).
     pub size_bytes: i64,
     /// When it was measured (RFC 3339, UTC).
@@ -342,6 +384,9 @@ pub struct DbUserView {
     pub name: String,
     /// `pending`, `ready`, `failed` or `deleting`.
     pub status: String,
+    /// The server it lives on: `mysql` (MariaDB) or `postgres`.
+    #[schema(example = "mysql")]
+    pub engine: String,
     /// What it may use.
     pub databases: Vec<UserGrantView>,
     /// Addresses it may connect from besides its own network.
@@ -392,6 +437,7 @@ async fn database_views(
             id: d.id,
             name: d.name,
             status: d.status,
+            engine: d.engine,
             size_bytes: d.size_bytes,
             size_checked_at: d.size_checked_at.map(rfc3339),
         })
@@ -429,6 +475,7 @@ async fn user_views(
             id: u.id,
             name: u.name,
             status: u.status,
+            engine: u.engine,
         });
     }
     Ok(out)
@@ -443,6 +490,10 @@ pub struct AddDatabase {
     /// The name; the account's prefix is put in front when it is not there.
     #[schema(example = "shop")]
     pub name: String,
+    /// `mysql` (MariaDB, the default) or `postgres` (needs the `db_postgres` feature).
+    #[serde(default)]
+    #[schema(example = "mysql")]
+    pub engine: Option<String>,
 }
 
 /// A database user to make.
@@ -454,6 +505,10 @@ pub struct AddDbUser {
     pub name: String,
     /// The password; a strong one is made (and shown once) when it is left out.
     pub password: Option<String>,
+    /// `mysql` (MariaDB, the default) or `postgres` (needs the `db_postgres` feature).
+    #[serde(default)]
+    #[schema(example = "mysql")]
+    pub engine: Option<String>,
 }
 
 /// A new password.
@@ -541,8 +596,10 @@ pub async fn create_database(
     running(&h)?;
     let tenant_name =
         dhpanel_domain::TenantUsername::parse(&h.tenant.username).map_err(internal)?;
+    let engine = chosen_engine(&state, &h, req.engine.as_deref()).await?;
     let name =
         full_name(&tenant_name, &req.name, prefix_required(&state).await?).map_err(name_error)?;
+    check_engine_name(engine, &name)?;
     let mut tx = state.db.begin().await.map_err(internal)?;
     dhpanel_database::domains::lock_tenant(&mut tx, h.tenant.id)
         .await
@@ -555,7 +612,7 @@ pub async fn create_database(
             format!("This plan allows {limit} databases."),
         ));
     }
-    let made = store::create(&mut tx, h.tenant.id, &name)
+    let made = store::create(&mut tx, h.tenant.id, &name, engine.as_str())
         .await
         .map_err(|e| match e {
             AddError::Taken => AppError::conflict("name_taken", "This name is taken."),
@@ -564,7 +621,11 @@ pub async fn create_database(
     queue(
         &mut tx,
         &h,
-        &Operation::CreateDatabase { name: name.clone() },
+        &Operation::CreateDatabase {
+            name: name.clone(),
+            engine,
+            dedicated: None,
+        },
         format!("dbcreate:{}", made.id.simple()),
         &who,
     )
@@ -572,7 +633,7 @@ pub async fn create_database(
     dhpanel_audit::insert(
         &mut *tx,
         &entry("database.created", &who, &h, "database", made.id)
-            .metadata(serde_json::json!({ "name": name })),
+            .metadata(serde_json::json!({ "name": name, "engine": engine.as_str() })),
     )
     .await
     .map_err(internal)?;
@@ -776,6 +837,8 @@ pub async fn delete_database(
         &h,
         &Operation::DropDatabase {
             name: gone.name.clone(),
+            engine: engine_of(&gone.engine),
+            dedicated: None,
         },
         format!("dbdrop:{}", gone.id.simple()),
         &who,
@@ -827,16 +890,18 @@ async fn queue_remote_access(
     tx: &mut dhpanel_database::sqlx::PgConnection,
     h: &Hosting,
     who: &Principal,
+    engine: DbEngine,
 ) -> Result<(), AppError> {
-    let cidrs = store::remote_union(tx, h.tenant.node_id)
+    let cidrs = store::remote_union(tx, h.tenant.node_id, engine.as_str())
         .await
         .map_err(internal)?;
     queue(
         tx,
         h,
-        &Operation::SetDbRemoteAccess { cidrs },
+        &Operation::SetDbRemoteAccess { cidrs, engine },
         format!(
-            "dbaccess:{}:{}",
+            "dbaccess:{}:{}:{}",
+            engine.as_str(),
             h.tenant.node_id.simple(),
             Uuid::now_v7().simple()
         ),
@@ -870,6 +935,8 @@ async fn queue_user(
             name: user.name.clone(),
             // Not in the ledger: the dispatcher opens the sealed one at send time.
             password: None::<DbPassword>,
+            engine: engine_of(&user.engine),
+            dedicated: None,
         },
         format!("dbuser:{}:{}", user.id.simple(), Uuid::now_v7().simple()),
         who,
@@ -917,8 +984,10 @@ pub async fn create_user(
     running(&h)?;
     let tenant_name =
         dhpanel_domain::TenantUsername::parse(&h.tenant.username).map_err(internal)?;
+    let engine = chosen_engine(&state, &h, req.engine.as_deref()).await?;
     let name =
         full_name(&tenant_name, &req.name, prefix_required(&state).await?).map_err(name_error)?;
+    check_engine_name(engine, &name)?;
     let (password, generated) = password_for(req.password)?;
     let mut tx = state.db.begin().await.map_err(internal)?;
     dhpanel_database::domains::lock_tenant(&mut tx, h.tenant.id)
@@ -935,7 +1004,7 @@ pub async fn create_user(
             format!("This plan allows {limit} database users."),
         ));
     }
-    let made = store::create_user(&mut tx, h.tenant.id, &name)
+    let made = store::create_user(&mut tx, h.tenant.id, &name, engine.as_str())
         .await
         .map_err(|e| match e {
             AddError::Taken => AppError::conflict("name_taken", "This name is taken."),
@@ -1051,6 +1120,8 @@ pub async fn delete_user(
         &h,
         &Operation::DropDbUser {
             name: gone.name.clone(),
+            engine: engine_of(&gone.engine),
+            dedicated: None,
         },
         format!("dbuserdrop:{}", gone.id.simple()),
         &who,
@@ -1062,7 +1133,7 @@ pub async fn delete_user(
         .map_err(internal)?
         .is_empty()
     {
-        queue_remote_access(&mut tx, &h, &who).await?;
+        queue_remote_access(&mut tx, &h, &who, engine_of(&gone.engine)).await?;
     }
     dhpanel_audit::insert(
         &mut *tx,
@@ -1091,6 +1162,12 @@ async fn ready_pair(
         .await
         .map_err(internal)?
         .ok_or_else(|| AppError::not_found("user"))?;
+    if db.engine != user.engine {
+        return Err(AppError::conflict(
+            "engine_mismatch",
+            "A user can only use databases on the same kind of server.",
+        ));
+    }
     if db.status != "ready" || user.status != "ready" {
         return Err(AppError::conflict(
             "not_ready",
@@ -1148,6 +1225,8 @@ pub async fn set_grant(
             database: db.name.clone(),
             user: user.name.clone(),
             access: access.as_str().to_owned(),
+            engine: engine_of(&db.engine),
+            dedicated: None,
         },
         format!(
             "dbgrant:{}:{}:{}",
@@ -1225,6 +1304,8 @@ pub async fn remove_grant(
         &Operation::RevokeDb {
             database: db.name.clone(),
             user: user.name.clone(),
+            engine: engine_of(&db.engine),
+            dedicated: None,
         },
         format!(
             "dbrevoke:{}:{}:{}",
@@ -1348,12 +1429,14 @@ pub async fn set_remote(
             username: h.tenant.username.clone(),
             name: user.name.clone(),
             cidrs: cidrs.clone(),
+            engine: engine_of(&user.engine),
+            dedicated: None,
         },
         format!("dbremote:{}:{}", user.id.simple(), Uuid::now_v7().simple()),
         &who,
     )
     .await?;
-    queue_remote_access(&mut tx, &h, &who).await?;
+    queue_remote_access(&mut tx, &h, &who, engine_of(&user.engine)).await?;
     dhpanel_audit::insert(
         &mut *tx,
         &entry("db_user.remote_hosts_set", &who, &h, "db_user", user.id)

@@ -53,6 +53,12 @@ pub enum Action {
         /// `a.b.c.d/n`, n from 8 to 32, at most 2000.
         cidrs: Vec<String>,
     },
+    /// [`Action::SetDbFirewall`] for the PostgreSQL server's public port (its own table and
+    /// its own port, the helper's setting `--pg-port`).
+    SetPgFirewall {
+        /// `a.b.c.d/n`, n from 8 to 32, at most 2000.
+        cidrs: Vec<String>,
+    },
     /// Does one file manager request on a tenant's files, as the tenant's own user
     /// id, in a process of its own (see [`crate::files`]).
     FileOp {
@@ -161,6 +167,7 @@ impl Action {
             Self::PrepareTenant { .. } => "prepare_tenant",
             Self::SetStorageQuota { .. } => "set_storage_quota",
             Self::SetDbFirewall { .. } => "set_db_firewall",
+            Self::SetPgFirewall { .. } => "set_pg_firewall",
             Self::FileOp { .. } => "file_op",
             Self::PlaceFile { .. } => "place_file",
             Self::TakeFile { .. } => "take_file",

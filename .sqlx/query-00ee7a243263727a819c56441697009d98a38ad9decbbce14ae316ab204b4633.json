@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO databases (tenant_id, name) VALUES ($1, $2)\n           RETURNING id, tenant_id, name, status, size_bytes,\n                     extract(epoch FROM size_checked_at)::bigint AS size_checked_at",
+  "query": "SELECT id, tenant_id, name, status, engine, size_bytes,\n                  extract(epoch FROM size_checked_at)::bigint AS size_checked_at\n           FROM databases WHERE tenant_id = $1 ORDER BY name",
   "describe": {
     "columns": [
       {
@@ -49,6 +49,17 @@
       },
       {
         "ordinal": 4,
+        "name": "engine",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "databases",
+            "name": "engine"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
         "name": "size_bytes",
         "type_info": "Int8",
         "origin": {
@@ -59,7 +70,7 @@
         }
       },
       {
-        "ordinal": 5,
+        "ordinal": 6,
         "name": "size_checked_at",
         "type_info": "Int8",
         "origin": "Expression"
@@ -67,8 +78,7 @@
     ],
     "parameters": {
       "Left": [
-        "Uuid",
-        "Text"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -77,8 +87,9 @@
       false,
       false,
       false,
+      false,
       null
     ]
   },
-  "hash": "4d36a5ae3846cc6562f1ca3d9da97cfd7c8e9566ebe4c17682e1d6de00c2c808"
+  "hash": "00ee7a243263727a819c56441697009d98a38ad9decbbce14ae316ab204b4633"
 }

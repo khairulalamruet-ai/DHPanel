@@ -42,17 +42,17 @@ const REMEMBERED: usize = 200;
 
 /// Where an import stands.
 #[derive(Debug, Clone, Default)]
-struct Progress {
-    stage: &'static str,
-    done: u64,
-    total: u64,
-    statements: u64,
-    error: Option<String>,
+pub(super) struct Progress {
+    pub(super) stage: &'static str,
+    pub(super) done: u64,
+    pub(super) total: u64,
+    pub(super) statements: u64,
+    pub(super) error: Option<String>,
 }
 
 static PROGRESS: Mutex<BTreeMap<Uuid, Progress>> = Mutex::new(BTreeMap::new());
 
-fn update(id: Uuid, f: impl FnOnce(&mut Progress)) {
+pub(super) fn update(id: Uuid, f: impl FnOnce(&mut Progress)) {
     if let Ok(mut all) = PROGRESS.lock() {
         if all.len() > REMEMBERED && !all.contains_key(&id) {
             // Forget the oldest finished one.
@@ -82,10 +82,20 @@ pub(super) fn failed(what: &str) -> AgentError {
 }
 
 /// Reads the bytes it is given and counts them.
-struct Counting<R> {
+pub(super) struct Counting<R> {
     inner: R,
     import_id: Uuid,
     read: u64,
+}
+
+impl<R> Counting<R> {
+    pub(super) fn new(inner: R, import_id: Uuid) -> Self {
+        Self {
+            inner,
+            import_id,
+            read: 0,
+        }
+    }
 }
 
 impl<R: Read> Read for Counting<R> {
@@ -264,6 +274,8 @@ pub async fn import_sql(context: Arc<TenantContext>, op: Operation) -> Result<Ou
         sha256,
         gzip,
         token,
+        engine,
+        ..
     } = op
     else {
         return Err(super::wrong_operation());
@@ -271,6 +283,9 @@ pub async fn import_sql(context: Arc<TenantContext>, op: Operation) -> Result<Ou
     // Arguments first: nothing is touched for a bad request.
     TenantUsername::parse(&username).map_err(|e| invalid(&e.to_string()))?;
     dhpanel_domain::databases::check_identifier(&database).map_err(|e| invalid(&e.to_string()))?;
+    if engine == dhpanel_node_protocol::DbEngine::Postgres {
+        super::pg::identifier(&database)?;
+    }
     let local = url.starts_with("http://127.0.0.1")
         || url.starts_with("http://localhost")
         || url.starts_with("http://[::1]");
@@ -307,7 +322,7 @@ pub async fn import_sql(context: Arc<TenantContext>, op: Operation) -> Result<Ou
     let result = tokio::time::timeout(
         MAX_DURATION,
         run(
-            &context, &database, import_id, &url, &token, size_bytes, &sha256, gzip,
+            &context, engine, &database, import_id, &url, &token, size_bytes, &sha256, gzip,
         ),
     )
     .await
@@ -328,6 +343,7 @@ pub async fn import_sql(context: Arc<TenantContext>, op: Operation) -> Result<Ou
 #[allow(clippy::too_many_arguments)]
 async fn run(
     context: &TenantContext,
+    engine: dhpanel_node_protocol::DbEngine,
     database: &str,
     import_id: Uuid,
     url: &str,
@@ -346,7 +362,7 @@ async fn run(
     })?;
     let path = dir.join(format!("{}.dump", import_id.simple()));
     let outcome = run_with_file(
-        context, database, import_id, url, token, size, sha256, gzip, &path,
+        context, engine, database, import_id, url, token, size, sha256, gzip, &path,
     )
     .await;
     // The file is only kept while a retry may need it.
@@ -360,6 +376,7 @@ async fn run(
 #[allow(clippy::too_many_arguments)]
 async fn run_with_file(
     context: &TenantContext,
+    engine: dhpanel_node_protocol::DbEngine,
     database: &str,
     import_id: Uuid,
     url: &str,
@@ -391,7 +408,14 @@ async fn run_with_file(
             "the dump does not match its SHA-256: nothing was run",
         ));
     }
-    import_file(context, database, import_id, path, gzip).await
+    match engine {
+        dhpanel_node_protocol::DbEngine::Mysql => {
+            import_file(context, database, import_id, path, gzip).await
+        }
+        dhpanel_node_protocol::DbEngine::Postgres => {
+            super::pgimport::import_file(context, database, import_id, path, gzip).await
+        }
+    }
 }
 
 /// Runs a dump that is in a file (plain or gzip) into `database`, as a temporary account

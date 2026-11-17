@@ -134,6 +134,8 @@ async fn an_account_is_backed_up_encrypted_and_every_part_checks_out() {
         context.clone(),
         Operation::CreateDatabase {
             name: "bkp_shop".into(),
+            engine: dhpanel_node_protocol::DbEngine::Mysql,
+            dedicated: None,
         },
     )
     .await

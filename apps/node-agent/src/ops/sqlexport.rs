@@ -48,12 +48,17 @@ pub async fn export_sql(context: Arc<TenantContext>, op: Operation) -> Result<Ou
         export_id,
         url,
         token,
+        engine,
+        ..
     } = op
     else {
         return Err(super::wrong_operation());
     };
     TenantUsername::parse(&username).map_err(|e| invalid(&e.to_string()))?;
     dhpanel_domain::databases::check_identifier(&database).map_err(|e| invalid(&e.to_string()))?;
+    if engine == dhpanel_node_protocol::DbEngine::Postgres {
+        super::pg::identifier(&database)?;
+    }
     let local = url.starts_with("http://127.0.0.1")
         || url.starts_with("http://localhost")
         || url.starts_with("http://[::1]");
@@ -74,7 +79,7 @@ pub async fn export_sql(context: Arc<TenantContext>, op: Operation) -> Result<Ou
     let path = dir.join(format!("{}.sql.gz", export_id.simple()));
     let result = tokio::time::timeout(
         MAX_DURATION,
-        run(&context, &database, export_id, &url, &token, &path),
+        run(&context, engine, &database, export_id, &url, &token, &path),
     )
     .await
     .unwrap_or_else(|_| Err(failed("the export took longer than four hours")));
@@ -84,17 +89,39 @@ pub async fn export_sql(context: Arc<TenantContext>, op: Operation) -> Result<Ou
 
 async fn run(
     context: &TenantContext,
+    engine: dhpanel_node_protocol::DbEngine,
     database: &str,
     export_id: Uuid,
     url: &str,
     token: &str,
     path: &Path,
 ) -> Result<u64, AgentError> {
-    let (account, password) =
-        reader_account(context, database, &export_id.simple().to_string()[..12]).await?;
-    let dumped = dump(context, database, &account, &password, path).await;
-    drop_account(context, &account).await;
-    dumped?;
+    if engine == dhpanel_node_protocol::DbEngine::Postgres {
+        // A temporary account that can only read this database, for the dump only.
+        super::pg::ensure_server(context).await?;
+        let password = random_password()
+            .map_err(|e| failed(&format!("cannot make a password: {}", e.kind())))?;
+        let account = format!("{database}__exp");
+        let admin = super::pg::connect(context, "postgres").await?;
+        super::pg::create_temporary_role(
+            context,
+            &admin,
+            &account,
+            &password,
+            &format!("{database}__ro"),
+            "127.0.0.1/32",
+        )
+        .await?;
+        let dumped = dump(context, engine, database, &account, &password, path).await;
+        let _ = super::pg::finish_temporary_role(context, database, &account, false).await;
+        dumped?;
+    } else {
+        let (account, password) =
+            reader_account(context, database, &export_id.simple().to_string()[..12]).await?;
+        let dumped = dump(context, engine, database, &account, &password, path).await;
+        drop_account(context, &account).await;
+        dumped?;
+    }
     let (url, token, path) = (url.to_owned(), token.to_owned(), path.to_owned());
     tokio::task::spawn_blocking(move || upload(&url, &token, &path))
         .await
@@ -159,6 +186,7 @@ pub(super) async fn drop_account(context: &TenantContext, account: &str) {
 /// Runs the dump into the gzip file at `path`.
 async fn dump(
     context: &TenantContext,
+    engine: dhpanel_node_protocol::DbEngine,
     database: &str,
     account: &str,
     password: &str,
@@ -185,12 +213,21 @@ async fn dump(
         gz.finish()?.flush()?;
         Ok(raw)
     });
-    let container =
-        dhpanel_docker_manager::Name::parse(db::CONTAINER).map_err(|e| failed(&e.to_string()))?;
-    let ran = context
-        .docker
-        .dump_database(&container, database, account, password, tx, MAX_DURATION)
-        .await;
+    let ran = if engine == dhpanel_node_protocol::DbEngine::Postgres {
+        let container = dhpanel_docker_manager::Name::parse(super::pg::CONTAINER)
+            .map_err(|e| failed(&e.to_string()))?;
+        context
+            .docker
+            .dump_pg_database(&container, database, account, password, tx, MAX_DURATION)
+            .await
+    } else {
+        let container = dhpanel_docker_manager::Name::parse(db::CONTAINER)
+            .map_err(|e| failed(&e.to_string()))?;
+        context
+            .docker
+            .dump_database(&container, database, account, password, tx, MAX_DURATION)
+            .await
+    };
     let written = writer
         .await
         .map_err(|_| failed("the dump was cancelled"))?

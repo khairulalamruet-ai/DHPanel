@@ -13,6 +13,8 @@ pub struct Db {
     pub name: String,
     /// `pending`, `ready`, `failed` or `deleting`.
     pub status: String,
+    /// The server it lives on: `mysql` or `postgres`.
+    pub engine: String,
     /// Size, as last measured (bytes).
     pub size_bytes: i64,
     /// When it was measured (Unix seconds).
@@ -30,6 +32,8 @@ pub struct DbUser {
     pub name: String,
     /// `pending`, `ready`, `failed` or `deleting`.
     pub status: String,
+    /// The server it lives on: `mysql` or `postgres`.
+    pub engine: String,
 }
 
 /// A user's access to a database.
@@ -68,7 +72,7 @@ fn taken(err: sqlx::Error) -> AddError {
 pub async fn list(pool: &PgPool, tenant_id: Uuid) -> Result<Vec<Db>, sqlx::Error> {
     sqlx::query_as!(
         Db,
-        r#"SELECT id, tenant_id, name, status, size_bytes,
+        r#"SELECT id, tenant_id, name, status, engine, size_bytes,
                   extract(epoch FROM size_checked_at)::bigint AS size_checked_at
            FROM databases WHERE tenant_id = $1 ORDER BY name"#,
         tenant_id,
@@ -84,7 +88,7 @@ pub async fn list(pool: &PgPool, tenant_id: Uuid) -> Result<Vec<Db>, sqlx::Error
 pub async fn get(pool: &PgPool, tenant_id: Uuid, id: Uuid) -> Result<Option<Db>, sqlx::Error> {
     sqlx::query_as!(
         Db,
-        r#"SELECT id, tenant_id, name, status, size_bytes,
+        r#"SELECT id, tenant_id, name, status, engine, size_bytes,
                   extract(epoch FROM size_checked_at)::bigint AS size_checked_at
            FROM databases WHERE tenant_id = $1 AND id = $2"#,
         tenant_id,
@@ -111,14 +115,20 @@ pub async fn count(conn: &mut PgConnection, tenant_id: Uuid) -> Result<i64, sqlx
 ///
 /// # Errors
 /// [`AddError`].
-pub async fn create(conn: &mut PgConnection, tenant_id: Uuid, name: &str) -> Result<Db, AddError> {
+pub async fn create(
+    conn: &mut PgConnection,
+    tenant_id: Uuid,
+    name: &str,
+    engine: &str,
+) -> Result<Db, AddError> {
     sqlx::query_as!(
         Db,
-        r#"INSERT INTO databases (tenant_id, name) VALUES ($1, $2)
-           RETURNING id, tenant_id, name, status, size_bytes,
+        r#"INSERT INTO databases (tenant_id, name, engine) VALUES ($1, $2, $3)
+           RETURNING id, tenant_id, name, status, engine, size_bytes,
                      extract(epoch FROM size_checked_at)::bigint AS size_checked_at"#,
         tenant_id,
         name,
+        engine,
     )
     .fetch_one(conn)
     .await
@@ -138,7 +148,7 @@ pub async fn mark_deleting(
         Db,
         r#"UPDATE databases SET status = 'deleting'
            WHERE tenant_id = $1 AND id = $2 AND status <> 'deleting'
-           RETURNING id, tenant_id, name, status, size_bytes,
+           RETURNING id, tenant_id, name, status, engine, size_bytes,
                      extract(epoch FROM size_checked_at)::bigint AS size_checked_at"#,
         tenant_id,
         id,
@@ -154,7 +164,7 @@ pub async fn mark_deleting(
 pub async fn users(pool: &PgPool, tenant_id: Uuid) -> Result<Vec<DbUser>, sqlx::Error> {
     sqlx::query_as!(
         DbUser,
-        "SELECT id, tenant_id, name, status FROM db_users WHERE tenant_id = $1 ORDER BY name",
+        "SELECT id, tenant_id, name, status, engine FROM db_users WHERE tenant_id = $1 ORDER BY name",
         tenant_id,
     )
     .fetch_all(pool)
@@ -168,7 +178,7 @@ pub async fn users(pool: &PgPool, tenant_id: Uuid) -> Result<Vec<DbUser>, sqlx::
 pub async fn user(pool: &PgPool, tenant_id: Uuid, id: Uuid) -> Result<Option<DbUser>, sqlx::Error> {
     sqlx::query_as!(
         DbUser,
-        "SELECT id, tenant_id, name, status FROM db_users WHERE tenant_id = $1 AND id = $2",
+        "SELECT id, tenant_id, name, status, engine FROM db_users WHERE tenant_id = $1 AND id = $2",
         tenant_id,
         id,
     )
@@ -197,13 +207,15 @@ pub async fn create_user(
     conn: &mut PgConnection,
     tenant_id: Uuid,
     name: &str,
+    engine: &str,
 ) -> Result<DbUser, AddError> {
     sqlx::query_as!(
         DbUser,
-        "INSERT INTO db_users (tenant_id, name) VALUES ($1, $2)
-         RETURNING id, tenant_id, name, status",
+        "INSERT INTO db_users (tenant_id, name, engine) VALUES ($1, $2, $3)
+         RETURNING id, tenant_id, name, status, engine",
         tenant_id,
         name,
+        engine,
     )
     .fetch_one(conn)
     .await
@@ -223,7 +235,7 @@ pub async fn mark_user_deleting(
         DbUser,
         "UPDATE db_users SET status = 'deleting'
          WHERE tenant_id = $1 AND id = $2 AND status <> 'deleting'
-         RETURNING id, tenant_id, name, status",
+         RETURNING id, tenant_id, name, status, engine",
         tenant_id,
         id,
     )
@@ -399,15 +411,20 @@ pub async fn record_sizes(
     Ok(updated)
 }
 
-/// Whether any account on the node has a database.
+/// Whether any account on the node has a database on this kind of server.
 ///
 /// # Errors
 /// Database errors.
-pub async fn node_has_databases(pool: &PgPool, node_id: Uuid) -> Result<bool, sqlx::Error> {
+pub async fn node_has_databases(
+    pool: &PgPool,
+    node_id: Uuid,
+    engine: &str,
+) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar!(
         r#"SELECT EXISTS (SELECT 1 FROM databases d JOIN tenants t ON t.id = d.tenant_id
-                          WHERE t.node_id = $1) AS "has!""#,
+                          WHERE t.node_id = $1 AND d.engine = $2) AS "has!""#,
         node_id,
+        engine,
     )
     .fetch_one(pool)
     .await
@@ -421,15 +438,17 @@ pub async fn node_has_databases(pool: &PgPool, node_id: Uuid) -> Result<bool, sq
 pub async fn remote_union(
     conn: &mut PgConnection,
     node_id: Uuid,
+    engine: &str,
 ) -> Result<Vec<String>, sqlx::Error> {
     sqlx::query_scalar!(
         r#"SELECT DISTINCT h.cidr AS "cidr!"
            FROM db_remote_hosts h
            JOIN db_users u ON u.id = h.user_id
            JOIN tenants t ON t.id = u.tenant_id
-           WHERE t.node_id = $1 AND u.status <> 'deleting'
+           WHERE t.node_id = $1 AND u.engine = $2 AND u.status <> 'deleting'
            ORDER BY 1"#,
         node_id,
+        engine,
     )
     .fetch_all(conn)
     .await
@@ -550,4 +569,22 @@ pub async fn biggest(
             node: r.node,
         })
         .collect())
+}
+
+/// The kind of server an account's database is on, by its whole name.
+///
+/// # Errors
+/// Database errors.
+pub async fn engine_of(
+    pool: &PgPool,
+    tenant_id: Uuid,
+    name: &str,
+) -> Result<Option<String>, sqlx::Error> {
+    sqlx::query_scalar::<_, String>(
+        "SELECT engine FROM databases WHERE tenant_id = $1 AND name = $2",
+    )
+    .bind(tenant_id)
+    .bind(name)
+    .fetch_optional(pool)
+    .await
 }

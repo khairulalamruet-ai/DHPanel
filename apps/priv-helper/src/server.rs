@@ -54,6 +54,8 @@ pub struct Config {
     pub tenants: TenantEnv,
     /// The one port the firewall action may filter (the database's public port).
     pub db_port: u16,
+    /// The one port the PostgreSQL firewall action may filter.
+    pub pg_port: u16,
     /// The agent's folder for files on their way (see [`crate::files`]).
     pub transfers: PathBuf,
     /// The commands and paths of the server tools.
@@ -253,6 +255,9 @@ fn execute_one(action: &Action, config: &Config) -> Result<(), (ErrorCode, &'sta
             inodes,
         } => tenant::set_storage_quota(&config.tenants, tenant_id, *uid, *disk_bytes, *inodes),
         Action::SetDbFirewall { cidrs } => crate::firewall::set(config.db_port, cidrs),
+        Action::SetPgFirewall { cidrs } => {
+            crate::firewall::set_in(crate::firewall::TABLE_PG, config.pg_port, cidrs)
+        }
         Action::SetNodeFirewall { policy } => crate::nodefw::set(policy, config.ssh_port),
         Action::SetTimezone { zone } => crate::servertools::set_timezone(&config.server, zone),
         Action::SetSwap { megabytes } => crate::servertools::set_swap(&config.server, *megabytes),
@@ -416,6 +421,7 @@ mod tests {
                 agent_gid: gid,
                 tenants: test_tenants(gid),
                 db_port: 13306,
+                pg_port: 15432,
                 transfers: std::env::temp_dir(),
                 server: crate::servertools::Env::default(),
                 ssh_port: 22,
@@ -599,6 +605,7 @@ mod tests {
             agent_gid: gid,
             tenants: test_tenants(gid),
             db_port: 13306,
+            pg_port: 15432,
             transfers: std::env::temp_dir(),
             server: crate::servertools::Env::default(),
             ssh_port: 22,
