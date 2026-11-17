@@ -2181,3 +2181,168 @@ async fn a_cache_server_is_ready_when_the_node_says_so_and_gone_when_it_is_remov
     agent_stop.send(true).unwrap();
     agent.await.unwrap();
 }
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs PostgreSQL"]
+async fn an_application_is_ready_when_the_node_says_so_failed_with_its_reason_and_gone_when_removed(
+    pool: PgPool,
+) {
+    let p = plane(&pool).await;
+    let d = Dispatcher::new(p.ops.clone(), p.gateway.clone(), None, dispatch_settings());
+    let mut registry = Registry::new();
+    registry.register("set_runtime_app", |op| async move {
+        let Operation::SetRuntimeApp { name, port, .. } = op else {
+            unreachable!()
+        };
+        if name == "broken" {
+            return Err(AgentError::new(
+                ErrorCode::Internal,
+                "the application stopped right after starting (exit code 1): boom",
+            ));
+        }
+        Ok(Output::RuntimeAppSet {
+            host: format!("dh-gus-app-{name}:{port}"),
+        })
+    });
+    registry.register("remove_runtime_app", |_| async move {
+        Ok(Output::RuntimeAppRemoved { existed: true })
+    });
+    let node = make_node_with(&p, &pool, "apps", registry).await;
+    let (agent_stop, agent) = node.start_agent(p.addr);
+    wait_connected(&p, node.id).await;
+    let results = p.gateway.take_results().expect("results taken once");
+    tokio::spawn(d.clone().run(results, p.stop.subscribe()));
+    let account: Uuid = sqlx::query_scalar(
+        "INSERT INTO accounts (kind, username, email, password_hash)
+         VALUES ('client', 'gus', 'gus@example.com',
+                 '$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHQ$aGFzaGhhc2hoYXNoaGFzaA') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let plan: Uuid = sqlx::query_scalar("SELECT id FROM plans WHERE is_default")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let tenant: Uuid = sqlx::query_scalar(
+        "INSERT INTO tenants (owner_account_id, node_id, plan_id, username, uid, status)
+         VALUES ($1, $2, $3, 'gus', 10007, 'active') RETURNING id",
+    )
+    .bind(account)
+    .bind(node.id)
+    .bind(plan)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let mut ids = Vec::new();
+    for name in ["api", "broken"] {
+        let app: Uuid = sqlx::query_scalar(
+            "INSERT INTO runtime_apps (tenant_id, name, kind, version, start_command, port)
+             VALUES ($1, $2, 'node', '24', 'node a.js', 3000) RETURNING id",
+        )
+        .bind(tenant)
+        .bind(name)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let op = match p
+            .ops
+            .enqueue(&Request::new(
+                node.id,
+                Operation::SetRuntimeApp {
+                    app_id: app,
+                    tenant_id: tenant,
+                    username: "gus".into(),
+                    uid: 10_007,
+                    kind: "node".into(),
+                    version: "24".into(),
+                    name: name.into(),
+                    dir: String::new(),
+                    command: vec!["node".into(), "a.js".into()],
+                    install: false,
+                    port: 3000,
+                    memory_mb: 256,
+                    env: None,
+                },
+                format!("rt-{name}"),
+            ))
+            .await
+            .unwrap()
+        {
+            dhpanel_operations::Enqueued::Created(op)
+            | dhpanel_operations::Enqueued::Existing(op) => op.id,
+        };
+        sqlx::query("UPDATE runtime_apps SET op_id = $2 WHERE id = $1")
+            .bind(app)
+            .bind(op)
+            .execute(&pool)
+            .await
+            .unwrap();
+        ids.push(app);
+    }
+    let state = |pool: PgPool, name: &'static str| async move {
+        sqlx::query_as::<_, (String, Option<String>, Option<String>)>(
+            "SELECT status, host, error FROM runtime_apps WHERE name = $1",
+        )
+        .bind(name)
+        .fetch_optional(&pool)
+        .await
+        .unwrap()
+    };
+    let mut api = None;
+    let mut broken = None;
+    for _ in 0..100 {
+        d.settle_runtime_apps().await;
+        api = state(pool.clone(), "api").await;
+        broken = state(pool.clone(), "broken").await;
+        if api.as_ref().is_some_and(|(s, _, _)| s == "ready")
+            && broken.as_ref().is_some_and(|(s, _, _)| s == "failed")
+        {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert_eq!(
+        api,
+        Some(("ready".into(), Some("dh-gus-app-api:3000".into()), None))
+    );
+    let (status, host, error) = broken.unwrap();
+    assert_eq!((status.as_str(), host), ("failed", None));
+    assert!(error.unwrap().contains("exit code 1"));
+    // Removed: the row goes when the node has removed the container.
+    let op = match p
+        .ops
+        .enqueue(&Request::new(
+            node.id,
+            Operation::RemoveRuntimeApp {
+                tenant_id: tenant,
+                username: "gus".into(),
+                name: "api".into(),
+            },
+            "rt-remove".to_owned(),
+        ))
+        .await
+        .unwrap()
+    {
+        dhpanel_operations::Enqueued::Created(op) | dhpanel_operations::Enqueued::Existing(op) => {
+            op.id
+        }
+    };
+    sqlx::query("UPDATE runtime_apps SET op_id = $2, status = 'removing' WHERE id = $1")
+        .bind(ids[0])
+        .bind(op)
+        .execute(&pool)
+        .await
+        .unwrap();
+    for _ in 0..100 {
+        d.settle_runtime_apps().await;
+        api = state(pool.clone(), "api").await;
+        if api.is_none() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert_eq!(api, None);
+    agent_stop.send(true).unwrap();
+    agent.await.unwrap();
+}

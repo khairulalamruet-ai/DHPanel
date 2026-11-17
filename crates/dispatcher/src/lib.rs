@@ -184,7 +184,7 @@ impl Dispatcher {
                 _ = tick.tick() => { self.tick().await; }
                 _ = capabilities.tick() => { self.request_capabilities().await; }
                 _ = purges.tick() => { self.request_purges().await; }
-                _ = routes.tick() => { self.expire_previews().await; self.request_route_syncs().await; self.request_error_pages().await; self.request_user_agents().await; self.request_firewalls().await; self.request_scans().await; self.request_signature_updates().await; self.request_image_checks().await; self.request_app_installs().await; self.settle_cache_instances().await; self.request_import_progress().await; self.request_cron_runs().await; self.request_metrics().await; self.request_services().await; }
+                _ = routes.tick() => { self.expire_previews().await; self.request_route_syncs().await; self.request_error_pages().await; self.request_user_agents().await; self.request_firewalls().await; self.request_scans().await; self.request_signature_updates().await; self.request_image_checks().await; self.request_app_installs().await; self.settle_cache_instances().await; self.settle_runtime_apps().await; self.request_import_progress().await; self.request_cron_runs().await; self.request_metrics().await; self.request_services().await; }
                 _ = certificates.tick() => { self.request_certificates().await; self.request_db_sizes().await; }
                 _ = expiry.tick() => { self.announce_expiring().await; }
                 Some(report) = results.recv() => self.handle_result(report).await,
@@ -996,6 +996,67 @@ impl Dispatcher {
             match result {
                 Ok(()) => moved += 1,
                 Err(err) => tracing::warn!(error = %err, "could not keep a cache server's state"),
+            }
+        }
+        moved
+    }
+
+    /// Writes down what the nodes answered about the applications clients run themselves
+    /// (T12.07, T12.08): one that is up is `ready` with the address to reach it by, one that
+    /// could not be made is `failed` with the reason, one that was removed leaves the table.
+    /// Returns how many rows moved.
+    pub async fn settle_runtime_apps(&self) -> usize {
+        let db = self.ops.db();
+        let rows = match dhpanel_database::runtime_apps::awaiting(db).await {
+            Ok(r) => r,
+            Err(err) => {
+                tracing::warn!(error = %err, "could not look for applications under way");
+                return 0;
+            }
+        };
+        let mut moved = 0;
+        for row in rows {
+            let Some(op_id) = row.op_id else { continue };
+            let Ok(Some(op)) = self.ops.get(op_id).await else {
+                continue;
+            };
+            let result = match op.status {
+                dhpanel_database::operations::Status::Succeeded if row.status == "removing" => {
+                    dhpanel_database::runtime_apps::forget(db, row.id).await
+                }
+                dhpanel_database::operations::Status::Succeeded => {
+                    let answer = op.output.and_then(|o| {
+                        serde_json::from_value::<dhpanel_node_protocol::Output>(o).ok()
+                    });
+                    match answer {
+                        Some(dhpanel_node_protocol::Output::RuntimeAppSet { host }) => {
+                            dhpanel_database::runtime_apps::ready(db, row.id, &host).await
+                        }
+                        _ => {
+                            dhpanel_database::runtime_apps::failed(
+                                db,
+                                row.id,
+                                "the node's answer is unreadable",
+                            )
+                            .await
+                        }
+                    }
+                }
+                dhpanel_database::operations::Status::Failed => {
+                    let message = op
+                        .error
+                        .as_ref()
+                        .and_then(|e| e.get("message"))
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("the node could not do it")
+                        .to_owned();
+                    dhpanel_database::runtime_apps::failed(db, row.id, &message).await
+                }
+                _ => continue,
+            };
+            match result {
+                Ok(()) => moved += 1,
+                Err(err) => tracing::warn!(error = %err, "could not keep an application's state"),
             }
         }
         moved

@@ -63,6 +63,10 @@ pub enum Role {
     /// The node's image vulnerability scanner, run for one image at a time (not part of a
     /// tenant's stack).
     Trivy,
+    /// A tenant's own Node.js application (T12.07; not part of the default stack).
+    Node,
+    /// A tenant's own Python application (T12.08; not part of the default stack).
+    Python,
 }
 
 impl Role {
@@ -80,6 +84,8 @@ impl Role {
             Self::Wpcli => "wpcli",
             Self::Redis => "redis",
             Self::Memcached => "memcached",
+            Self::Node => "node",
+            Self::Python => "python",
         }
     }
 }
@@ -105,6 +111,9 @@ pub enum StackError {
     /// No image runs this PHP version.
     #[error("PHP {0} is not available")]
     UnknownPhpVersion(String),
+    /// No image runs this version of a runtime.
+    #[error("{0} {1} is not available")]
+    UnknownRuntimeVersion(Role, String),
     /// The plan leaves too little of a resource to run the stack.
     #[error("the plan's {0} is too small to run a stack")]
     PlanTooSmall(&'static str),
@@ -142,6 +151,9 @@ pub struct Allowlist {
     by_role: BTreeMap<Role, Vec<ImageRef>>,
     /// The PHP versions that may run, with their images, default first.
     php: Vec<(String, ImageRef)>,
+    /// The versions of the runtimes tenants run their own applications on (Node.js, Python),
+    /// with their images, newest first.
+    runtimes: Vec<(Role, String, ImageRef)>,
     /// For a PHP version with an image of our own: the official one to fall back to.
     fallbacks: Vec<(ImageRef, ImageRef)>,
     /// Every image listed, as written.
@@ -160,6 +172,15 @@ pub struct ImageEntry {
     pub tag: Option<String>,
     /// What it is.
     pub note: String,
+}
+
+/// Whether `text` is the version of a runtime as the panel writes it: `24`, `3.13`.
+#[must_use]
+pub fn is_runtime_version(text: &str) -> bool {
+    (1..=6).contains(&text.len())
+        && !text.starts_with('.')
+        && !text.ends_with('.')
+        && text.bytes().all(|b| b.is_ascii_digit() || b == b'.')
 }
 
 /// Whether `text` is a PHP version as the panel writes it: `8.4`.
@@ -183,6 +204,7 @@ impl Allowlist {
             .map_err(|e| StackError::Allowlist(e.to_string().replace('\n', " ")))?;
         let mut by_role: BTreeMap<Role, Vec<ImageRef>> = BTreeMap::new();
         let mut php: Vec<(String, ImageRef)> = Vec::new();
+        let mut runtimes: Vec<(Role, String, ImageRef)> = Vec::new();
         let mut fallbacks: Vec<(ImageRef, ImageRef)> = Vec::new();
         let mut entries: Vec<ImageEntry> = Vec::new();
         for image in raw.image {
@@ -248,6 +270,29 @@ impl Allowlist {
                         "a php image needs its version, like \"8.4\"".to_owned(),
                     ));
                 }
+                (role @ (Role::Node | Role::Python), Some(version))
+                    if is_runtime_version(&version) =>
+                {
+                    if runtimes.iter().any(|(r, v, _)| *r == role && *v == version) {
+                        return Err(StackError::Allowlist(format!(
+                            "{role} {version} is listed twice"
+                        )));
+                    }
+                    match preferred {
+                        Some(own) => {
+                            runtimes.push((role, version, own.clone()));
+                            fallbacks.push((own.clone(), reference.clone()));
+                            own_image = Some(own);
+                        }
+                        None => runtimes.push((role, version, reference.clone())),
+                    }
+                }
+                (Role::Node | Role::Python, _) => {
+                    return Err(StackError::Allowlist(
+                        "a node or python image needs its version, like \"24\" or \"3.13\""
+                            .to_owned(),
+                    ));
+                }
                 (_, Some(_)) => {
                     return Err(StackError::Allowlist(format!(
                         "only php images have a version ({})",
@@ -283,6 +328,7 @@ impl Allowlist {
         Ok(Self {
             by_role,
             php,
+            runtimes,
             fallbacks,
             entries,
         })
@@ -340,6 +386,30 @@ impl Allowlist {
             .find(|(v, _)| v == version)
             .map(|(_, image)| image)
             .ok_or_else(|| StackError::UnknownPhpVersion(version.chars().take(10).collect()))
+    }
+
+    /// The versions of a runtime (`node`, `python`) that may run, the newest first.
+    #[must_use]
+    pub fn runtime_versions(&self, role: Role) -> Vec<&str> {
+        self.runtimes
+            .iter()
+            .filter(|(r, _, _)| *r == role)
+            .map(|(_, v, _)| v.as_str())
+            .collect()
+    }
+
+    /// The image that runs a version of a runtime.
+    ///
+    /// # Errors
+    /// [`StackError::UnknownRuntimeVersion`].
+    pub fn runtime_image(&self, role: Role, version: &str) -> Result<&ImageRef, StackError> {
+        self.runtimes
+            .iter()
+            .find(|(r, v, _)| *r == role && v == version)
+            .map(|(_, _, image)| image)
+            .ok_or_else(|| {
+                StackError::UnknownRuntimeVersion(role, version.chars().take(10).collect())
+            })
     }
 
     /// The official image to use when `image` (one of ours) cannot be pulled.
@@ -694,7 +764,9 @@ pub fn render(tenant: &Tenant<'_>, allowlist: &Allowlist) -> Result<Stack, Stack
             | Role::Trivy
             | Role::Wpcli
             | Role::Redis
-            | Role::Memcached => {
+            | Role::Memcached
+            | Role::Node
+            | Role::Python => {
                 continue;
             }
         }

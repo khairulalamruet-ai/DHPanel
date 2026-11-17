@@ -34,6 +34,7 @@ pub mod logs;
 pub mod metrics;
 pub mod nodeservices;
 pub mod pma;
+pub mod runtimeapp;
 pub mod scan;
 pub mod server;
 pub mod services;
@@ -212,6 +213,14 @@ impl Registry {
             registry.register("remove_cache_instance", {
                 let context = context.clone();
                 move |op| cacheaddon::remove_cache_instance(context.clone(), op)
+            });
+            registry.register("set_runtime_app", {
+                let context = context.clone();
+                move |op| runtimeapp::set_runtime_app(context.clone(), op)
+            });
+            registry.register("remove_runtime_app", {
+                let context = context.clone();
+                move |op| runtimeapp::remove_runtime_app(context.clone(), op)
             });
             registry.register("install_app", {
                 let context = context.clone();

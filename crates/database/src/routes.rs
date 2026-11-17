@@ -40,6 +40,9 @@ pub struct RoutedDomain {
     pub docroot: String,
     /// The PHP version the domain asks for instead of the account's.
     pub php_version: Option<String>,
+    /// The tenant's own application that shows this domain (`host:port` on the tenant's
+    /// network), once it runs.
+    pub app_upstream: Option<String>,
 }
 
 /// A redirect of a domain.
@@ -83,7 +86,10 @@ pub async fn domains(pool: &PgPool, tenant_id: Uuid) -> Result<Vec<RoutedDomain>
     sqlx::query_as!(
         RoutedDomain,
         r#"SELECT id AS "id!", fqdn AS "fqdn!", kind AS "kind!", parent_id, status AS "status!",
-                  force_https AS "force_https!", hsts AS "hsts!", docroot AS "docroot!", php_version
+                  force_https AS "force_https!", hsts AS "hsts!", docroot AS "docroot!", php_version,
+                  (SELECT a.host FROM runtime_apps a
+                    WHERE a.domain_id = all_names.id AND a.status = 'ready'
+                      AND a.host IS NOT NULL) AS "app_upstream?"
            FROM (
                SELECT id, fqdn, kind, parent_domain_id AS parent_id, status, force_https, hsts,
                       docroot, php_version

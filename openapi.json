@@ -19406,6 +19406,356 @@
         ]
       }
     },
+    "/api/v1/client/runtime-apps": {
+      "get": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "The account's applications.",
+        "operationId": "clientListRuntimeApps",
+        "responses": {
+          "200": {
+            "description": "The applications",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeAppList"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only` or `feature_disabled`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "Make an application: a container of your own that runs your files with a start command and,\nwhen a domain is given, shows that domain. The answer is `pending` until the node has done it.",
+        "operationId": "clientCreateRuntimeApp",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetRuntimeApp"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeAppView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only` or `feature_disabled`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`limit_reached`, `app_taken` or `tenant_not_running`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid input",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/runtime-apps/runtimes": {
+      "get": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "The versions of Node.js and Python that can be chosen.",
+        "operationId": "clientRuntimeVersions",
+        "responses": {
+          "200": {
+            "description": "The versions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Runtimes"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/runtime-apps/{id}": {
+      "put": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "Change an application's settings (and run it again with them).",
+        "operationId": "clientUpdateRuntimeApp",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Application id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetRuntimeApp"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeAppView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such application",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`limit_reached`, `app_taken` or `tenant_not_running`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid input",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "Remove an application (its container goes; your files stay).",
+        "operationId": "clientRemoveRuntimeApp",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Application id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Queued"
+          },
+          "404": {
+            "description": "No such application",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/runtime-apps/{id}/redeploy": {
+      "post": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "Run the application again from its files (after you changed them): the dependencies are\ninstalled again unless `install` is false.",
+        "operationId": "clientRedeployRuntimeApp",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Application id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Optional",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Redeploy"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeAppView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such application",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/client/services": {
       "get": {
         "tags": [
@@ -26843,6 +27193,20 @@
         },
         "additionalProperties": false
       },
+      "Redeploy": {
+        "type": "object",
+        "description": "Whether to install the dependencies again when redeploying.",
+        "properties": {
+          "install": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Install the dependencies first (default: yes)."
+          }
+        },
+        "additionalProperties": false
+      },
       "RedirectList": {
         "type": "object",
         "description": "The redirects of a domain.",
@@ -27270,6 +27634,145 @@
           "session_closed": {
             "type": "boolean",
             "description": "Whether an open connection was closed."
+          }
+        }
+      },
+      "RuntimeAppList": {
+        "type": "object",
+        "description": "The account's applications.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RuntimeAppView"
+            },
+            "description": "The applications."
+          },
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "How many the plan allows; `None` when unlimited."
+          }
+        }
+      },
+      "RuntimeAppView": {
+        "type": "object",
+        "description": "An application of the account.",
+        "required": [
+          "id",
+          "name",
+          "kind",
+          "version",
+          "dir",
+          "start_command",
+          "install",
+          "port",
+          "memory_mb",
+          "env_names",
+          "status"
+        ],
+        "properties": {
+          "dir": {
+            "type": "string",
+            "description": "The folder below the web directory."
+          },
+          "domain": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "That domain's name."
+          },
+          "domain_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The domain that shows it."
+          },
+          "env_names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The names of its environment variables (the values are never shown)."
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it failed."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Id."
+          },
+          "install": {
+            "type": "boolean",
+            "description": "Whether dependencies are installed before it starts."
+          },
+          "kind": {
+            "type": "string",
+            "description": "`node` or `python`."
+          },
+          "memory_mb": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Memory limit, MiB."
+          },
+          "name": {
+            "type": "string",
+            "description": "Short name."
+          },
+          "port": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The port it listens on (given to it as `PORT`)."
+          },
+          "start_command": {
+            "type": "string",
+            "description": "What starts it."
+          },
+          "status": {
+            "type": "string",
+            "description": "`pending`, `ready`, `failed` or `removing`."
+          },
+          "version": {
+            "type": "string",
+            "description": "The runtime's version."
+          }
+        }
+      },
+      "Runtimes": {
+        "type": "object",
+        "description": "What the account's applications may be, per kind.",
+        "required": [
+          "node",
+          "python"
+        ],
+        "properties": {
+          "node": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Node.js versions, the newest first."
+          },
+          "python": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Python versions, the newest first."
           }
         }
       },
@@ -27804,6 +28307,92 @@
             "propertyNames": {
               "type": "string"
             }
+          }
+        },
+        "additionalProperties": false
+      },
+      "SetRuntimeApp": {
+        "type": "object",
+        "description": "The settings a person gives for an application.",
+        "required": [
+          "start_command"
+        ],
+        "properties": {
+          "dir": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The folder of the application below the web directory (empty: the directory itself)."
+          },
+          "domain_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The domain that shows the application (one of the account's; one application each)."
+          },
+          "env": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "The environment, name to value. When given it replaces the whole environment; when left\nout the environment stays as it is.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "install": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Install the dependencies first (default: yes)."
+          },
+          "kind": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`node` or `python`; needed when making one, not changeable."
+          },
+          "memory_mb": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Memory limit in MiB (default 256)."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Short name (2-32 of a-z, 0-9, `-`); needed when making one, not changeable."
+          },
+          "port": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The port it listens on (default 3000)."
+          },
+          "start_command": {
+            "type": "string",
+            "description": "What starts it, for example `node server.js` or\n`python -m gunicorn app:app -b 0.0.0.0:$PORT`."
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The runtime's version (see `/runtimes`); the newest when not given."
           }
         },
         "additionalProperties": false

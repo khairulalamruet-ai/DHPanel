@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE runtime_apps SET status = 'ready', op_id = NULL, host = $2, error = NULL, updated_at = now()\n         WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "63407fb57df6909615c218799c66b1fe20b4b47f40fac8c732343cbdfd4adc1e"
+}

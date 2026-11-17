@@ -82,6 +82,7 @@ pub fn build(
             php_upstream: &php_upstream,
             policy: &policy,
             custom,
+            proxy: d.app_upstream.as_deref(),
         };
         if let Ok(config) = vhost::render(template, &site) {
             out.push((domain.as_str().to_owned(), config));
@@ -150,11 +151,33 @@ mod tests {
             hsts: false,
             docroot: docroot.into(),
             php_version: None,
+            app_upstream: None,
         }
     }
 
     fn alice() -> TenantUsername {
         TenantUsername::parse("alice").unwrap()
+    }
+
+    #[test]
+    fn a_domain_with_a_running_application_is_passed_on_to_it() {
+        let mut app = dom(1, "app.example.com", "primary", None, "");
+        app.app_upstream = Some("dh-alice-app-api:3000".into());
+        let files = build(
+            "active",
+            DEFAULT_NGINX_TEMPLATE,
+            &alice(),
+            "8.4",
+            &[app, dom(2, "www.example.com", "addon", None, "site")],
+            &[],
+            &[],
+        );
+        assert_eq!(files.len(), 2);
+        let by = |name: &str| files.iter().find(|(d, _)| d == name).unwrap().1.clone();
+        assert!(by("app.example.com").contains("proxy_pass http://dh-alice-app-api:3000;"));
+        assert!(!by("app.example.com").contains("fastcgi_pass"));
+        // The other site is still served from its files.
+        assert!(by("www.example.com").contains("fastcgi_pass"));
     }
 
     #[test]

@@ -867,6 +867,20 @@ impl std::fmt::Debug for DbPassword {
     }
 }
 
+/// The environment of a tenant's own application: names and values. Like [`DbPassword`] it is
+/// absent in the ledger and put in when the message is sent; `Debug` shows the names only.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct RuntimeEnv(pub Vec<(String, String)>);
+
+impl std::fmt::Debug for RuntimeEnv {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list()
+            .entries(self.0.iter().map(|(k, _)| k.as_str()))
+            .finish()
+    }
+}
+
 /// The size of one database.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -1987,6 +2001,51 @@ pub enum Operation {
         /// `redis` or `memcached`.
         kind: String,
     },
+    /// Makes (or changes) one of a tenant's own applications: a Node.js or Python container on
+    /// the tenant's network only, reachable by its container name (`dh-<account>-app-<name>`),
+    /// that runs the account's files from `dir` as the account's user. With `install` the
+    /// dependencies are installed first, in a one-off container. The command is a list of
+    /// words; nothing is run through a shell. Safe to repeat. Answered with
+    /// [`Output::RuntimeAppSet`].
+    SetRuntimeApp {
+        /// The application's id.
+        app_id: Uuid,
+        /// The tenant.
+        tenant_id: Uuid,
+        /// The tenant's system name.
+        username: String,
+        /// The tenant's numeric user id.
+        uid: u32,
+        /// `node` or `python`.
+        kind: String,
+        /// The runtime's version (`24`, `3.13`).
+        version: String,
+        /// The application's short name.
+        name: String,
+        /// The folder below the web directory.
+        dir: String,
+        /// The start command, one word per element.
+        command: Vec<String>,
+        /// Whether to install the dependencies first.
+        install: bool,
+        /// The port it listens on (it is also given as `PORT`).
+        port: u16,
+        /// Memory it may use, in MiB (32 to 4096).
+        memory_mb: u32,
+        /// Its environment; absent in the ledger, present on the wire.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        env: Option<RuntimeEnv>,
+    },
+    /// Removes one of a tenant's own applications. Safe to repeat. Answered with
+    /// [`Output::RuntimeAppRemoved`].
+    RemoveRuntimeApp {
+        /// The tenant.
+        tenant_id: Uuid,
+        /// The tenant's system name.
+        username: String,
+        /// The application's short name.
+        name: String,
+    },
     /// Installs an application of the catalog (see [`AppDefinition`]) in a folder of a tenant's
     /// files: the archive is downloaded and its checksum verified, then the definition's steps
     /// run, in a one-off container as the tenant's user on the tenant's network. The steps are
@@ -2201,6 +2260,8 @@ impl Operation {
         "install_app",
         "set_cache_instance",
         "remove_cache_instance",
+        "set_runtime_app",
+        "remove_runtime_app",
         "scan_image",
         "check_image_updates",
         "inventory_wordpress",
@@ -2283,6 +2344,8 @@ impl Operation {
             Self::InstallApp { .. } => "install_app",
             Self::SetCacheInstance { .. } => "set_cache_instance",
             Self::RemoveCacheInstance { .. } => "remove_cache_instance",
+            Self::SetRuntimeApp { .. } => "set_runtime_app",
+            Self::RemoveRuntimeApp { .. } => "remove_runtime_app",
             Self::ScanImage { .. } => "scan_image",
             Self::CheckImageUpdates { .. } => "check_image_updates",
             Self::InventoryWordPress { .. } => "inventory_wordpress",
@@ -2494,6 +2557,16 @@ pub enum Output {
     },
     /// Answer to [`Operation::RemoveCacheInstance`].
     CacheInstanceRemoved {
+        /// Whether there was one.
+        existed: bool,
+    },
+    /// Answer to [`Operation::SetRuntimeApp`].
+    RuntimeAppSet {
+        /// `name:port` the web server reaches it by.
+        host: String,
+    },
+    /// Answer to [`Operation::RemoveRuntimeApp`].
+    RuntimeAppRemoved {
         /// Whether there was one.
         existed: bool,
     },
@@ -3778,6 +3851,26 @@ mod tests {
                 uid: 10_000,
                 purge_data: true,
             },
+            Operation::SetRuntimeApp {
+                app_id: id(),
+                tenant_id: id(),
+                username: "alice".into(),
+                uid: 10_000,
+                kind: "node".into(),
+                version: "24".into(),
+                name: "api".into(),
+                dir: "api".into(),
+                command: vec!["node".into(), "server.js".into()],
+                install: true,
+                port: 3000,
+                memory_mb: 256,
+                env: None,
+            },
+            Operation::RemoveRuntimeApp {
+                tenant_id: id(),
+                username: "alice".into(),
+                name: "api".into(),
+            },
         ] {
             let wire = serde_json::to_value(&op).unwrap();
             assert_eq!(wire["type"], op.type_name());
@@ -3785,7 +3878,7 @@ mod tests {
         }
         assert_eq!(
             Operation::TYPE_NAMES.len(),
-            76,
+            78,
             "update TYPE_NAMES and type_name() together with the enum"
         );
     }

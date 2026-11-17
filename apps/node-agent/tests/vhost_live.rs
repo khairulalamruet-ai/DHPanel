@@ -274,6 +274,7 @@ async fn a_refused_configuration_is_rolled_back_and_the_site_keeps_running() {
             php_upstream: "dh-x-php:9000",
             policy: &policy,
             custom: "location /moved { return 301 /elsewhere; }",
+            proxy: None,
         },
     )
     .unwrap();

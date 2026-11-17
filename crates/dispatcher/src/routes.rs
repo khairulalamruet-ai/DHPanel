@@ -120,6 +120,7 @@ mod tests {
             hsts: false,
             docroot: String::new(),
             php_version: None,
+            app_upstream: None,
         }
     }
 

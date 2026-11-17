@@ -247,6 +247,8 @@ pub struct ContainerSpec {
     pub command: Vec<String>,
     /// Replaces the image's entrypoint (empty: keep it).
     pub entrypoint: Vec<String>,
+    /// The directory the process starts in (an absolute path; `None`: the image's).
+    pub working_dir: Option<String>,
     /// Environment variables. Never secrets: those are mounted, not passed here.
     pub env: BTreeMap<String, String>,
     /// Numeric `uid:gid` to run as (default: what the image says).
@@ -291,6 +293,7 @@ impl ContainerSpec {
             image,
             command: Vec::new(),
             entrypoint: Vec::new(),
+            working_dir: None,
             env: BTreeMap::new(),
             user: None,
             memory_bytes: 256 * 1024 * 1024,
@@ -337,6 +340,16 @@ impl ContainerSpec {
                 "command",
                 "at most 64 arguments of 4096 bytes, no NUL",
             ));
+        }
+        if let Some(dir) = &self.working_dir
+            && !(dir.starts_with('/')
+                && dir.len() <= 255
+                && !dir.split('/').any(|part| part == ".." || part == ".")
+                && dir
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "/._-".contains(c)))
+        {
+            return Err(invalid("working_dir", "a plain absolute path"));
         }
         if self.env.len() > 128 {
             return Err(invalid("env", "at most 128 variables"));
@@ -579,6 +592,7 @@ impl ContainerSpec {
             image: Some(self.image.as_str().to_owned()),
             cmd: (!self.command.is_empty()).then(|| self.command.clone()),
             entrypoint: (!self.entrypoint.is_empty()).then(|| self.entrypoint.clone()),
+            working_dir: self.working_dir.clone(),
             env: Some(self.env.iter().map(|(k, v)| format!("{k}={v}")).collect()),
             user: self.user.map(|(uid, gid)| format!("{uid}:{gid}")),
             labels: Some(labels),

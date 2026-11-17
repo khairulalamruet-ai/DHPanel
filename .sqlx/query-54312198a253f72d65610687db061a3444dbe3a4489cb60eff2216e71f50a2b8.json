@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE runtime_apps\n            SET version = $3, dir = $4, start_command = $5, install = $6, port = $7,\n                memory_mb = $8, domain_id = $9, env_names = $10,\n                status = 'pending', error = NULL, updated_at = now()\n          WHERE tenant_id = $1 AND id = $2 AND status <> 'removing'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Bool",
+        "Int4",
+        "Int4",
+        "Uuid",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "54312198a253f72d65610687db061a3444dbe3a4489cb60eff2216e71f50a2b8"
+}

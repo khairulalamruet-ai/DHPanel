@@ -15,9 +15,14 @@ admin_nav  = { group = "Hosting", order = 40, icon = "layers" }
 client_nav = { group = "Apps", order = 10, icon = "layers" }
 
 [features]
-keys = ["cache"]
+keys = ["cache", "runtime_apps"]
 
 # Memory all of an account's cache servers together may use, in MiB (a plan without this key
 # gets the default).
 [limits]
 cache_memory_mb = { type = "int", default = 64, unlimited = -1 }
+
+# Applications a client runs themselves (Node.js, Python): how many, and the memory they may
+# use together, in MiB (a plan without these keys gets the defaults).
+max_runtime_apps  = { type = "int", default = 3, unlimited = -1 }
+runtime_memory_mb = { type = "int", default = 1024, unlimited = -1 }

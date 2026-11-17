@@ -46,6 +46,7 @@ pub mod rbac;
 pub mod redirects;
 pub mod resellers;
 pub mod routes;
+pub mod runtime_apps;
 pub mod settings;
 pub mod skeleton;
 pub mod tenants;

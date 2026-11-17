@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COALESCE(sum(memory_mb), 0)::bigint AS \"n!\" FROM runtime_apps\n           WHERE tenant_id = $1 AND status <> 'removing' AND ($2::uuid IS NULL OR id <> $2)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "n!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "329bfafd6f73b2526cc7a556ec19032928d6e4920bd2a5b6baa39ffe540d378e"
+}

@@ -572,6 +572,7 @@ pub async fn preview(
             php_upstream: "dh-example-php:9000",
             policy: &policy,
             custom: "location /old { return 301 /new; }",
+            proxy: None,
         },
     )
     .map_err(bad)?;

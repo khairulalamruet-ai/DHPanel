@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS (SELECT 1 FROM domains WHERE id = $1 AND tenant_id = $2) AS \"own!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "own!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "e6d08619e1321d0e11a672d107bd2c09353087d061ced900c203a650f4ead7be"
+}

@@ -910,3 +910,288 @@ async fn a_cache_server_is_asked_for_with_a_sealed_password_and_within_the_plans
         (StatusCode::FORBIDDEN, Some("feature_disabled"))
     );
 }
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn a_client_runs_its_own_applications_within_its_plan_and_only_sees_its_own(pool: PgPool) {
+    let e = env(&pool).await;
+    let (alice_account, alice) = client(&pool, "alice", 10_000).await;
+    let (bob_account, _bob) = client(&pool, "bob", 10_001).await;
+    let a = e.sign_in(alice_account).await;
+    let b = e.sign_in(bob_account).await;
+    let path = "/api/v1/client/runtime-apps";
+    // The plan has to include the feature.
+    sqlx::query("UPDATE feature_sets SET all_features = false, features = ARRAY['files']::feature_key[] WHERE id = (SELECT feature_set_id FROM plans WHERE is_default)").execute(&pool).await.unwrap();
+    let (status, body) = e.call(&a, "GET", path, None).await;
+    assert_eq!(
+        (status, body["code"].as_str()),
+        (StatusCode::FORBIDDEN, Some("feature_disabled"))
+    );
+    sqlx::query("UPDATE feature_sets SET features = features || ARRAY['runtime_apps']::feature_key[] WHERE id = (SELECT feature_set_id FROM plans WHERE is_default)")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE tenants SET status = 'active'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, v) = e.call(&a, "GET", &format!("{path}/runtimes"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        v["node"].as_array().unwrap().iter().any(|x| x == "24"),
+        "{v}"
+    );
+    assert!(
+        v["python"].as_array().unwrap().iter().any(|x| x == "3.13"),
+        "{v}"
+    );
+    let (_, none) = e.call(&a, "GET", path, None).await;
+    assert_eq!(
+        (
+            none["items"].as_array().unwrap().len(),
+            none["limit"].as_i64()
+        ),
+        (0, Some(3))
+    );
+
+    // Input that is not valid.
+    let ok = json!({"name": "api", "kind": "node", "version": "24", "dir": "api", "start_command": "node server.js", "env": {"SECRET_KEY": "s3cr3t-value-123"}});
+    for (what, change) in [
+        ("name", json!({"name": "A"})),
+        ("kind", json!({"kind": "ruby"})),
+        ("version", json!({"version": "99"})),
+        ("dir", json!({"dir": "../etc"})),
+        ("port", json!({"port": 80})),
+        ("memory", json!({"memory_mb": 8})),
+        ("command", json!({"start_command": "node 'x"})),
+        ("env", json!({"env": {"PATH": "/tmp"}})),
+        ("domain", json!({"domain_id": Uuid::now_v7()})),
+        ("unknown field", json!({"privileged": true})),
+    ] {
+        let mut body = ok.clone();
+        for (k, v) in change.as_object().unwrap() {
+            body[k] = v.clone();
+        }
+        let (status, got) = e.call(&a, "POST", path, Some(body)).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{what}: {got}");
+    }
+
+    // A good one: pending, the secret is sealed and never in the ledger.
+    let (status, made) = e.call(&a, "POST", path, Some(ok.clone())).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{made}");
+    assert_eq!(
+        (
+            made["status"].as_str(),
+            made["env_names"].clone(),
+            made["install"].as_bool()
+        ),
+        (Some("pending"), json!(["SECRET_KEY"]), Some(true))
+    );
+    let id = made["id"].as_str().unwrap().to_owned();
+    let (kind, payload): (String, String) =
+        sqlx::query_as("SELECT kind, payload::text FROM operations WHERE tenant_id = $1")
+            .bind(alice)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(kind, "set_runtime_app");
+    assert!(
+        !payload.contains("s3cr3t-value-123") && !payload.contains("\"env\""),
+        "{payload}"
+    );
+    assert!(payload.contains("\"node\"") && payload.contains("server.js"));
+    let sealed: Vec<u8> =
+        sqlx::query_scalar("SELECT sealed_env FROM runtime_apps WHERE id = $1::uuid")
+            .bind(&id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(!String::from_utf8_lossy(&sealed).contains("s3cr3t-value-123"));
+    // The same name twice.
+    let (status, got) = e.call(&a, "POST", path, Some(ok.clone())).await;
+    assert_eq!(
+        (status, got["code"].as_str()),
+        (StatusCode::CONFLICT, Some("app_taken")),
+        "{got}"
+    );
+
+    // Another account sees none of it and cannot touch it.
+    let (_, theirs) = e.call(&b, "GET", path, None).await;
+    assert_eq!(theirs["items"].as_array().unwrap().len(), 0);
+    for (method, p, body) in [
+        (
+            "PUT",
+            format!("{path}/{id}"),
+            Some(json!({"start_command": "node x.js"})),
+        ),
+        ("POST", format!("{path}/{id}/redeploy"), None),
+        ("DELETE", format!("{path}/{id}"), None),
+    ] {
+        let (status, got) = e.call(&b, method, &p, body).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{method}: {got}");
+    }
+
+    // The plan's number and memory: three applications of 256 MiB, not a fourth, not a big one.
+    let (status, got) = e
+        .call(&a, "POST", path, Some(json!({"name": "big", "kind": "python", "start_command": "python a.py", "memory_mb": 900})))
+        .await;
+    assert_eq!(
+        (status, got["code"].as_str()),
+        (StatusCode::CONFLICT, Some("limit_reached")),
+        "{got}"
+    );
+    for name in ["two", "three"] {
+        let (status, got) = e
+            .call(&a, "POST", path, Some(json!({"name": name, "kind": "python", "version": "3.13", "start_command": "python a.py"})))
+            .await;
+        assert_eq!(status, StatusCode::ACCEPTED, "{got}");
+    }
+    let (status, got) = e
+        .call(
+            &a,
+            "POST",
+            path,
+            Some(json!({"name": "four", "kind": "node", "start_command": "node a.js"})),
+        )
+        .await;
+    assert_eq!(
+        (status, got["code"].as_str()),
+        (StatusCode::CONFLICT, Some("limit_reached")),
+        "{got}"
+    );
+
+    // Change: the environment stays when it is not given, a name cannot change.
+    let (status, got) = e
+        .call(
+            &a,
+            "PUT",
+            &format!("{path}/{id}"),
+            Some(json!({"start_command": "node app.js", "port": 4000})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{got}");
+    assert_eq!(
+        (
+            got["start_command"].as_str(),
+            got["port"].as_i64(),
+            got["env_names"].clone()
+        ),
+        (Some("node app.js"), Some(4000), json!(["SECRET_KEY"]))
+    );
+    let (status, _) = e
+        .call(
+            &a,
+            "PUT",
+            &format!("{path}/{id}"),
+            Some(json!({"name": "other", "start_command": "node app.js"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    // Redeploy without installing.
+    let (status, _) = e
+        .call(
+            &a,
+            "POST",
+            &format!("{path}/{id}/redeploy"),
+            Some(json!({"install": false})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    let install: bool = sqlx::query_scalar("SELECT (payload->>'install')::boolean FROM operations WHERE kind = 'set_runtime_app' ORDER BY id DESC LIMIT 1")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!(!install);
+
+    // A domain: the account's own only, one application each; when the application runs the
+    // web server's routes know where to send it.
+    let domain = domain(&pool, alice, "app.example.com").await;
+    let (status, got) = e
+        .call(
+            &a,
+            "PUT",
+            &format!("{path}/{id}"),
+            Some(json!({"start_command": "node app.js", "domain_id": domain})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{got}");
+    assert_eq!(got["domain"], "app.example.com");
+    let two: String = sqlx::query_scalar("SELECT id::text FROM runtime_apps WHERE name = 'two'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let (status, got) = e
+        .call(
+            &a,
+            "PUT",
+            &format!("{path}/{two}"),
+            Some(json!({"start_command": "python a.py", "domain_id": domain})),
+        )
+        .await;
+    assert_eq!(
+        (status, got["code"].as_str()),
+        (StatusCode::CONFLICT, Some("app_taken")),
+        "{got}"
+    );
+    let foreign = domain_of(&pool, bob_account, "bob.example.com").await;
+    let (status, _) = e
+        .call(
+            &a,
+            "PUT",
+            &format!("{path}/{two}"),
+            Some(json!({"start_command": "python a.py", "domain_id": foreign})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let routed = |pool: PgPool| async move {
+        dhpanel_database::routes::domains(&pool, alice)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|d| d.fqdn == "app.example.com")
+            .unwrap()
+            .app_upstream
+    };
+    assert_eq!(routed(pool.clone()).await, None, "not before it runs");
+    let before: i64 = sqlx::query_scalar("SELECT routes_version FROM tenants WHERE id = $1")
+        .bind(alice)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE runtime_apps SET status = 'ready', host = 'dh-alice-app-api:4000' WHERE name = 'api'").execute(&pool).await.unwrap();
+    assert_eq!(
+        routed(pool.clone()).await,
+        Some("dh-alice-app-api:4000".into())
+    );
+    let after: i64 = sqlx::query_scalar("SELECT routes_version FROM tenants WHERE id = $1")
+        .bind(alice)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!(
+        after > before,
+        "the site files are made again when the application runs"
+    );
+
+    // Removed: pending removal, the domain is the PHP site's again at once.
+    let (status, _) = e.call(&a, "DELETE", &format!("{path}/{id}"), None).await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    assert_eq!(routed(pool.clone()).await, None);
+    let (kind, status): (String, String) = sqlx::query_as("SELECT o.kind, r.status FROM runtime_apps r JOIN operations o ON o.id = r.op_id WHERE r.name = 'api'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        (kind.as_str(), status.as_str()),
+        ("remove_runtime_app", "removing")
+    );
+}
+
+async fn domain_of(pool: &PgPool, account: Uuid, fqdn: &str) -> Uuid {
+    let tenant: Uuid = sqlx::query_scalar("SELECT id FROM tenants WHERE owner_account_id = $1")
+        .bind(account)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    domain(pool, tenant, fqdn).await
+}

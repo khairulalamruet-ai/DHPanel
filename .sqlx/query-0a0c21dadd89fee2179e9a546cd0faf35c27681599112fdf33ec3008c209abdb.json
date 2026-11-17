@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT sealed_env FROM runtime_apps WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "sealed_env",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "runtime_apps",
+            "name": "sealed_env"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "0a0c21dadd89fee2179e9a546cd0faf35c27681599112fdf33ec3008c209abdb"
+}

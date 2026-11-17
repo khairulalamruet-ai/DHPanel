@@ -22,6 +22,8 @@
 //! what answers on `example.com/blog`. The installers (T12.02, T12.05) create the rows and
 //! move them from `installing` to `active` or `failed`; this module shows them.
 
+pub mod runtime;
+
 use std::sync::Arc;
 
 use axum::{
@@ -85,6 +87,7 @@ impl FromRef<AppsState> for SessionStore {
 /// Routes for hosting accounts.
 pub fn client_router() -> Router<AppsState> {
     Router::new()
+        .merge(runtime::router())
         .route("/api/v1/client/apps", get(client_list))
         .route("/api/v1/client/apps/{id}", get(client_get))
         .route(
@@ -1766,10 +1769,13 @@ pub async fn cache_remove(
         client_list, client_get, admin_list, install_wordpress, catalog_list, install_app,
         cache_list, cache_set, cache_remove, wp_overview, wp_update_plugins,
         wp_update_themes, wp_update_core, wp_maintenance, wp_admin_password, wp_operation, wp_scan,
-        wp_harden
+        wp_harden, runtime::runtimes, runtime::list, runtime::create, runtime::update,
+        runtime::redeploy, runtime::remove
     ),
     components(schemas(
         AppView, AppList, InstallWordPress, CacheView, CacheList, SetCache, CatalogEntry, CatalogList, InstallApp, WpAnswer, WpSlug, WpVersion, WpMaintenance,
+        runtime::RuntimeAppView, runtime::RuntimeAppList, runtime::SetRuntimeApp,
+        runtime::Runtimes, runtime::Redeploy,
         WpNewPassword, Pending, WpHarden, dhpanel_node_protocol::WpOverview,
         dhpanel_node_protocol::WpItem, dhpanel_node_protocol::WpScan
     )),

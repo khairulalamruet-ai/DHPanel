@@ -194,6 +194,61 @@ pub fn operation_secrets(
                         password,
                     });
                 }
+                // An application's environment: sealed by the API, opened here for this one
+                // message.
+                Operation::SetRuntimeApp {
+                    app_id,
+                    tenant_id,
+                    username,
+                    uid,
+                    kind,
+                    version,
+                    name,
+                    dir,
+                    command,
+                    install,
+                    port,
+                    memory_mb,
+                    env: None,
+                } => {
+                    let sealed = dhpanel_database::runtime_apps::sealed_env(&db, app_id)
+                        .await
+                        .map_err(|_| "could not read an application's environment".to_owned())?;
+                    let env = match sealed {
+                        None => Vec::new(),
+                        Some(sealed) => {
+                            let bytes = master_key
+                                .open(
+                                    &dhpanel_database::runtime_apps::env_context(app_id),
+                                    &sealed,
+                                )
+                                .map_err(|_| {
+                                    "an application's environment does not open".to_owned()
+                                })?;
+                            serde_json::from_slice::<std::collections::BTreeMap<String, String>>(
+                                &bytes,
+                            )
+                            .map_err(|_| "an application's environment is not readable".to_owned())?
+                            .into_iter()
+                            .collect()
+                        }
+                    };
+                    return Ok(Operation::SetRuntimeApp {
+                        app_id,
+                        tenant_id,
+                        username,
+                        uid,
+                        kind,
+                        version,
+                        name,
+                        dir,
+                        command,
+                        install,
+                        port,
+                        memory_mb,
+                        env: Some(dhpanel_node_protocol::RuntimeEnv(env)),
+                    });
+                }
                 // A WordPress user's new password: sealed by the API, opened here for this
                 // one message.
                 Operation::RunWpCli {
@@ -445,4 +500,107 @@ async fn transfer_token(
     Ok(dhpanel_node_protocol::DbPassword(
         String::from_utf8(bytes).map_err(|_| "a transfer token is not text".to_owned())?,
     ))
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use dhpanel_node_protocol::RuntimeEnv;
+    use sqlx::PgPool;
+    use uuid::Uuid;
+
+    /// The environment of an application is not in the ledger, and is opened for the one
+    /// message that carries it.
+    #[sqlx::test(migrations = "../../migrations")]
+    #[ignore = "needs PostgreSQL"]
+    async fn an_applications_environment_is_put_back_when_the_operation_is_sent(pool: PgPool) {
+        let key = MasterKey::from_bytes(&[7u8; 32]);
+        let account: Uuid = sqlx::query_scalar(
+            "INSERT INTO accounts (kind, username, email, password_hash)
+             VALUES ('client', 'gus', 'gus@example.com',
+                     '$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHQ$aGFzaGhhc2hoYXNoaGFzaA')
+             RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let node: Uuid =
+            sqlx::query_scalar("INSERT INTO nodes (name) VALUES ('node1') RETURNING id")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let plan: Uuid = sqlx::query_scalar("SELECT id FROM plans WHERE is_default")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let tenant: Uuid = sqlx::query_scalar(
+            "INSERT INTO tenants (owner_account_id, node_id, plan_id, username, uid, status)
+             VALUES ($1, $2, $3, 'gus', 10007, 'active') RETURNING id",
+        )
+        .bind(account)
+        .bind(node)
+        .bind(plan)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let app: Uuid = sqlx::query_scalar(
+            "INSERT INTO runtime_apps (tenant_id, name, kind, version, start_command)
+             VALUES ($1, 'api', 'node', '24', 'node a.js') RETURNING id",
+        )
+        .bind(tenant)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let sealed = key
+            .seal(
+                &dhpanel_database::runtime_apps::env_context(app),
+                br#"{"A":"1","SECRET":"it's s3cret"}"#,
+            )
+            .unwrap();
+        sqlx::query("UPDATE runtime_apps SET sealed_env = $2 WHERE id = $1")
+            .bind(app)
+            .bind(&sealed)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let op = Operation::SetRuntimeApp {
+            app_id: app,
+            tenant_id: tenant,
+            username: "gus".into(),
+            uid: 10_007,
+            kind: "node".into(),
+            version: "24".into(),
+            name: "api".into(),
+            dir: String::new(),
+            command: vec!["node".into(), "a.js".into()],
+            install: false,
+            port: 3000,
+            memory_mb: 256,
+            env: None,
+        };
+        let fill = operation_secrets(pool.clone(), key.clone());
+        let Operation::SetRuntimeApp { env, .. } = fill(op.clone()).await.unwrap() else {
+            panic!("the same kind of operation");
+        };
+        assert_eq!(
+            env,
+            Some(RuntimeEnv(vec![
+                ("A".into(), "1".into()),
+                ("SECRET".into(), "it's s3cret".into())
+            ]))
+        );
+        // Another application's sealed value does not open under this one's context.
+        let other = Uuid::now_v7();
+        sqlx::query("UPDATE runtime_apps SET sealed_env = $2 WHERE id = $1")
+            .bind(app)
+            .bind(
+                key.seal(&dhpanel_database::runtime_apps::env_context(other), b"{}")
+                    .unwrap(),
+            )
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(fill(op).await.is_err());
+    }
 }

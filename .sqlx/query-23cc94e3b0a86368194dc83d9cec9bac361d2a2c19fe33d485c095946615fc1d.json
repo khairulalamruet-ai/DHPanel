@@ -1,0 +1,220 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, tenant_id, name, kind, version, dir, start_command, install, port, memory_mb,\n                sealed_env, env_names, domain_id, status, op_id, host, error\n         FROM runtime_apps WHERE tenant_id = $1 ORDER BY name",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "runtime_apps",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "runtime_apps",
+            "name": "tenant_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runtime_apps",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "kind",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runtime_apps",
+            "name": "kind"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "version",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runtime_apps",
+            "name": "version"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "dir",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runtime_apps",
+            "name": "dir"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "start_command",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runtime_apps",
+            "name": "start_command"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "install",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "runtime_apps",
+            "name": "install"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "port",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "runtime_apps",
+            "name": "port"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "memory_mb",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "runtime_apps",
+            "name": "memory_mb"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "sealed_env",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "runtime_apps",
+            "name": "sealed_env"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "env_names",
+        "type_info": "TextArray",
+        "origin": {
+          "Table": {
+            "table": "runtime_apps",
+            "name": "env_names"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "domain_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "runtime_apps",
+            "name": "domain_id"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runtime_apps",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "op_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "runtime_apps",
+            "name": "op_id"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "host",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runtime_apps",
+            "name": "host"
+          }
+        }
+      },
+      {
+        "ordinal": 16,
+        "name": "error",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runtime_apps",
+            "name": "error"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "23cc94e3b0a86368194dc83d9cec9bac361d2a2c19fe33d485c095946615fc1d"
+}

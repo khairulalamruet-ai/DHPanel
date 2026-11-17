@@ -59,6 +59,32 @@ server {
 }
 ";
 
+/// The site configuration of a domain that shows one of the tenant's own applications
+/// (Node.js, Python): the web server passes every request on to the application's container.
+/// `{{php_upstream}}` is the application's `name:port` here.
+pub const PROXY_NGINX_TEMPLATE: &str = r"# Managed by DHPanel for {{domain}} (application). Changes made here are overwritten.
+{{policy_http}}
+server {
+    listen 8080;
+    server_name {{server_names}};
+    # The account's files stay in {{docroot}}; the application answers instead.
+    client_max_body_size 64m;
+    {{policy}}
+    {{custom}}
+
+    location / {
+        proxy_pass http://{{php_upstream}};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $http_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $http_connection;
+        proxy_read_timeout 300s;
+    }
+}
+";
+
 /// What is wrong with a template or with a value.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("{message}")]
@@ -355,6 +381,9 @@ pub struct Site<'a> {
     /// The person's own directives (empty for none), already checked with
     /// [`check_custom_block`].
     pub custom: &'a str,
+    /// An application of the tenant that answers for the site, `name:port`: when given the
+    /// site is passed on to it ([`PROXY_NGINX_TEMPLATE`]) instead of served from files.
+    pub proxy: Option<&'a str>,
 }
 
 /// Makes the configuration of one site from a template.
@@ -362,8 +391,12 @@ pub struct Site<'a> {
 /// # Errors
 /// [`VhostError`]: a bad template, too many names or a bad PHP address.
 pub fn render(template: &str, site: &Site<'_>) -> Result<String, VhostError> {
+    let (template, upstream) = match site.proxy {
+        Some(app) => (PROXY_NGINX_TEMPLATE, app),
+        None => (template, site.php_upstream),
+    };
     check_template(template)?;
-    check_upstream(site.php_upstream)?;
+    check_upstream(upstream)?;
     let mut names: Vec<&str> = vec![site.domain.as_str()];
     for alias in site.aliases {
         if !names.contains(&alias.as_str()) {
@@ -382,7 +415,7 @@ pub fn render(template: &str, site: &Site<'_>) -> Result<String, VhostError> {
         site.domain.as_str().to_owned(),
         names.join(" "),
         docroot,
-        site.php_upstream.to_owned(),
+        upstream.to_owned(),
     );
     values.policy_http = site.policy.http_lines(site.domain);
     values.policy = site.policy.server_lines(site.domain);
@@ -685,6 +718,38 @@ mod tests {
     }
 
     #[test]
+    fn a_domain_with_an_application_is_passed_on_to_it() {
+        check_template(PROXY_NGINX_TEMPLATE).unwrap();
+        let domain = fqdn("app.example.com");
+        let docroot = Docroot::parse("").unwrap();
+        let policy = Policy::default();
+        let site = |proxy| Site {
+            domain: &domain,
+            aliases: &[],
+            docroot: &docroot,
+            php_upstream: "dh-alice-php:9000",
+            policy: &policy,
+            custom: "",
+            proxy,
+        };
+        let text = render(DEFAULT_NGINX_TEMPLATE, &site(Some("dh-alice-app-api:3000"))).unwrap();
+        assert!(
+            text.contains("proxy_pass http://dh-alice-app-api:3000;"),
+            "{text}"
+        );
+        assert!(!text.contains("fastcgi_pass"));
+        assert!(text.contains("server_name app.example.com;"));
+        // A bad application address is refused like a bad PHP address.
+        assert!(
+            render(
+                DEFAULT_NGINX_TEMPLATE,
+                &site(Some("evil; return 200;:3000"))
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
     fn the_default_template_is_valid_and_makes_the_expected_file() {
         check_template(DEFAULT_NGINX_TEMPLATE).unwrap();
         let domain = fqdn("example.com");
@@ -699,6 +764,7 @@ mod tests {
                 php_upstream: "dh-alice-php:9000",
                 policy: &Policy::default(),
                 custom: "",
+                proxy: None,
             },
         )
         .unwrap();
@@ -748,6 +814,7 @@ server {
                 php_upstream: "dh-alice-php:9000",
                 policy: &Policy::default(),
                 custom: "",
+                proxy: None,
             },
         )
         .unwrap();
@@ -832,6 +899,7 @@ server {
                     php_upstream: bad,
                     policy: &Policy::default(),
                     custom: "",
+                    proxy: None,
                 },
             )
             .unwrap_err();
@@ -849,6 +917,7 @@ server {
                 php_upstream: "dh-a-php:9000",
                 policy: &Policy::default(),
                 custom: "",
+                proxy: None,
             },
         )
         .unwrap_err();
@@ -882,6 +951,7 @@ server {
                 php_upstream: "dh-alice-php:9000",
                 policy: &policy,
                 custom: "",
+                proxy: None,
             },
         )
         .unwrap();
@@ -906,6 +976,7 @@ server {
                 php_upstream: "dh-alice-php:9000",
                 policy: &Policy::default(),
                 custom: "",
+                proxy: None,
             },
         )
         .unwrap();
@@ -1073,6 +1144,7 @@ server {
                 php_upstream: "dh-alice-php:9000",
                 policy: &Policy::default(),
                 custom,
+                proxy: None,
             },
         )
         .unwrap();
@@ -1091,6 +1163,7 @@ server {
                 php_upstream: "dh-alice-php:9000",
                 policy: &Policy::default(),
                 custom: "alias /etc;",
+                proxy: None,
             },
         )
         .unwrap_err();

@@ -106,3 +106,48 @@ role      = "memcached"
 reference = "memcached@sha256:084fb554292d1447bc2c68b80c2331b98834514f56c866bc21a61be3c2ee376d"
 tag       = "1.6-alpine"
 note      = "Memcached 1.6.45 (Alpine): a tenant's own cache, on the tenant's network only, with a memory limit (T12.10)"
+
+# The runtimes a tenant may run its own applications on (T12.07, T12.08). `version` is the version
+# a client picks; the first entry of a runtime is the one used when none is chosen. Debian-based
+# Python images (`slim`) because most wheels are built for glibc.
+[[image]]
+role      = "node"
+version   = "26"
+reference = "node@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7edf6e7f4afa43ddeccd6452710bffb5"
+tag       = "26-alpine"
+note      = "Node.js 26.13, Alpine"
+
+[[image]]
+role      = "node"
+version   = "24"
+reference = "node@sha256:116b800c3754b440ee0aa3ed2f20f5bf3d99a554bfd9adeea09ea8017f6e85f5"
+tag       = "24-alpine"
+note      = "Node.js 24.22 (long-term support), Alpine"
+
+[[image]]
+role      = "node"
+version   = "22"
+reference = "node@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a"
+tag       = "22-alpine"
+note      = "Node.js 22.23 (maintenance), Alpine"
+
+[[image]]
+role      = "python"
+version   = "3.14"
+reference = "python@sha256:9aaa474097d094040649f2162a627c0049b408f52138d980916788d80f04802f"
+tag       = "3.14-slim"
+note      = "Python 3.14.10, Debian slim"
+
+[[image]]
+role      = "python"
+version   = "3.13"
+reference = "python@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90"
+tag       = "3.13-slim"
+note      = "Python 3.13.18, Debian slim"
+
+[[image]]
+role      = "python"
+version   = "3.12"
+reference = "python@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b"
+tag       = "3.12-slim"
+note      = "Python 3.12.16, Debian slim"
