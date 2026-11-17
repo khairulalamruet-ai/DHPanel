@@ -1,0 +1,140 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT r.account_id AS id, a.username, a.email, r.company_name, r.package_id,\n                  k.name AS package_name, r.status, r.branding,\n                  extract(epoch FROM r.created_at)::bigint AS \"created_at!\",\n                  (SELECT count(*) FROM tenants t\n                    WHERE t.reseller_id = r.account_id AND t.status <> 'deleting') AS \"accounts!\",\n                  (SELECT COALESCE(sum(u.total_bytes), 0)::bigint FROM tenants t\n                     JOIN tenant_disk_usage u ON u.tenant_id = t.id\n                    WHERE t.reseller_id = r.account_id AND t.status <> 'deleting') AS \"disk_used_bytes!\",\n                  (SELECT COALESCE(sum(h.net_tx_bytes), 0)::bigint FROM tenants t\n                     JOIN usage_hour h ON h.tenant_id = t.id\n                    WHERE t.reseller_id = r.account_id\n                      AND h.at >= date_trunc('month', now())) AS \"bandwidth_used_bytes!\"\n           FROM resellers r\n           JOIN accounts a ON a.id = r.account_id\n           JOIN reseller_packages k ON k.id = r.package_id\n           WHERE $1::uuid IS NULL OR r.account_id = $1\n           ORDER BY r.created_at DESC, r.account_id DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "resellers",
+            "name": "account_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "username",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "accounts",
+            "name": "username"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "email",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "accounts",
+            "name": "email"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "company_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "resellers",
+            "name": "company_name"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "package_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "resellers",
+            "name": "package_id"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "package_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "reseller_packages",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "resellers",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "branding",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "resellers",
+            "name": "branding"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "created_at!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 9,
+        "name": "accounts!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 10,
+        "name": "disk_used_bytes!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 11,
+        "name": "bandwidth_used_bytes!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "25d04644d2233767eb166e8a2c4a7daa6b95622d6a52ebbd1fd92657c1e9a3bf"
+}

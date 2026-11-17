@@ -32,7 +32,7 @@ pub async fn load_access(
 ) -> Result<Option<AccountAccess>, sqlx::Error> {
     sqlx::query_as!(
         AccountAccess,
-        r#"SELECT a.status AS "status: DbAccountStatus",
+        r#"SELECT effective_account_status(a.id) AS "status!: DbAccountStatus",
                   a.kind AS "kind: DbAccountKind",
                   COALESCE((SELECT array_agg(r.name ORDER BY r.name)
                             FROM account_roles ar JOIN roles r ON r.id = ar.role_id

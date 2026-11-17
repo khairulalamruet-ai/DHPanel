@@ -21,6 +21,7 @@ const EMBEDDED: &[(&str, &str)] = &[
     ("system", dhpanel_mod_system::MANIFEST),
     ("plans", dhpanel_mod_plans::MANIFEST),
     ("users", dhpanel_mod_users::MANIFEST),
+    ("resellers", dhpanel_mod_users::reseller::MANIFEST),
     ("domains", dhpanel_mod_domains::MANIFEST),
     ("databases", dhpanel_mod_databases::MANIFEST),
     ("files", dhpanel_mod_files::MANIFEST),
@@ -253,6 +254,29 @@ pub fn mount(
                             ..ModuleRoutes::none()
                         },
                         None => ModuleRoutes::none(),
+                    })
+                }
+                "resellers" => {
+                    let (db, sessions, hasher) =
+                        (db.clone(), sessions.clone(), admin.hasher.clone());
+                    Box::new(move || ModuleRoutes {
+                        admin: Some(dhpanel_mod_users::reseller::admin_router().with_state(
+                            dhpanel_mod_users::UsersState {
+                                db: db.clone(),
+                                sessions: sessions.clone(),
+                                hasher: hasher.clone(),
+                                purge_after_days: PURGE_AFTER_DAYS,
+                            },
+                        )),
+                        client: Some(dhpanel_mod_users::reseller::portal_router().with_state(
+                            dhpanel_mod_users::UsersState {
+                                db: db.clone(),
+                                sessions: sessions.clone(),
+                                hasher: hasher.clone(),
+                                purge_after_days: PURGE_AFTER_DAYS,
+                            },
+                        )),
+                        ..ModuleRoutes::none()
                     })
                 }
                 "users" => {
@@ -771,6 +795,7 @@ mod tests {
                 "system",
                 "plans",
                 "users",
+                "resellers",
                 "domains",
                 "databases",
                 "files",
@@ -805,6 +830,7 @@ mod tests {
                 "files",
                 "logs",
                 "notifications",
+                "resellers",
                 "services",
                 "usage",
                 "apps",
@@ -827,6 +853,7 @@ mod tests {
                 "files",
                 "logs",
                 "notifications",
+                "resellers",
                 "services",
                 "usage",
                 "apps",
@@ -870,6 +897,8 @@ mod tests {
             p::UsersRead::KEY,
             p::UsersManage::KEY,
             p::UsersImpersonate::KEY,
+            p::ResellersRead::KEY,
+            p::ResellersManage::KEY,
             p::DomainsRead::KEY,
             p::DomainsManage::KEY,
             p::DatabasesRead::KEY,
@@ -889,7 +918,7 @@ mod tests {
         }
         assert_eq!(
             declared.len(),
-            30,
+            32,
             "a manifest declares a key the code does not know: {declared:?}"
         );
     }

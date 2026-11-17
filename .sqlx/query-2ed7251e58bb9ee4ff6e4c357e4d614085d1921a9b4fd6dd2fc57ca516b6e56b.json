@@ -1,0 +1,37 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*) AS \"accounts!\",\n                  CASE WHEN bool_or(p.disk_bytes IS NULL) THEN NULL\n                       ELSE COALESCE(sum(p.disk_bytes), 0)::bigint END AS disk_bytes,\n                  CASE WHEN bool_or(p.bandwidth_bytes IS NULL) THEN NULL\n                       ELSE COALESCE(sum(p.bandwidth_bytes), 0)::bigint END AS bandwidth_bytes\n           FROM tenants t JOIN plans p ON p.id = t.plan_id\n           WHERE t.reseller_id = $1 AND t.status <> 'deleting'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "accounts!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "disk_bytes",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "bandwidth_bytes",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "2ed7251e58bb9ee4ff6e4c357e4d614085d1921a9b4fd6dd2fc57ca516b6e56b"
+}

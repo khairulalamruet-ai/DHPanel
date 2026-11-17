@@ -153,6 +153,7 @@ pub async fn list(pool: &PgPool) -> Result<Vec<Plan>, sqlx::Error> {
                   extract(epoch FROM p.created_at)::bigint AS "created_at!",
                   extract(epoch FROM p.updated_at)::bigint AS "updated_at!"
            FROM plans p JOIN feature_sets f ON f.id = p.feature_set_id
+           WHERE p.reseller_id IS NULL
            ORDER BY p.name"#
     )
     .fetch_all(pool)

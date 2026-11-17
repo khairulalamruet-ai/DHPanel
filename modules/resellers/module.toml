@@ -1,0 +1,15 @@
+# Resellers: accounts that sell hosting to clients of their own, inside the limits of a
+# package, with their own plans and branding (crates/modules/users, `reseller`).
+[module]
+name       = "resellers"
+version    = "0.1.0"
+title      = { en = "Resellers", bn = "রিসেলার" }
+category   = "core"
+core       = false
+depends_on = ["auth", "rbac", "audit", "nodes", "plans", "users"]
+
+[permissions]
+keys = ["admin.resellers.read", "admin.resellers.manage"]
+
+[ui]
+admin_nav = { group = "Hosting", order = 25, icon = "store" }

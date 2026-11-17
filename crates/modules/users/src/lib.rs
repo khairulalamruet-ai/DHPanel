@@ -56,6 +56,8 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, OpenApi, ToSchema};
 use uuid::Uuid;
 
+pub mod reseller;
+
 /// The users module's manifest text.
 pub const MANIFEST: &str = include_str!("../../../../modules/users/module.toml");
 
@@ -117,7 +119,9 @@ pub fn router() -> Router<UsersState> {
         )
 }
 
-fn internal(err: impl Into<Box<dyn std::error::Error + Send + Sync + 'static>>) -> AppError {
+pub(crate) fn internal(
+    err: impl Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
+) -> AppError {
     AppError::internal(err)
 }
 
@@ -520,6 +524,17 @@ pub async fn create_user(
     RequireRecent(who, _): RequireRecent<UsersManage>,
     Json(req): Json<CreateUser>,
 ) -> Result<(StatusCode, Json<UserChange>), AppError> {
+    create_user_inner(&state, &who, req, None).await
+}
+
+/// Creates a user for the administrator, or, with `reseller`, for that reseller: the
+/// reseller's package limits are checked in the same transaction.
+pub(crate) async fn create_user_inner(
+    state: &UsersState,
+    who: &Principal,
+    req: CreateUser,
+    reseller: Option<Uuid>,
+) -> Result<(StatusCode, Json<UserChange>), AppError> {
     let mut errors = Vec::new();
     let username = Username::parse(&req.username)
         .map_err(|e| errors.push(FieldError::new("username", e.code(), e.to_string())))
@@ -572,6 +587,9 @@ pub async fn create_user(
 
     let hash = state.hasher.hash_async(password).await.map_err(internal)?;
     let mut tx = state.db.begin().await.map_err(internal)?;
+    if let Some(reseller_id) = reseller {
+        crate::reseller::check_room(&mut tx, reseller_id, &plan).await?;
+    }
     let node_id = match req.node_id {
         Some(id) => id,
         None => users::pick_node(&mut tx)
@@ -656,12 +674,22 @@ pub async fn create_user(
         ),
         CreateError::BadOwner | CreateError::Database(_) => internal(e),
     })?;
+    if let Some(reseller_id) = reseller {
+        dhpanel_database::resellers::assign_tenant(&mut tx, tenant.id, reseller_id)
+            .await
+            .map_err(internal)?;
+    }
     let files = skeleton_for_new_tenant(&mut tx).await?;
     let op = set_up_operation(tenant.id, system.as_str(), tenant.uid, &plan, files)?;
-    let operation_id = queue(&mut tx, node_id, tenant.id, &op, &who).await?;
+    let operation_id = queue(&mut tx, node_id, tenant.id, &op, who).await?;
+    let action = if reseller.is_some() {
+        "reseller.user_created"
+    } else {
+        "admin.user_created"
+    };
     dhpanel_audit::insert(
         &mut *tx,
-        &entry("admin.user_created", &who, id).metadata(serde_json::json!({
+        &entry(action, who, id).metadata(serde_json::json!({
             "username": username.as_str(),
             "system_username": system.as_str(),
             "plan": plan.name,
@@ -675,7 +703,7 @@ pub async fn create_user(
     Ok((
         StatusCode::CREATED,
         Json(UserChange {
-            user: view(load(&state, id).await?),
+            user: view(load(state, id).await?),
             operation_id: Some(operation_id),
         }),
     ))
@@ -906,7 +934,16 @@ pub async fn suspend_user(
     RequireRecent(who, _): RequireRecent<UsersManage>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<UserChange>, AppError> {
-    let user = load(&state, id).await?;
+    suspend_user_inner(&state, &who, id, false).await
+}
+
+pub(crate) async fn suspend_user_inner(
+    state: &UsersState,
+    who: &Principal,
+    id: Uuid,
+    by_reseller: bool,
+) -> Result<Json<UserChange>, AppError> {
+    let user = load(state, id).await?;
     let tenant = tenant_of(&user)?;
     if tenant.status != TenantStatus::Active {
         return Err(AppError::conflict(
@@ -925,20 +962,28 @@ pub async fn suspend_user(
         &NodeOperation::SuspendTenant {
             username: tenant.username.clone(),
         },
-        &who,
+        who,
     )
     .await?;
     dhpanel_audit::insert(
         &mut *tx,
-        &entry("admin.user_suspended", &who, id)
-            .metadata(serde_json::json!({ "operation_id": operation_id })),
+        &entry(
+            if by_reseller {
+                "reseller.user_suspended"
+            } else {
+                "admin.user_suspended"
+            },
+            who,
+            id,
+        )
+        .metadata(serde_json::json!({ "operation_id": operation_id })),
     )
     .await
     .map_err(internal)?;
     tx.commit().await.map_err(internal)?;
-    end_sessions(&state, id).await;
+    end_sessions(state, id).await;
     Ok(Json(UserChange {
-        user: view(load(&state, id).await?),
+        user: view(load(state, id).await?),
         operation_id: Some(operation_id),
     }))
 }
@@ -966,7 +1011,16 @@ pub async fn unsuspend_user(
     RequireRecent(who, _): RequireRecent<UsersManage>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<UserChange>, AppError> {
-    let user = load(&state, id).await?;
+    unsuspend_user_inner(&state, &who, id, false).await
+}
+
+pub(crate) async fn unsuspend_user_inner(
+    state: &UsersState,
+    who: &Principal,
+    id: Uuid,
+    by_reseller: bool,
+) -> Result<Json<UserChange>, AppError> {
+    let user = load(state, id).await?;
     let tenant = tenant_of(&user)?;
     if tenant.status != TenantStatus::Suspended {
         return Err(AppError::conflict(
@@ -985,19 +1039,27 @@ pub async fn unsuspend_user(
         &NodeOperation::ResumeTenant {
             username: tenant.username.clone(),
         },
-        &who,
+        who,
     )
     .await?;
     dhpanel_audit::insert(
         &mut *tx,
-        &entry("admin.user_unsuspended", &who, id)
-            .metadata(serde_json::json!({ "operation_id": operation_id })),
+        &entry(
+            if by_reseller {
+                "reseller.user_unsuspended"
+            } else {
+                "admin.user_unsuspended"
+            },
+            who,
+            id,
+        )
+        .metadata(serde_json::json!({ "operation_id": operation_id })),
     )
     .await
     .map_err(internal)?;
     tx.commit().await.map_err(internal)?;
     Ok(Json(UserChange {
-        user: view(load(&state, id).await?),
+        user: view(load(state, id).await?),
         operation_id: Some(operation_id),
     }))
 }
@@ -1026,7 +1088,16 @@ pub async fn delete_user(
     RequireRecent(who, _): RequireRecent<UsersManage>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<UserChange>, AppError> {
-    let user = load(&state, id).await?;
+    delete_user_inner(&state, &who, id, false).await
+}
+
+pub(crate) async fn delete_user_inner(
+    state: &UsersState,
+    who: &Principal,
+    id: Uuid,
+    by_reseller: bool,
+) -> Result<Json<UserChange>, AppError> {
+    let user = load(state, id).await?;
     let mut tx = state.db.begin().await.map_err(internal)?;
     let mut operation_id = None;
     if let Some(tenant) = &user.tenant {
@@ -1056,7 +1127,7 @@ pub async fn delete_user(
                         .map_err(|_| internal(std::io::Error::other("negative uid")))?,
                     purge_data: false,
                 },
-                &who,
+                who,
             )
             .await?,
         );
@@ -1066,7 +1137,16 @@ pub async fn delete_user(
         .map_err(internal)?;
     dhpanel_audit::insert(
         &mut *tx,
-        &entry("admin.user_deleted", &who, id).metadata(serde_json::json!({
+        &entry(
+            if by_reseller {
+                "reseller.user_deleted"
+            } else {
+                "admin.user_deleted"
+            },
+            who,
+            id,
+        )
+        .metadata(serde_json::json!({
             "operation_id": operation_id,
             "purge_after_days": state.purge_after_days,
         })),
@@ -1074,9 +1154,9 @@ pub async fn delete_user(
     .await
     .map_err(internal)?;
     tx.commit().await.map_err(internal)?;
-    end_sessions(&state, id).await;
+    end_sessions(state, id).await;
     Ok(Json(UserChange {
-        user: view(load(&state, id).await?),
+        user: view(load(state, id).await?),
         operation_id,
     }))
 }
@@ -1206,7 +1286,7 @@ pub async fn reset_password(
 /// Ends every session of the user. The account change is already committed, so a
 /// failure here is logged and left for the session's own expiry rather than
 /// undoing the change.
-async fn end_sessions(state: &UsersState, id: Uuid) {
+pub(crate) async fn end_sessions(state: &UsersState, id: Uuid) {
     if state
         .sessions
         .revoke_all(id, None, RevokeReason::Admin)
@@ -1479,6 +1559,27 @@ pub async fn delete_skeleton_file(
     tags((name = "users", description = "Client accounts and their hosting"))
 )]
 pub struct UsersApi;
+
+/// OpenAPI description of the resellers module.
+#[derive(OpenApi)]
+#[openapi(
+    paths(
+        reseller::list_packages, reseller::create_package, reseller::delete_package,
+        reseller::list_resellers, reseller::create_reseller, reseller::set_reseller_status,
+        reseller::delete_reseller, reseller::me, reseller::my_package, reseller::put_branding,
+        reseller::my_users, reseller::create_my_user, reseller::set_my_user_status,
+        reseller::delete_my_user, reseller::my_plans, reseller::create_my_plan,
+        reseller::delete_my_plan
+    ),
+    components(schemas(
+        reseller::PackageView, reseller::CreatePackage, reseller::BrandingView,
+        reseller::ResellerView, reseller::ClientView, reseller::ResellerPlanView,
+        reseller::CreateReseller, reseller::SetStatus, reseller::PutBranding,
+        reseller::CreateClient, reseller::CreatePlan
+    )),
+    tags((name = "resellers", description = "Resellers, their packages, clients and plans"))
+)]
+pub struct ResellersApi;
 
 #[cfg(test)]
 mod tests {

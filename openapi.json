@@ -6689,6 +6689,269 @@
         ]
       }
     },
+    "/api/v1/admin/reseller-packages": {
+      "get": {
+        "tags": [
+          "resellers"
+        ],
+        "summary": "The packages.",
+        "operationId": "listResellerPackages",
+        "responses": {
+          "200": {
+            "description": "The packages",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PackageView"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "resellers"
+        ],
+        "summary": "Create a package.",
+        "operationId": "createResellerPackage",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePackage"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PackageView"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`package_name_taken`"
+          },
+          "422": {
+            "description": "Invalid input"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/reseller-packages/{id}": {
+      "delete": {
+        "tags": [
+          "resellers"
+        ],
+        "summary": "Delete a package no reseller uses.",
+        "operationId": "deleteResellerPackage",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Package id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "description": "No such package"
+          },
+          "409": {
+            "description": "`package_in_use`"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/resellers": {
+      "get": {
+        "tags": [
+          "resellers"
+        ],
+        "summary": "The resellers.",
+        "operationId": "listResellers",
+        "responses": {
+          "200": {
+            "description": "The resellers, newest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ResellerView"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "resellers"
+        ],
+        "summary": "Create a reseller: the account, its role and its standing, in one transaction.",
+        "operationId": "createReseller",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateReseller"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResellerView"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`username_taken` or `email_taken`"
+          },
+          "422": {
+            "description": "Invalid input or an unknown package"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/resellers/{id}": {
+      "delete": {
+        "tags": [
+          "resellers"
+        ],
+        "summary": "Delete a reseller that has no hosting accounts (any it had must be deleted and purged\nfirst). Its plans go; the login is disabled.",
+        "operationId": "deleteReseller",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Reseller id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "description": "No such reseller"
+          },
+          "409": {
+            "description": "`reseller_has_accounts`"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/resellers/{id}/status": {
+      "post": {
+        "tags": [
+          "resellers"
+        ],
+        "summary": "Suspend or resume a reseller. While it is suspended neither it nor its clients can\nsign in; the clients' sites keep running.",
+        "operationId": "setResellerStatus",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Reseller id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetStatus"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Changed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResellerView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such reseller"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/security/images": {
       "get": {
         "tags": [
@@ -20026,6 +20289,363 @@
           }
         }
       }
+    },
+    "/api/v1/reseller/me": {
+      "get": {
+        "tags": [
+          "resellers"
+        ],
+        "summary": "The caller's own reseller account.",
+        "operationId": "getResellerMe",
+        "responses": {
+          "200": {
+            "description": "The reseller",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResellerView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`not_a_reseller`"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/reseller/me/branding": {
+      "put": {
+        "tags": [
+          "resellers"
+        ],
+        "summary": "Change the branding.",
+        "operationId": "putResellerBranding",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutBranding"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The branding now",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrandingView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid input"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/reseller/me/package": {
+      "get": {
+        "tags": [
+          "resellers"
+        ],
+        "summary": "The caller's package.",
+        "operationId": "getResellerPackage",
+        "responses": {
+          "200": {
+            "description": "The package",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PackageView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`not_a_reseller`"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/reseller/plans": {
+      "get": {
+        "tags": [
+          "resellers"
+        ],
+        "summary": "The caller's plans.",
+        "operationId": "listResellerPlans",
+        "responses": {
+          "200": {
+            "description": "The plans",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ResellerPlanView"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "resellers"
+        ],
+        "summary": "Create a plan of the caller.",
+        "operationId": "createResellerPlan",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePlan"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResellerPlanView"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`plan_name_taken`"
+          },
+          "422": {
+            "description": "Invalid input"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/reseller/plans/{id}": {
+      "delete": {
+        "tags": [
+          "resellers"
+        ],
+        "summary": "Delete a plan of the caller that no account uses.",
+        "operationId": "deleteResellerPlan",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Plan id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "description": "Not one of the caller's plans"
+          },
+          "409": {
+            "description": "`plan_in_use`"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/reseller/users": {
+      "get": {
+        "tags": [
+          "resellers"
+        ],
+        "summary": "The caller's clients.",
+        "operationId": "listResellerUsers",
+        "responses": {
+          "200": {
+            "description": "The clients, newest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ClientView"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "resellers"
+        ],
+        "summary": "Create a client of the caller.",
+        "operationId": "createResellerUser",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateClient"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientView"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`reseller_limit` (the package is used up), `username_taken`, `email_taken`..."
+          },
+          "422": {
+            "description": "Invalid input or a plan that is not the caller's"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/reseller/users/{id}": {
+      "delete": {
+        "tags": [
+          "resellers"
+        ],
+        "summary": "Delete one of the caller's clients (its data is kept for a while, as for any user).",
+        "operationId": "deleteResellerUser",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Client id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "description": "Not one of the caller's clients"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/reseller/users/{id}/status": {
+      "post": {
+        "tags": [
+          "resellers"
+        ],
+        "summary": "Suspend or resume one of the caller's clients.",
+        "operationId": "setResellerUserStatus",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Client id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetStatus"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Changed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserChange"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not one of the caller's clients"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -21134,6 +21754,43 @@
           }
         }
       },
+      "BrandingView": {
+        "type": "object",
+        "description": "A reseller's branding.",
+        "required": [
+          "brand_name",
+          "primary_color",
+          "support_email"
+        ],
+        "properties": {
+          "brand_name": {
+            "type": "string",
+            "description": "Name shown instead of the panel's."
+          },
+          "custom_login_message": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A line shown on the sign-in page."
+          },
+          "logo_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Logo address (https)."
+          },
+          "primary_color": {
+            "type": "string",
+            "description": "Accent colour, `#rrggbb`."
+          },
+          "support_email": {
+            "type": "string",
+            "description": "Where clients write for support."
+          }
+        }
+      },
       "CacheList": {
         "type": "object",
         "description": "The account's cache servers.",
@@ -21517,6 +22174,62 @@
           "timeout"
         ]
       },
+      "ClientView": {
+        "type": "object",
+        "description": "A client of a reseller.",
+        "required": [
+          "id",
+          "reseller_id",
+          "username",
+          "email",
+          "domain",
+          "plan_name",
+          "disk_used_mb",
+          "status",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "description": "Creation time."
+          },
+          "disk_used_mb": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Disk in use, MiB."
+          },
+          "domain": {
+            "type": "string",
+            "description": "First domain, empty when it has none yet."
+          },
+          "email": {
+            "type": "string",
+            "description": "Email address."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Account id."
+          },
+          "plan_name": {
+            "type": "string",
+            "description": "Plan name."
+          },
+          "reseller_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The reseller."
+          },
+          "status": {
+            "type": "string",
+            "description": "`active` or `suspended`."
+          },
+          "username": {
+            "type": "string",
+            "description": "Login name."
+          }
+        }
+      },
       "CodeRequest": {
         "type": "object",
         "description": "A 6-digit authenticator code.",
@@ -21573,6 +22286,53 @@
         },
         "additionalProperties": false
       },
+      "CreateClient": {
+        "type": "object",
+        "description": "A client to create.",
+        "required": [
+          "username",
+          "email",
+          "password"
+        ],
+        "properties": {
+          "domain": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The client's first domain. It is not set up here: the client adds it from its own\npanel."
+          },
+          "email": {
+            "type": "string",
+            "description": "Email address."
+          },
+          "password": {
+            "type": "string",
+            "format": "password",
+            "description": "Initial password; must satisfy the password policy."
+          },
+          "plan_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The plan, by id."
+          },
+          "plan_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The plan, by the name the reseller gave it (or an allowed plan's name)."
+          },
+          "username": {
+            "type": "string",
+            "description": "Login name."
+          }
+        },
+        "additionalProperties": false
+      },
       "CreateEnrollment": {
         "type": "object",
         "description": "Request to add a node.",
@@ -21584,6 +22344,130 @@
             "type": "string",
             "description": "Name for the new node: 2-63 characters, a-z, 0-9 and `-`, starting with a letter.",
             "example": "eu-west-1"
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreatePackage": {
+        "type": "object",
+        "description": "A package to create.",
+        "required": [
+          "name",
+          "max_accounts",
+          "max_disk_gb",
+          "max_bandwidth_gb"
+        ],
+        "properties": {
+          "allow_overselling": {
+            "type": "boolean",
+            "description": "Whether the plans may add up to more than the caps."
+          },
+          "allowed_plans": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Plans of the administrator the reseller may use."
+          },
+          "max_accounts": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Most hosting accounts."
+          },
+          "max_bandwidth_gb": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Transfer cap in GiB per month."
+          },
+          "max_disk_gb": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Disk cap in GiB."
+          },
+          "name": {
+            "type": "string",
+            "description": "Name (1-100 characters)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreatePlan": {
+        "type": "object",
+        "description": "A plan to create.",
+        "required": [
+          "name",
+          "disk_mb",
+          "bandwidth_mb",
+          "domains_limit",
+          "databases_limit",
+          "mailboxes_limit"
+        ],
+        "properties": {
+          "bandwidth_mb": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Transfer per month in MiB."
+          },
+          "databases_limit": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Most databases."
+          },
+          "disk_mb": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Disk in MiB."
+          },
+          "domains_limit": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Most domains."
+          },
+          "mailboxes_limit": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Most mailboxes."
+          },
+          "name": {
+            "type": "string",
+            "description": "Name (1-100 characters)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreateReseller": {
+        "type": "object",
+        "description": "A reseller to create.",
+        "required": [
+          "username",
+          "email",
+          "company_name",
+          "password",
+          "package_id"
+        ],
+        "properties": {
+          "company_name": {
+            "type": "string",
+            "description": "Company name."
+          },
+          "email": {
+            "type": "string",
+            "description": "Email address."
+          },
+          "package_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The package."
+          },
+          "password": {
+            "type": "string",
+            "format": "password",
+            "description": "Initial password; must satisfy the password policy."
+          },
+          "username": {
+            "type": "string",
+            "description": "Login name."
           }
         },
         "additionalProperties": false
@@ -24859,6 +25743,62 @@
         },
         "additionalProperties": false
       },
+      "PackageView": {
+        "type": "object",
+        "description": "A package.",
+        "required": [
+          "id",
+          "name",
+          "max_accounts",
+          "max_disk_gb",
+          "max_bandwidth_gb",
+          "allow_overselling",
+          "allowed_plans",
+          "created_at"
+        ],
+        "properties": {
+          "allow_overselling": {
+            "type": "boolean",
+            "description": "Whether the plans may add up to more than the caps."
+          },
+          "allowed_plans": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Plans of the administrator the reseller may use."
+          },
+          "created_at": {
+            "type": "string",
+            "description": "Creation time."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Id."
+          },
+          "max_accounts": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Most hosting accounts."
+          },
+          "max_bandwidth_gb": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Transfer cap in GiB per month."
+          },
+          "max_disk_gb": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Disk cap in GiB."
+          },
+          "name": {
+            "type": "string",
+            "description": "Name."
+          }
+        }
+      },
       "PageInput": {
         "type": "object",
         "description": "A page to keep.",
@@ -25521,6 +26461,48 @@
           }
         }
       },
+      "PutBranding": {
+        "type": "object",
+        "description": "New branding; fields left out stay as they are.",
+        "properties": {
+          "brand_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Name shown instead of the panel's (1-100 characters)."
+          },
+          "custom_login_message": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A line for the sign-in page (up to 300 characters). An empty string removes it."
+          },
+          "logo_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Logo address; https only. An empty string removes it."
+          },
+          "primary_color": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Accent colour, `#rrggbb`."
+          },
+          "support_email": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Support email address."
+          }
+        },
+        "additionalProperties": false
+      },
       "PutSettings": {
         "type": "object",
         "description": "New values for some settings of a module.",
@@ -25862,6 +26844,139 @@
           }
         },
         "additionalProperties": false
+      },
+      "ResellerPlanView": {
+        "type": "object",
+        "description": "A plan of a reseller.",
+        "required": [
+          "id",
+          "reseller_id",
+          "name",
+          "disk_mb",
+          "bandwidth_mb",
+          "domains_limit",
+          "databases_limit",
+          "mailboxes_limit",
+          "created_at"
+        ],
+        "properties": {
+          "bandwidth_mb": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Transfer per month, MiB."
+          },
+          "created_at": {
+            "type": "string",
+            "description": "Creation time."
+          },
+          "databases_limit": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Most databases."
+          },
+          "disk_mb": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Disk, MiB."
+          },
+          "domains_limit": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Most domains."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Id."
+          },
+          "mailboxes_limit": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Most mailboxes."
+          },
+          "name": {
+            "type": "string",
+            "description": "Name."
+          },
+          "reseller_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The reseller."
+          }
+        }
+      },
+      "ResellerView": {
+        "type": "object",
+        "description": "A reseller.",
+        "required": [
+          "id",
+          "username",
+          "email",
+          "company_name",
+          "package_id",
+          "package_name",
+          "status",
+          "accounts_count",
+          "disk_used_gb",
+          "bandwidth_used_gb",
+          "branding",
+          "created_at"
+        ],
+        "properties": {
+          "accounts_count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Hosting accounts of its clients."
+          },
+          "bandwidth_used_gb": {
+            "type": "number",
+            "format": "double",
+            "description": "Data sent this month, GiB."
+          },
+          "branding": {
+            "$ref": "#/components/schemas/BrandingView",
+            "description": "Branding."
+          },
+          "company_name": {
+            "type": "string",
+            "description": "Company name."
+          },
+          "created_at": {
+            "type": "string",
+            "description": "Creation time."
+          },
+          "disk_used_gb": {
+            "type": "number",
+            "format": "double",
+            "description": "Disk in use, GiB."
+          },
+          "email": {
+            "type": "string",
+            "description": "Email address."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Id."
+          },
+          "package_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Package id."
+          },
+          "package_name": {
+            "type": "string",
+            "description": "Package name."
+          },
+          "status": {
+            "type": "string",
+            "description": "`active` or `suspended`."
+          },
+          "username": {
+            "type": "string",
+            "description": "Login name."
+          }
+        }
       },
       "ResetPassword": {
         "type": "object",
@@ -26613,6 +27728,20 @@
             "propertyNames": {
               "type": "string"
             }
+          }
+        },
+        "additionalProperties": false
+      },
+      "SetStatus": {
+        "type": "object",
+        "description": "A new status for a reseller.",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "`active` or `suspended`."
           }
         },
         "additionalProperties": false
@@ -28778,6 +29907,10 @@
     {
       "name": "users",
       "description": "Client accounts and their hosting"
+    },
+    {
+      "name": "resellers",
+      "description": "Resellers, their packages, clients and plans"
     },
     {
       "name": "domains",

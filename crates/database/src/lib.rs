@@ -44,6 +44,7 @@ pub mod plans;
 pub mod previews;
 pub mod rbac;
 pub mod redirects;
+pub mod resellers;
 pub mod routes;
 pub mod settings;
 pub mod skeleton;

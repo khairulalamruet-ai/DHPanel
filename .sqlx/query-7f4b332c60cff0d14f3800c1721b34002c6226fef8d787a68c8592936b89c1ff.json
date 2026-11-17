@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS (SELECT 1 FROM tenants\n                           WHERE owner_account_id = $1 AND reseller_id = $2) AS \"own!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "own!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "7f4b332c60cff0d14f3800c1721b34002c6226fef8d787a68c8592936b89c1ff"
+}

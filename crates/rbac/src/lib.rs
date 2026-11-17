@@ -105,6 +105,14 @@ pub mod permissions {
         pub UsersImpersonate = "admin.users.impersonate"
     );
     crate::permission!(
+        /// See resellers, their packages and their clients.
+        pub ResellersRead = "admin.resellers.read"
+    );
+    crate::permission!(
+        /// Create, suspend and delete resellers and their packages.
+        pub ResellersManage = "admin.resellers.manage"
+    );
+    crate::permission!(
         /// See every domain on the panel.
         pub DomainsRead = "admin.domains.read"
     );

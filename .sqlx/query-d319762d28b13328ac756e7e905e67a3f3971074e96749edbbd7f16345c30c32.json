@@ -1,0 +1,87 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT a.id, a.username, a.email,\n                  COALESCE((SELECT min(d.fqdn) FROM domains d WHERE d.tenant_id = t.id), '') AS \"domain!\",\n                  COALESCE(p.display_name, p.name) AS \"plan_name!\",\n                  COALESCE(u.total_bytes, 0) AS \"disk_used_bytes!\",\n                  CASE WHEN a.status::text = 'active' AND t.status = 'active' THEN 'active'\n                       ELSE 'suspended' END AS \"status!\",\n                  extract(epoch FROM a.created_at)::bigint AS \"created_at!\"\n           FROM tenants t\n           JOIN accounts a ON a.id = t.owner_account_id\n           JOIN plans p ON p.id = t.plan_id\n           LEFT JOIN tenant_disk_usage u ON u.tenant_id = t.id\n           WHERE t.reseller_id = $1 AND t.status <> 'deleting'\n           ORDER BY a.created_at DESC, a.id DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "accounts",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "username",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "accounts",
+            "name": "username"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "email",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "accounts",
+            "name": "email"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "domain!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "plan_name!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "disk_used_bytes!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 6,
+        "name": "status!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 7,
+        "name": "created_at!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "d319762d28b13328ac756e7e905e67a3f3971074e96749edbbd7f16345c30c32"
+}

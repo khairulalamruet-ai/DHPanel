@@ -1,0 +1,33 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO plans (name, display_name, description, feature_set_id, cpu_millis,\n                              memory_bytes, pids, disk_bytes, inodes, bandwidth_bytes, limits,\n                              isolation, reseller_id)\n           SELECT $1, $2, '', d.feature_set_id, d.cpu_millis, d.memory_bytes, d.pids, $3,\n                  d.inodes, $4, $5, d.isolation, $6\n           FROM plans d WHERE d.is_default\n           RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "plans",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Int8",
+        "Int8",
+        "Jsonb",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "db800e97e7b2ac422ac28ffb950b1822739c3a210890b92a09be9a8d3e5973cb"
+}

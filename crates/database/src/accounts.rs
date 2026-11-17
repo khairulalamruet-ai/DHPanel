@@ -170,7 +170,7 @@ pub async fn find_for_login(
 ) -> Result<Option<LoginAccount>, sqlx::Error> {
     sqlx::query_as!(
         LoginAccount,
-        r#"SELECT id, status AS "status: DbAccountStatus", password_hash
+        r#"SELECT id, effective_account_status(id) AS "status!: DbAccountStatus", password_hash
            FROM accounts
            WHERE ($1::text IS NOT NULL AND username = $1)
               OR ($2::text IS NOT NULL AND email = $2)
@@ -190,7 +190,7 @@ pub async fn find_profile(pool: &PgPool, id: Uuid) -> Result<Option<AccountProfi
     sqlx::query_as!(
         AccountProfile,
         r#"SELECT id, kind AS "kind: DbAccountKind", username, email,
-                  status AS "status: DbAccountStatus", locale
+                  effective_account_status(id) AS "status!: DbAccountStatus", locale
            FROM accounts WHERE id = $1"#,
         id
     )
@@ -206,7 +206,7 @@ pub async fn find_profile(pool: &PgPool, id: Uuid) -> Result<Option<AccountProfi
 pub async fn find_for_reauth(pool: &PgPool, id: Uuid) -> Result<Option<LoginAccount>, sqlx::Error> {
     sqlx::query_as!(
         LoginAccount,
-        r#"SELECT id, status AS "status: DbAccountStatus", password_hash
+        r#"SELECT id, effective_account_status(id) AS "status!: DbAccountStatus", password_hash
            FROM accounts WHERE id = $1"#,
         id
     )

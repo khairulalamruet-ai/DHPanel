@@ -1,0 +1,100 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT r.status, r.package_id, k.max_accounts, k.max_disk_gb, k.max_bandwidth_gb,\n                  k.allow_overselling, k.allowed_plans\n           FROM resellers r JOIN reseller_packages k ON k.id = r.package_id\n           WHERE r.account_id = $1 FOR UPDATE OF r",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "resellers",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "package_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "resellers",
+            "name": "package_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "max_accounts",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "reseller_packages",
+            "name": "max_accounts"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "max_disk_gb",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "reseller_packages",
+            "name": "max_disk_gb"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "max_bandwidth_gb",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "reseller_packages",
+            "name": "max_bandwidth_gb"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "allow_overselling",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "reseller_packages",
+            "name": "allow_overselling"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "allowed_plans",
+        "type_info": "UuidArray",
+        "origin": {
+          "Table": {
+            "table": "reseller_packages",
+            "name": "allowed_plans"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "bc998972ced57b85610b97f2bdd22783a57b71e11b186875a5c2a894d23d09fd"
+}
