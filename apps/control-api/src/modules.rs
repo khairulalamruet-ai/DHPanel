@@ -434,14 +434,19 @@ pub fn mount(
                     })
                 }
                 "migration" => {
-                    let (db, sessions, spool_dir) =
-                        (db.clone(), sessions.clone(), spool_dir.clone());
+                    let (db, sessions, spool_dir, loopback) = (
+                        db.clone(),
+                        sessions.clone(),
+                        spool_dir.clone(),
+                        dhpanel_mod_migration::exec::Loopback(late_mount.clone()),
+                    );
                     Box::new(move || ModuleRoutes {
                         admin: Some(dhpanel_mod_migration::admin_router().with_state(
                             dhpanel_mod_migration::MigrationState {
                                 db: db.clone(),
                                 sessions: sessions.clone(),
                                 spool_dir: spool_dir.clone(),
+                                loopback: loopback.clone(),
                             },
                         )),
                         ..ModuleRoutes::none()

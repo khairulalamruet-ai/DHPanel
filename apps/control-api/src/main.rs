@@ -4,6 +4,8 @@
 //! telemetry, serve HTTP, shut down gracefully on SIGINT/SIGTERM.
 
 mod app;
+#[cfg(test)]
+mod import_tests;
 mod modules;
 mod openapi;
 mod secrets;
@@ -366,6 +368,10 @@ async fn main() -> ExitCode {
             }
         }
     });
+    // Imports that were running when the panel last stopped cannot go on by themselves.
+    if let Err(error) = dhpanel_mod_migration::exec::end_interrupted(&db).await {
+        tracing::warn!(%error, "could not end the imports that were interrupted");
+    }
     // Uploaded dumps nobody needs any more are removed; forgotten uploads are cancelled.
     tokio::spawn({
         let (db, spool_dir) = (db.clone(), config.imports.spool_dir.clone());

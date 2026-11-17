@@ -67,6 +67,7 @@ async fn env(pool: &PgPool) -> Env {
                     db: pool.clone(),
                     sessions: sessions.clone(),
                     spool_dir: spool.clone(),
+                    loopback: Default::default(),
                 })),
                 ..ModuleRoutes::none()
             }
@@ -367,7 +368,7 @@ async fn bad_requests_and_missing_files_are_refused_or_fail_cleanly(pool: PgPool
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{field}: {got}");
         assert!(got.to_string().contains(field), "{field}: {got}");
     }
-    // The real import is not available yet.
+    // Without the panel's own routes to work through, a real import cannot start.
     let (status, got) = e
         .call(
             &root,
@@ -427,4 +428,78 @@ async fn bad_requests_and_missing_files_are_refused_or_fail_cleanly(pool: PgPool
 
 fn code(body: &Value) -> &str {
     body["code"].as_str().unwrap_or_default()
+}
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn a_failed_import_goes_on_from_its_step_and_a_dry_run_starts_over(pool: PgPool) {
+    use dhpanel_database::migration_transfers as store;
+    let admin = account(&pool, "admin", "rootuser", &["super_admin"]).await;
+    let made = store::insert(
+        &pool,
+        &store::NewTransfer {
+            source_type: "cpanel",
+            source_host: None,
+            backup_file: "a.tar.gz",
+            tenant_username: "alice",
+            target_domain: "alice.example.org",
+            dry_run: false,
+            on_conflict: "fail",
+            created_by: admin,
+        },
+    )
+    .await
+    .unwrap();
+    let steps = json!([
+        {"id": "step-1", "name": "one", "status": "completed", "details": "kept"},
+        {"id": "step-2", "name": "two", "status": "failed", "details": "boom"},
+        {"id": "step-3", "name": "three", "status": "pending"}
+    ]);
+    // Without a plan there is nothing to go on from.
+    store::set_progress(
+        &pool,
+        made.id,
+        &store::Progress {
+            status: "failed",
+            progress_percent: 33,
+            current_step: "two",
+            size_bytes: None,
+            steps: &steps,
+            plan: None,
+            error_message: Some("boom"),
+        },
+    )
+    .await
+    .unwrap();
+    assert!(!store::resume(&pool, made.id).await.unwrap());
+    let plan = json!({"ok": true});
+    store::set_progress(
+        &pool,
+        made.id,
+        &store::Progress {
+            status: "failed",
+            progress_percent: 33,
+            current_step: "two",
+            size_bytes: None,
+            steps: &steps,
+            plan: Some(&plan),
+            error_message: Some("boom"),
+        },
+    )
+    .await
+    .unwrap();
+    assert!(store::resume(&pool, made.id).await.unwrap());
+    let t = store::get(&pool, made.id).await.unwrap().unwrap();
+    assert_eq!(t.status, "running");
+    assert!(t.error_message.is_none());
+    let s = t.steps.as_array().unwrap();
+    assert_eq!(s[0]["status"], "completed", "what was done stays done");
+    assert_eq!(s[0]["details"], "kept");
+    assert_eq!(
+        s[1]["status"], "pending",
+        "the step that failed is tried again"
+    );
+    assert!(s[1].get("details").is_none());
+    // A transfer that is running cannot be resumed again.
+    assert!(!store::resume(&pool, made.id).await.unwrap());
 }

@@ -4668,7 +4668,7 @@
             }
           },
           "409": {
-            "description": "`import_unavailable`: only dry runs can be started",
+            "description": "`import_unavailable`: this panel cannot run imports",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -23611,7 +23611,7 @@
           },
           "dry_run": {
             "type": "boolean",
-            "description": "Only plan (default `true`). The real import is not available yet."
+            "description": "Only plan (default `true`). With `false` the plan is carried out when nothing stands in\nits way."
           },
           "on_conflict": {
             "type": [

@@ -301,11 +301,27 @@ pub fn plan(model: &ImportModel, existing: &Existing, options: &Options) -> Plan
     let main_override = options.main_domain.as_deref().map(str::to_ascii_lowercase);
     let mut kept_domains = BTreeSet::new();
     m.domains.clear();
+    let mut moved_domains = BTreeSet::new();
+    let old_main = model
+        .domains
+        .iter()
+        .find(|d| d.kind == DomainKind::Main)
+        .map(|d| d.name.clone());
     for mut d in model.domains.iter().cloned() {
+        let original = d.name.clone();
         if d.kind == DomainKind::Main
             && let Some(over) = &main_override
         {
             d.name.clone_from(over);
+        }
+        // A name below the old main domain moves with it: it has to lie below one of the
+        // account's domains here.
+        if matches!(d.kind, DomainKind::Sub | DomainKind::Alias)
+            && let (Some(old), Some(new)) = (&old_main, &main_override)
+            && old != new
+            && let Some(prefix) = d.name.strip_suffix(&format!(".{old}"))
+        {
+            d.name = format!("{prefix}.{new}");
         }
         if Fqdn::parse(&d.name).is_err() {
             out.skipped.push(Skipped {
@@ -338,11 +354,14 @@ pub fn plan(model: &ImportModel, existing: &Existing, options: &Options) -> Plan
             }
             continue;
         }
+        if d.name != original {
+            moved_domains.insert(original.clone());
+        }
         kept_domains.insert(d.name.clone());
         out.steps.push(Step {
             action: Action::AddDomain,
             subject: d.name.clone(),
-            renamed_from: None,
+            renamed_from: (d.name != original).then_some(original),
             bytes: None,
         });
         m.domains.push(d);
@@ -373,6 +392,14 @@ pub fn plan(model: &ImportModel, existing: &Existing, options: &Options) -> Plan
     let mut renamed: Vec<(Engine, String, String)> = Vec::new();
     if options.include.databases {
         for mut d in model.databases.iter().cloned() {
+            if d.engine != Engine::Mysql {
+                out.skipped.push(Skipped {
+                    kind: "database".into(),
+                    name: d.name,
+                    reason: "PostgreSQL databases cannot be imported yet".into(),
+                });
+                continue;
+            }
             let Some(base) = db_name(&old_user, &username, &d.name) else {
                 out.skipped.push(Skipped {
                     kind: "database".into(),
@@ -440,6 +467,14 @@ pub fn plan(model: &ImportModel, existing: &Existing, options: &Options) -> Plan
             m.databases.push(d);
         }
         for mut u in model.db_users.iter().cloned() {
+            if u.engine != Engine::Mysql {
+                out.skipped.push(Skipped {
+                    kind: "db_user".into(),
+                    name: u.name,
+                    reason: "PostgreSQL users cannot be imported yet".into(),
+                });
+                continue;
+            }
             let Some(base) = db_name(&old_user, &username, &u.name) else {
                 out.skipped.push(Skipped {
                     kind: "db_user".into(),
@@ -514,7 +549,15 @@ pub fn plan(model: &ImportModel, existing: &Existing, options: &Options) -> Plan
     m.dns_zones.clear();
     if options.include.dns {
         for z in model.dns_zones.iter().cloned() {
-            if kept_domains.contains(&z.name) {
+            if moved_domains.contains(&z.name) {
+                out.skipped.push(Skipped {
+                    kind: "dns_zone".into(),
+                    name: z.name,
+                    reason:
+                        "its domain has another name here, and the records belong to the old name"
+                            .into(),
+                });
+            } else if kept_domains.contains(&z.name) {
                 out.steps.push(Step {
                     action: Action::CreateDnsZone,
                     subject: z.name.clone(),

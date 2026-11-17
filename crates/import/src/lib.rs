@@ -12,11 +12,13 @@
 mod archive;
 pub mod cpanel;
 pub mod cyberpanel;
+mod extract;
 mod model;
 mod plan;
 mod zone;
 
 pub use archive::{Archive, HOME, Limits};
+pub use extract::{Repacked, copy_file, repack};
 pub use model::*;
 pub use plan::{
     Action, Conflict, Existing, Include, OnConflict, Options, Plan, Resolution, Skipped, Step, plan,

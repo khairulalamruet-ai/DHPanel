@@ -393,11 +393,11 @@ mod dry_run {
                 .iter()
                 .filter(|a| **a == Action::CreateDatabase)
                 .count(),
-            2
+            1
         );
         assert_eq!(
             actions.iter().filter(|a| **a == Action::ImportDump).count(),
-            2
+            1
         );
         assert_eq!(
             actions
@@ -637,4 +637,46 @@ mod dry_run {
             p.model.files.is_none() && p.model.databases.is_empty() && p.model.cron_jobs.is_empty()
         );
     }
+}
+
+#[test]
+fn a_file_and_a_folder_can_be_taken_out_of_the_archive() {
+    let archive = cpmove();
+    let mut dump = Vec::new();
+    let n = dhpanel_import::copy_file(&archive[..], "mysql/alice_wp.sql", &mut dump).unwrap();
+    assert_eq!(dump, b"-- dump\nCREATE TABLE t (id int);\n");
+    assert_eq!(n, dump.len() as u64);
+    assert!(dhpanel_import::copy_file(&archive[..], "mysql/none.sql", &mut Vec::new()).is_err());
+
+    // The files under public_html, packed again without that folder.
+    let mut packed = Vec::new();
+    let done = dhpanel_import::repack(
+        &archive[..],
+        |p| p.strip_prefix("homedir/public_html/").map(str::to_owned),
+        &mut packed,
+    )
+    .unwrap();
+    assert_eq!(done.entries, 2, "{done:?}");
+    assert_eq!(done.bytes, 17);
+    let mut names: Vec<String> = tar::Archive::new(flate2::read::GzDecoder::new(&packed[..]))
+        .entries()
+        .unwrap()
+        .map(|e| e.unwrap().path().unwrap().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    assert_eq!(names, ["a.txt", "index.php"]);
+}
+
+#[test]
+fn repacking_refuses_a_mapping_that_leaves_the_folder() {
+    let archive = cpmove();
+    let result = dhpanel_import::repack(
+        &archive[..],
+        |p| {
+            p.strip_prefix("homedir/public_html/")
+                .map(|r| format!("../{r}"))
+        },
+        Vec::new(),
+    );
+    assert!(result.is_err());
 }

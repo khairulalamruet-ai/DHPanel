@@ -15,6 +15,8 @@
 
 use std::{fs::File, io::BufReader, path::PathBuf};
 
+pub mod exec;
+
 use axum::{
     Json, Router,
     extract::{FromRef, Path, State},
@@ -53,6 +55,8 @@ pub struct MigrationState {
     pub sessions: SessionStore,
     /// The import folder's parent (`imports.spool_dir`); backups wait in its `migration` folder.
     pub spool_dir: PathBuf,
+    /// How the executor uses the panel's own API.
+    pub loopback: exec::Loopback,
 }
 
 impl FromRef<MigrationState> for PgPool {
@@ -291,8 +295,9 @@ fn describe(step: &dhpanel_import::Step) -> String {
     }
 }
 
-/// Runs the dry run of a transfer and records the outcome.
-async fn run_dry(state: &MigrationState, t: &Transfer) -> Result<(), AppError> {
+/// Plans a transfer and records the outcome. A dry run ends there; a real import goes on
+/// (`true`) when nothing stands in its way.
+async fn plan_transfer(state: &MigrationState, t: &Transfer) -> Result<bool, AppError> {
     let started = vec!["Reading the backup...".to_owned()];
     store::append_log(&state.db, t.id, &started)
         .await
@@ -305,7 +310,7 @@ async fn run_dry(state: &MigrationState, t: &Transfer) -> Result<(), AppError> {
                 .enumerate()
                 .map(|(i, s)| {
                     json!({"id": format!("step-{}", i + 1), "name": describe(s),
-                           "status": "completed"})
+                           "status": if t.dry_run { "completed" } else { "pending" }})
                 })
                 .collect();
             let mut log = vec![format!(
@@ -329,32 +334,41 @@ async fn run_dry(state: &MigrationState, t: &Transfer) -> Result<(), AppError> {
             for b in &plan.blockers {
                 log.push(format!("Blocked: {b}."));
             }
-            log.push(if plan.ok {
-                "Dry run finished: nothing was changed.".to_owned()
-            } else {
-                "Dry run finished: the import cannot run until the problems above are settled."
-                    .to_owned()
+            log.push(match (plan.ok, t.dry_run) {
+                (true, true) => "Dry run finished: nothing was changed.".to_owned(),
+                (true, false) => "The plan is fine: the import starts.".to_owned(),
+                (false, _) => {
+                    "The import cannot run until the problems above are settled.".to_owned()
+                }
             });
             store::append_log(&state.db, t.id, &log)
                 .await
                 .map_err(internal)?;
             let plan_json = serde_json::to_value(&plan).map_err(internal)?;
             let steps_json = Value::Array(steps);
+            let go = plan.ok && !t.dry_run;
+            let (status, percent, current) = match (plan.ok, t.dry_run) {
+                (true, true) => ("completed", 100, "Dry run finished"),
+                (true, false) => ("running", 0, "Starting"),
+                (false, _) => ("failed", 0, "The plan has problems"),
+            };
             store::set_progress(
                 &state.db,
                 t.id,
                 &Progress {
-                    status: "completed",
-                    progress_percent: 100,
-                    current_step: "Dry run finished",
+                    status,
+                    progress_percent: percent,
+                    current_step: current,
                     size_bytes: Some(size),
                     steps: &steps_json,
                     plan: Some(&plan_json),
-                    error_message: None,
+                    error_message: (!plan.ok)
+                        .then_some("The plan has problems that stop the import."),
                 },
             )
             .await
             .map_err(internal)?;
+            Ok(go)
         }
         Err(why) => {
             store::append_log(&state.db, t.id, &[format!("Failed: {why}")])
@@ -376,7 +390,15 @@ async fn run_dry(state: &MigrationState, t: &Transfer) -> Result<(), AppError> {
             )
             .await
             .map_err(internal)?;
+            Ok(false)
         }
+    }
+}
+
+/// Plans, and for a real import starts the executor in the background.
+async fn start(state: &MigrationState, t: &Transfer) -> Result<(), AppError> {
+    if plan_transfer(state, t).await? {
+        tokio::spawn(exec::run(state.clone(), t.id));
     }
     Ok(())
 }
@@ -433,7 +455,8 @@ pub struct CreateTransfer {
     pub tenant_username: String,
     /// The main domain here.
     pub target_domain: String,
-    /// Only plan (default `true`). The real import is not available yet.
+    /// Only plan (default `true`). With `false` the plan is carried out when nothing stands in
+    /// its way.
     #[serde(default = "yes")]
     pub dry_run: bool,
     /// `fail` (default), `rename` or `skip`.
@@ -455,7 +478,7 @@ fn yes() -> bool {
     request_body = CreateTransfer,
     responses(
         (status = 201, description = "Created and, for a dry run, finished", body = TransferView),
-        (status = 409, description = "`import_unavailable`: only dry runs can be started", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "`import_unavailable`: this panel cannot run imports", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 422, description = "Invalid input", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
@@ -511,10 +534,10 @@ pub async fn create(
     if !errors.is_empty() {
         return Err(AppError::validation(errors));
     }
-    if !req.dry_run {
+    if !req.dry_run && state.loopback.0.get().is_none() {
         return Err(AppError::conflict(
             "import_unavailable",
-            "Only a dry run can be started for now.",
+            "This panel cannot run imports.",
         ));
     }
     let t = store::insert(
@@ -525,7 +548,7 @@ pub async fn create(
             backup_file: &req.backup_file,
             tenant_username: &req.tenant_username.to_ascii_lowercase(),
             target_domain: &req.target_domain.to_ascii_lowercase(),
-            dry_run: true,
+            dry_run: req.dry_run,
             on_conflict: policy,
             created_by: who.account_id(),
         },
@@ -535,7 +558,7 @@ pub async fn create(
     dhpanel_audit::insert(&state.db, &audit("migration.transfer_started", &who, t.id))
         .await
         .map_err(internal)?;
-    run_dry(&state, &t).await?;
+    start(&state, &t).await?;
     let done = store::get(&state.db, t.id)
         .await
         .map_err(internal)?
@@ -559,31 +582,49 @@ pub async fn retry(
     Require(who, _): Require<MigrationManage>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<TransferView>, AppError> {
-    store::get(&state.db, id)
+    let existing = store::get(&state.db, id)
         .await
         .map_err(internal)?
         .ok_or_else(|| AppError::not_found("transfer"))?;
-    if !store::requeue(&state.db, id).await.map_err(internal)? {
-        return Err(AppError::conflict(
-            "not_retryable",
-            "Only a transfer that failed or was cancelled can be run again.",
-        ));
-    }
-    let t = store::get(&state.db, id)
-        .await
-        .map_err(internal)?
-        .ok_or_else(|| AppError::not_found("transfer"))?;
-    dhpanel_audit::insert(&state.db, &audit("migration.transfer_retried", &who, id))
+    // A real import that got as far as its steps goes on from the step that stopped it.
+    let resumed = !existing.dry_run
+        && state.loopback.0.get().is_some()
+        && store::resume(&state.db, id).await.map_err(internal)?;
+    if resumed {
+        dhpanel_audit::insert(&state.db, &audit("migration.transfer_retried", &who, id))
+            .await
+            .map_err(internal)?;
+        store::append_log(
+            &state.db,
+            id,
+            &["Going on from the step that stopped it.".to_owned()],
+        )
         .await
         .map_err(internal)?;
-    store::append_log(
-        &state.db,
-        id,
-        &["Running again from the first step.".to_owned()],
-    )
-    .await
-    .map_err(internal)?;
-    run_dry(&state, &t).await?;
+        tokio::spawn(exec::run(state.clone(), id));
+    } else {
+        if !store::requeue(&state.db, id).await.map_err(internal)? {
+            return Err(AppError::conflict(
+                "not_retryable",
+                "Only a transfer that failed or was cancelled can be run again.",
+            ));
+        }
+        let t = store::get(&state.db, id)
+            .await
+            .map_err(internal)?
+            .ok_or_else(|| AppError::not_found("transfer"))?;
+        dhpanel_audit::insert(&state.db, &audit("migration.transfer_retried", &who, id))
+            .await
+            .map_err(internal)?;
+        store::append_log(
+            &state.db,
+            id,
+            &["Running again from the first step.".to_owned()],
+        )
+        .await
+        .map_err(internal)?;
+        start(&state, &t).await?;
+    }
     let done = store::get(&state.db, id)
         .await
         .map_err(internal)?

@@ -252,6 +252,28 @@ pub async fn requeue(pool: &PgPool, id: Uuid) -> Result<bool, sqlx::Error> {
     Ok(done.rows_affected() == 1)
 }
 
+/// Sets a real import that failed or was cancelled running again from the step that stopped it:
+/// the steps that were done stay done. Whether it was.
+///
+/// # Errors
+/// Database errors.
+pub async fn resume(pool: &PgPool, id: Uuid) -> Result<bool, sqlx::Error> {
+    let done = sqlx::query(
+        "UPDATE migration_transfers SET status = 'running', error_message = NULL, updated_at = now(), \
+           steps = ( SELECT COALESCE(jsonb_agg( \
+                       CASE WHEN s->>'status' IN ('failed', 'running') \
+                            THEN jsonb_set(s - 'details', '{status}', '\"pending\"') ELSE s END \
+                       ORDER BY n), '[]'::jsonb) \
+                     FROM jsonb_array_elements(steps) WITH ORDINALITY AS t(s, n) ) \
+         WHERE id = $1 AND status IN ('failed', 'cancelled') AND NOT dry_run \
+           AND plan IS NOT NULL AND jsonb_array_length(steps) > 0",
+    )
+    .bind(id)
+    .execute(pool)
+    .await?;
+    Ok(done.rows_affected() == 1)
+}
+
 /// Removes a transfer that has ended. Whether it was.
 ///
 /// # Errors
