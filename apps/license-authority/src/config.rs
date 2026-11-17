@@ -44,6 +44,20 @@ pub struct LaConfig {
     /// answers at the domain it claims. Needs the panel to be reachable on https at the
     /// license's bound address.
     pub require_domain_proof: bool,
+    /// The shared secret payments webhooks are signed with. Without it the webhook answers 503.
+    #[serde(default, serialize_with = "serialize_opt_secret")]
+    pub payment_webhook_secret: Option<SecretString>,
+    /// Days a subscription whose payment did not arrive stays in good standing before it is
+    /// `grace` (the license keeps working).
+    pub billing_past_due_days: u32,
+    /// Days of `grace` before the license is suspended.
+    pub billing_grace_days: u32,
+    /// Days suspended before the subscription is `expired`.
+    pub billing_suspended_days: u32,
+    /// Days before the end of a period the customer is reminded.
+    pub billing_renewal_notice_days: u32,
+    /// Days a payment extends a subscription when the provider does not say.
+    pub billing_period_days: u32,
     /// Log format: `json` or `pretty`.
     pub log_format: String,
     /// Log filter directives.
@@ -54,6 +68,17 @@ pub struct LaConfig {
 fn serialize_secret<S: serde::Serializer>(v: &SecretString, s: S) -> Result<S::Ok, S::Error> {
     use secrecy::ExposeSecret as _;
     s.serialize_str(v.expose_secret())
+}
+
+fn serialize_opt_secret<S: serde::Serializer>(
+    v: &Option<SecretString>,
+    s: S,
+) -> Result<S::Ok, S::Error> {
+    use secrecy::ExposeSecret as _;
+    match v {
+        Some(v) => s.serialize_some(v.expose_secret()),
+        None => s.serialize_none(),
+    }
 }
 
 impl Default for LaConfig {
@@ -72,6 +97,12 @@ impl Default for LaConfig {
                 std::net::IpAddr::from([0, 0, 0, 0, 0, 0, 0, 1]),
             ],
             require_domain_proof: false,
+            payment_webhook_secret: None,
+            billing_past_due_days: 3,
+            billing_grace_days: 7,
+            billing_suspended_days: 30,
+            billing_renewal_notice_days: 7,
+            billing_period_days: 30,
             log_format: "json".to_owned(),
             log_filter: "info".to_owned(),
         }
@@ -131,6 +162,28 @@ impl LaConfig {
         }
         if !self.database_url.expose_secret().starts_with("postgres") {
             return bad("database_url: a postgres:// address");
+        }
+        for (name, v, max) in [
+            ("billing_past_due_days", self.billing_past_due_days, 90),
+            ("billing_grace_days", self.billing_grace_days, 90),
+            ("billing_suspended_days", self.billing_suspended_days, 365),
+            (
+                "billing_renewal_notice_days",
+                self.billing_renewal_notice_days,
+                90,
+            ),
+            ("billing_period_days", self.billing_period_days, 3660),
+        ] {
+            if !(1..=max).contains(&v) {
+                return Err(ConfigError::Invalid(format!("{name}: 1 to {max}")));
+            }
+        }
+        if self
+            .payment_webhook_secret
+            .as_ref()
+            .is_some_and(|s| s.expose_secret().len() < 16)
+        {
+            return bad("payment_webhook_secret: at least 16 characters");
         }
         if self.issuer.is_empty() || self.audience.is_empty() {
             return bad("issuer and audience may not be empty");

@@ -84,6 +84,9 @@ async fn main() -> ExitCode {
         hasher,
         prover: dhpanel_license_authority::domain_proof::default_prover(),
     };
+    tokio::spawn(dhpanel_license_authority::billing::run_forever(
+        state.clone(),
+    ));
     let listener = match tokio::net::TcpListener::bind(config.bind).await {
         Ok(l) => l,
         Err(err) => {

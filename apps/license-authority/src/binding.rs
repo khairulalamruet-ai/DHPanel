@@ -248,6 +248,8 @@ mod tests {
             key_dir: std::path::PathBuf::new(),
             trusted_proxies: vec!["127.0.0.1".parse().unwrap(), "::1".parse().unwrap()],
             domain_proof: false,
+            payment_webhook_secret: None,
+            billing: crate::billing::Timing::default(),
         }
     }
 

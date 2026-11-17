@@ -6,6 +6,7 @@
 //! they hold their own private key before anything is signed for them.
 
 pub mod admin;
+pub mod billing;
 pub mod binding;
 pub mod config;
 pub mod domain_proof;
@@ -49,6 +50,10 @@ pub struct Settings {
     /// Whether the first activation of an installation also has to prove, from outside, that
     /// the panel answers at the domain it claims ([`domain_proof`]).
     pub domain_proof: bool,
+    /// What payments webhooks are signed with (none: the webhook is off).
+    pub payment_webhook_secret: Option<secrecy::SecretString>,
+    /// The clocks of a subscription that is not paid ([`billing`]).
+    pub billing: billing::Timing,
 }
 
 impl Settings {
@@ -67,6 +72,14 @@ impl Settings {
             ),
             trusted_proxies: c.trusted_proxies.clone(),
             domain_proof: c.require_domain_proof,
+            payment_webhook_secret: c.payment_webhook_secret.clone(),
+            billing: billing::Timing {
+                past_due_days: i64::from(c.billing_past_due_days),
+                grace_days: i64::from(c.billing_grace_days),
+                suspended_days: i64::from(c.billing_suspended_days),
+                renewal_notice_days: i64::from(c.billing_renewal_notice_days),
+                period_days: i64::from(c.billing_period_days),
+            },
         }
     }
 }
@@ -259,5 +272,6 @@ pub fn router(state: LaState) -> Router {
         .merge(public::router())
         .merge(admin::router())
         .merge(integrity::router())
+        .merge(billing::router())
         .with_state(state)
 }
