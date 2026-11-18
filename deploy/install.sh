@@ -355,7 +355,7 @@ DHPanel is installed.
 
   Panel:     https://$HOSTNAME_FQDN   (the certificate arrives within a minute, once the name points here)
 $([ -n "$WEB_DIR" ] && printf '  Admin:     https://%s   (this name must point here too)\n' "$ADMIN_HOSTNAME")
-  Login:     $ADMIN_USER
+  Login:     $ADMIN_USER   (role super_admin: every permission on the panel, like WHM's root)
 $([ -n "$ADMIN_PASSWORD" ] && printf '  Password:  %s\n  (shown once, never stored: sign in and change it, then set up two-factor)\n' "$ADMIN_PASSWORD" || echo '  (the administrator already existed; its password is unchanged)')
 
 Keep a copy of $SECRETS/master_key somewhere else: without it a lost server cannot be restored
