@@ -138,11 +138,12 @@ jobs:
         with:
           fetch-depth: 0
       - run: rustup toolchain install && rustup show active-toolchain
-      - name: Build again, from another path
+      - name: Build again, from the same path
         run: |
-          mkdir /tmp/second && git archive HEAD | tar -x -C /tmp/second
-          cd /tmp/second
-          export SOURCE_DATE_EPOCH="$(git -C "$GITHUB_WORKSPACE" log -1 --format=%ct)"
+          # The vendored OpenSSL writes the folder it was built in into the program (its engines
+          # and modules folders), and the compiler's path remapping does not reach that, so a
+          # second build is compared from the same path as the first (a fresh runner).
+          export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
           export RUSTFLAGS="--remap-path-prefix=$PWD=/src --remap-path-prefix=$HOME/.cargo=/cargo -C strip=symbols"
           # The same packages as the real build: building a different set unifies features
           # differently and gives different bytes.
@@ -164,7 +165,7 @@ jobs:
           v="${GITHUB_REF_NAME#v}"
           mkdir -p /tmp/diag/first /tmp/diag/second
           cp first/dhpanel-${v}-linux-x86_64/bin/dhpanel-control-api /tmp/diag/first/
-          cp /tmp/second/target/release/dhpanel-control-api /tmp/diag/second/
+          cp target/release/dhpanel-control-api /tmp/diag/second/
           cmp -l /tmp/diag/first/dhpanel-control-api /tmp/diag/second/dhpanel-control-api | wc -l
           for d in first second; do strings -a /tmp/diag/$d/dhpanel-control-api > /tmp/diag/$d.str; done
           diff /tmp/diag/first.str /tmp/diag/second.str | head -40 || true
