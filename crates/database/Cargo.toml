@@ -17,6 +17,8 @@ dhpanel-domain.workspace = true
 sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "postgres", "migrate", "macros", "uuid", "time", "json"] }
 # Database URL stays wrapped so it never reaches logs.
 secrecy = "0.10"
+# `now_v7` is used by the resellers store; sqlx brings uuid in but without this feature.
+uuid = { version = "1", features = ["v7"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2.0.21"
