@@ -225,13 +225,15 @@ jobs:
           # The manifest lists the programs themselves (what an installation runs and what the
           # daily integrity scan hashes) and the two web archives, taken out of the x86_64 archive.
           v="${GITHUB_REF_NAME#v}"
-          mkdir -p bin web && tar -xzf out/dhpanel-${v}-linux-x86_64.tar.gz -C bin --strip-components=2 "dhpanel-${v}-linux-x86_64/bin"
-          tar -xzf out/dhpanel-${v}-linux-x86_64.tar.gz -C web --strip-components=2 "dhpanel-${v}-linux-x86_64/web"
+          # Not in the checkout: it has a web/ folder of its own (the source of the interface).
+          rel="$RUNNER_TEMP/release-files"; mkdir -p "$rel/bin" "$rel/web"
+          tar -xzf out/dhpanel-${v}-linux-x86_64.tar.gz -C "$rel/bin" --strip-components=2 "dhpanel-${v}-linux-x86_64/bin"
+          tar -xzf out/dhpanel-${v}-linux-x86_64.tar.gz -C "$rel/web" --strip-components=2 "dhpanel-${v}-linux-x86_64/web"
           umask 077
           printf '%s' "$RELEASE_SIGNING_KEY" > "$RUNNER_TEMP/release.key"
-          bin/dhctl release sign --key "$RUNNER_TEMP/release.key" --kid "$RELEASE_KID" \
+          "$rel/bin/dhctl" release sign --key "$RUNNER_TEMP/release.key" --kid "$RELEASE_KID" \
             --version "$v" --commit "$GITHUB_SHA" --created-at "$(git log -1 --format=%ct)" \
-            --out out/release-manifest.json bin/* web/*
+            --out out/release-manifest.json "$rel"/bin/* "$rel"/web/*
           rm -f "$RUNNER_TEMP/release.key"
       - name: Changelog
         run: deploy/release/changelog.sh "$GITHUB_REF_NAME" > out/CHANGELOG.md
