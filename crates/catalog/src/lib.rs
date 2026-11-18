@@ -10,6 +10,8 @@ use std::{collections::BTreeMap, path::Path};
 
 use dhpanel_node_protocol::AppDefinition;
 
+pub mod marketplace;
+
 include!(concat!(env!("OUT_DIR"), "/catalog_files.rs"));
 
 /// Why the catalog could not be read.

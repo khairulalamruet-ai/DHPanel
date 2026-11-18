@@ -24,6 +24,7 @@
 
 pub mod containers;
 pub mod gitdeploy;
+pub mod marketplace;
 pub mod runtime;
 
 use std::sync::Arc;
@@ -96,6 +97,7 @@ pub fn client_router() -> Router<AppsState> {
     Router::new()
         .merge(runtime::router())
         .merge(containers::client_router())
+        .merge(marketplace::client_router())
         .merge(gitdeploy::router())
         .route("/api/v1/client/apps", get(client_list))
         .route("/api/v1/client/apps/{id}", get(client_get))
@@ -1805,6 +1807,7 @@ pub async fn cache_remove(
         runtime::redeploy, runtime::remove, containers::admin_list, containers::admin_add,
         containers::admin_change, containers::admin_remove, containers::client_images,
         containers::client_list, containers::client_create, containers::client_update,
+        marketplace::list, marketplace::install, marketplace::update, marketplace::uninstall,
         gitdeploy::list, gitdeploy::create,
         gitdeploy::deploy_now, gitdeploy::rotate_secret, gitdeploy::remove, gitdeploy::webhook
     ),
@@ -1814,6 +1817,7 @@ pub async fn cache_remove(
         runtime::Runtimes, runtime::Redeploy, containers::ImageView, containers::SetImage,
         containers::ContainerView, containers::CreateContainer, containers::ChangeContainer, gitdeploy::GitDeployView, gitdeploy::GitDeployList,
         gitdeploy::CreateGitDeploy, gitdeploy::WebhookAnswer,
+        marketplace::SoftwareView, marketplace::Installed, marketplace::InstallRequest,
         WpNewPassword, Pending, WpHarden, dhpanel_node_protocol::WpOverview,
         dhpanel_node_protocol::WpItem, dhpanel_node_protocol::WpScan
     )),

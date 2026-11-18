@@ -20900,6 +20900,236 @@
         ]
       }
     },
+    "/api/v1/client/marketplace": {
+      "get": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "The marketplace, with what this account has installed.",
+        "operationId": "clientListMarketplace",
+        "responses": {
+          "200": {
+            "description": "The software, grouped by category order",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SoftwareView"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only` or `feature_disabled`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/marketplace/{slug}": {
+      "delete": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "Remove an installed software (its container goes).",
+        "operationId": "clientUninstallSoftware",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "description": "Software",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Queued"
+          },
+          "404": {
+            "description": "No such software, or it is not installed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/marketplace/{slug}/install": {
+      "post": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "Install a piece of software.",
+        "operationId": "clientInstallSoftware",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "description": "Software",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstallRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContainerView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such software",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`already_installed`, `builtin`, `unavailable`, `limit_reached` or `tenant_not_running`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/marketplace/{slug}/update": {
+      "post": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "Run an installed software again from the version on offer.",
+        "operationId": "clientUpdateSoftware",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "description": "Software",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "The session's csrf_token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContainerView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such software, or it is not installed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`up_to_date`, `limit_reached` or `tenant_not_running`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/client/notifications": {
       "get": {
         "tags": [
@@ -28642,6 +28872,21 @@
         },
         "additionalProperties": false
       },
+      "InstallRequest": {
+        "type": "object",
+        "description": "What to give for a new installation.",
+        "properties": {
+          "domain_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The domain that shows it (software that has a web page of its own)."
+          }
+        },
+        "additionalProperties": false
+      },
       "InstallWordPress": {
         "type": "object",
         "description": "A WordPress site to install.",
@@ -28697,6 +28942,42 @@
           }
         },
         "additionalProperties": false
+      },
+      "Installed": {
+        "type": "object",
+        "description": "What this account has of a software.",
+        "required": [
+          "id",
+          "version",
+          "status",
+          "update_available"
+        ],
+        "properties": {
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it failed."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The container's id."
+          },
+          "status": {
+            "type": "string",
+            "description": "`pending`, `ready`, `failed` or `removing`."
+          },
+          "update_available": {
+            "type": "boolean",
+            "description": "A newer version is on offer."
+          },
+          "version": {
+            "type": "string",
+            "description": "The version it runs."
+          }
+        }
       },
       "JobList": {
         "type": "object",
@@ -32922,6 +33203,105 @@
               "null"
             ],
             "description": "The login, if any."
+          }
+        }
+      },
+      "SoftwareView": {
+        "type": "object",
+        "description": "One piece of software of the marketplace.",
+        "required": [
+          "slug",
+          "name",
+          "category",
+          "category_name",
+          "description",
+          "license",
+          "homepage",
+          "kind",
+          "version",
+          "covers",
+          "provided_by",
+          "reason",
+          "usage",
+          "port",
+          "memory_mb"
+        ],
+        "properties": {
+          "category": {
+            "type": "string",
+            "description": "The group (`databases`, `web_servers`, ...)."
+          },
+          "category_name": {
+            "type": "string",
+            "description": "The group's name."
+          },
+          "covers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The Webuzo names this entry stands for."
+          },
+          "description": {
+            "type": "string",
+            "description": "What it is."
+          },
+          "homepage": {
+            "type": "string",
+            "description": "Project page."
+          },
+          "installed": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Installed",
+                "description": "What the account has."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "description": "`container` (install here), `builtin` (the panel has it) or `unavailable`."
+          },
+          "license": {
+            "type": "string",
+            "description": "SPDX license."
+          },
+          "memory_mb": {
+            "type": "integer",
+            "format": "int32",
+            "description": "`container`: the memory it gets, MiB."
+          },
+          "name": {
+            "type": "string",
+            "description": "Name."
+          },
+          "port": {
+            "type": "integer",
+            "format": "int32",
+            "description": "`container`: the port inside the account's network."
+          },
+          "provided_by": {
+            "type": "string",
+            "description": "`builtin`: where in the panel."
+          },
+          "reason": {
+            "type": "string",
+            "description": "`unavailable`: why."
+          },
+          "slug": {
+            "type": "string",
+            "description": "Identifier."
+          },
+          "usage": {
+            "type": "string",
+            "description": "`container`: how to reach it from the account's other applications."
+          },
+          "version": {
+            "type": "string",
+            "description": "The version on offer."
           }
         }
       },
