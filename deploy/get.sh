@@ -14,6 +14,9 @@
 #   --admin-username U   the first administrator's login (default: owner)
 #   --version X.Y.Z      a release other than the latest
 #   --repo OWNER/NAME    where releases are published (default: khairulalamruet-ai/DHPanel)
+#   --url BASE           download the archive and its .sha256 from BASE (any https address, e.g. a
+#                        private server or bucket) instead of GitHub
+#   --header 'H: V'      an HTTP header for the download (e.g. 'Authorization: Bearer TOKEN')
 #   --tarball FILE       install from a release archive already on this machine (no download)
 #   --no-agent           the control plane only; nodes are added from other servers
 #   --check              download and verify, then only look at what would be done
@@ -22,17 +25,19 @@
 # root); the generated password is printed once at the end. Anything else is passed to install.sh.
 set -euo pipefail
 
-REPO="khairulalamruet-ai/DHPanel"; VERSION=""; TARBALL=""; HOSTNAME_FQDN=""; ADMIN_EMAIL=""
+REPO="khairulalamruet-ai/DHPanel"; BASE_URL=""; HEADER=(); VERSION=""; TARBALL=""; HOSTNAME_FQDN=""; ADMIN_EMAIL=""
 PASS=()
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --repo) REPO="${2:?--repo needs OWNER/NAME}"; shift 2 ;;
         --version) VERSION="${2:?--version needs a number}"; VERSION="${VERSION#v}"; shift 2 ;;
+        --url) BASE_URL="${2:?--url needs an address}"; BASE_URL="${BASE_URL%/}"; shift 2 ;;
+        --header) HEADER=(-H "${2:?--header needs 'Name: value'}"); shift 2 ;;
         --tarball) TARBALL="${2:?--tarball needs a file}"; shift 2 ;;
         --hostname) HOSTNAME_FQDN="${2:?--hostname needs a name}"; shift 2 ;;
         --admin-email) ADMIN_EMAIL="${2:?--admin-email needs an address}"; shift 2 ;;
-        -h | --help) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h | --help) sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) PASS+=("$1"); shift ;;
     esac
 done
@@ -59,6 +64,18 @@ if [ -n "$TARBALL" ]; then
     [ -f "$TARBALL" ] || die "$TARBALL is not a file"
     cp "$TARBALL" "$WORK/release.tar.gz"
     [ ! -f "$TARBALL.sha256" ] || { cp "$TARBALL.sha256" "$WORK/release.sha256"; }
+elif [ -n "$BASE_URL" ]; then
+    [[ "$BASE_URL" =~ ^https:// ]] || die "--url must start with https://"
+    # The archive is dhpanel-<version>-linux-<arch>.tar.gz; without --version the newest one named
+    # in BASE/latest (a one-line text file holding the version) is taken.
+    if [ -z "$VERSION" ]; then
+        VERSION=$(curl -fsSL ${HEADER[@]+"${HEADER[@]}"} "$BASE_URL/latest" | tr -d ' \r\n') || die "cannot read $BASE_URL/latest (or give --version)"
+    fi
+    [[ "$VERSION" =~ ^[0-9A-Za-z][0-9A-Za-z.+-]*$ ]] || die "the version does not look like a version number"
+    name="dhpanel-${VERSION}-linux-${ARCH}.tar.gz"
+    say "downloading DHPanel $VERSION ($ARCH) from $BASE_URL"
+    curl -fSL --retry 3 ${HEADER[@]+"${HEADER[@]}"} -o "$WORK/release.tar.gz" "$BASE_URL/$name" || die "cannot download $BASE_URL/$name"
+    curl -fsSL --retry 3 ${HEADER[@]+"${HEADER[@]}"} -o "$WORK/release.sha256" "$BASE_URL/$name.sha256" || die "cannot download the checksum"
 else
     if [ -z "$VERSION" ]; then
         say "looking for the latest release of $REPO"
@@ -73,7 +90,6 @@ else
     curl -fSL --retry 3 -o "$WORK/release.tar.gz" "$base/$name" || die "cannot download $base/$name"
     curl -fsSL --retry 3 -o "$WORK/release.sha256" "$base/$name.sha256" || die "cannot download the checksum $base/$name.sha256"
 fi
-
 # The checksum is published next to the archive (the signed manifest of the release covers it
 # again, and `dhctl release verify` checks the installed programs against it later).
 if [ -f "$WORK/release.sha256" ]; then
