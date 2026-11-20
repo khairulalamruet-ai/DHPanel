@@ -8,10 +8,10 @@ import {
   Button,
   Input,
   useToast,
-} from "@dhpanel/ui";
-import { apiFetch } from "@dhpanel/api";
+} from "@builtpanel/ui";
+import { apiFetch } from "@builtpanel/api";
 import { UserPlus, RefreshCw } from "lucide-react";
-import { useTranslation } from "@dhpanel/i18n";
+import { useTranslation } from "@builtpanel/i18n";
 import { CreateFtpAccountPayload } from "./types";
 
 interface CreateFtpAccountDialogProps {

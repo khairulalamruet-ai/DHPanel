@@ -8,11 +8,11 @@ import {
   DialogFooter,
   Button,
   useToast,
-} from "@dhpanel/ui";
-import { apiFetch } from "@dhpanel/api";
+} from "@builtpanel/ui";
+import { apiFetch } from "@builtpanel/api";
 import { Shield, Check, Lock } from "lucide-react";
 import { DatabaseUserItem, DatabaseItem, UpdateGrantsPayload } from "./types";
-import { useTranslation } from "@dhpanel/i18n";
+import { useTranslation } from "@builtpanel/i18n";
 
 interface ManageGrantsDialogProps {
   open: boolean;

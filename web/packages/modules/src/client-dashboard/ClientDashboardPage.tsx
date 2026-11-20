@@ -8,9 +8,9 @@ import {
   Button,
   Badge,
   useToast,
-} from "@dhpanel/ui";
-import { apiFetch } from "@dhpanel/api";
-import { useTranslation } from "@dhpanel/i18n";
+} from "@builtpanel/ui";
+import { apiFetch } from "@builtpanel/api";
+import { useTranslation } from "@builtpanel/i18n";
 import {
   Globe,
   Database,
@@ -48,7 +48,7 @@ export function ClientDashboardPage() {
   const [data, setData] = useState<ClientDashboardData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  const FAVORITES_STORAGE_KEY = "dhpanel-client-favorites";
+  const FAVORITES_STORAGE_KEY = "builtpanel-client-favorites";
   const DEFAULT_FAVORITES = ["files", "databases", "domains", "ssl"];
 
   const [favorites, setFavorites] = useState<string[]>(() => {

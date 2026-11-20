@@ -1,16 +1,16 @@
 //! The server tools for real (T10.15): the privileged helper (root, started by the live script
 //! with its server tools run directly and a stand-in for the reboot), the agent's handlers.
-//! Ignored by default; skips without DHPANEL_TEST_HELPER_SOCKET and DHPANEL_TEST_SWAP_FILE.
+//! Ignored by default; skips without BUILTPANEL_TEST_HELPER_SOCKET and BUILTPANEL_TEST_SWAP_FILE.
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
-use dhpanel_docker_manager::DockerManager;
-use dhpanel_node_agent::ops::{
+use builtpanel_docker_manager::DockerManager;
+use builtpanel_node_agent::ops::{
     server::{drop_caches, reboot_node, report_server_info, set_swap, set_timezone},
     tenant::TenantContext,
 };
-use dhpanel_node_protocol::{ErrorCode, Operation, Output, ServerInfo};
+use builtpanel_node_protocol::{ErrorCode, Operation, Output, ServerInfo};
 
 fn docker_socket() -> PathBuf {
     let uid = std::fs::read_to_string("/proc/self/status")
@@ -36,8 +36,8 @@ async fn info() -> ServerInfo {
 #[ignore = "needs the privileged helper running as root"]
 async fn the_server_tools_report_and_change_the_machine() {
     let (Some(socket), Some(swap_file)) = (
-        std::env::var_os("DHPANEL_TEST_HELPER_SOCKET"),
-        std::env::var_os("DHPANEL_TEST_SWAP_FILE"),
+        std::env::var_os("BUILTPANEL_TEST_HELPER_SOCKET"),
+        std::env::var_os("BUILTPANEL_TEST_SWAP_FILE"),
     ) else {
         eprintln!("skipped: no helper (see the live script)");
         return;

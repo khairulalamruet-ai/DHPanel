@@ -1,7 +1,7 @@
 import React from "react";
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
-import { ToastProvider } from "@dhpanel/ui";
+import { ToastProvider } from "@builtpanel/ui";
 import { FileManagerPage } from "./FileManagerPage";
 
 function renderWithProviders(ui: React.ReactElement) {
@@ -65,10 +65,10 @@ describe("FileManagerPage (T08.09)", () => {
     });
 
     const textarea = screen.getByTestId("textarea-file-editor");
-    expect(textarea).toHaveValue("<?php\necho 'Hello from DHPanel!';\n");
+    expect(textarea).toHaveValue("<?php\necho 'Hello from Built Panel!';\n");
 
     fireEvent.change(textarea, {
-      target: { value: "<?php\necho 'Updated DHPanel code!';\n" },
+      target: { value: "<?php\necho 'Updated Built Panel code!';\n" },
     });
 
     const saveBtn = screen.getByTestId("btn-save-file-editor");

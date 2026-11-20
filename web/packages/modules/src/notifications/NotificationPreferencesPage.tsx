@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { useTranslation } from "@dhpanel/i18n";
-import { apiFetch } from "@dhpanel/api";
-import { useToast, Card, CardHeader, CardTitle, CardDescription, CardContent, Button, Input, Badge } from "@dhpanel/ui";
+import { useTranslation } from "@builtpanel/i18n";
+import { apiFetch } from "@builtpanel/api";
+import { useToast, Card, CardHeader, CardTitle, CardDescription, CardContent, Button, Input, Badge } from "@builtpanel/ui";
 import {
   Bell,
   Mail,

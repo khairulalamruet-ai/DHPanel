@@ -1,7 +1,7 @@
 //! What a notification says (T18.04): each event in English and in Bangla, with the panel's name
 //! (its branding) in the subject and at the foot of a mail.
 
-use dhpanel_kernel::Event;
+use builtpanel_kernel::Event;
 use serde_json::{Value, json};
 
 /// A notification as it is worded.

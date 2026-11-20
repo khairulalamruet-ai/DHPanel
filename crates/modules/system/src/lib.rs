@@ -10,7 +10,7 @@
 //! | PUT | `/api/v1/admin/settings/{module}` | `admin.settings.manage`, sudo mode |
 //!
 //! Switching a module changes the database and, right after the commit, the
-//! routes the server answers ([`dhpanel_kernel::ModuleMount`]): no restart.
+//! routes the server answers ([`builtpanel_kernel::ModuleMount`]): no restart.
 //!
 //! Rules, enforced here and again by the table and the mount:
 //! * a core module cannot be switched off;
@@ -30,16 +30,16 @@ use axum::{
     extract::{FromRef, Path, State},
     routing::{get, put},
 };
-use dhpanel_audit::{AuditEntry, Outcome};
-use dhpanel_database::{modules as db, sqlx::PgPool};
-use dhpanel_http_kit::{AppError, FieldError, ProblemDetails};
-use dhpanel_kernel::{Event, ModuleMount};
-use dhpanel_rbac::{
+use builtpanel_audit::{AuditEntry, Outcome};
+use builtpanel_database::{modules as db, sqlx::PgPool};
+use builtpanel_http_kit::{AppError, FieldError, ProblemDetails};
+use builtpanel_kernel::{Event, ModuleMount};
+use builtpanel_rbac::{
     Require, RequireRecent,
     permissions::{LogsRead, ModulesManage, ModulesRead, SettingsManage, SettingsRead},
 };
-use dhpanel_session::SessionStore;
-use dhpanel_settings::{ModuleSettings, Scope, SettingsError, SettingsRegistry};
+use builtpanel_session::SessionStore;
+use builtpanel_settings::{ModuleSettings, Scope, SettingsError, SettingsRegistry};
 use serde::{Deserialize, Serialize};
 use utoipa::{OpenApi, ToSchema};
 
@@ -164,7 +164,7 @@ pub async fn system_logs(
             "Between 1 and 1000 lines.",
         )]));
     }
-    let items = dhpanel_observability::ring::recent(
+    let items = builtpanel_observability::ring::recent(
         q.since_ms,
         level,
         q.search.as_deref(),
@@ -385,7 +385,7 @@ pub async fn set_module(
         .await
         .map_err(internal)?;
     for module in &changed {
-        dhpanel_audit::insert(
+        builtpanel_audit::insert(
             &mut *tx,
             &AuditEntry::new(
                 if change.enabled {
@@ -411,7 +411,7 @@ pub async fn set_module(
                 name: module.clone(),
             }
         };
-        dhpanel_events::publish(&mut tx, &event)
+        builtpanel_events::publish(&mut tx, &event)
             .await
             .map_err(internal)?;
     }
@@ -510,7 +510,7 @@ fn global_schema(settings: &ModuleSettings) -> serde_json::Value {
             settings
                 .properties
                 .get(key)
-                .is_some_and(|p| p.scope == dhpanel_settings::ScopeKind::Global)
+                .is_some_and(|p| p.scope == builtpanel_settings::ScopeKind::Global)
         });
     }
     schema
@@ -520,14 +520,15 @@ fn has_global_settings(settings: &ModuleSettings) -> bool {
     settings
         .properties
         .values()
-        .any(|p| p.scope == dhpanel_settings::ScopeKind::Global)
+        .any(|p| p.scope == builtpanel_settings::ScopeKind::Global)
 }
 
 async fn view(state: &SystemState, settings: &ModuleSettings) -> Result<SettingsView, AppError> {
     let mut conn = state.db.acquire().await.map_err(internal)?;
-    let values = dhpanel_settings::get(&state.settings, &mut conn, &settings.module, Scope::Global)
-        .await
-        .map_err(|e| internal(e.to_string()))?;
+    let values =
+        builtpanel_settings::get(&state.settings, &mut conn, &settings.module, Scope::Global)
+            .await
+            .map_err(|e| internal(e.to_string()))?;
     Ok(SettingsView {
         module: settings.module.clone(),
         title: localized(&settings.schema, "title"),
@@ -635,7 +636,7 @@ pub async fn put_settings(
         return Err(AppError::not_found("settings"));
     }
     let mut tx = state.db.begin().await.map_err(internal)?;
-    let change = dhpanel_settings::set(
+    let change = builtpanel_settings::set(
         &state.settings,
         &mut tx,
         &module,
@@ -659,7 +660,7 @@ pub async fn put_settings(
                 )
             })
             .collect();
-        dhpanel_audit::insert(
+        builtpanel_audit::insert(
             &mut *tx,
             &AuditEntry::new("admin.settings_changed", Outcome::Success)
                 .actor(who.account_id())
@@ -668,7 +669,7 @@ pub async fn put_settings(
         )
         .await
         .map_err(internal)?;
-        dhpanel_events::publish(
+        builtpanel_events::publish(
             &mut tx,
             &Event::SettingsChanged {
                 module: module.clone(),

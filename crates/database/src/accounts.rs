@@ -1,6 +1,6 @@
 //! Account persistence.
 
-use dhpanel_domain::{AccountKind, Email, Username};
+use builtpanel_domain::{AccountKind, Email, Username};
 use sqlx::{PgConnection, PgPool, types::Uuid};
 
 /// Mirrors the `account_kind` PostgreSQL enum.
@@ -215,7 +215,7 @@ pub async fn find_for_reauth(pool: &PgPool, id: Uuid) -> Result<Option<LoginAcco
 }
 
 /// The `password_hash` of the administrator named `root`: it has no panel password, the
-/// server's own root password is checked instead (by the `dhpanel-root-auth` helper).
+/// server's own root password is checked instead (by the `builtpanel-root-auth` helper).
 pub const SYSTEM_ROOT_PASSWORD: &str = "!system:root";
 
 /// The administrator `root` that logs in with the server's root password, if it is set up.

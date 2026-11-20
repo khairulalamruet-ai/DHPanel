@@ -1,7 +1,7 @@
 import React from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { ToastProvider } from "@dhpanel/ui";
+import { ToastProvider } from "@builtpanel/ui";
 import { NotificationItem, NotificationChannelConfig } from "./types";
 import { NotificationBell } from "./NotificationBell";
 import { NotificationPreferencesPage } from "./NotificationPreferencesPage";
@@ -51,7 +51,7 @@ const mockConfig: NotificationChannelConfig = {
   snooze_until: null,
 };
 
-vi.mock("@dhpanel/api", () => ({
+vi.mock("@builtpanel/api", () => ({
   apiFetch: vi.fn(async (url: string, opts?: any) => {
     if (url === "/api/v1/notifications") {
       return mockNotifications;

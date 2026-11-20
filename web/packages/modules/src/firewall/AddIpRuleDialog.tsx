@@ -7,9 +7,9 @@ import {
   DialogFooter,
   Button,
   Input,
-} from "@dhpanel/ui";
+} from "@builtpanel/ui";
 import { ShieldAlert, Plus, Ban, CheckCircle2 } from "lucide-react";
-import { useTranslation } from "@dhpanel/i18n";
+import { useTranslation } from "@builtpanel/i18n";
 import { IpRuleAction } from "./types";
 
 interface AddIpRuleDialogProps {

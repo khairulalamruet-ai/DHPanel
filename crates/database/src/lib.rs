@@ -130,7 +130,7 @@ pub fn connect_lazy(url: &SecretString, settings: &PoolSettings) -> Result<PgPoo
         .connect_lazy_with(opts))
 }
 
-/// Creates a pool and opens one connection immediately (used by `dhctl`).
+/// Creates a pool and opens one connection immediately (used by `bpctl`).
 ///
 /// # Errors
 /// URL parse errors or connection failures.

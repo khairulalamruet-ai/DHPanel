@@ -1,8 +1,8 @@
 import React from "react";
 import { describe, it, expect, beforeEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
-import { ToastProvider } from "@dhpanel/ui";
-import { resetMockPreviewLinks } from "@dhpanel/api";
+import { ToastProvider } from "@builtpanel/ui";
+import { resetMockPreviewLinks } from "@builtpanel/api";
 import { PreviewLinkDialog } from "./PreviewLinkDialog";
 import { ClientDomainItem } from "./types";
 
@@ -62,7 +62,7 @@ describe("PreviewLinkDialog (T06.14)", () => {
     });
 
     const input = screen.getByTestId("input-preview-url") as HTMLInputElement;
-    expect(input.value).toMatch(/https:\/\/prv_[a-z0-9]+\.preview\.dhpanel\.net/);
+    expect(input.value).toMatch(/https:\/\/prv_[a-z0-9]+\.preview\.builtpanel\.net/);
   });
 
   it("DoD: displays expired state and warning banner for an expired preview link", async () => {

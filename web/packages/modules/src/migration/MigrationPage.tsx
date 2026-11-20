@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { useTranslation } from "@dhpanel/i18n";
-import { apiFetch } from "@dhpanel/api";
-import { useToast, Button, Card, CardContent } from "@dhpanel/ui";
+import { useTranslation } from "@builtpanel/i18n";
+import { apiFetch } from "@builtpanel/api";
+import { useToast, Button, Card, CardContent } from "@builtpanel/ui";
 import {
   ArrowRightLeft,
   Plus,
@@ -116,7 +116,7 @@ export function MigrationPage() {
           <p className="text-muted-foreground text-sm">
             {t(
               "migration.pageSubtitle",
-              "Automate remote tenant migration from cPanel, CyberPanel, and OpenPanel directly into DHPanel."
+              "Automate remote tenant migration from cPanel, CyberPanel, and OpenPanel directly into Built Panel."
             )}
           </p>
         </div>

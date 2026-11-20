@@ -80,9 +80,17 @@ impl TenantUsername {
                 .is_some_and(|rest| rest.chars().all(|c| c.is_ascii_digit()))
         };
         let reserved = RESERVED_USERNAMES.contains(&s.as_str())
-            || ["docker", "systemd", "dhpanel", "dh", "user"]
-                .iter()
-                .any(|p| numbered(p));
+            || [
+                "docker",
+                "systemd",
+                "builtpanel",
+                "dhpanel",
+                "bp",
+                "dh",
+                "user",
+            ]
+            .iter()
+            .any(|p| numbered(p));
         if reserved {
             return Err(TenantError::ReservedUsername);
         }
@@ -343,8 +351,21 @@ mod tests {
             );
         }
         for reserved in [
-            "root", "www", "mysql", "postgres", "nobody", "docker", "docker1", "dhpanel2", "dh7",
-            "dh0", "systemd", "user", "user1000", "mail", "ftp",
+            "root",
+            "www",
+            "mysql",
+            "postgres",
+            "nobody",
+            "docker",
+            "docker1",
+            "builtpanel2",
+            "dh7",
+            "dh0",
+            "systemd",
+            "user",
+            "user1000",
+            "mail",
+            "ftp",
         ] {
             assert_eq!(
                 TenantUsername::parse(reserved),

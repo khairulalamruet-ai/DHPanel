@@ -14,7 +14,7 @@ import {
   Button,
   Badge,
   Input,
-} from "@dhpanel/ui";
+} from "@builtpanel/ui";
 import {
   ShieldAlert,
   ShieldOff,
@@ -22,7 +22,7 @@ import {
   Eye,
   Filter,
 } from "lucide-react";
-import { useTranslation } from "@dhpanel/i18n";
+import { useTranslation } from "@builtpanel/i18n";
 import { WafEvent, WafCategory, WafAction } from "./types";
 
 interface WafEventsTableProps {

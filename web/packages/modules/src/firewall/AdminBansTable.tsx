@@ -13,9 +13,9 @@ import {
   TableCell,
   Button,
   Badge,
-} from "@dhpanel/ui";
+} from "@builtpanel/ui";
 import { Ban, ShieldAlert, Zap, Clock, Plus, RotateCcw } from "lucide-react";
-import { useTranslation } from "@dhpanel/i18n";
+import { useTranslation } from "@builtpanel/i18n";
 import { GlobalIpBan } from "./types";
 import { AddGlobalBanDialog } from "./AddGlobalBanDialog";
 

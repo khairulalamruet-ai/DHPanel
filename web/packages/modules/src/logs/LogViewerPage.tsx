@@ -8,9 +8,9 @@ import {
   Badge,
   Input,
   useToast,
-} from "@dhpanel/ui";
-import { apiFetch } from "@dhpanel/api";
-import { useTranslation } from "@dhpanel/i18n";
+} from "@builtpanel/ui";
+import { apiFetch } from "@builtpanel/api";
+import { useTranslation } from "@builtpanel/i18n";
 import {
   FileText,
   Terminal,
@@ -80,13 +80,13 @@ export function LogViewerPage() {
       const randomMethod = ["GET", "POST", "GET", "HEAD"][Math.floor(Math.random() * 4)];
       const randomPaths = [
         "/api/v1/health",
-        "/wp-content/themes/dhpanel/style.css",
+        "/wp-content/themes/builtpanel/style.css",
         "/index.php",
         "/cart/checkout",
         "/wp-login.php",
       ];
       const randomPath = randomPaths[Math.floor(Math.random() * randomPaths.length)];
-      const currentDomain = selectedDomain === "all" ? "demo.dhpanel.test" : selectedDomain;
+      const currentDomain = selectedDomain === "all" ? "demo.builtpanel.test" : selectedDomain;
 
       const newEntry: LogEntry = {
         id: `live_${Date.now()}_${Math.random()}`,
@@ -129,14 +129,14 @@ export function LogViewerPage() {
           lineNumber: i,
           timestamp: time,
           type: "access",
-          domain: i % 2 === 0 ? "demo.dhpanel.test" : "store.dhpanel.test",
+          domain: i % 2 === 0 ? "demo.builtpanel.test" : "store.builtpanel.test",
           status_code: code,
           level: code >= 500 ? "error" : code >= 400 ? "warn" : "info",
           method: "GET",
           path: `/products/item-${(i % 100) + 1}?page=${(i % 5) + 1}`,
           ip: `10.0.${Math.floor(i / 256) % 256}.${i % 256}`,
           message: `GET /products/item-${(i % 100) + 1} HTTP/2.0 ${code}`,
-          raw: `${time} [store.dhpanel.test] 10.0.0.1 GET /products/item-${(i % 100) + 1} HTTP/2.0 ${code} - Mozilla/5.0`,
+          raw: `${time} [store.builtpanel.test] 10.0.0.1 GET /products/item-${(i % 100) + 1} HTTP/2.0 ${code} - Mozilla/5.0`,
         });
       }
 

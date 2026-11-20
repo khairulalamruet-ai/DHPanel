@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from "react";
-import { Input, Button } from "@dhpanel/ui";
+import { Input, Button } from "@builtpanel/ui";
 import { Eye, SlidersHorizontal, RotateCcw } from "lucide-react";
 
 interface VhostPreviewProps {

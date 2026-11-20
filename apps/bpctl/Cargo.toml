@@ -1,6 +1,6 @@
 [package]
-name = "dhpanel-dhctl"
-description = "DHPanel admin CLI for bootstrap, migrations and recovery."
+name = "builtpanel-bpctl"
+description = "Built Panel admin CLI for bootstrap, migrations and recovery."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,19 +8,19 @@ license.workspace = true
 publish.workspace = true
 
 [[bin]]
-name = "dhctl"
+name = "bpctl"
 path = "src/main.rs"
 
 [dependencies]
-dhpanel-auth-core.workspace = true
-dhpanel-common.workspace = true
-dhpanel-config.workspace = true
-dhpanel-database.workspace = true
-dhpanel-domain.workspace = true
-dhpanel-license.workspace = true
-dhpanel-pki.workspace = true
-dhpanel-system-backup.workspace = true
-# Subcommand parsing; dhctl grows many commands (migrate, admin, ca, ...).
+builtpanel-auth-core.workspace = true
+builtpanel-common.workspace = true
+builtpanel-config.workspace = true
+builtpanel-database.workspace = true
+builtpanel-domain.workspace = true
+builtpanel-license.workspace = true
+builtpanel-pki.workspace = true
+builtpanel-system-backup.workspace = true
+# Subcommand parsing; bpctl grows many commands (migrate, admin, ca, ...).
 clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 # Reads passwords from the terminal without echo.

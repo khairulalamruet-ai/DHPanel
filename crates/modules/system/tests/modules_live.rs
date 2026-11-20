@@ -11,12 +11,12 @@ use axum::{
     http::{Request, StatusCode, header},
     routing::get,
 };
-use dhpanel_cache::RedisHandle;
-use dhpanel_database::{modules as db, rbac::assign_role};
-use dhpanel_kernel::{Manifest, Module, ModuleMount, ModuleRoutes, Registry};
-use dhpanel_mod_system::{SystemState, router};
-use dhpanel_session::{CSRF_HEADER, NewSession, SessionConfig, SessionStore, set_cookie};
-use dhpanel_settings::SettingsRegistry;
+use builtpanel_cache::RedisHandle;
+use builtpanel_database::{modules as db, rbac::assign_role};
+use builtpanel_kernel::{Manifest, Module, ModuleMount, ModuleRoutes, Registry};
+use builtpanel_mod_system::{SystemState, router};
+use builtpanel_session::{CSRF_HEADER, NewSession, SessionConfig, SessionStore, set_cookie};
+use builtpanel_settings::SettingsRegistry;
 use secrecy::SecretString;
 use serde_json::{Value, json};
 use sqlx::PgPool;
@@ -95,11 +95,11 @@ async fn env(pool: &PgPool) -> Env {
     let redis = RedisHandle::new(&SecretString::from(url)).expect("valid REDIS_URL");
     let sessions = SessionStore::new(redis, pool.clone(), SessionConfig::default());
     let late: Arc<OnceLock<ModuleMount>> = Arc::default();
-    let branding: Arc<dhpanel_mod_system::bootstrap::BrandingCache> = Arc::default();
+    let branding: Arc<builtpanel_mod_system::bootstrap::BrandingCache> = Arc::default();
     let settings = Arc::new(
         SettingsRegistry::build(vec![(
             "system".to_owned(),
-            serde_json::from_str(dhpanel_mod_system::SETTINGS_SCHEMA).unwrap(),
+            serde_json::from_str(builtpanel_mod_system::SETTINGS_SCHEMA).unwrap(),
         ), (
             "dns".to_owned(),
             json!({
@@ -749,7 +749,7 @@ async fn bootstrap_gives_the_interface_everything_in_one_fast_request(pool: PgPo
         (json!([]), json!({}))
     );
     // The default language of the settings when the account has no preference of its own.
-    assert_eq!(body["branding"]["panel_name"], "DHPanel");
+    assert_eq!(body["branding"]["panel_name"], "Built Panel");
     assert!(body["locale"].is_string());
     // The modules being served, dependencies first, with their menu data.
     let names: Vec<&str> = body["modules"]
@@ -832,7 +832,7 @@ async fn bootstrap_answers_in_under_fifty_milliseconds_and_follows_the_settings(
     // The panel's name is remembered for a few seconds, but a change made through
     // the settings API shows up in the very next bootstrap.
     let (_, body) = e.call(Some(&root), "GET", path, None, false).await;
-    assert_eq!(body["branding"]["panel_name"], "DHPanel");
+    assert_eq!(body["branding"]["panel_name"], "Built Panel");
     let (status, saved) = e
         .call(
             Some(&root),
@@ -871,7 +871,7 @@ async fn the_control_planes_own_log_is_for_administrators_with_the_permission_on
     // The events of this process go to the ring when a subscriber with its layer is installed;
     // here one is installed for the test.
     use tracing_subscriber::layer::SubscriberExt as _;
-    let subscriber = tracing_subscriber::registry().with(dhpanel_observability::ring::RingLayer);
+    let subscriber = tracing_subscriber::registry().with(builtpanel_observability::ring::RingLayer);
     let _guard = tracing::subscriber::set_default(subscriber);
     tracing::warn!(marker = "the-log-api-test", "something worth a look");
     let (status, b) = e

@@ -1,4 +1,4 @@
-//! DHPanel node agent.
+//! Built Panel node agent.
 //!
 //! The agent runs on every hosting server and does exactly what the control
 //! plane's typed operations ask (ADR 0004). It never runs a shell.

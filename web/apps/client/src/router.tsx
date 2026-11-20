@@ -5,12 +5,12 @@ import {
   createRootRoute,
   Outlet,
 } from "@tanstack/react-router";
-import { ThemeProvider, ToastProvider } from "@dhpanel/ui";
-import { SessionProvider, useSession, LoginPage, AccountSecurityPage } from "@dhpanel/auth";
-import { queryClient, QueryClientProvider } from "@dhpanel/api";
-import { AppShell, NotFoundPage, RouteErrorFallback } from "@dhpanel/shell";
-import { ClientDashboardPage, ClientDomainsPage, DnsEditorPage, SslPage, PhpManagementPage, ServicesPage, ClientDatabasesPage, FileManagerPage, DiskUsagePage, FtpAccountsPage, ClientBackupsPage, CronJobsPage, LogViewerPage, ClientUsagePage, ClientProcessesPage, ClientWafPage, ClientFirewallPage, AppsPage, ClientEmailPage, ResellerPortalPage, MigrationPage, NotificationBell, NotificationPreferencesPage, CommandPalette, CommandPaletteTrigger } from "@dhpanel/modules";
-import { useTranslation } from "@dhpanel/i18n";
+import { ThemeProvider, ToastProvider } from "@builtpanel/ui";
+import { SessionProvider, useSession, LoginPage, AccountSecurityPage } from "@builtpanel/auth";
+import { queryClient, QueryClientProvider } from "@builtpanel/api";
+import { AppShell, NotFoundPage, RouteErrorFallback } from "@builtpanel/shell";
+import { ClientDashboardPage, ClientDomainsPage, DnsEditorPage, SslPage, PhpManagementPage, ServicesPage, ClientDatabasesPage, FileManagerPage, DiskUsagePage, FtpAccountsPage, ClientBackupsPage, CronJobsPage, LogViewerPage, ClientUsagePage, ClientProcessesPage, ClientWafPage, ClientFirewallPage, AppsPage, ClientEmailPage, ResellerPortalPage, MigrationPage, NotificationBell, NotificationPreferencesPage, CommandPalette, CommandPaletteTrigger } from "@builtpanel/modules";
+import { useTranslation } from "@builtpanel/i18n";
 import { LayoutDashboard, ShieldCheck, ShieldAlert, Globe, Lock, Database, Folder, Server, Archive, Clock, FileText, Activity, Terminal, Flame, Boxes, Mail, Briefcase, ArrowRightLeft } from "lucide-react";
 
 function AuthenticatedContent() {
@@ -177,7 +177,7 @@ function AuthenticatedContent() {
 
 function RootLayout() {
   return (
-    <ThemeProvider defaultTheme="system" storageKey="dhpanel-client-theme">
+    <ThemeProvider defaultTheme="system" storageKey="builtpanel-client-theme">
       <QueryClientProvider client={queryClient}>
         <ToastProvider>
           <SessionProvider bootstrapPath="/api/v1/auth/me">

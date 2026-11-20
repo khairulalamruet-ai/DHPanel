@@ -24,13 +24,13 @@ use axum::{
     http::StatusCode,
     routing::{delete, get, post},
 };
-use dhpanel_catalog::marketplace::{self, Kind, Software};
-use dhpanel_database::{
+use builtpanel_catalog::marketplace::{self, Kind, Software};
+use builtpanel_database::{
     container_images::{self as images, Image},
     runtime_apps as store,
 };
-use dhpanel_http_kit::{AppError, ProblemDetails};
-use dhpanel_rbac::Principal;
+use builtpanel_http_kit::{AppError, ProblemDetails};
+use builtpanel_rbac::Principal;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;

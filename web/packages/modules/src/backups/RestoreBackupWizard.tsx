@@ -7,10 +7,10 @@ import {
   DialogFooter,
   Button,
   useToast,
-} from "@dhpanel/ui";
-import { apiFetch } from "@dhpanel/api";
+} from "@builtpanel/ui";
+import { apiFetch } from "@builtpanel/api";
 import { RotateCcw, ShieldCheck, Database, Folder } from "lucide-react";
-import { useTranslation } from "@dhpanel/i18n";
+import { useTranslation } from "@builtpanel/i18n";
 import { BackupItem, RestoreBackupPayload } from "./types";
 
 interface RestoreBackupWizardProps {

@@ -8,7 +8,7 @@ export function LanguageSwitcher() {
     const nextLng = i18n.language.startsWith("bn") ? "en" : "bn";
     i18n.changeLanguage(nextLng);
     if (typeof window !== "undefined" && typeof window.localStorage !== "undefined") {
-      window.localStorage?.setItem?.("dhpanel-locale", nextLng);
+      window.localStorage?.setItem?.("builtpanel-locale", nextLng);
     }
   };
 

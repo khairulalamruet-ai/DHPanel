@@ -1,26 +1,26 @@
 #!/usr/bin/env bash
 # The one thing the deploy user may run as root (installed by setup-deploy-user.sh as
-# /usr/local/sbin/dhpanel-deploy; sudoers lets that user run exactly this and nothing else):
+# /usr/local/sbin/builtpanel-deploy; sudoers lets that user run exactly this and nothing else):
 #
-#   sudo dhpanel-deploy dhpanel-1.2.3-linux-x86_64
+#   sudo builtpanel-deploy builtpanel-1.2.3-linux-x86_64
 #
 # The release pipeline puts two files in the deploy user's incoming folder: the archive and
 # release-manifest.json (signed with a release key). Nothing from the archive is run: its
 # programs are checked against the signed manifest with the release keys this server trusts
-# (dhctl release verify), and only then does the deploy script that is installed here, owned
+# (bpctl release verify), and only then does the deploy script that is installed here, owned
 # by root, put them in place. A stolen deploy key therefore cannot make this server run
 # anything that the release key did not sign.
 set -euo pipefail
-die() { echo "dhpanel-deploy: $*" >&2; exit 1; }
+die() { echo "builtpanel-deploy: $*" >&2; exit 1; }
 [ "$(id -u)" -eq 0 ] || die "run as root (through sudo)"
 NAME="${1:-}"
-[[ "$NAME" =~ ^dhpanel-[0-9]+\.[0-9]+\.[0-9]+-linux-x86_64$ ]] || die "not a release name: $NAME"
-STATE="${DHPANEL_DEPLOY_STATE:-/var/lib/dhpanel-deploy}"
-KEYS="${DHPANEL_RELEASE_KEYS:-/etc/dhpanel/release-public-keys.txt}"
-DEPLOY="${DHPANEL_DEPLOY_SCRIPT:-/usr/local/lib/dhpanel/deploy.sh}"
-DHCTL="${DHPANEL_DHCTL:-/usr/local/bin/dhctl}"
+[[ "$NAME" =~ ^builtpanel-[0-9]+\.[0-9]+\.[0-9]+-linux-x86_64$ ]] || die "not a release name: $NAME"
+STATE="${BUILTPANEL_DEPLOY_STATE:-/var/lib/builtpanel-deploy}"
+KEYS="${BUILTPANEL_RELEASE_KEYS:-/etc/builtpanel/release-public-keys.txt}"
+DEPLOY="${BUILTPANEL_DEPLOY_SCRIPT:-/usr/local/lib/builtpanel/deploy.sh}"
+BPCTL="${BUILTPANEL_BPCTL:-/usr/local/bin/bpctl}"
 [ -r "$KEYS" ] || die "no trusted release keys at $KEYS"
-[ -x "$DHCTL" ] || die "dhctl is not installed at $DHCTL (install the panel first)"
+[ -x "$BPCTL" ] || die "bpctl is not installed at $BPCTL (install the panel first)"
 [ -x "$DEPLOY" ] || die "no deploy script at $DEPLOY"
 
 work="$(mktemp -d "$STATE/work.XXXXXX")"; chmod 0700 "$work"
@@ -53,19 +53,19 @@ done
 STAGE="$work/stage"; mkdir "$STAGE"
 cp "$BIN"/* "$STAGE"/
 [ -z "$WEB" ] || cp "$WEB"/* "$STAGE"/
-"$DHCTL" release verify --manifest "$work/release-manifest.json" --keys "$KEYS" --dir "$STAGE"
+"$BPCTL" release verify --manifest "$work/release-manifest.json" --keys "$KEYS" --dir "$STAGE"
 # ...and what this server installs is among them (a manifest of other files will not do).
 python3 - "$work/release-manifest.json" "${WEB:+web}" <<'PY'
 import base64, json, sys
 doc = json.load(open(sys.argv[1]))
 payload = doc["payload"] + "=" * (-len(doc["payload"]) % 4)
 names = {c["name"] for c in json.loads(base64.urlsafe_b64decode(payload))["components"]}
-needed = {"dhpanel-control-api", "dhctl"}
+needed = {"builtpanel-control-api", "bpctl"}
 if len(sys.argv) > 2 and sys.argv[2]:
     needed |= {"web-client", "web-admin"}
 missing = needed - names
 if missing:
-    sys.exit("dhpanel-deploy: the signed manifest does not list " + ", ".join(sorted(missing)))
+    sys.exit("builtpanel-deploy: the signed manifest does not list " + ", ".join(sorted(missing)))
 PY
 # Every program the deploy script installs is one of the checked files. (Not `exec`: the
 # working folder is removed when this ends.)

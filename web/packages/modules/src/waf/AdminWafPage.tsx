@@ -7,7 +7,7 @@ import {
   Button,
   Badge,
   useToast,
-} from "@dhpanel/ui";
+} from "@builtpanel/ui";
 import {
   ShieldAlert,
   ShieldCheck,
@@ -16,8 +16,8 @@ import {
   RefreshCw,
   Users,
 } from "lucide-react";
-import { useTranslation } from "@dhpanel/i18n";
-import { apiFetch } from "@dhpanel/api";
+import { useTranslation } from "@builtpanel/i18n";
+import { apiFetch } from "@builtpanel/api";
 import { WafEvent, WafPolicy, DisabledRuleInfo, WafStats, WafMode } from "./types";
 import { WafEventsTable } from "./WafEventsTable";
 import { DisabledRulesList } from "./DisabledRulesList";

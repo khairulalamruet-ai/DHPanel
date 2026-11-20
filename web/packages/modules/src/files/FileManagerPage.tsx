@@ -14,9 +14,9 @@ import {
   CardTitle,
   CardContent,
   useToast,
-} from "@dhpanel/ui";
-import { apiFetch } from "@dhpanel/api";
-import { useTranslation } from "@dhpanel/i18n";
+} from "@builtpanel/ui";
+import { apiFetch } from "@builtpanel/api";
+import { useTranslation } from "@builtpanel/i18n";
 import {
   Folder,
   FolderPlus,

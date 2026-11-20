@@ -1,4 +1,4 @@
-//! `dhpanel-root-auth`: the root login helper.
+//! `builtpanel-root-auth`: the root login helper.
 //!
 //! The control plane never runs as root, so it cannot read `/etc/shadow`. When someone logs in
 //! to the panel as `root` (like WHM), the control plane asks this helper whether the password is
@@ -33,7 +33,7 @@ use zeroize::Zeroize as _;
 /// Longest password accepted (bytes), the same limit as the panel's login.
 pub const MAX_PASSWORD_BYTES: usize = 1024;
 /// Where the helper listens by default.
-pub const DEFAULT_SOCKET: &str = "/run/dhpanel-root-auth/root-auth.sock";
+pub const DEFAULT_SOCKET: &str = "/run/builtpanel-root-auth/root-auth.sock";
 
 /// The result of checking a password against the shadow entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -328,8 +328,8 @@ mod tests {
 
     #[test]
     fn passwd_lines_give_ids() {
-        let passwd = "root:x:0:0:root:/root:/bin/bash\ndhpanel:x:998:997::/var/lib/dhpanel:/usr/sbin/nologin\n";
-        assert_eq!(lookup_user(passwd, "dhpanel"), Some((998, 997)));
+        let passwd = "root:x:0:0:root:/root:/bin/bash\nbuiltpanel:x:998:997::/var/lib/builtpanel:/usr/sbin/nologin\n";
+        assert_eq!(lookup_user(passwd, "builtpanel"), Some((998, 997)));
         assert_eq!(lookup_user(passwd, "dh"), None);
     }
 
@@ -354,7 +354,7 @@ mod tests {
 
     #[test]
     fn the_socket_answers_the_panel_and_never_logs_the_password() {
-        let dir = std::env::temp_dir().join(format!("dh-root-auth-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("bp-root-auth-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let shadow = dir.join("shadow");
         std::fs::write(&shadow, format!("root:{YESCRYPT}:19000:0:99999:7:::\n")).unwrap();

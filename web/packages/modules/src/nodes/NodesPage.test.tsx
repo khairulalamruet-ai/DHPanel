@@ -2,12 +2,12 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import React from "react";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { NodesPage } from "./NodesPage";
-import { ToastProvider } from "@dhpanel/ui";
-import * as dhpanelApi from "@dhpanel/api";
+import { ToastProvider } from "@builtpanel/ui";
+import * as builtpanelApi from "@builtpanel/api";
 
 let mockHasPermission = true;
 
-vi.mock("@dhpanel/auth", () => ({
+vi.mock("@builtpanel/auth", () => ({
   useSession: () => ({
     data: {
       user: { id: "00000000-0000-0000-0000-000000000001", username: "admin" },
@@ -20,7 +20,7 @@ vi.mock("@dhpanel/auth", () => ({
   }),
 }));
 
-vi.mock("@dhpanel/i18n", () => ({
+vi.mock("@builtpanel/i18n", () => ({
   useTranslation: () => ({
     t: (key: string) => {
       const dict: Record<string, string> = {
@@ -158,7 +158,7 @@ const mockNodesList = [
   {
     id: "node_01",
     name: "node-master-01",
-    hostname: "cp1.dhpanel.net",
+    hostname: "cp1.builtpanel.net",
     ip_address: "167.104.101.81",
     status: "online" as const,
     version: "0.1.0",
@@ -194,7 +194,7 @@ const mockNodesList = [
   {
     id: "node_02",
     name: "node-worker-02",
-    hostname: "worker2.dhpanel.net",
+    hostname: "worker2.builtpanel.net",
     ip_address: "167.104.101.82",
     status: "draining" as const,
     version: "0.1.0",
@@ -230,7 +230,7 @@ const mockNodesList = [
   {
     id: "node_03",
     name: "node-worker-03-backup",
-    hostname: "worker3.dhpanel.net",
+    hostname: "worker3.builtpanel.net",
     ip_address: "167.104.101.83",
     status: "offline" as const,
     version: "0.1.0",
@@ -268,7 +268,7 @@ describe("NodesPage", () => {
     vi.restoreAllMocks();
     mockHasPermission = true;
 
-    vi.spyOn(dhpanelApi, "apiFetch").mockImplementation(async (url: string, opts?: any) => {
+    vi.spyOn(builtpanelApi, "apiFetch").mockImplementation(async (url: string, opts?: any) => {
       if (url === "/api/v1/admin/nodes" && (!opts || opts.method === "GET")) {
         return { items: mockNodesList, total: 2 };
       }
@@ -283,7 +283,7 @@ describe("NodesPage", () => {
           token: "dhenroll_test123",
           expires_at: "2026-11-12T01:00:00Z",
           expires_in: 900,
-          enroll_command: "curl -sSL https://get.dhpanel.com/agent.sh | sudo bash -s -- --token dhenroll_test123",
+          enroll_command: "curl -sSL https://get.builtpanel.com/agent.sh | sudo bash -s -- --token dhenroll_test123",
         };
       }
       if (url.includes("/enrollments/") && opts?.method === "DELETE") {
@@ -363,7 +363,7 @@ describe("NodesPage", () => {
     fireEvent.click(cancelBtn);
 
     await waitFor(() => {
-      expect(dhpanelApi.apiFetch).toHaveBeenCalledWith(
+      expect(builtpanelApi.apiFetch).toHaveBeenCalledWith(
         expect.stringContaining("/api/v1/admin/nodes/enrollments/token_01"),
         expect.objectContaining({ method: "DELETE" })
       );
@@ -403,7 +403,7 @@ describe("NodesPage", () => {
 
     await waitFor(() => {
       expect(screen.getByText("dhenroll_test123")).toBeInTheDocument();
-      expect(screen.getByText(/curl -sSL https:\/\/get\.dhpanel\.com\/agent\.sh/i)).toBeInTheDocument();
+      expect(screen.getByText(/curl -sSL https:\/\/get\.builtpanel\.com\/agent\.sh/i)).toBeInTheDocument();
     });
 
     const copyBtn = screen.getByRole("button", { name: /Copy Command/i });
@@ -416,7 +416,7 @@ describe("NodesPage", () => {
 
   it("handles 403 reauth_required by prompting for sudo password", async () => {
     let callCount = 0;
-    vi.spyOn(dhpanelApi, "apiFetch").mockImplementation(async (url: string, opts?: any) => {
+    vi.spyOn(builtpanelApi, "apiFetch").mockImplementation(async (url: string, opts?: any) => {
       if (url === "/api/v1/admin/nodes" && (!opts || opts.method === "GET")) {
         return { items: mockNodesList, total: 2 };
       }
@@ -636,7 +636,7 @@ describe("NodesPage", () => {
   });
 
   it("toggles node drain and undrain actions", async () => {
-    const apiFetchSpy = vi.spyOn(dhpanelApi, "apiFetch");
+    const apiFetchSpy = vi.spyOn(builtpanelApi, "apiFetch");
 
     render(
       <ToastProvider>
@@ -674,7 +674,7 @@ describe("NodesPage", () => {
   });
 
   it("opens oversell configuration dialog and saves updated ratios", async () => {
-    const apiFetchSpy = vi.spyOn(dhpanelApi, "apiFetch");
+    const apiFetchSpy = vi.spyOn(builtpanelApi, "apiFetch");
 
     render(
       <ToastProvider>
@@ -705,7 +705,7 @@ describe("NodesPage", () => {
   });
 
   it("opens placement scheduler configuration dialog and verifies live simulation (DoD T16.02)", async () => {
-    const apiFetchSpy = vi.spyOn(dhpanelApi, "apiFetch");
+    const apiFetchSpy = vi.spyOn(builtpanelApi, "apiFetch");
 
     render(
       <ToastProvider>

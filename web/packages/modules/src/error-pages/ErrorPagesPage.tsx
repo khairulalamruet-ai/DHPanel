@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { apiFetch } from "@dhpanel/api";
-import { Badge, Button, useToast } from "@dhpanel/ui";
+import { apiFetch } from "@builtpanel/api";
+import { Badge, Button, useToast } from "@builtpanel/ui";
 import {
   Globe,
   UserX,
@@ -13,7 +13,7 @@ import { PageTemplateItem, PageTemplateListResponse, PageTemplateType } from "./
 import { PageTemplateEditor } from "./PageTemplateEditor";
 import { PageTemplatePreview } from "./PageTemplatePreview";
 import { PageTemplateResetDialog } from "./PageTemplateResetDialog";
-import { useTranslation } from "@dhpanel/i18n";
+import { useTranslation } from "@builtpanel/i18n";
 
 export function ErrorPagesPage() {
   const { t } = useTranslation();

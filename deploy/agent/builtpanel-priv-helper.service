@@ -1,28 +1,28 @@
-# DHPanel privileged helper: the only part of the node side that runs as root.
-# It listens on a Unix socket that only the dhpanel-agent user can open and
+# Built Panel privileged helper: the only part of the node side that runs as root.
+# It listens on a Unix socket that only the builtpanel-agent user can open and
 # carries out a short, fixed list of actions (see apps/priv-helper).
 [Unit]
-Description=DHPanel privileged helper
-Documentation=https://docs.dhpanel.dev/agent
-Before=dhpanel-agent.service
+Description=Built Panel privileged helper
+Documentation=https://docs.builtpanel.dev/agent
+Before=builtpanel-agent.service
 
 [Service]
 Type=simple
 User=root
 # The agent's group: the folder files wait in (shared with the agent) is open to it only.
-SupplementaryGroups=dhpanel-agent
-ExecStart=/usr/local/bin/dhpanel-priv-helper --socket /run/dhpanel/priv-helper.sock --agent-user dhpanel-agent --tenants-root /srv/tenants --db-port 13306 --pg-port 15432
+SupplementaryGroups=builtpanel-agent
+ExecStart=/usr/local/bin/builtpanel-priv-helper --socket /run/builtpanel/priv-helper.sock --agent-user builtpanel-agent --tenants-root /srv/tenants --db-port 13306 --pg-port 15432
 # The directory tenants live in is created by install.sh before the service is
 # started: the sandbox's mount namespace is built before any ExecStartPre runs,
-# so the path must already exist. It is the only place besides /run/dhpanel the
+# so the path must already exist. It is the only place besides /run/builtpanel the
 # helper may write.
 ReadWritePaths=/srv/tenants
 # Where files wait between the network and a tenant's files (the agent's).
-ReadWritePaths=-/var/lib/dhpanel-transfers
-StateDirectory=dhpanel-priv-helper
+ReadWritePaths=-/var/lib/builtpanel-transfers
+StateDirectory=builtpanel-priv-helper
 StateDirectoryMode=0700
-# /run/dhpanel, root-owned; other users can look inside but the socket is 0600.
-RuntimeDirectory=dhpanel
+# /run/builtpanel, root-owned; other users can look inside but the socket is 0600.
+RuntimeDirectory=builtpanel
 RuntimeDirectoryMode=0755
 Restart=always
 RestartSec=2

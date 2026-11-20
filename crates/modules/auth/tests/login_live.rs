@@ -1,5 +1,5 @@
 //! Login / logout / me against real PostgreSQL and Redis.
-//! Ignored by default: `eval "$(deploy/dev/devenv.sh test-env)" && cargo test -p dhpanel-mod-auth -- --include-ignored`
+//! Ignored by default: `eval "$(deploy/dev/devenv.sh test-env)" && cargo test -p builtpanel-mod-auth -- --include-ignored`
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::{
@@ -13,13 +13,13 @@ use axum::{
     extract::connect_info::MockConnectInfo,
     http::{Request, StatusCode, header},
 };
-use dhpanel_auth_core::password::{Argon2Params, PasswordHasher};
-use dhpanel_cache::{
+use builtpanel_auth_core::password::{Argon2Params, PasswordHasher};
+use builtpanel_cache::{
     RedisHandle,
     lockout::{FailureLimiter, LockoutPolicy},
 };
-use dhpanel_mod_auth::{AuthState, LoginLimits, router};
-use dhpanel_session::{SessionConfig, SessionStore};
+use builtpanel_mod_auth::{AuthState, LoginLimits, router};
+use builtpanel_session::{SessionConfig, SessionStore};
 use secrecy::SecretString;
 use serde_json::{Value, json};
 use sqlx::PgPool;
@@ -72,24 +72,24 @@ fn limited_state(
         },
         trusted_proxies: trusted_proxies.to_vec().into(),
         redis: redis_handle,
-        master_key: dhpanel_auth_core::secretbox::MasterKey::from_bytes(&[42; 32]),
-        totp_issuer: "DHPanel Test".into(),
+        master_key: builtpanel_auth_core::secretbox::MasterKey::from_bytes(&[42; 32]),
+        totp_issuer: "Built Panel Test".into(),
         root_login: None,
-        audit: dhpanel_audit::AuditWriter::new(pool.clone()),
+        audit: builtpanel_audit::AuditWriter::new(pool.clone()),
     }
 }
 
 fn app(state: AuthState) -> Router {
     let trusted = state.trusted_proxies.clone();
     router()
-        .merge(dhpanel_audit::router::<AuthState>())
+        .merge(builtpanel_audit::router::<AuthState>())
         .with_state(state)
         .layer(axum::middleware::from_fn_with_state(
             trusted,
-            dhpanel_http_kit::client_ip::client_ip_layer,
+            builtpanel_http_kit::client_ip::client_ip_layer,
         ))
         .layer(axum::middleware::from_fn(
-            dhpanel_http_kit::request_id::correlation_id_layer,
+            builtpanel_http_kit::request_id::correlation_id_layer,
         ))
         .layer(MockConnectInfo(SocketAddr::from((
             [198, 51, 100, 23],
@@ -225,7 +225,7 @@ async fn login_me_logout_flow(pool: PgPool) {
     assert!(r.body.get("password_hash").is_none());
     let set = r.set_cookie.expect("cookie");
     for attr in [
-        "__Host-dh_session=",
+        "__Host-bp_session=",
         "Secure",
         "HttpOnly",
         "SameSite=Strict",
@@ -678,7 +678,7 @@ async fn logout_without_csrf_header_is_403_and_keeps_the_session(pool: PgPool) {
 
 // ---------------------------------------------------------------- 2FA (T01.08)
 
-use dhpanel_auth_core::totp::TotpSecret;
+use builtpanel_auth_core::totp::TotpSecret;
 
 fn unix_now() -> u64 {
     std::time::SystemTime::now()
@@ -785,7 +785,7 @@ async fn password_step(app: &Router, name: &str) -> String {
     assert!(r.body.get("csrf_token").is_none());
     let set = r.set_cookie.expect("pending cookie");
     for attr in [
-        "__Host-dh_mfa=",
+        "__Host-bp_mfa=",
         "HttpOnly",
         "Secure",
         "SameSite=Strict",
@@ -794,7 +794,7 @@ async fn password_step(app: &Router, name: &str) -> String {
         assert!(set.contains(attr), "{set}");
     }
     assert!(
-        !set.contains("__Host-dh_session"),
+        !set.contains("__Host-bp_session"),
         "no session before the second factor"
     );
     cookie_pair(&set)
@@ -846,7 +846,7 @@ async fn account_with_2fa_cannot_log_in_without_the_second_step(pool: PgPool) {
     let pending = password_step(&app, "nina").await;
     let r = send(&app, "GET", "/api/v1/auth/me", Some(&pending), None).await;
     assert_eq!(r.status, StatusCode::UNAUTHORIZED);
-    let as_session = pending.replace("__Host-dh_mfa", "__Host-dh_session");
+    let as_session = pending.replace("__Host-bp_mfa", "__Host-bp_session");
     let r = send(&app, "GET", "/api/v1/auth/me", Some(&as_session), None).await;
     assert_eq!(r.status, StatusCode::UNAUTHORIZED);
 
@@ -857,7 +857,7 @@ async fn account_with_2fa_cannot_log_in_without_the_second_step(pool: PgPool) {
     assert_eq!(r.body["username"], "nina");
     assert_eq!(r.body["mfa_enabled"], true);
     let session = cookie_pair(&r.set_cookie.unwrap());
-    assert!(session.starts_with("__Host-dh_session="), "{session}");
+    assert!(session.starts_with("__Host-bp_session="), "{session}");
     let r = send(&app, "GET", "/api/v1/auth/me", Some(&session), None).await;
     assert_eq!(r.status, StatusCode::OK);
 
@@ -899,7 +899,7 @@ async fn totp_codes_and_pending_logins_are_single_use(pool: PgPool) {
     // No pending cookie, or a forged one: expired, not a code check.
     for cookie in [
         None,
-        Some("__Host-dh_mfa=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"),
+        Some("__Host-bp_mfa=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"),
     ] {
         let r = mfa_step(&app, cookie, &code).await;
         assert_eq!(r.body["code"], "mfa_session_expired", "{cookie:?}");
@@ -1316,7 +1316,7 @@ async fn me_lists_roles_and_permissions(pool: PgPool) {
     let hasher = PasswordHasher::new(fast_params(2)).unwrap();
     let id = create_account(&pool, &hasher, "yuri", "active").await;
     for role in ["admin", "support"] {
-        dhpanel_database::rbac::assign_role(&pool, id, role, None)
+        builtpanel_database::rbac::assign_role(&pool, id, role, None)
             .await
             .unwrap();
     }
@@ -1350,7 +1350,7 @@ async fn audit_rows(pool: &PgPool) -> Vec<(String, String, Option<Uuid>)> {
 async fn login_failed_login_and_logout_appear_in_the_audit_log(pool: PgPool) {
     let hasher = PasswordHasher::new(fast_params(2)).unwrap();
     let id = create_account(&pool, &hasher, "audrey", "active").await;
-    dhpanel_database::rbac::assign_role(&pool, id, "super_admin", None)
+    builtpanel_database::rbac::assign_role(&pool, id, "super_admin", None)
         .await
         .unwrap();
     let app = app(state(&pool, hasher));
@@ -1747,12 +1747,12 @@ async fn ten_failures_from_one_address_block_it_for_an_hour(pool: PgPool) {
     assert!((3500..=3600).contains(&left), "{left}");
 }
 
-/// A stand-in for dhpanel-root-auth: root's password is `ROOT_PASSWORD`.
+/// A stand-in for builtpanel-root-auth: root's password is `ROOT_PASSWORD`.
 const ROOT_PASSWORD: &str = "Server-Root-Secret-77";
 
 fn fake_root_helper() -> std::path::PathBuf {
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
-    let dir = std::env::temp_dir().join(format!("dh-root-live-{}", Uuid::now_v7().simple()));
+    let dir = std::env::temp_dir().join(format!("bp-root-live-{}", Uuid::now_v7().simple()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("root-auth.sock");
     let listener = tokio::net::UnixListener::bind(&path).unwrap();
@@ -1781,14 +1781,14 @@ fn fake_root_helper() -> std::path::PathBuf {
 #[ignore = "needs PostgreSQL + Redis"]
 async fn root_logs_in_with_the_servers_root_password(pool: PgPool) {
     let hasher = PasswordHasher::new(fast_params(2)).unwrap();
-    let email = dhpanel_domain::Email::parse("root@panel.example.com").unwrap();
-    let (id, created) = dhpanel_database::accounts::enable_system_root(&pool, &email)
+    let email = builtpanel_domain::Email::parse("root@panel.example.com").unwrap();
+    let (id, created) = builtpanel_database::accounts::enable_system_root(&pool, &email)
         .await
         .unwrap();
     assert!(created);
     // Turned on again: the same account.
     assert_eq!(
-        dhpanel_database::accounts::enable_system_root(&pool, &email)
+        builtpanel_database::accounts::enable_system_root(&pool, &email)
             .await
             .unwrap(),
         (id, false)
@@ -1802,7 +1802,7 @@ async fn root_logs_in_with_the_servers_root_password(pool: PgPool) {
     );
 
     let mut st = state(&pool, hasher.clone());
-    st.root_login = Some(dhpanel_mod_auth::root_login::RootLogin::new(
+    st.root_login = Some(builtpanel_mod_auth::root_login::RootLogin::new(
         fake_root_helper(),
     ));
     let on = app(st);
@@ -1824,7 +1824,7 @@ async fn root_logs_in_with_the_servers_root_password(pool: PgPool) {
 
     // A helper that is down is reported, not taken for a wrong password.
     let mut st = state(&pool, hasher.clone());
-    st.root_login = Some(dhpanel_mod_auth::root_login::RootLogin::new(
+    st.root_login = Some(builtpanel_mod_auth::root_login::RootLogin::new(
         "/nonexistent/root-auth.sock".into(),
     ));
     let r = login(&app(st), "root", ROOT_PASSWORD, None).await;
@@ -1832,12 +1832,12 @@ async fn root_logs_in_with_the_servers_root_password(pool: PgPool) {
 
     // Turned off: the account is disabled and the login stops working.
     assert!(
-        dhpanel_database::accounts::disable_system_root(&pool)
+        builtpanel_database::accounts::disable_system_root(&pool)
             .await
             .unwrap()
     );
     let mut st = state(&pool, hasher);
-    st.root_login = Some(dhpanel_mod_auth::root_login::RootLogin::new(
+    st.root_login = Some(builtpanel_mod_auth::root_login::RootLogin::new(
         fake_root_helper(),
     ));
     let r = login(&app(st), "root", ROOT_PASSWORD, None).await;

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { useTranslation } from "@dhpanel/i18n";
-import { apiFetch } from "@dhpanel/api";
+import { useTranslation } from "@builtpanel/i18n";
+import { apiFetch } from "@builtpanel/api";
 import { UpdateSystemCard } from "./UpdateSystemCard";
 import { UpdateHistoryTable } from "./UpdateHistoryTable";
 import { PanelUpdateStatus } from "./types";
@@ -14,7 +14,7 @@ const INITIAL_STATUS: PanelUpdateStatus = {
     release_date: new Date().toISOString(),
     channel: "stable",
     ed25519_signature: "e93f820c7419...ed25519...valid",
-    key_id: "dhpanel-root-2026",
+    key_id: "builtpanel-root-2026",
     checksum_sha256: "9b3c4f028d716...sha256",
     changelog: [
       "Multi-node clustering protocol v2 support",

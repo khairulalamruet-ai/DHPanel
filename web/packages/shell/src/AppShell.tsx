@@ -1,6 +1,6 @@
 import React, { useState } from "react";
-import { useSession } from "@dhpanel/auth";
-import { LanguageSwitcher, useTranslation } from "@dhpanel/i18n";
+import { useSession } from "@builtpanel/auth";
+import { LanguageSwitcher, useTranslation } from "@builtpanel/i18n";
 import { ThemeToggle } from "./ThemeToggle";
 import {
   Menu,
@@ -71,7 +71,7 @@ export function AppShell({ title, navItems, headerActions, children }: AppShellP
   return (
     <div className="min-h-screen bg-background text-foreground font-sans">
       {session?.branding?.customCss && (
-        <style id="dhpanel-live-custom-css" dangerouslySetInnerHTML={{ __html: session.branding.customCss }} />
+        <style id="builtpanel-live-custom-css" dangerouslySetInnerHTML={{ __html: session.branding.customCss }} />
       )}
       {/* Mobile Top Navigation */}
       <div className="flex items-center justify-between border-b px-4 py-3 md:hidden">

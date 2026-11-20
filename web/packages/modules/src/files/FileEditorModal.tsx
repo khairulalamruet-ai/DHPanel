@@ -5,11 +5,11 @@ import {
   Button,
   Badge,
   useToast,
-} from "@dhpanel/ui";
-import { apiFetch } from "@dhpanel/api";
+} from "@builtpanel/ui";
+import { apiFetch } from "@builtpanel/api";
 import { FileCode, Save } from "lucide-react";
 import { FileItem, ReadFileResponse, WriteFilePayload } from "./types";
-import { useTranslation } from "@dhpanel/i18n";
+import { useTranslation } from "@builtpanel/i18n";
 
 interface FileEditorModalProps {
   open: boolean;

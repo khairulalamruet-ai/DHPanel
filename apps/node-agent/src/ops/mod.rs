@@ -63,7 +63,7 @@ use std::{
     time::Duration,
 };
 
-use dhpanel_node_protocol::{
+use builtpanel_node_protocol::{
     AgentError, AgentMessage, ErrorCode, Operation, OperationEnvelope, OperationResult, Output,
     Parsed, encode, parse_operation_frame,
 };
@@ -706,7 +706,7 @@ impl Drop for Running<'_> {
 /// One line to stderr (the journal under systemd). Never contains secrets.
 #[allow(clippy::print_stderr)]
 fn log(line: &str) {
-    eprintln!("dhpanel-agent: {line}");
+    eprintln!("builtpanel-agent: {line}");
 }
 
 #[cfg(test)]
@@ -714,7 +714,7 @@ fn log(line: &str) {
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use dhpanel_node_protocol::{ResultStatus, decode};
+    use builtpanel_node_protocol::{ResultStatus, decode};
 
     use super::*;
 

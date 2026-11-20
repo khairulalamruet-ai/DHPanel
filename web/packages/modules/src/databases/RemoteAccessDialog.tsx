@@ -8,11 +8,11 @@ import {
   DialogFooter,
   Button,
   useToast,
-} from "@dhpanel/ui";
-import { apiFetch } from "@dhpanel/api";
+} from "@builtpanel/ui";
+import { apiFetch } from "@builtpanel/api";
 import { Network, Plus, Trash2, ShieldCheck, AlertCircle } from "lucide-react";
 import { UpdateRemoteHostsPayload } from "./types";
-import { useTranslation } from "@dhpanel/i18n";
+import { useTranslation } from "@builtpanel/i18n";
 
 interface RemoteAccessDialogProps {
   open: boolean;

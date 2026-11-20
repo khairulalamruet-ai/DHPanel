@@ -2,12 +2,12 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import React from "react";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { OperationsPage } from "./OperationsPage";
-import { ToastProvider } from "@dhpanel/ui";
-import * as dhpanelApi from "@dhpanel/api";
+import { ToastProvider } from "@builtpanel/ui";
+import * as builtpanelApi from "@builtpanel/api";
 
 let mockHasPermission = true;
 
-vi.mock("@dhpanel/auth", () => ({
+vi.mock("@builtpanel/auth", () => ({
   useSession: () => ({
     data: {
       user: { id: "00000000-0000-0000-0000-000000000001", username: "admin" },
@@ -20,7 +20,7 @@ vi.mock("@dhpanel/auth", () => ({
   }),
 }));
 
-vi.mock("@dhpanel/i18n", () => ({
+vi.mock("@builtpanel/i18n", () => ({
   useTranslation: () => ({
     t: (key: string) => {
       const dict: Record<string, string> = {
@@ -126,7 +126,7 @@ const mockOperationsList = [
     tenant_id: null,
     status: "succeeded" as const,
     retries_count: 0,
-    payload: { echo: "dhpanel-heartbeat" },
+    payload: { echo: "builtpanel-heartbeat" },
     output: { pong: true, latency_ms: 1.4 },
     error: null,
     created_at: "2026-11-12T00:00:00Z",
@@ -158,7 +158,7 @@ describe("OperationsPage", () => {
     vi.restoreAllMocks();
     mockHasPermission = true;
 
-    vi.spyOn(dhpanelApi, "apiFetch").mockImplementation(async (url: string, opts?: any) => {
+    vi.spyOn(builtpanelApi, "apiFetch").mockImplementation(async (url: string, opts?: any) => {
       if (opts?.method === "POST" && url.includes("/retry")) {
         return {
           success: true,

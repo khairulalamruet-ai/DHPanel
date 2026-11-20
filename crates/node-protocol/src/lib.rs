@@ -132,7 +132,7 @@ pub struct SiteRoute {
     /// The names (lower-case ASCII), at least one.
     pub hosts: Vec<String>,
     /// Where the site's web container listens, `host:port` (for example
-    /// `dh-alice-web:8080`), or `None` for a suspended site: visitors then get
+    /// `bp-alice-web:8080`), or `None` for a suspended site: visitors then get
     /// the "suspended" page and nothing is served from the tenant's files.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub upstream: Option<String>,
@@ -151,7 +151,7 @@ pub struct SiteRoute {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub suspended_by: Option<String>,
     /// The web application firewall for this site: `None` is off. Only a node whose web
-    /// server has the firewall (`DHPANEL_AGENT_WAF_DIR`) applies it.
+    /// server has the firewall (`BUILTPANEL_AGENT_WAF_DIR`) applies it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub waf: Option<WafSetting>,
 }
@@ -832,7 +832,7 @@ pub const MAX_ERROR_PAGE_BYTES: usize = 16 * 1024;
 ///
 /// The private key is not part of what the control plane records in its ledger:
 /// there it is `None`, and the dispatcher fills it in at the moment the message is
-/// sent (see `dhpanel_dispatcher::SecretFiller`). `Debug` never shows it.
+/// sent (see `builtpanel_dispatcher::SecretFiller`). `Debug` never shows it.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CustomCertificate {
@@ -1130,7 +1130,7 @@ pub struct NodeMetrics {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ContainerMetrics {
-    /// The container's name (`dh-<account>-<role>`).
+    /// The container's name (`bp-<account>-<role>`).
     pub name: String,
     /// Memory in use, in bytes.
     pub memory_bytes: u64,
@@ -1157,7 +1157,7 @@ pub const MAX_METRIC_CONTAINERS: usize = 5000;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ContainerItem {
-    /// Its name (`dh-<account>-<role>`).
+    /// Its name (`bp-<account>-<role>`).
     pub name: String,
     /// What it is for (`web`, `php`).
     pub role: String,
@@ -1190,7 +1190,7 @@ pub const NODE_SERVICES: [&str; 3] = ["database", "phpmyadmin", "sftp"];
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProcessItem {
-    /// The container it runs in (`dh-<account>-<role>`).
+    /// The container it runs in (`bp-<account>-<role>`).
     pub container: String,
     /// Its id inside the container.
     pub pid: u32,
@@ -2122,7 +2122,7 @@ pub enum Operation {
     SyncCronJobs {
         /// The tenant.
         tenant_id: Uuid,
-        /// The tenant's system name (its PHP container is `dh-<name>-php`).
+        /// The tenant's system name (its PHP container is `bp-<name>-php`).
         username: String,
         /// All of the account's jobs (at most [`MAX_CRON_JOBS`]).
         jobs: Vec<CronJobSpec>,
@@ -2337,7 +2337,7 @@ pub enum Operation {
         plugins: Vec<String>,
     },
     /// Makes (or changes) a tenant's own cache server: a Redis or Memcached container on the
-    /// tenant's network only, reachable by its container name (`dh-<account>-redis`), with a memory limit; Redis
+    /// tenant's network only, reachable by its container name (`bp-<account>-redis`), with a memory limit; Redis
     /// also has a password. Safe to repeat. Answered with [`Output::CacheInstanceSet`].
     SetCacheInstance {
         /// The instance's id (the control plane finds the password by it).
@@ -2367,7 +2367,7 @@ pub enum Operation {
         kind: String,
     },
     /// Makes (or changes) one of a tenant's own applications: a Node.js or Python container on
-    /// the tenant's network only, reachable by its container name (`dh-<account>-app-<name>`),
+    /// the tenant's network only, reachable by its container name (`bp-<account>-app-<name>`),
     /// that runs the account's files from `dir` as the account's user. With `install` the
     /// dependencies are installed first, in a one-off container. The command is a list of
     /// words; nothing is run through a shell. Safe to repeat. Answered with
@@ -2406,7 +2406,7 @@ pub enum Operation {
         image: Option<String>,
     },
     /// Deploys a site or an application from a git repository: fetches `branch` of the
-    /// repository over http(s) into a new release folder (`.dh-releases/<name>/<time>` below the
+    /// repository over http(s) into a new release folder (`.bp-releases/<name>/<time>` below the
     /// web directory), runs the build steps in a sandbox (each a list of words, no shell), then
     /// switches `dest` to the new release with one rename and keeps the last few releases. When
     /// `restart_app` names one of the tenant's applications it is restarted. Everything runs in
@@ -4247,7 +4247,7 @@ mod tests {
                 routes: vec![SiteRoute {
                     waf: None,
                     hosts: vec!["example.com".into()],
-                    upstream: Some("dh-alice-web:8080".into()),
+                    upstream: Some("bp-alice-web:8080".into()),
                     redirects: vec![],
                     force_https: false,
                     hsts: false,
@@ -4393,7 +4393,7 @@ mod tests {
                 account: "alice".into(),
                 target: BackupTarget {
                     kind: "local".into(),
-                    settings: serde_json::json!({"path": "/var/backups/dhpanel"}),
+                    settings: serde_json::json!({"path": "/var/backups/builtpanel"}),
                 },
                 credentials: None,
                 key: None,

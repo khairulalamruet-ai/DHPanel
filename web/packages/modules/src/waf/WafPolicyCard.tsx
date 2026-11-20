@@ -7,9 +7,9 @@ import {
   CardContent,
   Badge,
   Button,
-} from "@dhpanel/ui";
+} from "@builtpanel/ui";
 import { Shield, ShieldAlert, ShieldCheck, ShieldX, Sliders } from "lucide-react";
-import { useTranslation } from "@dhpanel/i18n";
+import { useTranslation } from "@builtpanel/i18n";
 import { WafPolicy, WafMode } from "./types";
 
 interface WafPolicyCardProps {

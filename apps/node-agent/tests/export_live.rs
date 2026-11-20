@@ -15,14 +15,14 @@ use std::{
     time::Duration,
 };
 
-use dhpanel_docker_manager::{DockerManager, Name};
-use dhpanel_node_agent::ops::{
+use builtpanel_docker_manager::{DockerManager, Name};
+use builtpanel_node_agent::ops::{
     db::{CONTAINER, create_database, ensure_db_server, port},
     sqlexport::export_sql,
     sqlimport::import_sql,
     tenant::TenantContext,
 };
-use dhpanel_node_protocol::{DbPassword, ErrorCode, Operation, Output};
+use builtpanel_node_protocol::{DbPassword, ErrorCode, Operation, Output};
 use mysql_async::prelude::Queryable as _;
 use sha2::{Digest as _, Sha256};
 use uuid::Uuid;
@@ -124,7 +124,7 @@ fn op(database: &str, url: &str, token: Option<&str>, id: Uuid) -> Operation {
         export_id: id,
         url: url.into(),
         token: token.map(|t| DbPassword(t.into())),
-        engine: dhpanel_node_protocol::DbEngine::Mysql,
+        engine: builtpanel_node_protocol::DbEngine::Mysql,
         dedicated: None,
     }
 }
@@ -141,9 +141,9 @@ async fn a_database_is_dumped_compressed_and_sent_in_chunks_and_the_dump_loads_e
     // Another live test may have left the server behind with its own root password.
     let _ = docker.remove(&Name::parse(CONTAINER).unwrap(), true).await;
     let _ = docker
-        .remove_volume(&Name::parse("dh-db-data").unwrap())
+        .remove_volume(&Name::parse("bp-db-data").unwrap())
         .await;
-    let root_dir = std::env::temp_dir().join(format!("dh-export-live-{}", std::process::id()));
+    let root_dir = std::env::temp_dir().join(format!("bp-export-live-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root_dir);
     std::fs::create_dir_all(&root_dir).unwrap();
     let context = Arc::new(TenantContext {
@@ -160,7 +160,7 @@ async fn a_database_is_dumped_compressed_and_sent_in_chunks_and_the_dump_loads_e
             context.clone(),
             Operation::CreateDatabase {
                 name: name.into(),
-                engine: dhpanel_node_protocol::DbEngine::Mysql,
+                engine: builtpanel_node_protocol::DbEngine::Mysql,
                 dedicated: None,
             },
         )
@@ -309,7 +309,7 @@ async fn a_database_is_dumped_compressed_and_sent_in_chunks_and_the_dump_loads_e
                 .collect(),
             gzip: true,
             token: Some(DbPassword("any".into())),
-            engine: dhpanel_node_protocol::DbEngine::Mysql,
+            engine: builtpanel_node_protocol::DbEngine::Mysql,
             dedicated: None,
         },
     )
@@ -335,7 +335,7 @@ async fn a_database_is_dumped_compressed_and_sent_in_chunks_and_the_dump_loads_e
     let docker = context.docker.clone();
     let _ = docker.remove(&Name::parse(CONTAINER).unwrap(), true).await;
     let _ = docker
-        .remove_volume(&Name::parse("dh-db-data").unwrap())
+        .remove_volume(&Name::parse("bp-db-data").unwrap())
         .await;
     let _ = std::fs::remove_dir_all(&root_dir);
 }

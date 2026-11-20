@@ -6,9 +6,9 @@ import {
   DialogTitle,
   DialogFooter,
   Button,
-} from "@dhpanel/ui";
-import { apiFetch } from "@dhpanel/api";
-import { useTranslation } from "@dhpanel/i18n";
+} from "@builtpanel/ui";
+import { apiFetch } from "@builtpanel/api";
+import { useTranslation } from "@builtpanel/i18n";
 import { UploadCloud, AlertCircle, Key, FileCheck } from "lucide-react";
 import type { SslCertificateItem, CustomCertPayload } from "./types";
 

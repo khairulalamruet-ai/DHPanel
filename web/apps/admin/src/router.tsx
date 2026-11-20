@@ -5,10 +5,10 @@ import {
   createRootRoute,
   Outlet,
 } from "@tanstack/react-router";
-import { ThemeProvider, ToastProvider } from "@dhpanel/ui";
-import { SessionProvider, useSession, LoginPage, AccountSecurityPage } from "@dhpanel/auth";
-import { queryClient, QueryClientProvider } from "@dhpanel/api";
-import { AppShell, NotFoundPage, RouteErrorFallback } from "@dhpanel/shell";
+import { ThemeProvider, ToastProvider } from "@builtpanel/ui";
+import { SessionProvider, useSession, LoginPage, AccountSecurityPage } from "@builtpanel/auth";
+import { queryClient, QueryClientProvider } from "@builtpanel/api";
+import { AppShell, NotFoundPage, RouteErrorFallback } from "@builtpanel/shell";
 import {
   DashboardPage,
   UiDemoPage,
@@ -72,8 +72,8 @@ import {
   AdminSecurityCenterPage,
   filterNavItems,
   registeredFrontendModules,
-} from "@dhpanel/modules";
-import { useTranslation } from "@dhpanel/i18n";
+} from "@builtpanel/modules";
+import { useTranslation } from "@builtpanel/i18n";
 
 function AuthenticatedContent() {
   const { data: session, isLoading } = useSession();

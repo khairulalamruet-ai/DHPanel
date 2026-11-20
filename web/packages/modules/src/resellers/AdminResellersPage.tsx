@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { useTranslation } from "@dhpanel/i18n";
-import { apiFetch } from "@dhpanel/api";
+import { useTranslation } from "@builtpanel/i18n";
+import { apiFetch } from "@builtpanel/api";
 import {
   Table,
   TableHeader,
@@ -17,7 +17,7 @@ import {
   DialogTitle,
   DialogDescription,
   DialogFooter,
-} from "@dhpanel/ui";
+} from "@builtpanel/ui";
 import {
   Briefcase,
   Package,

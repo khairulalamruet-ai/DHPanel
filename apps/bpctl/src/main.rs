@@ -1,22 +1,22 @@
-//! DHPanel admin CLI for bootstrap, migrations and recovery.
+//! Built Panel admin CLI for bootstrap, migrations and recovery.
 //!
-//! Reads the same configuration as the control plane (`DHPANEL_CONFIG`,
-//! `DHPANEL_*` env, secret files).
+//! Reads the same configuration as the control plane (`BUILTPANEL_CONFIG`,
+//! `BUILTPANEL_*` env, secret files).
 
 use std::{io::BufRead as _, path::PathBuf, process::ExitCode};
 
-use clap::{Parser, Subcommand};
-use dhpanel_auth_core::{
+use builtpanel_auth_core::{
     password::{Argon2Params, PasswordHasher},
     policy::PasswordPolicy,
 };
-use dhpanel_config::ControlConfig;
-use dhpanel_database::{
+use builtpanel_config::ControlConfig;
+use builtpanel_database::{
     PoolSettings,
     accounts::{InsertAccountError, NewAccount},
     sqlx::PgPool,
 };
-use dhpanel_domain::{AccountKind, Email, Username};
+use builtpanel_domain::{AccountKind, Email, Username};
+use clap::{Parser, Subcommand};
 use secrecy::SecretString;
 
 /// `EX_USAGE` from sysexits.h (invalid input).
@@ -32,10 +32,10 @@ const EXIT_IOERR: u8 = 74;
 /// `EX_CONFIG` from sysexits.h.
 const EXIT_CONFIG: u8 = 78;
 /// Where the control plane keeps its secrets, including the node CA.
-const DEFAULT_CA_DIR: &str = "/etc/dhpanel/secrets";
+const DEFAULT_CA_DIR: &str = "/etc/builtpanel/secrets";
 
 #[derive(Debug, Parser)]
-#[command(name = "dhctl", version, about = "DHPanel admin CLI")]
+#[command(name = "bpctl", version, about = "Built Panel admin CLI")]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -171,7 +171,7 @@ enum CaAction {
         #[arg(long, default_value = DEFAULT_CA_DIR)]
         dir: PathBuf,
         /// Common name of the CA certificate.
-        #[arg(long, default_value = "DHPanel Node CA")]
+        #[arg(long, default_value = "Built Panel Node CA")]
         name: String,
         /// Validity of the CA certificate in years (1..=20).
         #[arg(long, default_value_t = 10)]
@@ -232,7 +232,7 @@ enum AdminAction {
     },
     /// Let the administrator `root` log in with this server's root password (like WHM).
     /// Creates that administrator (full access) or turns it back on; the password is checked
-    /// by the dhpanel-root-auth helper (auth.root_login_socket in the configuration).
+    /// by the builtpanel-root-auth helper (auth.root_login_socket in the configuration).
     RootLogin {
         /// Contact email of the `root` administrator (used only when it is created).
         #[arg(long, required_unless_present = "disable")]
@@ -249,7 +249,7 @@ struct Failure(u8, String);
 
 impl Failure {
     fn exit(self) -> ExitCode {
-        eprintln!("dhctl: {}", self.1);
+        eprintln!("bpctl: {}", self.1);
         ExitCode::from(self.0)
     }
 }
@@ -288,7 +288,7 @@ fn release_failure(e: &impl std::fmt::Display) -> Failure {
 
 #[allow(clippy::print_stdout)]
 fn release(action: ReleaseAction) -> Result<(), Failure> {
-    use dhpanel_license::{
+    use builtpanel_license::{
         FileSigningKey, PublicKeys, ReleaseManifest, SignedManifest, SigningKey as _, update,
     };
     let read = |path: &std::path::Path| {
@@ -406,10 +406,10 @@ fn system_backup(action: &SystemBackupAction) -> Result<(), Failure> {
             format!("cannot read the master key file: {}", e.kind()),
         )
     })?;
-    let key = dhpanel_system_backup::derive_key(&text);
+    let key = builtpanel_system_backup::derive_key(&text);
     let file = std::fs::File::open(input)
         .map_err(|e| Failure(EXIT_IOERR, format!("cannot read the backup: {}", e.kind())))?;
-    let names = dhpanel_system_backup::unpack(&key, std::io::BufReader::new(file), output)
+    let names = builtpanel_system_backup::unpack(&key, std::io::BufReader::new(file), output)
         .map_err(|e| Failure(EXIT_DATAERR, e.to_string()))?;
     for name in names {
         println!("{}", output.join(name).display());
@@ -417,8 +417,8 @@ fn system_backup(action: &SystemBackupAction) -> Result<(), Failure> {
     Ok(())
 }
 
-fn pki_failure(err: dhpanel_pki::PkiError) -> Failure {
-    use dhpanel_pki::PkiError as E;
+fn pki_failure(err: builtpanel_pki::PkiError) -> Failure {
+    use builtpanel_pki::PkiError as E;
     let code = match &err {
         E::AlreadyInitialised(_) => EXIT_DATAERR,
         E::InvalidInput(_) => EXIT_USAGE,
@@ -429,17 +429,17 @@ fn pki_failure(err: dhpanel_pki::PkiError) -> Failure {
     Failure(code, err.to_string())
 }
 
-fn print_ca(ca: &dhpanel_pki::CertificateAuthority) {
+fn print_ca(ca: &builtpanel_pki::CertificateAuthority) {
     println!("name:        {}", ca.common_name());
     println!("fingerprint: sha256:{}", ca.fingerprint_sha256());
     println!(
         "valid:       {} to {}",
-        dhpanel_pki::format_rfc3339(ca.not_before()),
-        dhpanel_pki::format_rfc3339(ca.not_after())
+        builtpanel_pki::format_rfc3339(ca.not_before()),
+        builtpanel_pki::format_rfc3339(ca.not_after())
     );
 }
 
-/// `dhctl ca ...`: no database needed, only the CA files.
+/// `bpctl ca ...`: no database needed, only the CA files.
 fn ca(action: CaAction) -> Result<(), Failure> {
     let now = time::OffsetDateTime::now_utc();
     match action {
@@ -447,7 +447,7 @@ fn ca(action: CaAction) -> Result<(), Failure> {
             if !(1..=20).contains(&years) {
                 return Err(Failure(EXIT_USAGE, "--years must be 1..=20".to_owned()));
             }
-            let ca = dhpanel_pki::init_ca_dir(
+            let ca = builtpanel_pki::init_ca_dir(
                 &dir,
                 &name,
                 now,
@@ -457,11 +457,11 @@ fn ca(action: CaAction) -> Result<(), Failure> {
             println!("created the node CA in {}", dir.display());
             println!(
                 "certificate: {}",
-                dir.join(dhpanel_pki::CA_CERT_FILE).display()
+                dir.join(builtpanel_pki::CA_CERT_FILE).display()
             );
             println!(
                 "private key: {} (mode 0600)",
-                dir.join(dhpanel_pki::CA_KEY_FILE).display()
+                dir.join(builtpanel_pki::CA_KEY_FILE).display()
             );
             print_ca(&ca);
             println!(
@@ -470,7 +470,7 @@ fn ca(action: CaAction) -> Result<(), Failure> {
             Ok(())
         }
         CaAction::Show { dir } => {
-            print_ca(&dhpanel_pki::load_ca_dir(&dir, now).map_err(pki_failure)?);
+            print_ca(&builtpanel_pki::load_ca_dir(&dir, now).map_err(pki_failure)?);
             Ok(())
         }
         CaAction::IssueServer {
@@ -482,7 +482,7 @@ fn ca(action: CaAction) -> Result<(), Failure> {
             if !(1..=400).contains(&days) {
                 return Err(Failure(EXIT_USAGE, "--days must be 1..=400".to_owned()));
             }
-            let ca = dhpanel_pki::load_ca_dir(&dir, now).map_err(pki_failure)?;
+            let ca = builtpanel_pki::load_ca_dir(&dir, now).map_err(pki_failure)?;
             let (issued, key) = ca
                 .issue_server_certificate(&names, now, time::Duration::days(i64::from(days)))
                 .map_err(pki_failure)?;
@@ -491,16 +491,19 @@ fn ca(action: CaAction) -> Result<(), Failure> {
                     .map_err(|e| Failure(EXIT_IOERR, format!("{}: {e}", out_dir.display())))?;
             }
             let (cert_path, key_path) = (out_dir.join("server.crt"), out_dir.join("server.key"));
-            dhpanel_pki::write_private_file(&key_path, secrecy::ExposeSecret::expose_secret(&key))
-                .map_err(pki_failure)?;
-            dhpanel_pki::write_public_file(&cert_path, &issued.cert_pem).map_err(pki_failure)?;
+            builtpanel_pki::write_private_file(
+                &key_path,
+                secrecy::ExposeSecret::expose_secret(&key),
+            )
+            .map_err(pki_failure)?;
+            builtpanel_pki::write_public_file(&cert_path, &issued.cert_pem).map_err(pki_failure)?;
             println!("certificate: {}", cert_path.display());
             println!("private key: {} (mode 0600)", key_path.display());
             println!("subject:     {}", issued.subject_cn);
             println!("fingerprint: sha256:{}", issued.fingerprint_sha256);
             println!(
                 "expires:     {}",
-                dhpanel_pki::format_rfc3339(issued.not_after)
+                builtpanel_pki::format_rfc3339(issued.not_after)
             );
             Ok(())
         }
@@ -517,9 +520,9 @@ async fn connect(config: &ControlConfig) -> Result<PgPool, Failure> {
         .map_err(|e| Failure(EXIT_CONFIG, e.to_string()))?;
     let settings = PoolSettings {
         max_connections: 1,
-        application_name: "dhctl".to_owned(),
+        application_name: "bpctl".to_owned(),
     };
-    dhpanel_database::connect(&url, &settings)
+    builtpanel_database::connect(&url, &settings)
         .await
         .map_err(|e| Failure(EXIT_UNAVAILABLE, format!("cannot connect to database: {e}")))
 }
@@ -529,13 +532,13 @@ async fn migrate(action: Option<MigrateAction>) -> Result<(), Failure> {
     let pool = connect(&config).await?;
 
     if action.is_none() {
-        dhpanel_database::migrate(&pool)
+        builtpanel_database::migrate(&pool)
             .await
             .map_err(|e| Failure(EXIT_UNAVAILABLE, format!("migration failed: {e}")))?;
         println!("migrations applied");
     }
 
-    let rows = dhpanel_database::migration_status(&pool)
+    let rows = builtpanel_database::migration_status(&pool)
         .await
         .map_err(|e| {
             Failure(
@@ -607,12 +610,12 @@ async fn admin_create(
         .map_err(|e| Failure(EXIT_SOFTWARE, e.to_string()))?;
 
     let pool = connect(&config).await?;
-    let db_err = |e: dhpanel_database::sqlx::Error| {
+    let db_err = |e: builtpanel_database::sqlx::Error| {
         Failure(EXIT_UNAVAILABLE, format!("database error: {e}"))
     };
     // Checked before the account is created so a typo cannot leave an
     // administrator without any role.
-    if !dhpanel_database::rbac::role_exists(&pool, role)
+    if !builtpanel_database::rbac::role_exists(&pool, role)
         .await
         .map_err(db_err)?
     {
@@ -621,11 +624,11 @@ async fn admin_create(
             format!("--role: no role named '{role}'"),
         ));
     }
-    let existing_admins = dhpanel_database::accounts::count_accounts(&pool, AccountKind::Admin)
+    let existing_admins = builtpanel_database::accounts::count_accounts(&pool, AccountKind::Admin)
         .await
         .map_err(|e| Failure(EXIT_UNAVAILABLE, format!("database error: {e}")))?;
 
-    let id = dhpanel_database::accounts::insert_account(
+    let id = builtpanel_database::accounts::insert_account(
         &pool,
         &NewAccount {
             kind: AccountKind::Admin,
@@ -649,11 +652,11 @@ async fn admin_create(
     } else {
         ""
     };
-    match dhpanel_database::rbac::assign_role(&pool, id, role, None)
+    match builtpanel_database::rbac::assign_role(&pool, id, role, None)
         .await
         .map_err(db_err)?
     {
-        dhpanel_database::rbac::AssignRole::UnknownRole => {
+        builtpanel_database::rbac::AssignRole::UnknownRole => {
             return Err(Failure(
                 EXIT_SOFTWARE,
                 format!(
@@ -661,12 +664,12 @@ async fn admin_create(
                 ),
             ));
         }
-        dhpanel_database::rbac::AssignRole::Assigned
-        | dhpanel_database::rbac::AssignRole::AlreadyAssigned => {}
+        builtpanel_database::rbac::AssignRole::Assigned
+        | builtpanel_database::rbac::AssignRole::AlreadyAssigned => {}
     }
     if require_mfa {
         let mut conn = pool.acquire().await.map_err(db_err)?;
-        dhpanel_database::admins::update_admin(&mut conn, id, None, None, Some(true))
+        builtpanel_database::admins::update_admin(&mut conn, id, None, None, Some(true))
             .await
             .map_err(|e| Failure(EXIT_UNAVAILABLE, format!("database error: {e}")))?;
     }
@@ -681,11 +684,11 @@ async fn admin_root_login(email: Option<&str>, disable: bool) -> Result<(), Fail
         .transpose()?;
     let config = load_config()?;
     let pool = connect(&config).await?;
-    let db_err = |e: dhpanel_database::sqlx::Error| {
+    let db_err = |e: builtpanel_database::sqlx::Error| {
         Failure(EXIT_UNAVAILABLE, format!("database error: {e}"))
     };
     if disable {
-        let was = dhpanel_database::accounts::disable_system_root(&pool)
+        let was = builtpanel_database::accounts::disable_system_root(&pool)
             .await
             .map_err(db_err)?;
         println!(
@@ -701,7 +704,7 @@ async fn admin_root_login(email: Option<&str>, disable: bool) -> Result<(), Fail
     let Some(email) = email else {
         return Err(Failure(EXIT_USAGE, "give --email or --disable".to_owned()));
     };
-    let (id, created) = dhpanel_database::accounts::enable_system_root(&pool, &email)
+    let (id, created) = builtpanel_database::accounts::enable_system_root(&pool, &email)
         .await
         .map_err(|e| match e {
             InsertAccountError::EmailTaken => Failure(
@@ -716,22 +719,22 @@ async fn admin_root_login(email: Option<&str>, disable: bool) -> Result<(), Fail
                 Failure(EXIT_UNAVAILABLE, format!("database error: {db}"))
             }
         })?;
-    match dhpanel_database::rbac::assign_role(&pool, id, "super_admin", None)
+    match builtpanel_database::rbac::assign_role(&pool, id, "super_admin", None)
         .await
         .map_err(db_err)?
     {
-        dhpanel_database::rbac::AssignRole::UnknownRole => {
+        builtpanel_database::rbac::AssignRole::UnknownRole => {
             return Err(Failure(
                 EXIT_SOFTWARE,
-                "the built-in role super_admin is missing; run `dhctl migrate`".to_owned(),
+                "the built-in role super_admin is missing; run `bpctl migrate`".to_owned(),
             ));
         }
-        dhpanel_database::rbac::AssignRole::Assigned
-        | dhpanel_database::rbac::AssignRole::AlreadyAssigned => {}
+        builtpanel_database::rbac::AssignRole::Assigned
+        | builtpanel_database::rbac::AssignRole::AlreadyAssigned => {}
     }
     if config.auth.root_login_socket.is_none() {
         eprintln!(
-            "dhctl: warning: auth.root_login_socket is not set in the configuration, so root cannot log in yet"
+            "bpctl: warning: auth.root_login_socket is not set in the configuration, so root cannot log in yet"
         );
     }
     println!(
@@ -758,7 +761,7 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        std::env::temp_dir().join(format!("dhctl-{tag}-{}-{nanos}", std::process::id()))
+        std::env::temp_dir().join(format!("bpctl-{tag}-{}-{nanos}", std::process::id()))
     }
 
     #[test]
@@ -778,12 +781,12 @@ mod tests {
         }
         assert!(!dir.exists());
         init(10).unwrap();
-        assert!(dir.join(dhpanel_pki::CA_KEY_FILE).exists());
+        assert!(dir.join(builtpanel_pki::CA_KEY_FILE).exists());
         // A second init is a data conflict and leaves the key alone.
-        let key_before = std::fs::read(dir.join(dhpanel_pki::CA_KEY_FILE)).unwrap();
+        let key_before = std::fs::read(dir.join(builtpanel_pki::CA_KEY_FILE)).unwrap();
         assert_eq!(init(10).unwrap_err().0, EXIT_DATAERR);
         assert_eq!(
-            std::fs::read(dir.join(dhpanel_pki::CA_KEY_FILE)).unwrap(),
+            std::fs::read(dir.join(builtpanel_pki::CA_KEY_FILE)).unwrap(),
             key_before
         );
 

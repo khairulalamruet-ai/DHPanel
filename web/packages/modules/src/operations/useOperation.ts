@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { apiFetch, getCsrfToken } from "@dhpanel/api";
+import { apiFetch, getCsrfToken } from "@builtpanel/api";
 import type { OperationItem } from "./types";
 
 export interface UseOperationOptions {

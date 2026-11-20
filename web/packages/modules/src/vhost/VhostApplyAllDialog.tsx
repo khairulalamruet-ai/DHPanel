@@ -7,8 +7,8 @@ import {
   DialogDescription,
   DialogFooter,
   Button,
-} from "@dhpanel/ui";
-import { apiFetch } from "@dhpanel/api";
+} from "@builtpanel/ui";
+import { apiFetch } from "@builtpanel/api";
 import { Send, CheckCircle2, AlertTriangle, RefreshCw, Server } from "lucide-react";
 import { useOperation } from "../operations/useOperation";
 import type { VhostTemplate, VhostApplyAllResponse } from "./types";

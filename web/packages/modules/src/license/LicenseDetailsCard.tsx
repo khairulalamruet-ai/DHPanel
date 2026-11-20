@@ -1,6 +1,6 @@
 import React, { useState } from "react";
-import { useTranslation } from "@dhpanel/i18n";
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, Button, Badge } from "@dhpanel/ui";
+import { useTranslation } from "@builtpanel/i18n";
+import { Card, CardHeader, CardTitle, CardDescription, CardContent, Button, Badge } from "@builtpanel/ui";
 import {
   KeyRound,
   Copy,

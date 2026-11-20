@@ -8,11 +8,11 @@ import {
   Button,
   Input,
   useToast,
-} from "@dhpanel/ui";
-import { apiFetch } from "@dhpanel/api";
+} from "@builtpanel/ui";
+import { apiFetch } from "@builtpanel/api";
 import { FilePlus, FolderPlus } from "lucide-react";
 import { CreateItemPayload } from "./types";
-import { useTranslation } from "@dhpanel/i18n";
+import { useTranslation } from "@builtpanel/i18n";
 
 interface CreateItemDialogProps {
   open: boolean;

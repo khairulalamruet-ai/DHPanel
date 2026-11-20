@@ -8,10 +8,10 @@
       "pluginName": "Prometheus"
     }
   ],
-  "title": "DHPanel fleet",
-  "uid": "dhpanel-fleet",
+  "title": "Built Panel fleet",
+  "uid": "builtpanel-fleet",
   "tags": [
-    "dhpanel"
+    "builtpanel"
   ],
   "timezone": "browser",
   "schemaVersion": 39,
@@ -58,7 +58,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "dhpanel_node_cpu_busy_ratio",
+          "expr": "builtpanel_node_cpu_busy_ratio",
           "legendFormat": "{{node}}",
           "datasource": {
             "type": "prometheus",
@@ -103,7 +103,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "dhpanel_node_memory_used_bytes",
+          "expr": "builtpanel_node_memory_used_bytes",
           "legendFormat": "{{node}} used",
           "datasource": {
             "type": "prometheus",
@@ -112,7 +112,7 @@
         },
         {
           "refId": "B",
-          "expr": "dhpanel_node_memory_total_bytes",
+          "expr": "builtpanel_node_memory_total_bytes",
           "legendFormat": "{{node}} total",
           "datasource": {
             "type": "prometheus",
@@ -157,7 +157,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "dhpanel_node_load1",
+          "expr": "builtpanel_node_load1",
           "legendFormat": "{{node}} load",
           "datasource": {
             "type": "prometheus",
@@ -166,7 +166,7 @@
         },
         {
           "refId": "B",
-          "expr": "dhpanel_node_cpus",
+          "expr": "builtpanel_node_cpus",
           "legendFormat": "{{node}} CPUs",
           "datasource": {
             "type": "prometheus",
@@ -211,7 +211,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "dhpanel_node_disk_used_bytes",
+          "expr": "builtpanel_node_disk_used_bytes",
           "legendFormat": "{{node}} used",
           "datasource": {
             "type": "prometheus",
@@ -220,7 +220,7 @@
         },
         {
           "refId": "B",
-          "expr": "dhpanel_node_disk_total_bytes",
+          "expr": "builtpanel_node_disk_total_bytes",
           "legendFormat": "{{node}} size",
           "datasource": {
             "type": "prometheus",
@@ -265,7 +265,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "dhpanel_node_containers",
+          "expr": "builtpanel_node_containers",
           "legendFormat": "{{node}}",
           "datasource": {
             "type": "prometheus",
@@ -310,7 +310,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "dhpanel_tenants",
+          "expr": "builtpanel_tenants",
           "legendFormat": "{{status}}",
           "datasource": {
             "type": "prometheus",
@@ -355,7 +355,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "topk(10, dhpanel_tenant_cpu_cores)",
+          "expr": "topk(10, builtpanel_tenant_cpu_cores)",
           "legendFormat": "{{account}}",
           "datasource": {
             "type": "prometheus",
@@ -400,7 +400,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "topk(10, dhpanel_tenant_memory_bytes)",
+          "expr": "topk(10, builtpanel_tenant_memory_bytes)",
           "legendFormat": "{{account}}",
           "datasource": {
             "type": "prometheus",
@@ -445,7 +445,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "topk(10, dhpanel_tenant_net_receive_bytes + dhpanel_tenant_net_transmit_bytes)",
+          "expr": "topk(10, builtpanel_tenant_net_receive_bytes + builtpanel_tenant_net_transmit_bytes)",
           "legendFormat": "{{account}}",
           "datasource": {
             "type": "prometheus",
@@ -490,7 +490,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "topk(10, dhpanel_tenant_io_write_bytes)",
+          "expr": "topk(10, builtpanel_tenant_io_write_bytes)",
           "legendFormat": "{{account}}",
           "datasource": {
             "type": "prometheus",
@@ -535,7 +535,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "dhpanel_operations",
+          "expr": "builtpanel_operations",
           "legendFormat": "{{status}}",
           "datasource": {
             "type": "prometheus",

@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { AdminQuickstartChecklist } from "../onboarding";
-import { useTranslation } from "@dhpanel/i18n";
-import { useSession } from "@dhpanel/auth";
-import { apiFetch } from "@dhpanel/api";
-import { Button } from "@dhpanel/ui";
+import { useTranslation } from "@builtpanel/i18n";
+import { useSession } from "@builtpanel/auth";
+import { apiFetch } from "@builtpanel/api";
+import { Button } from "@builtpanel/ui";
 import { LayoutGrid, RefreshCw, AlertCircle } from "lucide-react";
 import { HealthCard } from "./HealthCard";
 import {
@@ -21,7 +21,7 @@ import {
   LicenseStatusWidget,
 } from "./DashboardWidgets";
 
-const STORAGE_KEY = "dhpanel-admin-dashboard-layout";
+const STORAGE_KEY = "builtpanel-admin-dashboard-layout";
 
 const DEFAULT_WIDGETS: DashboardWidgetItem[] = [
   { id: "nodes_status", enabled: true, order: 0 },
@@ -65,7 +65,7 @@ const DEFAULT_SUMMARY: AdminDashboardSummary = {
     ssh_bans: 12,
   },
   license: {
-    tier: "DHPanel Enterprise Edition",
+    tier: "Built Panel Enterprise Edition",
     status: "active",
     signature_valid: true,
     expires_in_days: 305,
@@ -162,7 +162,7 @@ export function DashboardPage() {
             {t("common.dashboard", "Control Center")}
           </h1>
           <p className="text-sm text-muted-foreground">
-            {session?.branding?.companyName || "DHPanel"} Cloud Infrastructure Overview
+            {session?.branding?.companyName || "Built Panel"} Cloud Infrastructure Overview
           </p>
         </div>
 

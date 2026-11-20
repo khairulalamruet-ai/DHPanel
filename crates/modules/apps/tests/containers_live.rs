@@ -9,11 +9,11 @@ use axum::{
     body::Body,
     http::{Request, StatusCode, header},
 };
-use dhpanel_cache::RedisHandle;
-use dhpanel_database::modules as db;
-use dhpanel_kernel::{Manifest, Module, ModuleMount, ModuleRoutes, Registry};
-use dhpanel_mod_apps::{AppsState, admin_router, client_router};
-use dhpanel_session::{CSRF_HEADER, NewSession, SessionConfig, SessionStore, set_cookie};
+use builtpanel_cache::RedisHandle;
+use builtpanel_database::modules as db;
+use builtpanel_kernel::{Manifest, Module, ModuleMount, ModuleRoutes, Registry};
+use builtpanel_mod_apps::{AppsState, admin_router, client_router};
+use builtpanel_session::{CSRF_HEADER, NewSession, SessionConfig, SessionStore, set_cookie};
 use secrecy::SecretString;
 use serde_json::{Value, json};
 use sqlx::PgPool;
@@ -63,23 +63,23 @@ async fn env(pool: &PgPool) -> Env {
                 admin: Some(admin_router().with_state(AppsState {
                     db: pool.clone(),
                     sessions: sessions.clone(),
-                    master_key: dhpanel_auth_core::secretbox::MasterKey::from_bytes(&[42; 32]),
+                    master_key: builtpanel_auth_core::secretbox::MasterKey::from_bytes(&[42; 32]),
                     wait: std::time::Duration::from_millis(300),
-                    catalog: std::sync::Arc::new(dhpanel_catalog::Catalog::embedded().unwrap()),
+                    catalog: std::sync::Arc::new(builtpanel_catalog::Catalog::embedded().unwrap()),
                 })),
                 client: Some(client_router().with_state(AppsState {
                     db: pool.clone(),
                     sessions: sessions.clone(),
-                    master_key: dhpanel_auth_core::secretbox::MasterKey::from_bytes(&[42; 32]),
+                    master_key: builtpanel_auth_core::secretbox::MasterKey::from_bytes(&[42; 32]),
                     wait: std::time::Duration::from_millis(300),
-                    catalog: std::sync::Arc::new(dhpanel_catalog::Catalog::embedded().unwrap()),
+                    catalog: std::sync::Arc::new(builtpanel_catalog::Catalog::embedded().unwrap()),
                 })),
-                public: Some(dhpanel_mod_apps::public_router().with_state(AppsState {
+                public: Some(builtpanel_mod_apps::public_router().with_state(AppsState {
                     db: pool.clone(),
                     sessions: sessions.clone(),
-                    master_key: dhpanel_auth_core::secretbox::MasterKey::from_bytes(&[42; 32]),
+                    master_key: builtpanel_auth_core::secretbox::MasterKey::from_bytes(&[42; 32]),
                     wait: std::time::Duration::from_millis(300),
-                    catalog: std::sync::Arc::new(dhpanel_catalog::Catalog::embedded().unwrap()),
+                    catalog: std::sync::Arc::new(builtpanel_catalog::Catalog::embedded().unwrap()),
                 })),
             }
         }),
@@ -229,7 +229,7 @@ async fn admin(pool: &PgPool) -> Uuid {
     .fetch_one(pool)
     .await
     .unwrap();
-    dhpanel_database::rbac::assign_role(pool, id, "super_admin", None)
+    builtpanel_database::rbac::assign_role(pool, id, "super_admin", None)
         .await
         .unwrap();
     id

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-command installer: downloads a DHPanel release, checks it and runs install.sh from it.
+# One-command installer: downloads a Built Panel release, checks it and runs install.sh from it.
 #
 #   curl -fsSL https://github.com/khairulalamruet-ai/DHPanel/releases/latest/download/get.sh | sudo bash
 #
@@ -42,8 +42,29 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-die() { echo "get.sh: $*" >&2; exit 1; }
-say() { echo "==> $*"; }
+# The installer's look (deploy/ui.sh). The published get.sh carries a copy of it right below
+# the marker (the release puts it there); run from a checkout, it reads the file next to it;
+# otherwise the steps are plain lines.
+# @UI@
+if ! declare -F ui_init > /dev/null; then
+    if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "$(dirname "${BASH_SOURCE[0]}")/ui.sh" ]; then
+        # shellcheck source=deploy/ui.sh
+        . "$(dirname "${BASH_SOURCE[0]}")/ui.sh"
+    else
+        ui_init() { exec 3>&1 4>&2; }
+        ui_banner() { :; }
+        ui_step() { echo "==> $1"; }
+        ui_fail() { echo "get.sh: $1" >&2; }
+        ui_cleanup() { :; }
+        _ui_end_step() { :; }
+    fi
+fi
+UI_TOTAL=6
+ui_init
+ui_banner "the modern hosting control panel  ·  installer"
+
+die() { ui_fail "$*"; exit 1; }
+say() { ui_step "$*"; }
 
 [ "$(uname -s)" = Linux ] || die "Linux only"
 [ "$(id -u)" -eq 0 ] || die "run as root: curl -fsSL <url> | sudo bash"
@@ -56,8 +77,8 @@ if ! command -v curl > /dev/null || ! command -v tar > /dev/null; then
     DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl tar ca-certificates > /dev/null
 fi
 
-WORK="$(mktemp -d /var/tmp/dhpanel-get.XXXXXX)"
-trap 'rm -rf "$WORK"' EXIT
+WORK="$(mktemp -d /var/tmp/builtpanel-get.XXXXXX)"
+trap 'ui_cleanup; rm -rf "$WORK"' EXIT
 
 # --- the release ----------------------------------------------------------------------------
 if [ -n "$TARBALL" ]; then
@@ -66,15 +87,15 @@ if [ -n "$TARBALL" ]; then
     [ ! -f "$TARBALL.sha256" ] || { cp "$TARBALL.sha256" "$WORK/release.sha256"; }
 elif [ -n "$BASE_URL" ]; then
     [[ "$BASE_URL" =~ ^https:// ]] || die "--url must start with https://"
-    # The archive is dhpanel-<version>-linux-<arch>.tar.gz; without --version the newest one named
+    # The archive is builtpanel-<version>-linux-<arch>.tar.gz; without --version the newest one named
     # in BASE/latest (a one-line text file holding the version) is taken.
     if [ -z "$VERSION" ]; then
         VERSION=$(curl -fsSL ${HEADER[@]+"${HEADER[@]}"} "$BASE_URL/latest" | tr -d ' \r\n') || die "cannot read $BASE_URL/latest (or give --version)"
     fi
     [[ "$VERSION" =~ ^[0-9A-Za-z][0-9A-Za-z.+-]*$ ]] || die "the version does not look like a version number"
-    name="dhpanel-${VERSION}-linux-${ARCH}.tar.gz"
-    say "downloading DHPanel $VERSION ($ARCH) from $BASE_URL"
-    curl -fSL --retry 3 ${HEADER[@]+"${HEADER[@]}"} -o "$WORK/release.tar.gz" "$BASE_URL/$name" || die "cannot download $BASE_URL/$name"
+    name="builtpanel-${VERSION}-linux-${ARCH}.tar.gz"
+    say "downloading Built Panel $VERSION ($ARCH) from $BASE_URL"
+    curl -fsSL --retry 3 ${HEADER[@]+"${HEADER[@]}"} -o "$WORK/release.tar.gz" "$BASE_URL/$name" || die "cannot download $BASE_URL/$name"
     curl -fsSL --retry 3 ${HEADER[@]+"${HEADER[@]}"} -o "$WORK/release.sha256" "$BASE_URL/$name.sha256" || die "cannot download the checksum"
 else
     if [ -z "$VERSION" ]; then
@@ -86,14 +107,14 @@ else
         VERSION="${tag#v}"
     fi
     [[ "$VERSION" =~ ^[0-9A-Za-z][0-9A-Za-z.+-]*$ ]] || die "--version does not look like a version number"
-    name="dhpanel-${VERSION}-linux-${ARCH}.tar.gz"
+    name="builtpanel-${VERSION}-linux-${ARCH}.tar.gz"
     base="https://github.com/$REPO/releases/download/v${VERSION}"
-    say "downloading DHPanel $VERSION ($ARCH)"
-    curl -fSL --retry 3 -o "$WORK/release.tar.gz" "$base/$name" || die "cannot download $base/$name"
+    say "downloading Built Panel $VERSION ($ARCH)"
+    curl -fsSL --retry 3 -o "$WORK/release.tar.gz" "$base/$name" || die "cannot download $base/$name"
     curl -fsSL --retry 3 -o "$WORK/release.sha256" "$base/$name.sha256" || die "cannot download the checksum $base/$name.sha256"
 fi
 # The checksum is published next to the archive (the signed manifest of the release covers it
-# again, and `dhctl release verify` checks the installed programs against it later).
+# again, and `bpctl release verify` checks the installed programs against it later).
 if [ -f "$WORK/release.sha256" ]; then
     say "checking the download"
     want=$(awk '{print $1; exit}' "$WORK/release.sha256")
@@ -108,7 +129,7 @@ fi
 say "unpacking"
 mkdir "$WORK/release"
 tar -xzf "$WORK/release.tar.gz" -C "$WORK/release" --strip-components=1 --no-same-owner
-[ -x "$WORK/release/install.sh" ] && [ -d "$WORK/release/bin" ] || die "the archive is not a DHPanel release (no install.sh and bin/)"
+[ -x "$WORK/release/install.sh" ] && [ -d "$WORK/release/bin" ] || die "the archive is not a Built Panel release (no install.sh and bin/)"
 
 # --- defaults that make it one command -------------------------------------------------------
 if [ -z "$HOSTNAME_FQDN" ]; then
@@ -121,5 +142,7 @@ if [ -z "$HOSTNAME_FQDN" ]; then
 fi
 [ -n "$ADMIN_EMAIL" ] || ADMIN_EMAIL="admin@$HOSTNAME_FQDN"
 
-say "running the installer"
-"$WORK/release/install.sh" --bin-dir "$WORK/release/bin" --hostname "$HOSTNAME_FQDN" --admin-email "$ADMIN_EMAIL" ${PASS[@]+"${PASS[@]}"}
+say "starting the installer"
+_ui_end_step
+# The installer goes on with the same look, without drawing the logo again.
+BUILTPANEL_UI_BANNER=0 "$WORK/release/install.sh" --bin-dir "$WORK/release/bin" --hostname "$HOSTNAME_FQDN" --admin-email "$ADMIN_EMAIL" ${PASS[@]+"${PASS[@]}"}

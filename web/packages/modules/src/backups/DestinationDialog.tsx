@@ -8,10 +8,10 @@ import {
   Button,
   Input,
   useToast,
-} from "@dhpanel/ui";
-import { apiFetch } from "@dhpanel/api";
+} from "@builtpanel/ui";
+import { apiFetch } from "@builtpanel/api";
 import { HardDrive, Cloud, Server, CheckCircle2, AlertTriangle, RefreshCw } from "lucide-react";
-import { useTranslation } from "@dhpanel/i18n";
+import { useTranslation } from "@builtpanel/i18n";
 import { BackupDestinationType } from "./types";
 
 interface DestinationDialogProps {
@@ -30,7 +30,7 @@ export function DestinationDialog({
 
   const [type, setType] = useState<BackupDestinationType>("s3");
   const [name, setName] = useState("");
-  const [localPath, setLocalPath] = useState("/var/backups/dhpanel");
+  const [localPath, setLocalPath] = useState("/var/backups/builtpanel");
 
   // S3 fields
   const [s3Bucket, setS3Bucket] = useState("");
@@ -209,7 +209,7 @@ export function DestinationDialog({
               <Input
                 value={localPath}
                 onChange={(e) => setLocalPath(e.target.value)}
-                placeholder="/var/backups/dhpanel"
+                placeholder="/var/backups/builtpanel"
                 className="font-mono text-xs"
                 data-testid="input-local-path"
               />

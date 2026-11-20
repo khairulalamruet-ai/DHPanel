@@ -23,7 +23,7 @@ use crate::{
     quota, skeleton,
 };
 
-/// First and one-past-last tenant id (kept in step with `dhpanel_domain::UidRange::DEFAULT`).
+/// First and one-past-last tenant id (kept in step with `builtpanel_domain::UidRange::DEFAULT`).
 pub const UID_START: u32 = 10_000;
 /// See [`UID_START`].
 pub const UID_END: u32 = 60_000;
@@ -389,8 +389,8 @@ mod tests {
 
     #[test]
     fn tenant_ids_map_into_the_agents_subordinate_range() {
-        let text = "dev:100000:65536\ndhpanel-agent:165536:65536\n";
-        let range = subuid_range(text, "dhpanel-agent").unwrap();
+        let text = "dev:100000:65536\nbuiltpanel-agent:165536:65536\n";
+        let range = subuid_range(text, "builtpanel-agent").unwrap();
         assert_eq!(range, (165_536, 65_536));
         assert_eq!(host_uid(range, 10_000).unwrap(), 165_536 + 9_999);
         assert_eq!(host_uid(range, 59_999).unwrap(), 165_536 + 59_998);
@@ -407,9 +407,12 @@ mod tests {
             ErrorCode::Failed
         );
         assert_eq!(subuid_range(text, "nobody"), None);
-        assert_eq!(subuid_range("dhpanel-agent:x:y", "dhpanel-agent"), None);
         assert_eq!(
-            subuid_range("dhpanel-agent-two:1:2", "dhpanel-agent"),
+            subuid_range("builtpanel-agent:x:y", "builtpanel-agent"),
+            None
+        );
+        assert_eq!(
+            subuid_range("builtpanel-agent-two:1:2", "builtpanel-agent"),
             None,
             "whole names only"
         );
@@ -586,7 +589,7 @@ mod tests {
         let root = scratch("bad");
         let env = TenantEnv {
             root: root.clone(),
-            agent_name: "dhpanel-agent".into(),
+            agent_name: "builtpanel-agent".into(),
             subuid_file: "/nonexistent".into(),
             agent_gid: 0,
             mountinfo: "/nonexistent".into(),
@@ -611,7 +614,7 @@ mod tests {
         let (_, gid) = me();
         let env = TenantEnv {
             root: root.clone(),
-            agent_name: "dhpanel-agent".into(),
+            agent_name: "builtpanel-agent".into(),
             subuid_file: "/nonexistent".into(),
             agent_gid: gid,
             mountinfo: "/proc/self/mountinfo".into(),

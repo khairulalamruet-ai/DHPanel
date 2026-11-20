@@ -8,9 +8,9 @@ import {
   Button,
   Input,
   Badge,
-} from "@dhpanel/ui";
+} from "@builtpanel/ui";
 import { ShieldOff, AlertTriangle } from "lucide-react";
-import { useTranslation } from "@dhpanel/i18n";
+import { useTranslation } from "@builtpanel/i18n";
 
 interface DisableRuleDialogProps {
   open: boolean;

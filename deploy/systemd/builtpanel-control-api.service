@@ -1,33 +1,33 @@
-# The DHPanel control plane (T19.02). It never runs as root: it needs the network (its own
+# The Built Panel control plane (T19.02). It never runs as root: it needs the network (its own
 # port, PostgreSQL, Redis, the agent port), its configuration (read only) and a few folders it
 # writes (uploaded dumps, the scratch folder of backups, its licensing identity). Anything that
 # needs more is done by the node agent and the privileged helper on the nodes, not here.
 #
-#   systemd-analyze security --offline=true dhpanel-control-api.service   # exposure below 3
+#   systemd-analyze security --offline=true builtpanel-control-api.service   # exposure below 3
 [Unit]
-Description=DHPanel control plane
-Documentation=https://docs.dhpanel.dev/control-plane
+Description=Built Panel control plane
+Documentation=https://docs.builtpanel.dev/control-plane
 After=network-online.target postgresql.service redis-server.service
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=dhpanel
-Group=dhpanel
-ExecStart=/usr/local/bin/dhpanel-control-api
-Environment=DHPANEL_CONFIG=/etc/dhpanel/control.toml
+User=builtpanel
+Group=builtpanel
+ExecStart=/usr/local/bin/builtpanel-control-api
+Environment=BUILTPANEL_CONFIG=/etc/builtpanel/control.toml
 Restart=always
 RestartSec=3
 TimeoutStopSec=30
 # One signal asks it to stop the API, the agent port and the dispatcher.
 KillSignal=SIGTERM
 
-# What it may write: /var/lib/dhpanel (uploads, scratch, the licensing identity). The
-# configuration and the secrets in /etc/dhpanel are read only (ProtectSystem=strict; a
+# What it may write: /var/lib/builtpanel (uploads, scratch, the licensing identity). The
+# configuration and the secrets in /etc/builtpanel are read only (ProtectSystem=strict; a
 # ConfigurationDirectory= line would make that folder writable, which is why it is not used).
-StateDirectory=dhpanel
+StateDirectory=builtpanel
 StateDirectoryMode=0700
-ReadWritePaths=/var/lib/dhpanel
+ReadWritePaths=/var/lib/builtpanel
 
 # --- Hardening.
 NoNewPrivileges=yes

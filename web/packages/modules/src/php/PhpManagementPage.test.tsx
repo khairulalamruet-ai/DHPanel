@@ -1,8 +1,8 @@
 import React from "react";
 import { describe, it, expect, beforeEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
-import { ToastProvider } from "@dhpanel/ui";
-import { resetMockPhp } from "@dhpanel/api";
+import { ToastProvider } from "@builtpanel/ui";
+import { resetMockPhp } from "@builtpanel/api";
 import { PhpManagementPage } from "./PhpManagementPage";
 
 function renderWithProviders(ui: React.ReactElement) {

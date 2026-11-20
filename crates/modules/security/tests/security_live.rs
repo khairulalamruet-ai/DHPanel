@@ -9,11 +9,11 @@ use axum::{
     body::Body,
     http::{Request, StatusCode, header},
 };
-use dhpanel_cache::RedisHandle;
-use dhpanel_database::modules as db;
-use dhpanel_kernel::{Manifest, Module, ModuleMount, ModuleRoutes, Registry};
-use dhpanel_mod_security::{SecurityState, admin_router, client_router};
-use dhpanel_session::{CSRF_HEADER, NewSession, SessionConfig, SessionStore, set_cookie};
+use builtpanel_cache::RedisHandle;
+use builtpanel_database::modules as db;
+use builtpanel_kernel::{Manifest, Module, ModuleMount, ModuleRoutes, Registry};
+use builtpanel_mod_security::{SecurityState, admin_router, client_router};
+use builtpanel_session::{CSRF_HEADER, NewSession, SessionConfig, SessionStore, set_cookie};
 use secrecy::SecretString;
 use serde_json::{Value, json};
 use sqlx::PgPool;
@@ -214,7 +214,7 @@ async fn the_most_specific_policy_decides_and_clients_are_kept_to_their_own_doma
     .fetch_one(&pool)
     .await
     .unwrap();
-    dhpanel_database::rbac::assign_role(&pool, admin_id, "super_admin", None)
+    builtpanel_database::rbac::assign_role(&pool, admin_id, "super_admin", None)
         .await
         .unwrap();
     let root = e.sign_in(admin_id).await;
@@ -482,7 +482,7 @@ async fn administrators_keep_the_list_of_refused_user_agents(pool: PgPool) {
     .fetch_one(&pool)
     .await
     .unwrap();
-    dhpanel_database::rbac::assign_role(&pool, admin_id, "super_admin", None)
+    builtpanel_database::rbac::assign_role(&pool, admin_id, "super_admin", None)
         .await
         .unwrap();
     let root = e.sign_in(admin_id).await;
@@ -573,7 +573,7 @@ async fn administrators_set_a_nodes_firewall_and_a_bad_policy_is_refused(pool: P
     .fetch_one(&pool)
     .await
     .unwrap();
-    dhpanel_database::rbac::assign_role(&pool, admin_id, "super_admin", None)
+    builtpanel_database::rbac::assign_role(&pool, admin_id, "super_admin", None)
         .await
         .unwrap();
     let root = e.sign_in(admin_id).await;
@@ -657,7 +657,7 @@ async fn malware_scans_are_asked_for_listed_and_only_one_runs_at_a_time(pool: Pg
     .fetch_one(&pool)
     .await
     .unwrap();
-    dhpanel_database::rbac::assign_role(&pool, admin_id, "super_admin", None)
+    builtpanel_database::rbac::assign_role(&pool, admin_id, "super_admin", None)
         .await
         .unwrap();
     let root = e.sign_in(admin_id).await;
@@ -689,20 +689,22 @@ async fn malware_scans_are_asked_for_listed_and_only_one_runs_at_a_time(pool: Pg
     );
     // The dispatcher's part: sent, then finished with what the node found.
     let id: Uuid = made["id"].as_str().unwrap().parse().unwrap();
-    let queued = dhpanel_database::malware::queued(&pool, 10).await.unwrap();
+    let queued = builtpanel_database::malware::queued(&pool, 10)
+        .await
+        .unwrap();
     assert_eq!(queued.len(), 1);
     assert_eq!(queued[0].folder.as_deref(), Some("wp-content/uploads"));
     assert!(queued[0].quarantine);
     // (The operation's own row is the dispatcher's business; the scan only keeps its id.)
     let op = Uuid::new_v4();
-    dhpanel_database::malware::sent(&pool, id, op)
+    builtpanel_database::malware::sent(&pool, id, op)
         .await
         .unwrap();
     // Still one at a time while it runs.
     let (status, _) = e.call(&a, "POST", own, Some(json!({}))).await;
     assert_eq!(status, StatusCode::CONFLICT);
     let findings = json!([{"path": "www/wp-content/uploads/x.php", "signature": "Php.Trojan.Agent", "quarantined": true}]);
-    dhpanel_database::malware::finish(&pool, id, 1234, &findings, false)
+    builtpanel_database::malware::finish(&pool, id, 1234, &findings, false)
         .await
         .unwrap();
     let (status, list) = e.call(&a, "GET", own, None).await;
@@ -727,7 +729,7 @@ async fn malware_scans_are_asked_for_listed_and_only_one_runs_at_a_time(pool: Pg
     let (_, list) = e.call(&root, "GET", &path, None).await;
     assert_eq!(list["items"].as_array().unwrap().len(), 2);
     // A tenant just scanned is not due for the scheduled scan; one never scanned would be.
-    let due = dhpanel_database::malware::due(&pool, "malware", 7 * 24 * 3600, 10)
+    let due = builtpanel_database::malware::due(&pool, "malware", 7 * 24 * 3600, 10)
         .await
         .unwrap();
     assert!(!due.contains(&tenant));
@@ -753,7 +755,7 @@ async fn an_old_plugin_is_reported_against_the_advisories(pool: PgPool) {
     .fetch_one(&pool)
     .await
     .unwrap();
-    dhpanel_database::rbac::assign_role(&pool, admin_id, "super_admin", None)
+    builtpanel_database::rbac::assign_role(&pool, admin_id, "super_admin", None)
         .await
         .unwrap();
     let root = e.sign_in(admin_id).await;
@@ -815,7 +817,7 @@ async fn an_old_plugin_is_reported_against_the_advisories(pool: PgPool) {
         (StatusCode::CONFLICT, Some("scan_under_way"))
     );
     let id: Uuid = made["id"].as_str().unwrap().parse().unwrap();
-    dhpanel_database::malware::sent(&pool, id, Uuid::new_v4())
+    builtpanel_database::malware::sent(&pool, id, Uuid::new_v4())
         .await
         .unwrap();
     let installs = json!([{
@@ -823,7 +825,7 @@ async fn an_old_plugin_is_reported_against_the_advisories(pool: PgPool) {
         "plugins": [{"slug": "old-forms", "version": "1.2.3"}, {"slug": "fine", "version": "9.9"}, {"slug": "unknown-version", "version": ""}],
         "themes": []
     }]);
-    dhpanel_database::malware::finish(&pool, id, 1, &installs, false)
+    builtpanel_database::malware::finish(&pool, id, 1, &installs, false)
         .await
         .unwrap();
     let (status, list) = e.call(&a, "GET", own, None).await;
@@ -883,14 +885,14 @@ async fn the_images_of_the_list_show_their_findings_and_whether_a_newer_one_exis
     .fetch_one(&pool)
     .await
     .unwrap();
-    dhpanel_database::rbac::assign_role(&pool, admin_id, "super_admin", None)
+    builtpanel_database::rbac::assign_role(&pool, admin_id, "super_admin", None)
         .await
         .unwrap();
     let root = e.sign_in(admin_id).await;
     let digest = format!("sha256:{}", "a".repeat(64));
     let newer = format!("sha256:{}", "b".repeat(64));
     let image = format!("php@{digest}");
-    dhpanel_database::images::sync(
+    builtpanel_database::images::sync(
         &pool,
         &[
             (
@@ -918,15 +920,15 @@ async fn the_images_of_the_list_show_their_findings_and_whether_a_newer_one_exis
     assert!(list["items"][0]["scanned_at"].is_null());
     assert_eq!(list["items"][0]["update_available"], false);
     // The dispatcher's findings and the registry's answer arrive.
-    let next = dhpanel_database::images::next_to_scan(&pool, 86_400)
+    let next = builtpanel_database::images::next_to_scan(&pool, 86_400)
         .await
         .unwrap();
     assert!(next.is_some());
     let top = json!([{"id": "CVE-2025-1", "package": "openssl", "installed": "1", "fixed": "2", "severity": "CRITICAL", "title": "bad"}]);
-    dhpanel_database::images::store_scan(&pool, &image, [1, 2, 3, 4], &top)
+    builtpanel_database::images::store_scan(&pool, &image, [1, 2, 3, 4], &top)
         .await
         .unwrap();
-    dhpanel_database::images::store_digest(&pool, "php", "8.4-fpm-alpine", &newer)
+    builtpanel_database::images::store_digest(&pool, "php", "8.4-fpm-alpine", &newer)
         .await
         .unwrap();
     let (_, list) = e.call(&root, "GET", path, None).await;
@@ -947,7 +949,7 @@ async fn the_images_of_the_list_show_their_findings_and_whether_a_newer_one_exis
     assert_eq!(php["update_available"], true);
     assert_eq!(php["latest_digest"], newer);
     // A scan just done is not due again for a day; the other image (never scanned) is.
-    let due = dhpanel_database::images::next_to_scan(&pool, 86_400)
+    let due = builtpanel_database::images::next_to_scan(&pool, 86_400)
         .await
         .unwrap();
     assert_eq!(due.as_deref(), Some(format!("mariadb@{digest}").as_str()));
@@ -983,7 +985,7 @@ async fn the_images_of_the_list_show_their_findings_and_whether_a_newer_one_exis
         )
         .await;
     assert_eq!(status, StatusCode::ACCEPTED);
-    let due = dhpanel_database::images::next_to_scan(&pool, 86_400)
+    let due = builtpanel_database::images::next_to_scan(&pool, 86_400)
         .await
         .unwrap();
     assert_eq!(due.as_deref(), Some(image.as_str()));

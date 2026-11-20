@@ -229,14 +229,14 @@ export const getInitialSettingsStore = () => ({
           type: "string",
           title: "Panel Name",
           description: "Name displayed across headers, emails, and login pages",
-          default: "DHPanel",
+          default: "Built Panel",
         },
         support_email: {
           type: "string",
           format: "email",
           title: "Support Contact Email",
           description: "Inquiries and customer issue reports will be directed here",
-          default: "support@dhpanel.local",
+          default: "support@builtpanel.local",
         },
         session_timeout: {
           type: "integer",
@@ -257,16 +257,16 @@ export const getInitialSettingsStore = () => ({
           title: "Default Language",
           enum: ["bn", "en"],
           enumNames: ["বাংলা", "English"],
-          default: "bn",
+          default: "en",
         },
       },
     },
     values: {
-      panel_name: "DHPanel",
-      support_email: "support@dhpanel.local",
+      panel_name: "Built Panel",
+      support_email: "support@builtpanel.local",
       session_timeout: 60,
       maintenance_mode: false,
-      default_locale: "bn",
+      default_locale: "en",
     },
   },
   security: {
@@ -381,7 +381,7 @@ export const getInitialSettingsStore = () => ({
           format: "email",
           title: "Alert Recipient Email",
           description: "Destination address for critical node alarms",
-          default: "alerts@dhpanel.local",
+          default: "alerts@builtpanel.local",
         },
         notify_on_node_offline: {
           type: "boolean",
@@ -398,7 +398,7 @@ export const getInitialSettingsStore = () => ({
       },
     },
     values: {
-      alert_email: "alerts@dhpanel.local",
+      alert_email: "alerts@builtpanel.local",
       notify_on_node_offline: true,
       slack_webhook_url: "",
     },
@@ -942,7 +942,7 @@ const getInitialOperations = (): any[] => [
     tenant_id: null,
     status: "succeeded",
     retries_count: 0,
-    payload: { echo: "dhpanel-heartbeat", timestamp: new Date(Date.now() - 60000).toISOString() },
+    payload: { echo: "builtpanel-heartbeat", timestamp: new Date(Date.now() - 60000).toISOString() },
     output: { pong: true, latency_ms: 1.4 },
     error: null,
     created_at: new Date(Date.now() - 65000).toISOString(),
@@ -1059,7 +1059,7 @@ const getInitialDnsZones = (): MockDnsZone[] => [
     domain_id: "dom_01",
     domain_name: "alpha-hosting.com",
     tenant_id: "usr_0001",
-    nameservers: ["ns1.dhpanel.net", "ns2.dhpanel.net"],
+    nameservers: ["ns1.builtpanel.net", "ns2.builtpanel.net"],
     soa_serial: 2026111301,
     records_count: 7,
     is_custom_ns: false,
@@ -1071,7 +1071,7 @@ const getInitialDnsZones = (): MockDnsZone[] => [
     domain_id: "dom_02",
     domain_name: "blog.alpha-hosting.com",
     tenant_id: "usr_0001",
-    nameservers: ["ns1.dhpanel.net", "ns2.dhpanel.net"],
+    nameservers: ["ns1.builtpanel.net", "ns2.builtpanel.net"],
     soa_serial: 2026111302,
     records_count: 2,
     is_custom_ns: false,
@@ -1083,7 +1083,7 @@ const getInitialDnsZones = (): MockDnsZone[] => [
     domain_id: "dom_03",
     domain_name: "beta-app.io",
     tenant_id: "usr_0001",
-    nameservers: ["ns1.dhpanel.net", "ns2.dhpanel.net"],
+    nameservers: ["ns1.builtpanel.net", "ns2.builtpanel.net"],
     soa_serial: 2026111303,
     records_count: 2,
     is_custom_ns: false,
@@ -1241,7 +1241,7 @@ export const getInitialDnsClusterServers = (): MockDnsClusterServer[] => [
   {
     id: "dns_srv_01",
     name: "Primary PowerDNS US-East",
-    hostname: "ns1.dhpanel.internal",
+    hostname: "ns1.builtpanel.internal",
     ip_address: "192.0.2.11",
     port: 53,
     api_url: "http://192.0.2.11:8081",
@@ -1256,7 +1256,7 @@ export const getInitialDnsClusterServers = (): MockDnsClusterServer[] => [
   {
     id: "dns_srv_02",
     name: "Secondary PowerDNS EU-Central",
-    hostname: "ns2.dhpanel.internal",
+    hostname: "ns2.builtpanel.internal",
     ip_address: "198.51.100.22",
     port: 53,
     api_url: "http://198.51.100.22:8081",
@@ -1271,7 +1271,7 @@ export const getInitialDnsClusterServers = (): MockDnsClusterServer[] => [
   {
     id: "dns_srv_03",
     name: "Edge Replica PowerDNS AP-South",
-    hostname: "ns3.dhpanel.internal",
+    hostname: "ns3.builtpanel.internal",
     ip_address: "203.0.113.33",
     port: 53,
     api_url: "http://203.0.113.33:8081",
@@ -1381,7 +1381,7 @@ const getInitialSslCertificates = (): MockSslCert[] => [
     domain_name: "dev.internal-net.org",
     status: "self_signed",
     type: "self_signed",
-    issuer: "DHPanel Internal Self-Signed CA",
+    issuer: "Built Panel Internal Self-Signed CA",
     subject: "CN=dev.internal-net.org",
     sans: ["dev.internal-net.org"],
     expires_at: new Date(Date.now() + 350 * 86400 * 1000).toISOString(),
@@ -1844,8 +1844,8 @@ const getInitialPageTemplates = (): MockPageTemplate[] => [
     variables: [
       { name: "{{domain}}", description: "Suspended domain name", sample: "example.com" },
       { name: "{{reason}}", description: "Reason for domain suspension", sample: "Terms of service review" },
-      { name: "{{contact_email}}", description: "Support or admin contact email", sample: "admin@dhpanel.net" },
-      { name: "{{panel_name}}", description: "Platform / branding name", sample: "DHPanel" },
+      { name: "{{contact_email}}", description: "Support or admin contact email", sample: "admin@builtpanel.net" },
+      { name: "{{panel_name}}", description: "Platform / branding name", sample: "Built Panel" },
       { name: "{{year}}", description: "Current calendar year", sample: "2026" },
     ],
   },
@@ -1862,8 +1862,8 @@ const getInitialPageTemplates = (): MockPageTemplate[] => [
     variables: [
       { name: "{{username}}", description: "Suspended user account name", sample: "tenant_user" },
       { name: "{{domain}}", description: "Domain name being accessed", sample: "client-site.com" },
-      { name: "{{contact_email}}", description: "Administrative support email", sample: "support@dhpanel.net" },
-      { name: "{{panel_name}}", description: "Platform / branding name", sample: "DHPanel" },
+      { name: "{{contact_email}}", description: "Administrative support email", sample: "support@builtpanel.net" },
+      { name: "{{panel_name}}", description: "Platform / branding name", sample: "Built Panel" },
       { name: "{{year}}", description: "Current calendar year", sample: "2026" },
     ],
   },
@@ -1880,7 +1880,7 @@ const getInitialPageTemplates = (): MockPageTemplate[] => [
     variables: [
       { name: "{{domain}}", description: "Host domain name", sample: "my-app.net" },
       { name: "{{path}}", description: "Missing request path", sample: "/old-missing-page" },
-      { name: "{{panel_name}}", description: "Platform / branding name", sample: "DHPanel" },
+      { name: "{{panel_name}}", description: "Platform / branding name", sample: "Built Panel" },
       { name: "{{year}}", description: "Current calendar year", sample: "2026" },
     ],
   },
@@ -1897,7 +1897,7 @@ const getInitialPageTemplates = (): MockPageTemplate[] => [
     variables: [
       { name: "{{domain}}", description: "Host domain name", sample: "api-server.org" },
       { name: "{{service}}", description: "Failing upstream daemon name", sample: "php-fpm-8.3" },
-      { name: "{{panel_name}}", description: "Platform / branding name", sample: "DHPanel" },
+      { name: "{{panel_name}}", description: "Platform / branding name", sample: "Built Panel" },
       { name: "{{year}}", description: "Current calendar year", sample: "2026" },
     ],
   },
@@ -1926,7 +1926,7 @@ const getInitialPreviewLinks = (): Record<string, MockPreviewLink> => ({
     target_domain: "blog.alpha-hosting.com",
     enabled: true,
     token: "exp_test_7890",
-    url: "https://exp_test_7890.preview.dhpanel.net",
+    url: "https://exp_test_7890.preview.builtpanel.net",
     created_at: new Date(Date.now() - 48 * 3600 * 1000).toISOString(),
     expires_at: new Date(Date.now() - 24 * 3600 * 1000).toISOString(), // Expired
     ttl_hours: 24,
@@ -2040,7 +2040,7 @@ export const resetMockDatabases = () => {
 const mockMe = {
   id: "00000000-0000-0000-0000-000000000001",
   username: "admin",
-  email: "admin@dhpanel.local",
+  email: "admin@builtpanel.local",
   kind: "admin",
   locale: "bn",
   mfa_enabled: false,
@@ -2090,7 +2090,7 @@ export const handlers = [
         id: mockMe.id,
         username: mockMe.username,
         email: mockMe.email,
-        name: "DHPanel Super Admin",
+        name: "Built Panel Super Admin",
       },
       roles: ["super_admin"],
       permissions: ["*"],
@@ -2098,7 +2098,7 @@ export const handlers = [
       features: ["all"],
       limits: {},
       branding: {
-        companyName: "DHPanel",
+        companyName: "Built Panel",
         logoUrl: "/logo.svg",
       },
       locale: "bn",
@@ -2119,7 +2119,7 @@ export const handlers = [
       modules: ["dashboard", "domains", "files", "security"],
       features: ["domains", "redirects"],
       limits: { max_domains: 5, used_domains: 1 },
-      branding: { companyName: "DHPanel" },
+      branding: { companyName: "Built Panel" },
       locale: "bn",
       csrfToken: "mock-csrf-token-client-12345",
     });
@@ -2159,7 +2159,7 @@ export const handlers = [
     return HttpResponse.json({
       ...mockMe,
       username: login,
-      email: `${login}@dhpanel.local`,
+      email: `${login}@builtpanel.local`,
     });
   }),
 
@@ -2178,7 +2178,7 @@ export const handlers = [
     return HttpResponse.json({
       ...mockMe,
       username: "admin_2fa",
-      email: "admin_2fa@dhpanel.local",
+      email: "admin_2fa@builtpanel.local",
       mfa_enabled: true,
     });
   }),
@@ -2212,7 +2212,7 @@ export const handlers = [
   http.post(/\/api\/v1\/auth\/mfa\/totp\/enroll$/, () => {
     return HttpResponse.json({
       secret: "JBSWY3DPEHPK3PXP",
-      otpauth_uri: "otpauth://totp/DHPanel:admin@dhpanel.local?secret=JBSWY3DPEHPK3PXP&issuer=DHPanel",
+      otpauth_uri: "otpauth://totp/Built%20Panel:admin@builtpanel.local?secret=JBSWY3DPEHPK3PXP&issuer=Built%20Panel",
     });
   }),
 
@@ -2397,7 +2397,7 @@ export const handlers = [
       {
         id: "00000000-0000-0000-0000-0000000000aa",
         name: "node-master-01",
-        hostname: "cp1.dhpanel.net",
+        hostname: "cp1.builtpanel.net",
         ip_address: "167.104.101.81",
         status: "online",
         version: "0.1.0",
@@ -2433,7 +2433,7 @@ export const handlers = [
       {
         id: "00000000-0000-0000-0000-0000000000bb",
         name: "node-worker-02",
-        hostname: "worker2.dhpanel.net",
+        hostname: "worker2.builtpanel.net",
         ip_address: "167.104.101.82",
         status: "draining",
         version: "0.1.0",
@@ -2469,7 +2469,7 @@ export const handlers = [
       {
         id: "00000000-0000-0000-0000-0000000000cc",
         name: "node-worker-03-backup",
-        hostname: "worker3.dhpanel.net",
+        hostname: "worker3.builtpanel.net",
         ip_address: "167.104.101.83",
         status: "offline",
         version: "0.1.0",
@@ -2641,7 +2641,7 @@ export const handlers = [
         const token = "dhn_" + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
         const expiresIn = 900;
         const expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
-        const enrollCommand = `curl -sSL https://get.dhpanel.com/agent.sh | sudo bash -s -- --token ${token}`;
+        const enrollCommand = `curl -sSL https://get.builtpanel.com/agent.sh | sudo bash -s -- --token ${token}`;
 
         const newEnrollment = {
           id,
@@ -3864,7 +3864,7 @@ export const handlers = [
     }
 
     const opId = `op_prov_${Date.now()}`;
-    const containerName = `dh-tenant-${username}`;
+    const containerName = `bp-tenant-${username}`;
 
     return HttpResponse.json(
       {
@@ -3882,7 +3882,7 @@ export const handlers = [
           id: `cnt_${username}_${Date.now()}`,
           name: containerName,
           status: "running",
-          image: "dhpanel/stack-php83-nginx:latest",
+          image: "builtpanel/stack-php83-nginx:latest",
           ip_address: "172.28.0.12",
           created_at: new Date().toISOString(),
         },
@@ -3931,9 +3931,9 @@ export const handlers = [
             },
             container: {
               id: `cnt_${username}_01`,
-              name: `dh-tenant-${username}`,
+              name: `bp-tenant-${username}`,
               status: "running",
-              image: "dhpanel/stack-php83-nginx:latest",
+              image: "builtpanel/stack-php83-nginx:latest",
               ip_address: "172.28.0.5",
               started_at: new Date(Date.now() - 86400 * 1000 * 14).toISOString(),
               uptime: "Up 14 days",
@@ -4074,14 +4074,14 @@ export const handlers = [
         plan_name: "Standard Business Plan",
         node_name: "node-sgp-01 (Singapore)",
         server_ip: "167.104.101.81",
-        nameservers: ["ns1.dhpanel.net", "ns2.dhpanel.net"],
+        nameservers: ["ns1.builtpanel.net", "ns2.builtpanel.net"],
         created_at: new Date(Date.now() - 86400 * 1000 * 14).toISOString(),
         status: "active",
       },
       container: {
         status: "running",
-        name: "dh-tenant-alpha",
-        image: "dhpanel/stack-php83-nginx:latest",
+        name: "bp-tenant-alpha",
+        image: "builtpanel/stack-php83-nginx:latest",
         php_version: "8.3.12",
         uptime: "Up 14 days, 6 hours",
         ip_address: "172.28.0.5",
@@ -4593,7 +4593,7 @@ export const handlers = [
     const records = mockDnsRecords.filter((r) => r.zone_id === zone.id);
     const lines = [
       `; BIND Zone File for ${zone.domain_name}`,
-      `; Exported from DHPanel at ${new Date().toISOString()}`,
+      `; Exported from Built Panel at ${new Date().toISOString()}`,
       `$ORIGIN ${zone.domain_name}.`,
       `$TTL 3600`,
       `@   IN  SOA ${zone.nameservers[0]}. hostmaster.${zone.domain_name}. (`,
@@ -5474,7 +5474,7 @@ export const handlers = [
       target_domain: domain.name,
       enabled: true,
       token,
-      url: `https://${token}.preview.dhpanel.net`,
+      url: `https://${token}.preview.builtpanel.net`,
       created_at: new Date(now).toISOString(),
       expires_at: expiresAt,
       ttl_hours: ttl,
@@ -5553,7 +5553,7 @@ export const handlers = [
         used_db_size_mb: sizeMb,
       },
       remote_db_hosts: mockRemoteDbHosts,
-      phpmyadmin_url: "https://pma.dhpanel.net",
+      phpmyadmin_url: "https://pma.builtpanel.net",
     });
   }),
 
@@ -5712,7 +5712,7 @@ export const handlers = [
   http.post(/\/api\/v1\/client\/databases\/phpmyadmin-sso$/, () => {
     const ssoToken = `pma_sso_${Math.random().toString(36).substring(2, 10)}`;
     return HttpResponse.json({
-      redirect_url: `https://pma.dhpanel.net/sso?token=${ssoToken}`,
+      redirect_url: `https://pma.builtpanel.net/sso?token=${ssoToken}`,
       token: ssoToken,
       expires_in_seconds: 300,
     });
@@ -5729,7 +5729,7 @@ export const handlers = [
 
     const filename = `${db.name}_dump_${Date.now()}.sql.gz`;
     return HttpResponse.json({
-      download_url: `https://downloads.dhpanel.net/dumps/${filename}?signature=mock_signed_token`,
+      download_url: `https://downloads.builtpanel.net/dumps/${filename}?signature=mock_signed_token`,
       filename,
       size_bytes: db.size_bytes,
       expires_at: new Date(Date.now() + 300 * 1000).toISOString(),
@@ -5927,7 +5927,7 @@ export const handlers = [
         owner: "demo",
         group: "demo",
         updated_at: new Date(Date.now() - 1800 * 1000).toISOString(),
-        content: "<?php\necho 'Hello from DHPanel!';\n",
+        content: "<?php\necho 'Hello from Built Panel!';\n",
       },
       {
         id: "f_style_css",
@@ -6385,7 +6385,7 @@ export const handlers = [
           // GET /api/v1/client/ftp/connection-info
           http.get(/\/api\/v1\/client\/ftp\/connection-info$/, () => {
             return HttpResponse.json({
-              host: "ftp.demo.dhpanel.test",
+              host: "ftp.demo.builtpanel.test",
               port: 21,
               protocol: "FTPS (FTP over TLS/SSL)",
               encryption: "Explicit TLS",
@@ -6497,7 +6497,7 @@ export const handlers = [
                 destination: "Local Storage",
                 sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
                 manifest: {
-                  domains: ["demo.dhpanel.test"],
+                  domains: ["demo.builtpanel.test"],
                   databases: ["demo_wordpress", "demo_analytics"],
                   has_mail: true,
                   has_dns: true,
@@ -6553,7 +6553,7 @@ export const handlers = [
                   destination: "Local Storage",
                   sha256: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
                   manifest: {
-                    domains: body.include_files ? ["demo.dhpanel.test"] : [],
+                    domains: body.include_files ? ["demo.builtpanel.test"] : [],
                     databases: body.include_databases ? ["demo_wordpress", "demo_analytics"] : [],
                     has_mail: body.include_mail,
                     has_dns: body.type === "full",
@@ -6653,7 +6653,7 @@ export const handlers = [
                     is_default: true,
                     status: "connected",
                     created_at: new Date(Date.now() - 86400 * 30 * 1000).toISOString(),
-                    config: { local_path: "/var/backups/dhpanel" },
+                    config: { local_path: "/var/backups/builtpanel" },
                   },
                   {
                     id: "dest_s3_01",
@@ -6662,7 +6662,7 @@ export const handlers = [
                     is_default: false,
                     status: "connected",
                     created_at: new Date(Date.now() - 86400 * 15 * 1000).toISOString(),
-                    config: { s3_bucket: "dhpanel-vault", s3_region: "eu-central-1" },
+                    config: { s3_bucket: "builtpanel-vault", s3_region: "eu-central-1" },
                   },
                   {
                     id: "dest_sftp_01",
@@ -6671,7 +6671,7 @@ export const handlers = [
                     is_default: false,
                     status: "connected",
                     created_at: new Date(Date.now() - 86400 * 7 * 1000).toISOString(),
-                    config: { sftp_host: "nas.dhpanel.internal", sftp_port: 22, sftp_user: "backupuser" },
+                    config: { sftp_host: "nas.builtpanel.internal", sftp_port: 22, sftp_user: "backupuser" },
                   },
                 ];
 
@@ -7046,7 +7046,7 @@ export const handlers = [
   ...(() => {
                         const mockDomainOverviews = [
                           {
-                            domain: "demo.dhpanel.test",
+                            domain: "demo.builtpanel.test",
                             access_log_size_bytes: 8945600,
                             access_log_size_formatted: "8.5 MB",
                             error_log_size_bytes: 421000,
@@ -7056,7 +7056,7 @@ export const handlers = [
                             last_updated_at: new Date().toISOString(),
                           },
                           {
-                            domain: "store.dhpanel.test",
+                            domain: "store.builtpanel.test",
                             access_log_size_bytes: 15420000,
                             access_log_size_formatted: "14.7 MB",
                             error_log_size_bytes: 120500,
@@ -7066,7 +7066,7 @@ export const handlers = [
                             last_updated_at: new Date().toISOString(),
                           },
                           {
-                            domain: "api.dhpanel.test",
+                            domain: "api.builtpanel.test",
                             access_log_size_bytes: 28450000,
                             access_log_size_formatted: "27.1 MB",
                             error_log_size_bytes: 84000,
@@ -7079,7 +7079,7 @@ export const handlers = [
 
                         const generateSeedLogs = (domain: string, type: string) => {
                           const entries: any[] = [];
-                          const targetDomain = domain === "all" ? "demo.dhpanel.test" : domain;
+                          const targetDomain = domain === "all" ? "demo.builtpanel.test" : domain;
                           const baseTime = Date.now() - 3600 * 1000 * 4;
 
                           if (type === "access") {
@@ -7248,7 +7248,7 @@ export const handlers = [
                                   { level: "info", component: "runner", msg: "Cron runner executed job cron_01 successfully" },
                                 ],
                                 caddy: [
-                                  { level: "info", component: "tls", msg: "TLS certificate renewed successfully for *.dhpanel.test" },
+                                  { level: "info", component: "tls", msg: "TLS certificate renewed successfully for *.builtpanel.test" },
                                   { level: "info", component: "http", msg: "Handled request GET / HTTP/2.0 status=200 remote=192.168.1.10" },
                                   { level: "warn", component: "proxy", msg: "Upstream backend 127.0.0.1:9000 took > 2500ms to respond" },
                                   { level: "error", component: "tls", msg: "ACME challenge failed for invalid-domain.test: NXDOMAIN" },
@@ -7675,7 +7675,7 @@ export const handlers = [
                                       ...(() => {
                                         const mockServerOverview = {
                                           node_id: "node-1",
-                                          hostname: "node-1.dhpanel.internal",
+                                          hostname: "node-1.builtpanel.internal",
                                           os: "Ubuntu 24.04.1 LTS",
                                           kernel: "6.8.0-45-generic",
                                           uptime_seconds: 432000,
@@ -8829,7 +8829,7 @@ export const handlers = [
                                                              rbl_blacklisted: false,
                                                              rbl_listings: [],
                                                              recommendations: [
-                                                               "DKIM selector dhpanel is active with 2048-bit RSA key.",
+                                                               "DKIM selector builtpanel is active with 2048-bit RSA key.",
                                                                "DMARC policy is currently set to p=quarantine.",
                                                              ],
                                                            },
@@ -9290,7 +9290,7 @@ export const handlers = [
                                                          // Migration & Transfer Handlers (T15.04, T15.05, T15.06)
                                                          let mockTransferJobs: Array<{
                                                            id: string;
-                                                           source_type: "cpanel" | "cyberpanel" | "openpanel" | "dhpanel_archive";
+                                                           source_type: "cpanel" | "cyberpanel" | "openpanel" | "builtpanel_archive";
                                                            source_host?: string;
                                                            tenant_username: string;
                                                            target_domain: string;
@@ -9376,12 +9376,12 @@ export const handlers = [
                                                                "Checking source cPanel version: 110.0.12 (Linux x86_64)",
                                                                "Triggering /scripts/pkgacct apex_store --skiphomedir=0...",
                                                                "pkgacct completed in 42s. Archive size: 819,200 KB.",
-                                                               "Starting streaming rsync transfer to /var/dhpanel/transfers/cpmove-apex_store.tar.gz...",
+                                                               "Starting streaming rsync transfer to /var/builtpanel/transfers/cpmove-apex_store.tar.gz...",
                                                                "Transfer completed: 858,993,459 bytes received (speed 38.4 MB/s).",
                                                                "Validating SHA256 checksum... OK.",
                                                                "Extracting archive metadata from cp/apex_store yaml manifest...",
                                                                "Discovered primary domain: apexstore.com (document_root: public_html)",
-                                                               "Provisioning DHPanel tenant apex_store with linux user and cgroup limits...",
+                                                               "Provisioning Built Panel tenant apex_store with linux user and cgroup limits...",
                                                                "RESTORED user apex_store (UID 1042, GID 1042)",
                                                                "Extracting MySQL dumps: apex_store_prod.sql.gz, apex_store_cache.sql.gz...",
                                                                "Creating MySQL user apex_store_u with grant on apex_store_prod.*...",
@@ -9588,14 +9588,14 @@ export const handlers = [
                                               // ===================================
   ...(() => {
                                                 let mockBrandingState = {
-                                                  companyName: "DHPanel",
+                                                  companyName: "Built Panel",
                                                   logoUrl: "",
                                                   faviconUrl: "",
                                                   accentColor: "#3b82f6",
-                                                  loginTitle: "DHPanel",
+                                                  loginTitle: "Built Panel",
                                                   loginSubtitle: "Sign in to control your web hosting infrastructure",
-                                                  loginFooterText: "DHPanel Cloud Infrastructure & Management",
-                                                  nameservers: ["ns1.dhpanel.net", "ns2.dhpanel.net"],
+                                                  loginFooterText: "Built Panel Cloud Infrastructure & Management",
+                                                  nameservers: ["ns1.builtpanel.net", "ns2.builtpanel.net"],
                                                   customCss: "",
                                                 };
 
@@ -9677,7 +9677,7 @@ export const handlers = [
                                                   release_date: new Date().toISOString(),
                                                   channel: "stable",
                                                   ed25519_signature: "e93f820c74198d023afc50193bbd7310...ed25519",
-                                                  key_id: "dhpanel-root-2026",
+                                                  key_id: "builtpanel-root-2026",
                                                   checksum_sha256: "9b3c4f028d716498c005b81ae2409744c8...sha256",
                                                   changelog: [
                                                     "Multi-node clustering protocol v2 support",
@@ -9745,7 +9745,7 @@ export const handlers = [
                                                         release_date: new Date().toISOString(),
                                                         channel: "beta",
                                                         ed25519_signature: "77aa01ff4c82...ed25519",
-                                                        key_id: "dhpanel-beta-2026",
+                                                        key_id: "builtpanel-beta-2026",
                                                         checksum_sha256: "88cc44bb...sha256",
                                                         changelog: ["Experimental eBPF network packet filter"],
                                                         required_migrations: ["000017_ebpf_metrics.sql"],
@@ -9757,7 +9757,7 @@ export const handlers = [
                                                         release_date: new Date().toISOString(),
                                                         channel: "stable",
                                                         ed25519_signature: "e93f820c7419...ed25519",
-                                                        key_id: "dhpanel-root-2026",
+                                                        key_id: "builtpanel-root-2026",
                                                         checksum_sha256: "9b3c4f028d716...sha256",
                                                         changelog: [
                                                           "Multi-node clustering protocol v2 support",
@@ -10045,7 +10045,7 @@ export const handlers = [
                                                       driver: "postgres",
                                                       host: "127.0.0.1",
                                                       port: 5432,
-                                                      database: "dhpanel_db",
+                                                      database: "builtpanel_db",
                                                       password: "[REDACTED_CONFIDENTIAL]",
                                                     },
                                                     redis: {
@@ -10055,8 +10055,8 @@ export const handlers = [
                                                     },
                                                     cluster: { mode: "standalone_master", enrolled_nodes: 3 },
                                                     storage: {
-                                                      data_path: "/var/lib/dhpanel/data",
-                                                      backup_path: "/var/lib/dhpanel/backups",
+                                                      data_path: "/var/lib/builtpanel/data",
+                                                      backup_path: "/var/lib/builtpanel/backups",
                                                     },
                                                     features: ["domains", "databases", "waf", "cron", "ssl", "backups"],
                                                   },
@@ -10092,7 +10092,7 @@ export const handlers = [
     installation_id: "8c4d9102-5e93-42fa-9b32-fa9921bc810b",
     customer_name: "Apex Cloud Services LLC",
     customer_email: "license@apexcloud.io",
-    product_name: "DHPanel Enterprise Edition",
+    product_name: "Built Panel Enterprise Edition",
     plan_tier: "enterprise" as const,
     status: "active" as "active" | "grace_period" | "expired" | "suspended" | "restricted",
     issued_at: new Date(Date.now() - 30 * 86400000).toISOString(),
@@ -10198,7 +10198,7 @@ export const handlers = [
       ssh_bans: 12,
     },
     license: {
-      tier: "DHPanel Enterprise Edition",
+      tier: "Built Panel Enterprise Edition",
       status: "active",
       signature_valid: true,
       expires_in_days: 305,
@@ -10515,7 +10515,7 @@ export const handlers = [
           license_key: "DHP-ENT-2026-A1B2-C3D4",
           installation_id: "00000000-0000-0000-0000-0000000000aa",
           server_ip: "167.104.101.81",
-          hostname: "cp1.dhpanel.net",
+          hostname: "cp1.builtpanel.net",
           last_heartbeat_at: new Date().toISOString(),
           status: "active",
         },
@@ -10525,7 +10525,7 @@ export const handlers = [
           license_key: "DHP-ENT-2026-A1B2-C3D4",
           installation_id: "00000000-0000-0000-0000-0000000000bb",
           server_ip: "167.104.101.82",
-          hostname: "worker2.dhpanel.net",
+          hostname: "worker2.builtpanel.net",
           last_heartbeat_at: new Date(Date.now() - 120 * 1000).toISOString(),
           status: "active",
         },

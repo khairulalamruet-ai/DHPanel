@@ -8,14 +8,14 @@ import { SwapCard } from "./SwapCard";
 import { DropCachesCard } from "./DropCachesCard";
 import { SshConfigCard } from "./SshConfigCard";
 
-// Mock @dhpanel/api
+// Mock @builtpanel/api
 const mockApiFetch = vi.fn();
-vi.mock("@dhpanel/api", () => ({
+vi.mock("@builtpanel/api", () => ({
   apiFetch: (...args: any[]) => mockApiFetch(...args),
 }));
 
-// Mock @dhpanel/i18n
-vi.mock("@dhpanel/i18n", () => ({
+// Mock @builtpanel/i18n
+vi.mock("@builtpanel/i18n", () => ({
   useTranslation: () => ({
     t: (key: string, params?: Record<string, any>) => {
       if (params) {
@@ -30,10 +30,10 @@ vi.mock("@dhpanel/i18n", () => ({
   }),
 }));
 
-// Mock @dhpanel/ui toast
+// Mock @builtpanel/ui toast
 const mockToast = vi.fn();
-vi.mock("@dhpanel/ui", async () => {
-  const actual = await vi.importActual<any>("@dhpanel/ui");
+vi.mock("@builtpanel/ui", async () => {
+  const actual = await vi.importActual<any>("@builtpanel/ui");
   return {
     ...actual,
     useToast: () => ({ toast: mockToast }),
@@ -47,7 +47,7 @@ describe("Server Tools & Maintenance UI (T10.15)", () => {
 
   const mockOverview = {
     node_id: "node-1",
-    hostname: "node-1.dhpanel.internal",
+    hostname: "node-1.builtpanel.internal",
     os: "Ubuntu 24.04.1 LTS",
     kernel: "6.8.0-45-generic",
     uptime_seconds: 432000,
@@ -103,7 +103,7 @@ describe("Server Tools & Maintenance UI (T10.15)", () => {
 
     await waitFor(() => {
       expect(screen.getByTestId("server-tools-title")).toBeInTheDocument();
-      expect(screen.getByTestId("text-node-hostname")).toHaveTextContent("node-1.dhpanel.internal");
+      expect(screen.getByTestId("text-node-hostname")).toHaveTextContent("node-1.builtpanel.internal");
       expect(screen.getByTestId("title-timezone-config")).toBeInTheDocument();
       expect(screen.getByTestId("title-swap-management")).toBeInTheDocument();
       expect(screen.getByTestId("title-drop-caches")).toBeInTheDocument();
@@ -211,7 +211,7 @@ describe("Server Tools & Maintenance UI (T10.15)", () => {
       <RebootDialog
         open={true}
         onOpenChange={vi.fn()}
-        nodeHostname="node-1.dhpanel.internal"
+        nodeHostname="node-1.builtpanel.internal"
         onConfirm={onConfirm}
       />
     );

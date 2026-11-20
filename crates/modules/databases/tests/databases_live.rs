@@ -9,15 +9,15 @@ use axum::{
     body::Body,
     http::{Request, StatusCode, header},
 };
-use dhpanel_auth_core::secretbox::MasterKey;
-use dhpanel_cache::RedisHandle;
-use dhpanel_database::modules as db;
-use dhpanel_kernel::{Manifest, Module, ModuleMount, ModuleRoutes, Registry};
-use dhpanel_mod_databases::{
+use builtpanel_auth_core::secretbox::MasterKey;
+use builtpanel_cache::RedisHandle;
+use builtpanel_database::modules as db;
+use builtpanel_kernel::{Manifest, Module, ModuleMount, ModuleRoutes, Registry};
+use builtpanel_mod_databases::{
     DatabasesState, SETTINGS_SCHEMA, admin_router, client_router, public_router,
 };
-use dhpanel_session::{CSRF_HEADER, NewSession, SessionConfig, SessionStore, set_cookie};
-use dhpanel_settings::{Scope, SettingsRegistry};
+use builtpanel_session::{CSRF_HEADER, NewSession, SessionConfig, SessionStore, set_cookie};
+use builtpanel_settings::{Scope, SettingsRegistry};
 use secrecy::SecretString;
 use serde_json::{Value, json};
 use sqlx::PgPool;
@@ -64,7 +64,7 @@ async fn env(pool: &PgPool) -> Env {
         )])
         .unwrap(),
     );
-    let spool = std::env::temp_dir().join(format!("dh-spool-{}", Uuid::new_v4()));
+    let spool = std::env::temp_dir().join(format!("bp-spool-{}", Uuid::new_v4()));
     let manifest = Manifest::parse(
         "databases",
         "[module]\nname = \"databases\"\nversion = \"1.0.0\"\ntitle = { en = \"Databases\" }\ncategory = \"core\"\ncore = true\n",
@@ -260,12 +260,12 @@ async fn node_answers(pool: &PgPool, kind: &str, name: &str, ok: bool) {
         .unwrap();
     if ok {
         assert!(
-            dhpanel_database::operations::succeed(pool, id, &json!({}))
+            builtpanel_database::operations::succeed(pool, id, &json!({}))
                 .await
                 .unwrap()
         );
     } else {
-        dhpanel_database::operations::fail(
+        builtpanel_database::operations::fail(
             pool,
             id,
             &json!({"code": "internal", "message": "no", "retryable": false}),
@@ -449,7 +449,7 @@ async fn databases_users_and_grants_are_made_on_the_node_in_the_background(pool:
         .await;
     assert_eq!(status, StatusCode::CREATED, "{made}");
     let password = made["password"].as_str().unwrap().to_owned();
-    assert!(dhpanel_domain::databases::check_password(&password).is_ok());
+    assert!(builtpanel_domain::databases::check_password(&password).is_ok());
     assert_eq!(made["user"]["name"], "alice_web");
     // The ledger has no password; the sealed one opens to what was shown.
     let ledger: Value =
@@ -465,13 +465,13 @@ async fn databases_users_and_grants_are_made_on_the_node_in_the_background(pool:
             .await
             .unwrap();
     assert!(!all_ledger.contains(&password));
-    let (user_id, sealed) = dhpanel_database::databases::sealed_password_of(&pool, "alice_web")
+    let (user_id, sealed) = builtpanel_database::databases::sealed_password_of(&pool, "alice_web")
         .await
         .unwrap()
         .unwrap();
     let opened = MasterKey::from_bytes(&KEY)
         .open(
-            &dhpanel_database::databases::password_context(user_id),
+            &builtpanel_database::databases::password_context(user_id),
             &sealed,
         )
         .unwrap();
@@ -480,7 +480,7 @@ async fn databases_users_and_grants_are_made_on_the_node_in_the_background(pool:
     assert!(
         MasterKey::from_bytes(&KEY)
             .open(
-                &dhpanel_database::databases::password_context(Uuid::now_v7()),
+                &builtpanel_database::databases::password_context(Uuid::now_v7()),
                 &sealed
             )
             .is_err()
@@ -509,7 +509,7 @@ async fn databases_users_and_grants_are_made_on_the_node_in_the_background(pool:
     // The node has it: ready, and the sealed password is gone.
     node_answers(&pool, "upsert_db_user", "alice_web", true).await;
     assert!(
-        dhpanel_database::databases::sealed_password_of(&pool, "alice_web")
+        builtpanel_database::databases::sealed_password_of(&pool, "alice_web")
             .await
             .unwrap()
             .is_none()
@@ -603,7 +603,7 @@ async fn databases_users_and_grants_are_made_on_the_node_in_the_background(pool:
         "a password the person gave is not shown back"
     );
     assert!(
-        dhpanel_database::databases::sealed_password_of(&pool, "alice_web")
+        builtpanel_database::databases::sealed_password_of(&pool, "alice_web")
             .await
             .unwrap()
             .is_some()
@@ -764,7 +764,7 @@ async fn the_account_prefix_can_be_switched_off_and_names_stay_unique(pool: PgPo
     .await
     .unwrap();
     let mut tx = pool.begin().await.unwrap();
-    dhpanel_settings::set(
+    builtpanel_settings::set(
         &e.settings,
         &mut tx,
         "databases",
@@ -992,7 +992,7 @@ async fn a_dump_is_uploaded_in_chunks_checked_and_handed_to_the_node_once(pool: 
             .unwrap();
     let token = MasterKey::from_bytes(&KEY)
         .open(
-            &dhpanel_database::imports::token_context(id.parse().unwrap()),
+            &builtpanel_database::imports::token_context(id.parse().unwrap()),
             &sealed,
         )
         .unwrap();
@@ -1057,9 +1057,15 @@ async fn a_dump_is_uploaded_in_chunks_checked_and_handed_to_the_node_once(pool: 
         .unwrap();
     let (_, now) = e.call(&a, "GET", &one, None).await;
     assert_eq!(now["status"], "running", "{now}");
-    dhpanel_database::imports::record_progress(&pool, id.parse().unwrap(), "importing", 2500, 120)
-        .await
-        .unwrap();
+    builtpanel_database::imports::record_progress(
+        &pool,
+        id.parse().unwrap(),
+        "importing",
+        2500,
+        120,
+    )
+    .await
+    .unwrap();
     let (_, now) = e.call(&a, "GET", &one, None).await;
     assert_eq!(
         (
@@ -1075,7 +1081,7 @@ async fn a_dump_is_uploaded_in_chunks_checked_and_handed_to_the_node_once(pool: 
         (StatusCode::CONFLICT, "import_running")
     );
     // A node that does not know the import (it restarted) loses it, after a minute.
-    dhpanel_database::imports::lost(&pool, id.parse().unwrap())
+    builtpanel_database::imports::lost(&pool, id.parse().unwrap())
         .await
         .unwrap();
     let (_, now) = e.call(&a, "GET", &one, None).await;
@@ -1084,7 +1090,7 @@ async fn a_dump_is_uploaded_in_chunks_checked_and_handed_to_the_node_once(pool: 
         "not lost yet: it was heard of a moment ago"
     );
     assert!(
-        dhpanel_database::operations::succeed(
+        builtpanel_database::operations::succeed(
             &pool,
             op_id,
             &json!({"type": "sql_imported", "statements": 5000})
@@ -1121,7 +1127,7 @@ async fn a_dump_is_uploaded_in_chunks_checked_and_handed_to_the_node_once(pool: 
             .exists()
     );
     assert_eq!(
-        dhpanel_mod_databases::imports::sweep(&pool, &e.spool)
+        builtpanel_mod_databases::imports::sweep(&pool, &e.spool)
             .await
             .unwrap(),
         1
@@ -1255,7 +1261,7 @@ async fn a_dump_is_uploaded_in_chunks_checked_and_handed_to_the_node_once(pool: 
         .execute(&pool)
         .await
         .unwrap();
-    dhpanel_database::operations::fail(
+    builtpanel_database::operations::fail(
         &pool,
         op_id,
         &json!({"code": "invalid_argument", "message": "statement 3: error 1064: syntax", "retryable": false}),
@@ -1325,7 +1331,7 @@ async fn an_export_is_made_by_the_node_and_downloaded_with_a_five_minute_link(po
         .unwrap();
     let token = String::from_utf8(
         MasterKey::from_bytes(&KEY)
-            .open(&dhpanel_database::exports::token_context(uuid), &sealed)
+            .open(&builtpanel_database::exports::token_context(uuid), &sealed)
             .unwrap(),
     )
     .unwrap();
@@ -1433,7 +1439,7 @@ async fn an_export_is_made_by_the_node_and_downloaded_with_a_five_minute_link(po
         .unwrap();
     let token = String::from_utf8(
         MasterKey::from_bytes(&KEY)
-            .open(&dhpanel_database::exports::token_context(uuid), &sealed)
+            .open(&builtpanel_database::exports::token_context(uuid), &sealed)
             .unwrap(),
     )
     .unwrap();
@@ -1563,7 +1569,7 @@ async fn an_export_is_made_by_the_node_and_downloaded_with_a_five_minute_link(po
         .unwrap();
     let stale = e.spool.join(format!("{}.sql.gz", id2.simple()));
     std::fs::write(&stale, b"x").unwrap();
-    dhpanel_mod_databases::imports::sweep(&pool, &e.spool)
+    builtpanel_mod_databases::imports::sweep(&pool, &e.spool)
         .await
         .unwrap();
     assert!(!stale.exists());
@@ -1588,7 +1594,7 @@ async fn an_export_is_made_by_the_node_and_downloaded_with_a_five_minute_link(po
         .execute(&pool)
         .await
         .unwrap();
-    dhpanel_database::operations::fail(
+    builtpanel_database::operations::fail(
         &pool,
         op,
         &json!({"code": "internal", "message": "the dump failed (exit 2): no", "retryable": false}),
@@ -1635,7 +1641,7 @@ fn node_plays(
                 .await
                 .unwrap();
                 if ok {
-                    dhpanel_database::operations::succeed(
+                    builtpanel_database::operations::succeed(
                         &pool,
                         id,
                         &json!({"type": "phpmyadmin_opened", "link_expires_at": 4_102_444_800_i64, "applied": true}),
@@ -1643,7 +1649,7 @@ fn node_plays(
                     .await
                     .unwrap();
                 } else {
-                    dhpanel_database::operations::fail(
+                    builtpanel_database::operations::fail(
                         &pool,
                         id,
                         &json!({"code": "internal", "message": "no", "retryable": false}),
@@ -1676,7 +1682,7 @@ async fn phpmyadmin_links_are_made_once_per_sign_in_and_the_token_never_reaches_
         (StatusCode::CONFLICT, "phpmyadmin_unavailable")
     );
     let mut tx = pool.begin().await.unwrap();
-    dhpanel_settings::set(
+    builtpanel_settings::set(
         &e.settings,
         &mut tx,
         "databases",
@@ -1763,7 +1769,7 @@ async fn admin_with(pool: &PgPool, name: &str, roles: &[&str]) -> Uuid {
     .await
     .unwrap();
     for role in roles {
-        dhpanel_database::rbac::assign_role(pool, id, role, None)
+        builtpanel_database::rbac::assign_role(pool, id, role, None)
             .await
             .unwrap();
     }
@@ -2136,7 +2142,7 @@ async fn databases_of_a_tenant_with_its_own_server_are_made_there_and_wait_while
     node_answers(&pool, "create_database", "alice_one", true).await;
 
     // The tenant's own server: new databases and users are made there.
-    dhpanel_database::tenant_db::set_state(&pool, tenant, "mysql", "dedicated", None)
+    builtpanel_database::tenant_db::set_state(&pool, tenant, "mysql", "dedicated", None)
         .await
         .unwrap();
     let (status, _) = e
@@ -2206,7 +2212,7 @@ async fn databases_of_a_tenant_with_its_own_server_are_made_there_and_wait_while
     );
 
     // While the move runs, work waits.
-    dhpanel_database::tenant_db::set_state(&pool, tenant, "mysql", "moving_to_shared", None)
+    builtpanel_database::tenant_db::set_state(&pool, tenant, "mysql", "moving_to_shared", None)
         .await
         .unwrap();
     let (status, body) = e

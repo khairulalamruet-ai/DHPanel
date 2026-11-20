@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
-import { setCsrfToken, getCsrfToken, apiFetch, api } from "@dhpanel/api";
+import { setCsrfToken, getCsrfToken, apiFetch, api } from "@builtpanel/api";
 import { BootstrapData } from "./types";
 
 interface SessionContextType {
@@ -46,8 +46,8 @@ export function SessionProvider({ children, bootstrapPath = "/api/v1/auth/me" }:
             modules: ["dashboard", "domains", "security"],
             features: ["all"],
             limits: {},
-            branding: { companyName: "DHPanel" },
-            locale: res.locale || "bn",
+            branding: { companyName: "Built Panel" },
+            locale: res.locale || "en",
             csrfToken: res.csrf_token,
             mfa_enabled: res.mfa_enabled,
           };

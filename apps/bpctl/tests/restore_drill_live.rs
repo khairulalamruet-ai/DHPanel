@@ -1,6 +1,6 @@
 //! The restore drill (T19.07): a panel with real data is backed up, "lost", and brought back
 //! on a new database exactly as `deploy/runbooks/system-restore.md` says - with the real
-//! `dhctl` binary for every step it names (migrate, admin create, ca init, system-backup open).
+//! `bpctl` binary for every step it names (migrate, admin create, ca init, system-backup open).
 //! Ignored by default; run with DATABASE_URL (superuser), pg_restore and psql on the PATH.
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
@@ -11,7 +11,7 @@ use std::{
     process::{Command, Stdio},
 };
 
-use dhpanel_system_backup::{Connection, Job, PART, derive_key, run_job};
+use builtpanel_system_backup::{Connection, Job, PART, derive_key, run_job};
 
 fn psql(url: &str, sql: &str) -> String {
     let out = Command::new("psql")
@@ -26,11 +26,11 @@ fn psql(url: &str, sql: &str) -> String {
     String::from_utf8(out.stdout).unwrap().trim().to_owned()
 }
 
-/// `dhctl ARGS` with the configuration of one panel database; returns what it printed.
-fn dhctl(config: &Path, stdin: Option<&str>, args: &[&str]) -> String {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_dhctl"))
+/// `bpctl ARGS` with the configuration of one panel database; returns what it printed.
+fn bpctl(config: &Path, stdin: Option<&str>, args: &[&str]) -> String {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_bpctl"))
         .args(args)
-        .env("DHPANEL_CONFIG", config)
+        .env("BUILTPANEL_CONFIG", config)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -47,7 +47,7 @@ fn dhctl(config: &Path, stdin: Option<&str>, args: &[&str]) -> String {
     let out = child.wait_with_output().unwrap();
     assert!(
         out.status.success(),
-        "dhctl {args:?}: {}{}",
+        "bpctl {args:?}: {}{}",
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
@@ -81,7 +81,7 @@ fn a_lost_panel_comes_back_on_a_new_database_with_everything_in_it() {
         psql(&url, &format!("CREATE DATABASE {db}"));
     }
     let (src_url, new_url) = (format!("{base}/{source}"), format!("{base}/{fresh}"));
-    let dir = std::env::temp_dir().join(format!("dh-drill-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("bp-drill-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join("dest")).unwrap();
     // One configuration per server: the old one and the new one differ only in the database.
@@ -106,8 +106,8 @@ fn a_lost_panel_comes_back_on_a_new_database_with_everything_in_it() {
     let (old_config, new_config) = (config("old", &src_url), config("new", &new_url));
 
     // The panel as it was: migrated, an administrator, a CA, and some history.
-    dhctl(&old_config, None, &["migrate"]);
-    dhctl(
+    bpctl(&old_config, None, &["migrate"]);
+    bpctl(
         &old_config,
         Some("correct-horse-battery-staple-91\n"),
         &[
@@ -120,7 +120,7 @@ fn a_lost_panel_comes_back_on_a_new_database_with_everything_in_it() {
             "--password-stdin",
         ],
     );
-    dhctl(
+    bpctl(
         &old_config,
         None,
         &["ca", "init", "--dir", dir.join("ca").to_str().unwrap()],
@@ -157,7 +157,7 @@ fn a_lost_panel_comes_back_on_a_new_database_with_everything_in_it() {
     // The server is lost: only the stored backup and the master key survive. Restore as the
     // runbook says.
     let opened = dir.join("restore");
-    dhctl(
+    bpctl(
         &new_config,
         None,
         &[
@@ -202,10 +202,10 @@ fn a_lost_panel_comes_back_on_a_new_database_with_everything_in_it() {
         ),
         hash_before
     );
-    let status = dhctl(&new_config, None, &["migrate", "info"]);
+    let status = bpctl(&new_config, None, &["migrate", "info"]);
     assert!(!status.contains("pending"), "{status}");
     assert!(status.contains("applied"), "{status}");
-    assert!(dhctl(&new_config, None, &["migrate"]).contains("migrations applied"));
+    assert!(bpctl(&new_config, None, &["migrate"]).contains("migrations applied"));
 
     let _ = std::fs::remove_dir_all(&dir);
     for db in [source, fresh] {

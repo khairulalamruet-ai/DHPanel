@@ -23,13 +23,13 @@ use axum::{
     http::{HeaderValue, header},
     response::{IntoResponse as _, Response},
 };
-use dhpanel_database::{
+use builtpanel_database::{
     accounts::{self, DbAccountKind},
     rbac::load_access,
 };
-use dhpanel_http_kit::{AppError, ProblemDetails};
-use dhpanel_session::Authenticated;
-use dhpanel_settings::Scope;
+use builtpanel_http_kit::{AppError, ProblemDetails};
+use builtpanel_session::Authenticated;
+use builtpanel_settings::Scope;
 use serde::Serialize;
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -43,7 +43,7 @@ pub const BRANDING_TTL: Duration = Duration::from_secs(5);
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, ToSchema)]
 pub struct Branding {
     /// Name shown on the sign-in page and in the browser tab.
-    #[schema(example = "DHPanel")]
+    #[schema(example = "Built Panel")]
     pub panel_name: String,
     /// A notice for all users while it is not empty.
     pub maintenance_notice: String,
@@ -55,7 +55,7 @@ pub struct Branding {
 impl Default for Branding {
     fn default() -> Self {
         Self {
-            panel_name: "DHPanel".to_owned(),
+            panel_name: "Built Panel".to_owned(),
             maintenance_notice: String::new(),
             default_language: "en".to_owned(),
         }
@@ -96,10 +96,10 @@ async fn branding(state: &SystemState) -> Result<Branding, AppError> {
     }
     let mut conn = state.db.acquire().await.map_err(AppError::internal)?;
     let values =
-        match dhpanel_settings::get(&state.settings, &mut conn, "system", Scope::Global).await {
+        match builtpanel_settings::get(&state.settings, &mut conn, "system", Scope::Global).await {
             Ok(values) => values,
             // A build without the schema falls back to the defaults rather than failing sign-in.
-            Err(dhpanel_settings::SettingsError::UnknownModule(_)) => Default::default(),
+            Err(builtpanel_settings::SettingsError::UnknownModule(_)) => Default::default(),
             Err(err) => return Err(AppError::internal(std::io::Error::other(err.to_string()))),
         };
     let text = |key: &str, fallback: &str| {
@@ -233,7 +233,7 @@ pub async fn admin_bootstrap(
     let (Some(profile), Some(access)) = (profile, access) else {
         return Err(AppError::Unauthorized);
     };
-    if access.status != dhpanel_database::accounts::DbAccountStatus::Active {
+    if access.status != builtpanel_database::accounts::DbAccountStatus::Active {
         return Err(AppError::Unauthorized);
     }
     let kind = match profile.kind {

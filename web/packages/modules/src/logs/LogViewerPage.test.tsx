@@ -1,7 +1,7 @@
 import React from "react";
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
-import { ToastProvider } from "@dhpanel/ui";
+import { ToastProvider } from "@builtpanel/ui";
 import { LogViewerPage } from "./LogViewerPage";
 
 function renderWithProviders(ui: React.ReactElement) {
@@ -57,7 +57,7 @@ describe("LogViewerPage (T10.06)", () => {
     });
 
     fireEvent.change(screen.getByTestId("select-log-domain"), {
-      target: { value: "store.dhpanel.test" },
+      target: { value: "store.builtpanel.test" },
     });
 
     await waitFor(() => {

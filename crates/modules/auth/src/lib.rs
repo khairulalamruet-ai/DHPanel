@@ -22,14 +22,14 @@
 //!   answers 429 `too_many_attempts` with `Retry-After` until the lock expires,
 //!   even for the correct password. A successful login clears the account count.
 //! * `root` logs in with the server's own root password (like WHM), checked by
-//!   the `dhpanel-root-auth` helper; see [`root_login`]. The same lockout applies.
+//!   the `builtpanel-root-auth` helper; see [`root_login`]. The same lockout applies.
 //!
 //! The server must be run with `into_make_service_with_connect_info::<SocketAddr>()`
 //! so the client IP is available.
 //!
 //! CSRF: login and `/me` return the session's `csrf_token`; the client keeps it
 //! in memory and sends it as `X-CSRF-Token` on every state-changing request
-//! (enforced by [`dhpanel_session::Authenticated`]). Login itself is exempt:
+//! (enforced by [`builtpanel_session::Authenticated`]). Login itself is exempt:
 //! it has no session yet, accepts only `application/json` (which a cross-site
 //! form cannot send without a CORS preflight) and rotates any prior session.
 
@@ -52,25 +52,25 @@ use axum::{
     routing::{get, post},
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use dhpanel_audit::{AuditEntry, AuditWriter, Outcome};
-use dhpanel_auth_core::{
+use builtpanel_audit::{AuditEntry, AuditWriter, Outcome};
+use builtpanel_auth_core::{
     password::{PasswordHasher, Verification},
     secretbox::MasterKey,
 };
-use dhpanel_cache::{
+use builtpanel_cache::{
     RedisHandle,
     lockout::{FailureLimiter, LockoutPolicy},
 };
-use dhpanel_database::{
+use builtpanel_database::{
     accounts::{self, AccountProfile, DbAccountKind, DbAccountStatus, LoginEvent, LoginOutcome},
     sqlx::PgPool,
 };
-use dhpanel_domain::{Email, Username};
-use dhpanel_http_kit::{
+use builtpanel_domain::{Email, Username};
+use builtpanel_http_kit::{
     AppError, ProblemDetails,
     client_ip::{client_ip, rate_limit_key},
 };
-use dhpanel_session::{
+use builtpanel_session::{
     Authenticated, CsrfToken, NewSession, RevokeReason, SessionStore, clear_cookie, cookie_value,
     set_cookie,
 };
@@ -260,7 +260,7 @@ impl Me {
         csrf: &CsrfToken,
         impersonator: Option<(Uuid, String)>,
     ) -> Result<Self, AppError> {
-        let access = dhpanel_database::rbac::load_access(db, p.id)
+        let access = builtpanel_database::rbac::load_access(db, p.id)
             .await
             .map_err(AppError::internal)?;
         let (roles, permissions, mfa_enabled, mfa_required) = access
@@ -364,9 +364,9 @@ fn login_audit_entry(ev: &LoginEvent<'_>) -> Option<AuditEntry> {
     operation_id = "login",
     request_body = LoginRequest,
     responses(
-        (status = 202, description = "Password accepted but a second factor is required: a short-lived `__Host-dh_mfa` cookie is set; continue with POST /api/v1/public/auth/login/mfa", body = mfa::MfaChallenge),
+        (status = 202, description = "Password accepted but a second factor is required: a short-lived `__Host-bp_mfa` cookie is set; continue with POST /api/v1/public/auth/login/mfa", body = mfa::MfaChallenge),
         (status = 200, description = "Logged in; session cookie set", body = Me,
-         headers(("set-cookie" = String, description = "__Host-dh_session=…; Path=/; Secure; HttpOnly; SameSite=Strict"))),
+         headers(("set-cookie" = String, description = "__Host-bp_session=…; Path=/; Secure; HttpOnly; SameSite=Strict"))),
         (status = 401, description = "Invalid username or password", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "Correct password but account suspended or disabled", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 422, description = "Malformed body", body = ProblemDetails, content_type = "application/problem+json"),
@@ -515,7 +515,7 @@ pub async fn login(
         }
     }
 
-    if dhpanel_database::mfa::totp_enabled(&state.db, account.id)
+    if builtpanel_database::mfa::totp_enabled(&state.db, account.id)
         .await
         .map_err(AppError::internal)?
     {
@@ -730,7 +730,7 @@ impl Modify for SessionCookieScheme {
         components.add_security_scheme(
             "session",
             SecurityScheme::ApiKey(ApiKey::Cookie(ApiKeyValue::with_description(
-                dhpanel_session::COOKIE_NAME,
+                builtpanel_session::COOKIE_NAME,
                 "HttpOnly session cookie set by POST /api/v1/public/auth/login",
             ))),
         );
@@ -796,6 +796,6 @@ mod tests {
         ] {
             assert!(json.contains(p), "{p}");
         }
-        assert!(json.contains("__Host-dh_session"));
+        assert!(json.contains("__Host-bp_session"));
     }
 }

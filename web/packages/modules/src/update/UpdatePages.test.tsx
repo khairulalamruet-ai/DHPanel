@@ -1,7 +1,7 @@
 import React from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { ToastProvider } from "@dhpanel/ui";
+import { ToastProvider } from "@builtpanel/ui";
 import { UpdatePage } from "./UpdatePage";
 import { UpdateSystemCard } from "./UpdateSystemCard";
 import { PanelUpdateStatus } from "./types";
@@ -15,7 +15,7 @@ const mockStatus: PanelUpdateStatus = {
     release_date: new Date().toISOString(),
     channel: "stable",
     ed25519_signature: "mock_signature",
-    key_id: "dhpanel-root-2026",
+    key_id: "builtpanel-root-2026",
     checksum_sha256: "mock_sha256",
     changelog: ["Clustering protocol v2", "Dynamic WAF reload"],
     required_migrations: ["000015_cluster_nodes_v2.sql"],
@@ -64,7 +64,7 @@ const mockApiFetch = vi.fn(async (url: string, opts?: any) => {
   return { ok: true };
 });
 
-vi.mock("@dhpanel/api", () => ({
+vi.mock("@builtpanel/api", () => ({
   apiFetch: (url: string, opts?: any) => mockApiFetch(url, opts),
 }));
 

@@ -31,9 +31,9 @@ use axum::{
     http::StatusCode,
     routing::{get, post},
 };
-use dhpanel_audit::{AuditEntry, Outcome};
-use dhpanel_auth_core::{password::PasswordHasher, policy::PasswordPolicy};
-use dhpanel_database::{
+use builtpanel_audit::{AuditEntry, Outcome};
+use builtpanel_auth_core::{password::PasswordHasher, policy::PasswordPolicy};
+use builtpanel_database::{
     accounts::{self, InsertAccountError, NewAccount},
     operations::{self, EnqueueError, NewOperation},
     plans::{self, Plan},
@@ -43,14 +43,14 @@ use dhpanel_database::{
     tenants::{self, CreateError},
     users::{self, Filter, UpdateError, User},
 };
-use dhpanel_domain::{AccountKind, Email, TenantStatus, TenantUsername, Username};
-use dhpanel_http_kit::{AppError, FieldError, ProblemDetails};
-use dhpanel_node_protocol::{Operation as NodeOperation, SkeletonFile, check_skeleton};
-use dhpanel_rbac::{
+use builtpanel_domain::{AccountKind, Email, TenantStatus, TenantUsername, Username};
+use builtpanel_http_kit::{AppError, FieldError, ProblemDetails};
+use builtpanel_node_protocol::{Operation as NodeOperation, SkeletonFile, check_skeleton};
+use builtpanel_rbac::{
     Principal, Require, RequireRecent,
     permissions::{UsersImpersonate, UsersManage, UsersRead},
 };
-use dhpanel_session::{RevokeReason, SessionStore, rfc3339};
+use builtpanel_session::{RevokeReason, SessionStore, rfc3339};
 use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, OpenApi, ToSchema};
@@ -631,14 +631,14 @@ pub(crate) async fn create_user_inner(
         AssignRole::UnknownRole => return Err(internal(std::io::Error::other("no client role"))),
     }
     // The license's limit on hosting accounts.
-    let hosting_accounts = dhpanel_database::sqlx::query_scalar::<_, i64>(
+    let hosting_accounts = builtpanel_database::sqlx::query_scalar::<_, i64>(
         "SELECT count(*) FROM tenants WHERE status <> 'deleting'",
     )
     .fetch_one(&mut *tx)
     .await
     .map_err(internal)?;
     if let Some(reached) =
-        dhpanel_database::license::check_limit(&mut tx, "max_tenants", hosting_accounts + 1)
+        builtpanel_database::license::check_limit(&mut tx, "max_tenants", hosting_accounts + 1)
             .await
             .map_err(internal)?
     {
@@ -675,7 +675,7 @@ pub(crate) async fn create_user_inner(
         CreateError::BadOwner | CreateError::Database(_) => internal(e),
     })?;
     if let Some(reseller_id) = reseller {
-        dhpanel_database::resellers::assign_tenant(&mut tx, tenant.id, reseller_id)
+        builtpanel_database::resellers::assign_tenant(&mut tx, tenant.id, reseller_id)
             .await
             .map_err(internal)?;
     }
@@ -687,7 +687,7 @@ pub(crate) async fn create_user_inner(
     } else {
         "admin.user_created"
     };
-    dhpanel_audit::insert(
+    builtpanel_audit::insert(
         &mut *tx,
         &entry(action, who, id).metadata(serde_json::json!({
             "username": username.as_str(),
@@ -784,7 +784,7 @@ pub async fn update_user(
     if !found {
         return Err(AppError::not_found("user"));
     }
-    dhpanel_audit::insert(
+    builtpanel_audit::insert(
         &mut *tx,
         &entry("admin.user_updated", &who, id).metadata(serde_json::json!({
             "email_changed": email.is_some(),
@@ -892,7 +892,7 @@ pub async fn change_plan(
         )
         .await?;
     }
-    dhpanel_audit::insert(
+    builtpanel_audit::insert(
         &mut *tx,
         &entry("admin.user_plan_changed", &who, id).metadata(serde_json::json!({
             "from": tenant.plan_name,
@@ -965,7 +965,7 @@ pub(crate) async fn suspend_user_inner(
         who,
     )
     .await?;
-    dhpanel_audit::insert(
+    builtpanel_audit::insert(
         &mut *tx,
         &entry(
             if by_reseller {
@@ -1042,7 +1042,7 @@ pub(crate) async fn unsuspend_user_inner(
         who,
     )
     .await?;
-    dhpanel_audit::insert(
+    builtpanel_audit::insert(
         &mut *tx,
         &entry(
             if by_reseller {
@@ -1135,7 +1135,7 @@ pub(crate) async fn delete_user_inner(
     users::set_account_status(&mut tx, id, "disabled")
         .await
         .map_err(internal)?;
-    dhpanel_audit::insert(
+    builtpanel_audit::insert(
         &mut *tx,
         &entry(
             if by_reseller {
@@ -1209,7 +1209,7 @@ pub async fn retry_setup(
     let files = skeleton_for_new_tenant(&mut tx).await?;
     let op = set_up_operation(tenant.id, &tenant.username, tenant.uid, &plan, files)?;
     let operation_id = queue(&mut tx, tenant.node_id, tenant.id, &op, &who).await?;
-    dhpanel_audit::insert(
+    builtpanel_audit::insert(
         &mut *tx,
         &entry("admin.user_setup_retried", &who, id)
             .metadata(serde_json::json!({ "operation_id": operation_id })),
@@ -1275,7 +1275,7 @@ pub async fn reset_password(
     users::set_password_hash(&mut tx, id, &hash)
         .await
         .map_err(internal)?;
-    dhpanel_audit::insert(&mut *tx, &entry("admin.user_password_reset", &who, id))
+    builtpanel_audit::insert(&mut *tx, &entry("admin.user_password_reset", &who, id))
         .await
         .map_err(internal)?;
     tx.commit().await.map_err(internal)?;
@@ -1350,7 +1350,7 @@ pub async fn impersonate(
         .issue_impersonation(who.account_id(), id)
         .await
         .map_err(internal)?;
-    dhpanel_audit::insert(
+    builtpanel_audit::insert(
         &state.db,
         &entry("admin.impersonation_issued", &who, id)
             .metadata(serde_json::json!({ "user": user.username })),
@@ -1359,7 +1359,7 @@ pub async fn impersonate(
     .map_err(internal)?;
     Ok(Json(ImpersonationToken {
         token: secrecy::ExposeSecret::expose_secret(&token).to_owned(),
-        expires_in: dhpanel_session::IMPERSONATION_TTL_SECS,
+        expires_in: builtpanel_session::IMPERSONATION_TTL_SECS,
         redeem_path: "/api/v1/public/auth/impersonate",
     }))
 }
@@ -1492,7 +1492,7 @@ pub async fn put_skeleton_file(
     skeleton::put(&mut tx, &req.path, &req.content, who.account_id())
         .await
         .map_err(internal)?;
-    dhpanel_audit::insert(
+    builtpanel_audit::insert(
         &mut *tx,
         &AuditEntry::new("admin.skeleton_file_saved", Outcome::Success)
             .actor(who.account_id())
@@ -1532,7 +1532,7 @@ pub async fn delete_skeleton_file(
     if !skeleton::delete(&mut tx, &q.path).await.map_err(internal)? {
         return Err(AppError::not_found("skeleton file"));
     }
-    dhpanel_audit::insert(
+    builtpanel_audit::insert(
         &mut *tx,
         &AuditEntry::new("admin.skeleton_file_deleted", Outcome::Success)
             .actor(who.account_id())

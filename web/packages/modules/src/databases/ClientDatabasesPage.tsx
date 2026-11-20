@@ -19,8 +19,8 @@ import {
   DialogDescription,
   DialogFooter,
   useToast,
-} from "@dhpanel/ui";
-import { apiFetch } from "@dhpanel/api";
+} from "@builtpanel/ui";
+import { apiFetch } from "@builtpanel/api";
 import {
   Database,
   Users,
@@ -48,7 +48,7 @@ import { CreateDatabaseUserDialog } from "./CreateDatabaseUserDialog";
 import { ManageGrantsDialog } from "./ManageGrantsDialog";
 import { SqlImportDialog } from "./SqlImportDialog";
 import { RemoteAccessDialog } from "./RemoteAccessDialog";
-import { useTranslation } from "@dhpanel/i18n";
+import { useTranslation } from "@builtpanel/i18n";
 
 export function ClientDatabasesPage() {
   const { t } = useTranslation();

@@ -9,9 +9,9 @@ import {
   Button,
   Input,
   Badge,
-} from "@dhpanel/ui";
+} from "@builtpanel/ui";
 import { HardDrive, Lock, Settings2 } from "lucide-react";
-import { useTranslation } from "@dhpanel/i18n";
+import { useTranslation } from "@builtpanel/i18n";
 import { ServerSwapInfo } from "./types";
 
 interface SwapCardProps {

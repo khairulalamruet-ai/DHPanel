@@ -837,7 +837,7 @@ export interface components {
             /** @description TOTP is enabled (enrolment confirmed). */
             totp_enabled: boolean;
         };
-        /** @description Wire format (RFC 9457 + DHPanel extensions `code`, `correlation_id`, `errors`). */
+        /** @description Wire format (RFC 9457 + Built Panel extensions `code`, `correlation_id`, `errors`). */
         ProblemDetails: {
             /** @description Stable machine-readable code. */
             code: string;
@@ -2018,7 +2018,7 @@ export interface operations {
             /** @description Logged in; session cookie set */
             200: {
                 headers: {
-                    /** @description __Host-dh_session=…; Path=/; Secure; HttpOnly; SameSite=Strict */
+                    /** @description __Host-bp_session=…; Path=/; Secure; HttpOnly; SameSite=Strict */
                     "set-cookie"?: string;
                     [name: string]: unknown;
                 };
@@ -2026,7 +2026,7 @@ export interface operations {
                     "application/json": components["schemas"]["Me"];
                 };
             };
-            /** @description Password accepted but a second factor is required: a short-lived `__Host-dh_mfa` cookie is set; continue with POST /api/v1/public/auth/login/mfa */
+            /** @description Password accepted but a second factor is required: a short-lived `__Host-bp_mfa` cookie is set; continue with POST /api/v1/public/auth/login/mfa */
             202: {
                 headers: {
                     [name: string]: unknown;
@@ -2199,7 +2199,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description `enrollment_unavailable`: this control plane has no node CA yet (run `dhctl ca init`) */
+            /** @description `enrollment_unavailable`: this control plane has no node CA yet (run `bpctl ca init`) */
             503: {
                 headers: {
                     [name: string]: unknown;

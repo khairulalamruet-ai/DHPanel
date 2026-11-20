@@ -9,9 +9,9 @@ import {
   Button,
   Badge,
   useToast,
-} from "@dhpanel/ui";
-import { useTranslation } from "@dhpanel/i18n";
-import { apiFetch } from "@dhpanel/api";
+} from "@builtpanel/ui";
+import { useTranslation } from "@builtpanel/i18n";
+import { apiFetch } from "@builtpanel/api";
 import {
   RefreshCw,
   ShieldCheck,
@@ -141,10 +141,10 @@ export function UpdateSystemCard({ status, onRefresh }: UpdateSystemCardProps) {
         });
       } else {
         setCurrentStep("completed");
-        setStepMessage(t("update.steps.completed", "Update successfully applied! DHPanel is running the newest release."));
+        setStepMessage(t("update.steps.completed", "Update successfully applied! Built Panel is running the newest release."));
         toast({
           title: t("update.updateSuccess", "Update Applied Successfully"),
-          description: `DHPanel updated to ${status.available_update.version}`,
+          description: `Built Panel updated to ${status.available_update.version}`,
         });
       }
       onRefresh();
@@ -188,7 +188,7 @@ export function UpdateSystemCard({ status, onRefresh }: UpdateSystemCardProps) {
             <div className="flex items-center gap-2">
               <ArrowUpCircle className="h-5 w-5 text-primary" />
               <CardTitle className="text-lg font-bold" data-testid="panel-update-title">
-                {t("update.title", "DHPanel Release & Update Manager")}
+                {t("update.title", "Built Panel Release & Update Manager")}
               </CardTitle>
               <Badge variant="outline" className="font-mono text-xs">
                 {status.current_version}
@@ -406,7 +406,7 @@ export function UpdateSystemCard({ status, onRefresh }: UpdateSystemCardProps) {
             <CheckCircle2 className="h-5 w-5 text-emerald-500 shrink-0" />
             <div>
               <span className="font-semibold text-foreground">
-                {t("update.upToDate", "DHPanel is up to date.")}
+                {t("update.upToDate", "Built Panel is up to date.")}
               </span>
               <p>{t("update.upToDateDesc", "You are currently running the latest certified build on the active channel.")}</p>
             </div>

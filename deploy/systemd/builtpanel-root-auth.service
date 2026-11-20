@@ -1,22 +1,22 @@
-# DHPanel root login helper: lets the administrator `root` log in to the panel with this
+# Built Panel root login helper: lets the administrator `root` log in to the panel with this
 # server's root password (like WHM). The control plane never runs as root and cannot read
 # /etc/shadow; this helper reads root's line, checks one password at a time and answers one
-# byte, over a socket that only the panel's user (dhpanel) can open. See apps/root-auth.
+# byte, over a socket that only the panel's user (builtpanel) can open. See apps/root-auth.
 #
-#   systemd-analyze security --offline=true dhpanel-root-auth.service
+#   systemd-analyze security --offline=true builtpanel-root-auth.service
 [Unit]
-Description=DHPanel root login helper
-Documentation=https://docs.dhpanel.dev/control-plane
-Before=dhpanel-control-api.service
+Description=Built Panel root login helper
+Documentation=https://docs.builtpanel.dev/control-plane
+Before=builtpanel-control-api.service
 
 [Service]
 Type=simple
 # Root only to read /etc/shadow (its owner); no capabilities at all.
 User=root
 # The socket is created in the panel's group (mode 0660), so no chown is needed.
-Group=dhpanel
-ExecStart=/usr/local/bin/dhpanel-root-auth --socket /run/dhpanel-root-auth/root-auth.sock --client-user dhpanel
-RuntimeDirectory=dhpanel-root-auth
+Group=builtpanel
+ExecStart=/usr/local/bin/builtpanel-root-auth --socket /run/builtpanel-root-auth/root-auth.sock --client-user builtpanel
+RuntimeDirectory=builtpanel-root-auth
 RuntimeDirectoryMode=0750
 Restart=always
 RestartSec=2

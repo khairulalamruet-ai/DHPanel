@@ -24,6 +24,7 @@ const RESERVED: &[&str] = &[
     "mariadb_sys",
     "admin",
     "administrator",
+    "builtpanel",
     "dhpanel",
     "pma",
     "phpmyadmin",

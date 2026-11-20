@@ -4,12 +4,12 @@
 
 use std::{path::PathBuf, sync::Arc};
 
-use dhpanel_docker_manager::{ContainerSpec, DockerManager, ImageRef, Name};
-use dhpanel_node_agent::ops::{
+use builtpanel_docker_manager::{ContainerSpec, DockerManager, ImageRef, Name};
+use builtpanel_node_agent::ops::{
     services::{list_containers, restart_container},
     tenant::TenantContext,
 };
-use dhpanel_node_protocol::{ErrorCode, Operation, Output};
+use builtpanel_node_protocol::{ErrorCode, Operation, Output};
 use uuid::Uuid;
 
 fn docker_socket() -> PathBuf {
@@ -52,11 +52,11 @@ async fn an_account_lists_and_restarts_only_its_own_containers() {
             name
         }
     };
-    let a_web = make(format!("dh-sva{pid}-web"), Some(alice), "web").await;
-    let a_php = make(format!("dh-sva{pid}-php"), Some(alice), "php").await;
-    let b_web = make(format!("dh-svb{pid}-web"), Some(bob), "web").await;
-    let node_db = make(format!("dh-svdb{pid}"), None, "db").await;
-    let base = std::env::temp_dir().join(format!("dh-services-live-{pid}"));
+    let a_web = make(format!("bp-sva{pid}-web"), Some(alice), "web").await;
+    let a_php = make(format!("bp-sva{pid}-php"), Some(alice), "php").await;
+    let b_web = make(format!("bp-svb{pid}-web"), Some(bob), "web").await;
+    let node_db = make(format!("bp-svdb{pid}"), None, "db").await;
+    let base = std::env::temp_dir().join(format!("bp-services-live-{pid}"));
     let context = Arc::new(TenantContext {
         helper_socket: base.join("none.sock"),
         tenants_root: base.join("tenants"),
@@ -144,7 +144,7 @@ async fn an_account_lists_and_restarts_only_its_own_containers() {
     for name in [
         b_web.as_str().to_owned(),
         node_db.as_str().to_owned(),
-        format!("dh-nobody{pid}-web"),
+        format!("bp-nobody{pid}-web"),
         "../etc".to_owned(),
     ] {
         let e = restart_container(

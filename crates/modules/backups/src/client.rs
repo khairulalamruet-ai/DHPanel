@@ -16,16 +16,16 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
 };
-use dhpanel_audit::{AuditEntry, Outcome};
-use dhpanel_backup::{crypto::new_key, schedule::Cron};
-use dhpanel_database::{
+use builtpanel_audit::{AuditEntry, Outcome};
+use builtpanel_backup::{crypto::new_key, schedule::Cron};
+use builtpanel_database::{
     accounts::DbAccountKind,
     backups::{self as store, Backup, NewRestore, Restore, RestoreError},
     plans, tenants, users,
 };
-use dhpanel_http_kit::{AppError, FieldError, ProblemDetails};
-use dhpanel_rbac::Principal;
-use dhpanel_session::rfc3339;
+use builtpanel_http_kit::{AppError, FieldError, ProblemDetails};
+use builtpanel_rbac::Principal;
+use builtpanel_session::rfc3339;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -88,7 +88,7 @@ async fn audit(
     kind: &'static str,
     id: Uuid,
 ) -> Result<(), AppError> {
-    dhpanel_audit::insert(
+    builtpanel_audit::insert(
         &state.db,
         &AuditEntry::new(action, Outcome::Success)
             .actor(who.account_id())
@@ -783,7 +783,7 @@ pub async fn start_export(
 ) -> Result<(StatusCode, Json<ExportView>), AppError> {
     let h = hosting(&state, &who).await?;
     running(&h)?;
-    if req.passphrase.chars().count() < dhpanel_backup::export::MIN_PASSPHRASE {
+    if req.passphrase.chars().count() < builtpanel_backup::export::MIN_PASSPHRASE {
         return Err(bad(
             "passphrase",
             "too_short",
@@ -804,7 +804,7 @@ pub async fn start_export(
         .await
         .map_err(internal)?
         .ok_or_else(|| internal(std::io::Error::other("a backup has no key")))?;
-    let key: [u8; dhpanel_backup::KEY_LEN] = state
+    let key: [u8; builtpanel_backup::KEY_LEN] = state
         .master_key
         .open(&store::key_context(id), &sealed)
         .map_err(internal)?
@@ -816,7 +816,7 @@ pub async fn start_export(
         backup.created_at,
     );
     let header = tokio::task::spawn_blocking(move || {
-        dhpanel_backup::export::Header::new(
+        builtpanel_backup::export::Header::new(
             &id.simple().to_string(),
             &account,
             created_at,

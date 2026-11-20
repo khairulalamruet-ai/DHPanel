@@ -1,6 +1,6 @@
 import React from "react";
-import { Card, CardContent } from "@dhpanel/ui";
-import { useTranslation } from "@dhpanel/i18n";
+import { Card, CardContent } from "@builtpanel/ui";
+import { useTranslation } from "@builtpanel/i18n";
 import {
   UserX,
   Flame,

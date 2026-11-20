@@ -17,22 +17,22 @@ use axum::{
     http::StatusCode,
     routing::get,
 };
-use dhpanel_audit::{AuditEntry, Outcome};
-use dhpanel_database::{
+use builtpanel_audit::{AuditEntry, Outcome};
+use builtpanel_database::{
     dns::{self as store, DeleteOutcome, StoredLine, Template, TemplateError},
     domains::Domain,
     sqlx::PgConnection,
 };
-use dhpanel_domain::{
+use builtpanel_domain::{
     DnsRecord, DnsTemplateRecord, DnsVariables, DomainKind, Fqdn, check_dns_template,
     render_dns_template,
 };
-use dhpanel_http_kit::{AppError, FieldError, ProblemDetails};
-use dhpanel_rbac::{
+use builtpanel_http_kit::{AppError, FieldError, ProblemDetails};
+use builtpanel_rbac::{
     Require, RequireRecent,
     permissions::{DomainsManage, DomainsRead},
 };
-use dhpanel_session::rfc3339;
+use builtpanel_session::rfc3339;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -309,7 +309,12 @@ fn write_error(err: TemplateError) -> AppError {
     }
 }
 
-fn audit(action: &'static str, who: &dhpanel_rbac::Principal, id: Uuid, name: &str) -> AuditEntry {
+fn audit(
+    action: &'static str,
+    who: &builtpanel_rbac::Principal,
+    id: Uuid,
+    name: &str,
+) -> AuditEntry {
     AuditEntry::new(action, Outcome::Success)
         .actor(who.account_id())
         .target("dns_template", id)
@@ -401,7 +406,7 @@ pub async fn create_template(
     )
     .await
     .map_err(write_error)?;
-    dhpanel_audit::insert(
+    builtpanel_audit::insert(
         &mut *tx,
         &audit("admin.dns_template_created", &who, id, &input.name),
     )
@@ -468,7 +473,7 @@ pub async fn update_template(
     {
         return Err(AppError::not_found("template"));
     }
-    dhpanel_audit::insert(
+    builtpanel_audit::insert(
         &mut *tx,
         &audit("admin.dns_template_updated", &who, id, &input.name),
     )
@@ -531,7 +536,7 @@ pub async fn delete_template(
             ));
         }
     }
-    dhpanel_audit::insert(
+    builtpanel_audit::insert(
         &mut *tx,
         &audit("admin.dns_template_deleted", &who, id, &name),
     )

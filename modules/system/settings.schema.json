@@ -11,7 +11,7 @@
       "description": "Shown in the sign-in page and the browser tab.",
       "minLength": 1,
       "maxLength": 64,
-      "default": "DHPanel",
+      "default": "Built Panel",
       "x-scope": "global",
       "x-title": {
         "en": "Panel name",

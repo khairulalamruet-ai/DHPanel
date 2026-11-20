@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Installs the DHPanel control plane, and by default a local node agent, on ONE new server
+# Installs the Built Panel control plane, and by default a local node agent, on ONE new server
 # (Ubuntu 22.04/24.04/26.04 or Debian 12/13, run as root). T19.01.
 #
 #   sudo ./install.sh --bin-dir ./bin --hostname panel.example.com --admin-email you@example.com
 #
-#   --bin-dir DIR        the release's binaries: dhpanel-control-api, dhctl, dhpanel-root-auth, and (for the local
-#                        node) dhpanel-agent and dhpanel-priv-helper
+#   --bin-dir DIR        the release's binaries: builtpanel-control-api, bpctl, builtpanel-root-auth, and (for the local
+#                        node) builtpanel-agent and builtpanel-priv-helper
 #   --hostname NAME      the DNS name the panel is served under (it must already point here;
 #                        Caddy gets its certificate from it)
 #   --admin-email MAIL   the first administrator's email
@@ -18,7 +18,7 @@
 #                        it must point here too; on sslip.io names it does on its own)
 #   --no-agent           install the control plane only (nodes are added from other servers)
 #   --no-root-login      do not let `root` log in to the panel with this server's root password
-#                        (on by default, like WHM; the helper dhpanel-root-auth checks it)
+#                        (on by default, like WHM; the helper builtpanel-root-auth checks it)
 #   --check              only look: what is there, what would be done; changes nothing
 #
 # Safe to run again: every step looks at what is already there, secrets and the CA are never
@@ -26,13 +26,13 @@
 # which and why; running again continues from there.
 #
 # What it installs: PostgreSQL 18 (PGDG), Redis, Caddy, ufw (22, 80, 443 and the agent port
-# 8444), the control plane as the unprivileged user `dhpanel` under its hardened unit, the CA
+# 8444), the control plane as the unprivileged user `builtpanel` under its hardened unit, the CA
 # of the node channel, and with the local node: rootless Docker, the agent and the root helper.
 set -euo pipefail
 
 BIN_DIR=""; WEB_DIR=""; ADMIN_HOSTNAME=""; HOSTNAME_FQDN=""; ADMIN_EMAIL=""; ADMIN_USER=owner; WITH_AGENT=1; ROOT_LOGIN=1; CHECK=0
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ETC=/etc/dhpanel; SECRETS=$ETC/secrets; STATE=/var/lib/dhpanel; AGENT_PORT=8444
+ETC=/etc/builtpanel; SECRETS=$ETC/secrets; STATE=/var/lib/builtpanel; AGENT_PORT=8444
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -50,10 +50,30 @@ while [ $# -gt 0 ]; do
     esac
 done
 
+# The look: the logo, a live line per step with an overall progress bar (deploy/ui.sh), or plain
+# "==> step" lines when that file is missing or the output is not a terminal.
+if [ -f "$HERE/ui.sh" ]; then
+    # shellcheck source=deploy/ui.sh
+    . "$HERE/ui.sh"
+else
+    ui_init() { exec 3>&1 4>&2; }
+    ui_banner() { :; }
+    ui_log_to() { :; }
+    ui_step() { echo "==> $1"; }
+    ui_warn() { echo "warning: $1"; }
+    ui_fail() { echo "install.sh: $1" >&2; }
+    ui_done() { :; }
+    ui_box() { cat >&3; }
+    ui_cleanup() { :; }
+fi
+UI_TOTAL=$(grep -c '^[[:space:]]*say "' "${BASH_SOURCE[0]}")
+ui_init
+[ "${BUILTPANEL_UI_BANNER:-1}" = 0 ] || ui_banner "the modern hosting control panel  ·  installer"
+
 step=""
-say() { step="$*"; echo "==> $*"; }
-die() { echo "install.sh: $*" >&2; exit 1; }
-trap 'rc=$?; [ $rc -ne 0 ] && [ -n "$step" ] && echo "install.sh: stopped during \"$step\"; fix the cause above and run this again" >&2' EXIT
+say() { step="$*"; ui_step "$*"; }
+die() { ui_fail "$*"; exit 1; }
+trap 'rc=$?; ui_cleanup; [ $rc -ne 0 ] && [ -n "$step" ] && echo "install.sh: stopped during \"$step\"; fix the cause above and run this again" >&4' EXIT
 
 # --- what this machine is ------------------------------------------------------------------
 [ "$(uname -s)" = Linux ] || die "Linux only"
@@ -85,7 +105,7 @@ if [ -n "$WEB_DIR" ]; then
 fi
 [ -n "$ADMIN_EMAIL" ] || die "give the first administrator's email with --admin-email"
 [[ "$ADMIN_EMAIL" =~ ^[^@\ ]+@[^@\ ]+\.[^@\ ]+$ ]] || die "--admin-email does not look like an email address"
-need=(dhpanel-control-api dhctl); [ "$WITH_AGENT" -eq 1 ] && need+=(dhpanel-agent dhpanel-priv-helper); [ "$ROOT_LOGIN" -eq 1 ] && need+=(dhpanel-root-auth)
+need=(builtpanel-control-api bpctl); [ "$WITH_AGENT" -eq 1 ] && need+=(builtpanel-agent builtpanel-priv-helper); [ "$ROOT_LOGIN" -eq 1 ] && need+=(builtpanel-root-auth)
 for b in "${need[@]}"; do
     [ -x "$BIN_DIR/$b" ] || die "$BIN_DIR/$b is missing or not executable"
     # An ELF program for this machine's architecture (the control plane has no --version: running
@@ -98,20 +118,22 @@ free_gb=$(df -BG --output=avail / | tail -1 | tr -dc '0-9'); [ "$free_gb" -ge 10
 mem_mb=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo); [ "$mem_mb" -ge 1800 ] || die "at least 2 GB of memory are needed (there are ${mem_mb} MB)"
 
 if [ "$CHECK" -eq 1 ]; then
-    say "check only: nothing is changed"
+    echo "==> check only: nothing is changed"
     echo "    system:        ${PRETTY_NAME} ($(uname -m)), ${mem_mb} MB memory, ${free_gb} GB free"
     echo "    binaries:      ${need[*]} found and runnable"
     echo "    postgresql 18: $(command -v /usr/lib/postgresql/18/bin/postgres > /dev/null && echo present || echo 'would be installed')"
     echo "    redis:         $(command -v redis-server || echo 'would be installed')"
     echo "    caddy:         $(command -v caddy || echo 'would be installed')"
     echo "    web interface: $([ -n "$WEB_DIR" ] && echo "$WEB_DIR (clients on $HOSTNAME_FQDN, administrators on $ADMIN_HOSTNAME)" || echo 'none given: only the API is served')"
-    echo "    panel user:    $(id dhpanel > /dev/null 2>&1 && echo present || echo 'would be created')"
+    echo "    panel user:    $(id builtpanel > /dev/null 2>&1 && echo present || echo 'would be created')"
     echo "    configuration: $([ -f $ETC/control.toml ] && echo "present ($ETC/control.toml is kept)" || echo 'would be written')"
     echo "    CA:            $([ -f $SECRETS/node_ca.crt ] && echo 'present (kept)' || echo 'would be created')"
     echo "    root login:    $([ "$ROOT_LOGIN" -eq 1 ] && echo "on (root's password: $(passwd -S root 2> /dev/null | awk '{print $2}'))" || echo off)"
     exit 0
 fi
 [ "$(id -u)" -eq 0 ] || die "run as root (sudo)"
+# From here the commands' own output goes to the log; the terminal shows the steps.
+ui_log_to /var/log/builtpanel-install.log
 
 export DEBIAN_FRONTEND=noninteractive
 apt_install() { apt-get install -y -qq "$@" > /dev/null; }
@@ -158,13 +180,43 @@ if ! command -v caddy > /dev/null; then
 fi
 
 # --- user, folders, secrets ----------------------------------------------------------------
+# --- upgrade from DHPanel -------------------------------------------------------------------
+# A server installed while the panel was called DHPanel moves to the new names: services, the
+# system user, folders, the database and its role. Secrets, the CA and the data stay as they are.
+if [ -d /etc/dhpanel ] && [ ! -e "$ETC" ]; then
+    say "upgrading from DHPanel to Built Panel"
+    for unit in dhpanel-control-api dhpanel-root-auth; do
+        systemctl disable --now "$unit" > /dev/null 2>&1 || true
+        rm -f "/etc/systemd/system/$unit.service"
+    done
+    # The node agent's part (its user, Docker and packet filter) is moved by agent/install.sh.
+    systemctl stop dhpanel-agent 2> /dev/null || true
+    systemctl daemon-reload
+    if id dhpanel > /dev/null 2>&1 && ! id builtpanel > /dev/null 2>&1; then
+        usermod -l builtpanel -d "$STATE" dhpanel
+        groupmod -n builtpanel dhpanel 2> /dev/null || true
+    fi
+    mv /etc/dhpanel "$ETC"
+    [ ! -d /var/lib/dhpanel ] || [ -e "$STATE" ] || mv /var/lib/dhpanel "$STATE"
+    [ ! -d /usr/share/dhpanel ] || [ -e /usr/share/builtpanel ] || mv /usr/share/dhpanel /usr/share/builtpanel
+    sed -i 's#/etc/dhpanel#/etc/builtpanel#g; s#/var/lib/dhpanel#/var/lib/builtpanel#g; s#/run/dhpanel#/run/builtpanel#g; s#/usr/share/dhpanel#/usr/share/builtpanel#g' "$ETC/control.toml"
+    runuser -u postgres -- psql -qAt -v ON_ERROR_STOP=1 <<'SQL' > /dev/null
+SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'dhpanel' AND pid <> pg_backend_pid();
+SELECT 'ALTER DATABASE dhpanel RENAME TO builtpanel' WHERE EXISTS (SELECT FROM pg_database WHERE datname = 'dhpanel') AND NOT EXISTS (SELECT FROM pg_database WHERE datname = 'builtpanel') \gexec
+SELECT 'ALTER ROLE dhpanel RENAME TO builtpanel' WHERE EXISTS (SELECT FROM pg_roles WHERE rolname = 'dhpanel') AND NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'builtpanel') \gexec
+SQL
+    # The address names the role and the database (its password is set again below).
+    [ ! -f "$SECRETS/database_url" ] || sed -i 's#//dhpanel:#//builtpanel:#; s#/dhpanel$#/builtpanel#' "$SECRETS/database_url"
+    rm -f /usr/local/bin/dhpanel-control-api /usr/local/bin/dhctl /usr/local/bin/dhpanel-root-auth
+fi
+
 say "the panel's user and folders"
-id dhpanel > /dev/null 2>&1 || useradd --system --user-group --home-dir "$STATE" --no-create-home --shell /usr/sbin/nologin dhpanel
-install -d -m 0755 -o root -g dhpanel "$ETC"
-install -d -m 0750 -o root -g dhpanel "$SECRETS"
-install -d -m 0700 -o dhpanel -g dhpanel "$STATE"
-for b in dhpanel-control-api dhctl; do install -m 0755 -o root -g root "$BIN_DIR/$b" /usr/local/bin/$b; done
-[ "$ROOT_LOGIN" -eq 0 ] || install -m 0755 -o root -g root "$BIN_DIR/dhpanel-root-auth" /usr/local/bin/dhpanel-root-auth
+id builtpanel > /dev/null 2>&1 || useradd --system --user-group --home-dir "$STATE" --no-create-home --shell /usr/sbin/nologin builtpanel
+install -d -m 0755 -o root -g builtpanel "$ETC"
+install -d -m 0750 -o root -g builtpanel "$SECRETS"
+install -d -m 0700 -o builtpanel -g builtpanel "$STATE"
+for b in builtpanel-control-api bpctl; do install -m 0755 -o root -g root "$BIN_DIR/$b" /usr/local/bin/$b; done
+[ "$ROOT_LOGIN" -eq 0 ] || install -m 0755 -o root -g root "$BIN_DIR/builtpanel-root-auth" /usr/local/bin/builtpanel-root-auth
 
 secret() { # name, command that prints it: written once, never replaced
     if [ ! -s "$SECRETS/$1" ]; then
@@ -172,7 +224,7 @@ secret() { # name, command that prints it: written once, never replaced
     fi
     # The panel's own user reads it and nobody else: the program refuses a secret file that
     # anyone but its owner can read.
-    chown dhpanel:dhpanel "$SECRETS/$1"; chmod 0600 "$SECRETS/$1"
+    chown builtpanel:builtpanel "$SECRETS/$1"; chmod 0600 "$SECRETS/$1"
 }
 say "database and Redis passwords"
 secret db_password bash -c 'openssl rand -hex 24'
@@ -182,11 +234,11 @@ DBPW=$(cat $SECRETS/db_password); RPW=$(cat $SECRETS/redis_password)
 
 say "the panel's database"
 runuser -u postgres -- psql -qAt -v ON_ERROR_STOP=1 -v pw="$DBPW" <<'SQL' > /dev/null
-SELECT 'CREATE ROLE dhpanel LOGIN' WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'dhpanel') \gexec
-ALTER ROLE dhpanel PASSWORD :'pw';
-SELECT 'CREATE DATABASE dhpanel OWNER dhpanel' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'dhpanel') \gexec
+SELECT 'CREATE ROLE builtpanel LOGIN' WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'builtpanel') \gexec
+ALTER ROLE builtpanel PASSWORD :'pw';
+SELECT 'CREATE DATABASE builtpanel OWNER builtpanel' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'builtpanel') \gexec
 SQL
-secret database_url printf 'postgres://dhpanel:%s@127.0.0.1/dhpanel' "$DBPW"
+secret database_url printf 'postgres://builtpanel:%s@127.0.0.1/builtpanel' "$DBPW"
 
 say "Redis password (local only)"
 if ! grep -q "^requirepass" /etc/redis/redis.conf; then
@@ -225,11 +277,11 @@ public_url = "https://$HOSTNAME_FQDN"
 stream_listen = "0.0.0.0:$AGENT_PORT"
 stream_url = "https://$HOSTNAME_FQDN:$AGENT_PORT"
 TOML
-    chown root:dhpanel "$ETC/control.toml"; chmod 0640 "$ETC/control.toml"
+    chown root:builtpanel "$ETC/control.toml"; chmod 0640 "$ETC/control.toml"
 fi
 # Root login (like WHM): the control plane asks the root helper on this socket. Kept in step with
 # --no-root-login on every run, also in a configuration written by an earlier run.
-ROOT_SOCKET=/run/dhpanel-root-auth/root-auth.sock
+ROOT_SOCKET=/run/builtpanel-root-auth/root-auth.sock
 sed -i '/^root_login_socket *=/d' "$ETC/control.toml"
 if [ "$ROOT_LOGIN" -eq 1 ]; then
     if grep -q '^\[auth\]' "$ETC/control.toml"; then
@@ -238,54 +290,48 @@ if [ "$ROOT_LOGIN" -eq 1 ]; then
         printf '\n[auth]\nroot_login_socket = "%s"\n' "$ROOT_SOCKET" >> "$ETC/control.toml"
     fi
 fi
-export DHPANEL_CONFIG="$ETC/control.toml"
-as_panel() { runuser -u dhpanel -- env DHPANEL_CONFIG="$DHPANEL_CONFIG" "$@"; }
+export BUILTPANEL_CONFIG="$ETC/control.toml"
+as_panel() { runuser -u builtpanel -- env BUILTPANEL_CONFIG="$BUILTPANEL_CONFIG" "$@"; }
 
 say "the node channel's certificate authority"
 # Made by root (the folder is not writable for the panel's user); the keys are handed over below.
-[ -f "$SECRETS/node_ca.crt" ] || dhctl ca init --dir "$SECRETS" > /dev/null
-[ -f "$SECRETS/server.crt" ] || dhctl ca issue-server --dir "$SECRETS" --dns "$HOSTNAME_FQDN" --out-dir "$SECRETS" > /dev/null
+[ -f "$SECRETS/node_ca.crt" ] || bpctl ca init --dir "$SECRETS" > /dev/null
+[ -f "$SECRETS/server.crt" ] || bpctl ca issue-server --dir "$SECRETS" --dns "$HOSTNAME_FQDN" --out-dir "$SECRETS" > /dev/null
 chmod 0750 "$SECRETS"; chmod 0640 "$SECRETS"/*.crt; chmod 0600 "$SECRETS"/*.key
 # Made by root, read by the panel's user (the certificates are not secret, the keys are).
-chown dhpanel:dhpanel "$SECRETS"/*.crt "$SECRETS"/*.key
+chown builtpanel:builtpanel "$SECRETS"/*.crt "$SECRETS"/*.key
 
 say "database schema"
-as_panel dhctl migrate > /dev/null
+as_panel bpctl migrate > /dev/null
 
-say "the first administrator"
-ADMIN_PASSWORD=""
-if [ "$(runuser -u postgres -- psql -qAt -d dhpanel -c "select count(*) from accounts where kind = 'admin'")" = 0 ]; then
-    ADMIN_PASSWORD="$(openssl rand -base64 24 | tr -d '/+=' | cut -c1-24)-Aa1"
-    printf '%s\n' "$ADMIN_PASSWORD" | as_panel dhctl admin create --username "$ADMIN_USER" --email "$ADMIN_EMAIL" --password-stdin > /dev/null
-fi
-
+CPU_LIMITS=yes
 ROOT_PW_STATE=""
 if [ "$ROOT_LOGIN" -eq 1 ]; then
     say "root login (root with this server's root password)"
-    install -m 0644 "$HERE/systemd/dhpanel-root-auth.service" /etc/systemd/system/dhpanel-root-auth.service
+    install -m 0644 "$HERE/systemd/builtpanel-root-auth.service" /etc/systemd/system/builtpanel-root-auth.service
     systemctl daemon-reload
-    systemctl enable dhpanel-root-auth > /dev/null 2>&1
-    systemctl restart dhpanel-root-auth
-    as_panel dhctl admin root-login --email "root@$HOSTNAME_FQDN" > /dev/null
+    systemctl enable builtpanel-root-auth > /dev/null 2>&1
+    systemctl restart builtpanel-root-auth
+    as_panel bpctl admin root-login --email "root@$HOSTNAME_FQDN" > /dev/null
     # P: root has a usable password; L: locked; NP: none (cloud images often log in with a key only).
     ROOT_PW_STATE=$(passwd -S root 2> /dev/null | awk '{print $2}')
 else
-    as_panel dhctl admin root-login --disable > /dev/null
-    if [ -f /etc/systemd/system/dhpanel-root-auth.service ]; then
-        systemctl disable --now dhpanel-root-auth > /dev/null 2>&1 || true
+    as_panel bpctl admin root-login --disable > /dev/null
+    if [ -f /etc/systemd/system/builtpanel-root-auth.service ]; then
+        systemctl disable --now builtpanel-root-auth > /dev/null 2>&1 || true
     fi
 fi
 
 # --- the service, the web server, the firewall ----------------------------------------------
 say "the control plane's service"
-install -m 0644 "$HERE/systemd/dhpanel-control-api.service" /etc/systemd/system/dhpanel-control-api.service
+install -m 0644 "$HERE/systemd/builtpanel-control-api.service" /etc/systemd/system/builtpanel-control-api.service
 systemctl daemon-reload
-systemctl enable dhpanel-control-api > /dev/null 2>&1
-systemctl restart dhpanel-control-api
+systemctl enable builtpanel-control-api > /dev/null 2>&1
+systemctl restart builtpanel-control-api
 for _ in $(seq 1 40); do curl -fsS http://127.0.0.1:8080/api/v1/public/ready > /dev/null 2>&1 && break; sleep 0.5; done
-curl -fsS http://127.0.0.1:8080/api/v1/public/ready > /dev/null 2>&1 || die "the control plane does not answer (journalctl -u dhpanel-control-api)"
+curl -fsS http://127.0.0.1:8080/api/v1/public/ready > /dev/null 2>&1 || die "the control plane does not answer (journalctl -u builtpanel-control-api)"
 
-WEB_ROOT=/usr/share/dhpanel/web
+WEB_ROOT=/usr/share/builtpanel/web
 if [ -n "$WEB_DIR" ]; then
     say "the web interface (clients on $HOSTNAME_FQDN, administrators on $ADMIN_HOSTNAME)"
     install -d -m 0755 "$WEB_ROOT"
@@ -336,9 +382,9 @@ say "Caddy in front of the panel"
     options=""
     if [ "$WITH_AGENT" -eq 1 ]; then
         # One web server for the panel and for the sites on this machine. The node agent owns the
-        # server named `dhpanel` (it fills it with every site's route), so the panel's own server has
+        # server named `builtpanel` (it fills it with every site's route), so the panel's own server has
         # that name and the agent is told the panel's names: they stay in what it sends.
-        printf '{\n    servers :443 {\n        name dhpanel\n    }\n}\n'
+        printf '{\n    servers :443 {\n        name builtpanel\n    }\n}\n'
     fi
     if [ -n "$WEB_DIR" ]; then
         panel_site "$HOSTNAME_FQDN" client
@@ -366,34 +412,52 @@ if [ "$WITH_AGENT" -eq 1 ]; then
         # Only the agent's own rootless daemon is used: the system-wide one stays off.
         systemctl disable --now docker.service docker.socket > /dev/null 2>&1 || true
     fi
-    "$HERE/agent/install.sh" --binary "$BIN_DIR/dhpanel-agent" --priv-helper "$BIN_DIR/dhpanel-priv-helper" --rootless-docker
+    "$HERE/agent/install.sh" --binary "$BIN_DIR/builtpanel-agent" --priv-helper "$BIN_DIR/builtpanel-priv-helper" --rootless-docker
+    agent_uid=$(id -u builtpanel-agent)
+    if ! grep -qw cpu "/sys/fs/cgroup/user.slice/user-${agent_uid}.slice/user@${agent_uid}.service/cgroup.subtree_control" 2> /dev/null; then
+        ui_warn "this server does not hand the CPU controller to the agent's user (a container-type VPS, or an old systemd): hosting accounts cannot get CPU limits here"
+        CPU_LIMITS=no
+    fi
     # The agent drives the web server on this machine (Caddy's admin API, which listens on this
     # machine only) and keeps the panel's own name in what it sends it.
-    install -d -m 0755 /etc/systemd/system/dhpanel-agent.service.d
-    cat > /etc/systemd/system/dhpanel-agent.service.d/panel.conf <<CONF
+    install -d -m 0755 /etc/systemd/system/builtpanel-agent.service.d
+    cat > /etc/systemd/system/builtpanel-agent.service.d/panel.conf <<CONF
 [Service]
-Environment=DHPANEL_AGENT_CADDY_ADMIN=http://127.0.0.1:2019
-Environment=DHPANEL_AGENT_PANEL_HOST=$HOSTNAME_FQDN
-Environment=DHPANEL_AGENT_PANEL_UPSTREAM=127.0.0.1:8080
-$([ -n "$WEB_DIR" ] && printf 'Environment=DHPANEL_AGENT_PANEL_ADMIN_HOST=%s\nEnvironment=DHPANEL_AGENT_PANEL_WEB_ROOT=%s\n' "$ADMIN_HOSTNAME" "$WEB_ROOT")
+Environment=BUILTPANEL_AGENT_CADDY_ADMIN=http://127.0.0.1:2019
+Environment=BUILTPANEL_AGENT_PANEL_HOST=$HOSTNAME_FQDN
+Environment=BUILTPANEL_AGENT_PANEL_UPSTREAM=127.0.0.1:8080
+$([ -n "$WEB_DIR" ] && printf 'Environment=BUILTPANEL_AGENT_PANEL_ADMIN_HOST=%s\nEnvironment=BUILTPANEL_AGENT_PANEL_WEB_ROOT=%s\n' "$ADMIN_HOSTNAME" "$WEB_ROOT")
 CONF
     systemctl daemon-reload
-    systemctl try-restart dhpanel-agent 2> /dev/null || true
+    systemctl try-restart builtpanel-agent 2> /dev/null || true
+fi
+
+# The administrator with a password of its own (it is the way in when `root` cannot be: root login
+# off, or root has no password on this server). Made last, so a password that is printed is never
+# lost to an install that stopped half way. With root login on and a root password set, root is
+# the administrator, like WHM, and nothing is generated.
+say "the first administrator"
+ADMIN_PASSWORD=""
+if [ "$ROOT_LOGIN" -eq 0 ] || [ "$ROOT_PW_STATE" != P ]; then
+    if [ "$(runuser -u postgres -- psql -qAt -d builtpanel -c "select count(*) from accounts where kind = 'admin' and password_hash like '\$argon2id\$%'")" = 0 ]; then
+        ADMIN_PASSWORD="$(openssl rand -base64 24 | tr -d '/+=' | cut -c1-24)-Aa1"
+        printf '%s\n' "$ADMIN_PASSWORD" | as_panel bpctl admin create --username "$ADMIN_USER" --email "$ADMIN_EMAIL" --password-stdin > /dev/null
+    fi
 fi
 
 trap - EXIT
-cat <<EOF
-
-DHPanel is installed.
+ui_done
+cat -s <<EOF | ui_box
+${UI_OK:-}${UI_B:-}Built Panel is installed.${UI_R:-}
 
   Panel:     https://$HOSTNAME_FQDN   (the certificate arrives within a minute, once the name points here)
 $([ -n "$WEB_DIR" ] && printf '  Admin:     https://%s   (this name must point here too)\n' "$ADMIN_HOSTNAME")
-  Login:     $ADMIN_USER   (role super_admin: every permission on the panel, like WHM's root)
-$([ "$ROOT_LOGIN" -eq 1 ] && printf '  Root:      root   with this server'"'"'s root password (full access, like WHM)\n')
-$([ "$ROOT_LOGIN" -eq 1 ] && [ "$ROOT_PW_STATE" != P ] && printf '             root has no usable password yet: set one with `sudo passwd root` to use it\n')
-$([ -n "$ADMIN_PASSWORD" ] && printf '  Password:  %s\n  (shown once, never stored: sign in and change it, then set up two-factor)\n' "$ADMIN_PASSWORD" || echo '  (the administrator already existed; its password is unchanged)')
+$([ "$ROOT_LOGIN" -eq 1 ] && [ "$ROOT_PW_STATE" = P ] && printf '  Login:     root\n  Password:  this server'"'"'s root password (the one you log in to the server with)\n  Access:    full, like WHM'"'"'s root (role super_admin)\n')
+$([ -n "$ADMIN_PASSWORD" ] && printf '  Login:     %s   (role super_admin: every permission on the panel)\n  Password:  %s\n  (shown once, never stored: sign in and change it, then set up two-factor)\n' "$ADMIN_USER" "$ADMIN_PASSWORD")
+$([ "$ROOT_LOGIN" -eq 1 ] && [ "$ROOT_PW_STATE" != P ] && printf '  Root:      root has no usable password on this server: set one with `sudo passwd root`, then log in as root\n')
+$([ -z "$ADMIN_PASSWORD" ] && [ "$ROOT_LOGIN" -eq 0 ] && echo '  (an administrator already existed; its password is unchanged)')
 
-Keep a copy of $SECRETS/master_key somewhere else: without it a lost server cannot be restored
+$([ "$CPU_LIMITS" = no ] && printf 'Note: this server does not hand the CPU controller to the agent, so hosting plans cannot limit CPU here.\n\n')Keep a copy of $SECRETS/master_key somewhere else: without it a lost server cannot be restored
 (deploy/runbooks/system-restore.md).
-$([ "$WITH_AGENT" -eq 1 ] && printf '\nThe local node is installed but not enrolled: add a node in the panel, then run the enrol command it\nshows as the agent user, then `systemctl enable --now dhpanel-agent` (see deploy/agent/install.sh).\n')
+$([ "$WITH_AGENT" -eq 1 ] && printf '\nThe local node is installed but not enrolled: add a node in the panel, then run the enrol command it\nshows as the agent user, then `systemctl enable --now builtpanel-agent` (see deploy/agent/install.sh).\n')
 EOF

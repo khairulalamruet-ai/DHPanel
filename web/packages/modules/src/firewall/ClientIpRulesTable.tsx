@@ -14,9 +14,9 @@ import {
   Button,
   Badge,
   Input,
-} from "@dhpanel/ui";
+} from "@builtpanel/ui";
 import { ShieldCheck, Ban, CheckCircle2, Trash2, Search, Filter } from "lucide-react";
-import { useTranslation } from "@dhpanel/i18n";
+import { useTranslation } from "@builtpanel/i18n";
 import { ClientIpRule } from "./types";
 
 interface ClientIpRulesTableProps {

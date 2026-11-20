@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# Installs the DHPanel node agent on a Linux server (run as root).
+# Installs the Built Panel node agent on a Linux server (run as root).
 #
-#   sudo ./install.sh --binary ./dhpanel-agent [--priv-helper PATH | --no-priv-helper] [--rootless-docker] [--check]
+#   sudo ./install.sh --binary ./builtpanel-agent [--priv-helper PATH | --no-priv-helper] [--rootless-docker] [--check]
 #
 # The root helper is installed (or updated) automatically from the file called
-# dhpanel-priv-helper next to the agent binary; --priv-helper PATH names another,
+# builtpanel-priv-helper next to the agent binary; --priv-helper PATH names another,
 # --no-priv-helper leaves it out. Running this again after an upgrade replaces the
 # binaries and the units and restarts the helper: nothing else to do by hand.
 # --check only looks (what is there, what would be done) and changes nothing.
 #
 # What it does (safe to run again):
-#   * creates the unprivileged system user `dhpanel-agent`
+#   * creates the unprivileged system user `builtpanel-agent`
 #   * installs the binary to /usr/local/bin and the hardened systemd unit
-#   * creates /var/lib/dhpanel-agent (mode 0700, owned by the agent)
+#   * creates /var/lib/builtpanel-agent (mode 0700, owned by the agent)
 #   * installs and starts the small root helper the agent asks for the few host
 #     changes that need root (its own hardened unit), and the packet filter tool
 #     (nftables) it needs for the database's remote access, if it is missing
@@ -22,10 +22,10 @@
 # shows when you add the node (run as the agent user), then enable the service.
 set -euo pipefail
 
-AGENT_USER=dhpanel-agent
-STATE_DIR=/var/lib/dhpanel-agent
-BIN_DST=/usr/local/bin/dhpanel-agent
-UNIT_DST=/etc/systemd/system/dhpanel-agent.service
+AGENT_USER=builtpanel-agent
+STATE_DIR=/var/lib/builtpanel-agent
+BIN_DST=/usr/local/bin/builtpanel-agent
+UNIT_DST=/etc/systemd/system/builtpanel-agent.service
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 binary=""
@@ -60,8 +60,8 @@ command -v systemctl >/dev/null || die "systemd is required"
 # The helper: the one named, or the one beside the agent binary.
 if [ "$no_helper" -eq 1 ]; then
   helper=""
-elif [ -z "$helper" ] && [ -x "$(dirname "$binary")/dhpanel-priv-helper" ]; then
-  helper="$(dirname "$binary")/dhpanel-priv-helper"
+elif [ -z "$helper" ] && [ -x "$(dirname "$binary")/builtpanel-priv-helper" ]; then
+  helper="$(dirname "$binary")/builtpanel-priv-helper"
 fi
 
 if [ "$check" -eq 1 ]; then
@@ -71,11 +71,59 @@ if [ "$check" -eq 1 ]; then
     "$helper" --version >/dev/null 2>&1 || die "$helper does not run on this machine"
     say "root helper:    $helper ($("$helper" --version 2>/dev/null | head -1)) would be installed"
   else
-    say "root helper:    none (use --priv-helper PATH, or put dhpanel-priv-helper next to the agent binary)"
+    say "root helper:    none (use --priv-helper PATH, or put builtpanel-priv-helper next to the agent binary)"
   fi
   say "nftables:       $(command -v nft || echo 'missing (would be installed)')"
   say "agent user:     $(id "$AGENT_USER" >/dev/null 2>&1 && echo present || echo 'would be created')"
   exit 0
+fi
+
+# --- upgrade from DHPanel -----------------------------------------------------
+# A node installed while the panel was called DHPanel: its user, folders, units and packet
+# filter tables move to the new names. Its Docker containers, volumes and networks keep their
+# `dh-` names (Docker cannot rename a volume); the marker `legacy-names` tells the agent so.
+OLD_USER=dhpanel-agent; OLD_STATE=/var/lib/dhpanel-agent
+if [ "$check" -eq 0 ] && id "$OLD_USER" >/dev/null 2>&1 && ! id "$AGENT_USER" >/dev/null 2>&1; then
+  say "upgrading this node from DHPanel to Built Panel (Docker names stay dh-)"
+  OLD_UID="$(id -u "$OLD_USER")"
+  for unit in dhpanel-agent dhpanel-priv-helper; do
+    systemctl disable --now "$unit" >/dev/null 2>&1 || true
+    rm -f "/etc/systemd/system/$unit.service"
+  done
+  rm -rf /etc/systemd/system/dhpanel-agent.service.d
+  # The user's own services (its rootless Docker) stop with its user manager and start again
+  # under the new name below; the containers come back with Docker (restart policies).
+  loginctl disable-linger "$OLD_USER" 2>/dev/null || true
+  systemctl stop "user@${OLD_UID}.service" 2>/dev/null || true
+  pkill -KILL -u "$OLD_UID" 2>/dev/null || true
+  sleep 1
+  if [ -d "$OLD_STATE" ] && [ ! -e "$STATE_DIR" ]; then
+    mv "$OLD_STATE" "$STATE_DIR"
+    # Docker's bind volumes (webmail, vhosts) keep the path they were made with.
+    ln -s "$STATE_DIR" "$OLD_STATE"
+  fi
+  if [ -d /var/lib/dhpanel-transfers ] && [ ! -e /var/lib/builtpanel-transfers ]; then
+    mv /var/lib/dhpanel-transfers /var/lib/builtpanel-transfers
+    ln -s /var/lib/builtpanel-transfers /var/lib/dhpanel-transfers
+  fi
+  usermod -l "$AGENT_USER" -d "$STATE_DIR/home" "$OLD_USER"
+  groupmod -n "$AGENT_USER" "$OLD_USER" 2>/dev/null || true
+  sed -i "s/^${OLD_USER}:/${AGENT_USER}:/" /etc/subuid /etc/subgid
+  [ ! -f /etc/systemd/system/user@.service.d/dhpanel-delegate.conf ] \
+    || mv /etc/systemd/system/user@.service.d/dhpanel-delegate.conf /etc/systemd/system/user@.service.d/builtpanel-delegate.conf
+  # The helper's packet filter tables: copied under the new names, then the old ones removed,
+  # so no rule is ever missing in between.
+  if [ -x /usr/sbin/nft ]; then
+    for t in db pg fw; do
+      if /usr/sbin/nft list table inet "dhpanel_$t" >/dev/null 2>&1; then
+        /usr/sbin/nft list table inet "dhpanel_$t" | sed "s/table inet dhpanel_$t/table inet builtpanel_$t/" | /usr/sbin/nft -f -
+        /usr/sbin/nft delete table inet "dhpanel_$t"
+      fi
+    done
+  fi
+  rm -f /usr/local/bin/dhpanel-agent /usr/local/bin/dhpanel-priv-helper
+  touch "$STATE_DIR/legacy-names"
+  systemctl daemon-reload
 fi
 
 # --- user and directories ---------------------------------------------------
@@ -92,13 +140,13 @@ AGENT_UID="$(id -u "$AGENT_USER")"
 install -d -m 0700 -o "$AGENT_USER" -g "$AGENT_USER" "$STATE_DIR" "$STATE_DIR/home"
 # Files on their way between the network and a tenant's files: the agent and (through its
 # group) the privileged helper only.
-install -d -m 0770 -o "$AGENT_USER" -g "$AGENT_USER" /var/lib/dhpanel-transfers
+install -d -m 0770 -o "$AGENT_USER" -g "$AGENT_USER" /var/lib/builtpanel-transfers
 
 # --- binary and unit --------------------------------------------------------
 say "installing $BIN_DST"
 install -m 0755 -o root -g root "$binary" "$BIN_DST"
 say "installing $UNIT_DST"
-sed "s/@AGENT_UID@/${AGENT_UID}/g" "$HERE/dhpanel-agent.service" > "$UNIT_DST.new"
+sed "s/@AGENT_UID@/${AGENT_UID}/g" "$HERE/builtpanel-agent.service" > "$UNIT_DST.new"
 chmod 0644 "$UNIT_DST.new"
 mv -f "$UNIT_DST.new" "$UNIT_DST"
 if command -v systemd-analyze >/dev/null; then
@@ -126,24 +174,24 @@ if [ -n "$helper" ]; then
     fi
   fi
   [ -x /usr/sbin/nft ] || die "nftables is installed but /usr/sbin/nft is not there (the helper runs it by that path)"
-  HELPER_DST=/usr/local/bin/dhpanel-priv-helper
-  HELPER_UNIT=/etc/systemd/system/dhpanel-priv-helper.service
+  HELPER_DST=/usr/local/bin/builtpanel-priv-helper
+  HELPER_UNIT=/etc/systemd/system/builtpanel-priv-helper.service
   say "installing $HELPER_DST"
   install -m 0755 -o root -g root "$helper" "$HELPER_DST.new"
   mv -f "$HELPER_DST.new" "$HELPER_DST"
-  install -m 0644 -o root -g root "$HERE/dhpanel-priv-helper.service" "$HELPER_UNIT"
+  install -m 0644 -o root -g root "$HERE/builtpanel-priv-helper.service" "$HELPER_UNIT"
   systemctl daemon-reload
   # Where tenants live. It must exist before the unit starts (the unit's sandbox
   # lists it as writable); only root may create things in it.
   install -d -m 0755 -o root -g root /srv/tenants
-  say "starting dhpanel-priv-helper"
-  systemctl enable dhpanel-priv-helper >/dev/null 2>&1
-  systemctl restart dhpanel-priv-helper
+  say "starting builtpanel-priv-helper"
+  systemctl enable builtpanel-priv-helper >/dev/null 2>&1
+  systemctl restart builtpanel-priv-helper
   for _ in $(seq 1 20); do
-    [ -S /run/dhpanel/priv-helper.sock ] && break
+    [ -S /run/builtpanel/priv-helper.sock ] && break
     sleep 0.5
   done
-  [ -S /run/dhpanel/priv-helper.sock ] || die "the privileged helper did not create its socket (journalctl -u dhpanel-priv-helper)"
+  [ -S /run/builtpanel/priv-helper.sock ] || die "the privileged helper did not create its socket (journalctl -u builtpanel-priv-helper)"
 else
   say "skipping the privileged helper (none given or found next to the agent binary)"
 fi
@@ -167,7 +215,7 @@ if [ "$rootless" -eq 1 ]; then
   # leave `cpu` out, and rootless Docker then refuses every CPU limit.
   say "delegating the cgroup controllers (cpu, cpuset, io, memory, pids) to users' services"
   install -d -m 0755 /etc/systemd/system/user@.service.d
-  printf '[Service]\nDelegate=cpu cpuset io memory pids\n' > /etc/systemd/system/user@.service.d/dhpanel-delegate.conf
+  printf '[Service]\nDelegate=cpu cpuset io memory pids\n' > /etc/systemd/system/user@.service.d/builtpanel-delegate.conf
   systemctl daemon-reload
   say "enabling lingering so the agent's Docker daemon runs without a login"
   loginctl enable-linger "$AGENT_USER"
@@ -180,14 +228,16 @@ if [ "$rootless" -eq 1 ]; then
   # again, and cgroup v2 lets it only when nothing of the old one is left in its cgroup.
   controllers="/sys/fs/cgroup/user.slice/user-${AGENT_UID}.slice/user@${AGENT_UID}.service/cgroup.subtree_control"
   if ! grep -qw cpu "$controllers" 2>/dev/null; then
-    systemctl stop dhpanel-agent 2>/dev/null || true
+    systemctl stop builtpanel-agent 2>/dev/null || true
     pkill -KILL -u "$AGENT_UID" 2>/dev/null || true
     sleep 2
     systemctl reset-failed "user@${AGENT_UID}.service" 2>/dev/null || true
     systemctl restart "user@${AGENT_UID}.service"
     for _ in $(seq 1 30); do systemctl is-active --quiet "user@${AGENT_UID}.service" && break; sleep 1; done
   fi
-  grep -qw cpu "$controllers" 2>/dev/null || die "the cpu controller is not delegated to the agent's user ($controllers): CPU limits would not work"
+  # Not fatal: the panel and the node work, only a plan's CPU limit cannot be enforced (a
+  # container-type VPS, or an old systemd, does not hand the controller over). install.sh says so.
+  grep -qw cpu "$controllers" 2>/dev/null || echo "install.sh: warning: the cpu controller is not delegated to the agent's user ($controllers): CPU limits will not work" >&2
 
   as_agent() {
     runuser -u "$AGENT_USER" -- env HOME="$STATE_DIR/home" \
@@ -232,10 +282,10 @@ Installed.$([ -n "$helper" ] && printf '\n\nThe database server is reached from 
 
 Next:
   1. Enrol (once, as the agent user), using the command shown when you add the node in the panel:
-       sudo -u $AGENT_USER dhpanel-agent enroll --server … --ca-fingerprint … --token …
+       sudo -u $AGENT_USER builtpanel-agent enroll --server … --ca-fingerprint … --token …
   2. Start the service:
-       sudo systemctl enable --now dhpanel-agent
+       sudo systemctl enable --now builtpanel-agent
   3. Check it:
-       sudo -u $AGENT_USER dhpanel-agent status
-       systemctl status dhpanel-agent
+       sudo -u $AGENT_USER builtpanel-agent status
+       systemctl status builtpanel-agent
 EOF

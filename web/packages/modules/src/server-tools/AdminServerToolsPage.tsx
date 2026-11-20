@@ -8,7 +8,7 @@ import {
   Button,
   Badge,
   useToast,
-} from "@dhpanel/ui";
+} from "@builtpanel/ui";
 import {
   Wrench,
   Server,
@@ -18,8 +18,8 @@ import {
   Clock,
   Cpu,
 } from "lucide-react";
-import { useTranslation } from "@dhpanel/i18n";
-import { apiFetch } from "@dhpanel/api";
+import { useTranslation } from "@builtpanel/i18n";
+import { apiFetch } from "@builtpanel/api";
 import { ServerOverview, SshConfigInfo, ServerAuditEvent } from "./types";
 import { TimezoneCard } from "./TimezoneCard";
 import { SwapCard } from "./SwapCard";
@@ -296,7 +296,7 @@ export function AdminServerToolsPage() {
       <RebootDialog
         open={isRebootOpen}
         onOpenChange={setIsRebootOpen}
-        nodeHostname={overview?.hostname || "node-1.dhpanel.internal"}
+        nodeHostname={overview?.hostname || "node-1.builtpanel.internal"}
         onConfirm={handleReboot}
       />
     </div>

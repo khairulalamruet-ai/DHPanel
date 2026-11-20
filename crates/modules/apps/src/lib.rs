@@ -35,9 +35,9 @@ use axum::{
     http::StatusCode,
     routing::get,
 };
-use dhpanel_audit::{AuditEntry, Outcome};
-use dhpanel_auth_core::secretbox::MasterKey;
-use dhpanel_database::{
+use builtpanel_audit::{AuditEntry, Outcome};
+use builtpanel_auth_core::secretbox::MasterKey;
+use builtpanel_database::{
     accounts::DbAccountKind,
     apps as store, databases as dbstore,
     operations::{self, EnqueueError, NewOperation},
@@ -45,11 +45,11 @@ use dhpanel_database::{
     sqlx::PgPool,
     tenants, users,
 };
-use dhpanel_domain::TenantUsername;
-use dhpanel_http_kit::{AppError, FieldError, ProblemDetails};
-use dhpanel_node_protocol::{DbEngine, DbPassword, Operation};
-use dhpanel_rbac::{Principal, Require, permissions::AppsRead};
-use dhpanel_session::SessionStore;
+use builtpanel_domain::TenantUsername;
+use builtpanel_http_kit::{AppError, FieldError, ProblemDetails};
+use builtpanel_node_protocol::{DbEngine, DbPassword, Operation};
+use builtpanel_rbac::{Principal, Require, permissions::AppsRead};
+use builtpanel_session::SessionStore;
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, OpenApi, ToSchema};
 use uuid::Uuid;
@@ -69,7 +69,7 @@ pub struct AppsState {
     /// How long a request waits for the node before answering `202`.
     pub wait: std::time::Duration,
     /// The applications that can be installed.
-    pub catalog: Arc<dhpanel_catalog::Catalog>,
+    pub catalog: Arc<builtpanel_catalog::Catalog>,
 }
 
 /// How long a request waits for the node by default.
@@ -346,7 +346,7 @@ fn generate_password() -> String {
         let a = Uuid::new_v4().simple().to_string();
         let b = Uuid::new_v4().simple().to_string();
         let candidate = format!("{}-{}", a[..10].to_uppercase(), &b[..14]);
-        if dhpanel_domain::databases::check_password(&candidate).is_ok() {
+        if builtpanel_domain::databases::check_password(&candidate).is_ok() {
             return candidate;
         }
     }
@@ -435,7 +435,7 @@ pub async fn install_wordpress(
             "A locale such as bn_BD; up to 10 plugin slugs.",
         ));
     }
-    let fqdn = dhpanel_database::sqlx::query_scalar::<_, String>(
+    let fqdn = builtpanel_database::sqlx::query_scalar::<_, String>(
         "SELECT fqdn FROM domains WHERE id = $1 AND tenant_id = $2",
     )
     .bind(req.domain_id)
@@ -455,7 +455,7 @@ pub async fn install_wordpress(
         .await
         .map_err(internal)?;
     let name = format!("{stem}{number}");
-    if name.len() > dhpanel_domain::databases::MAX_NAME_LEN {
+    if name.len() > builtpanel_domain::databases::MAX_NAME_LEN {
         return Err(bad(
             "domain_id",
             "The account's name is too long for a database name.",
@@ -550,7 +550,7 @@ async fn queue_setup(
             .map_err(internal)
     };
     let mut tx = state.db.begin().await.map_err(internal)?;
-    dhpanel_database::domains::lock_tenant(&mut tx, tenant.id)
+    builtpanel_database::domains::lock_tenant(&mut tx, tenant.id)
         .await
         .map_err(internal)?;
     if let Some(name) = name {
@@ -579,7 +579,7 @@ async fn queue_setup(
             }
             dbstore::AddError::Database(db) => internal(db),
         };
-        let dedicated = match dhpanel_database::tenant_db::dedicated_for(
+        let dedicated = match builtpanel_database::tenant_db::dedicated_for(
             &state.db,
             tenant.id,
             &tenant.username,
@@ -661,7 +661,7 @@ async fn queue_setup(
                 other => internal(other),
             })?;
         }
-        dhpanel_database::sqlx::query(
+        builtpanel_database::sqlx::query(
             "UPDATE apps SET database_id = $2, settings = settings || jsonb_build_object('db_id', $2::text, 'user_id', $3::text) WHERE id = $1",
         )
         .bind(app_id)
@@ -681,7 +681,7 @@ async fn queue_setup(
         .await
         .map_err(internal)?;
     }
-    dhpanel_audit::insert(
+    builtpanel_audit::insert(
         &mut *tx,
         &AuditEntry::new("app.install_requested", Outcome::Success)
             .actor(who.account_id())
@@ -902,7 +902,7 @@ pub async fn install_app(
         admin_email = Some(email);
         admin_password = Some(password);
     }
-    let fqdn = dhpanel_database::sqlx::query_scalar::<_, String>(
+    let fqdn = builtpanel_database::sqlx::query_scalar::<_, String>(
         "SELECT fqdn FROM domains WHERE id = $1 AND tenant_id = $2",
     )
     .bind(req.domain_id)
@@ -927,7 +927,7 @@ pub async fn install_app(
             .await
             .map_err(internal)?;
         let name = format!("{stem}{number}");
-        if name.len() > dhpanel_domain::databases::MAX_NAME_LEN {
+        if name.len() > builtpanel_domain::databases::MAX_NAME_LEN {
             return Err(bad(
                 "domain_id",
                 "The account's name is too long for a database name.",
@@ -1006,9 +1006,9 @@ pub struct WpAnswer {
     /// `running`, `done` or `failed`.
     pub state: String,
     /// The versions and updates (for the overview).
-    pub overview: Option<dhpanel_node_protocol::WpOverview>,
+    pub overview: Option<builtpanel_node_protocol::WpOverview>,
     /// What the scan found.
-    pub scan: Option<dhpanel_node_protocol::WpScan>,
+    pub scan: Option<builtpanel_node_protocol::WpScan>,
     /// What WP-CLI said (for the other actions).
     pub output: Option<String>,
     /// Why it failed.
@@ -1066,30 +1066,30 @@ impl std::fmt::Debug for WpNewPassword {
     }
 }
 
-fn answer_of(row: &dhpanel_database::operations::Operation) -> Option<WpAnswer> {
-    use dhpanel_database::operations::Status;
+fn answer_of(row: &builtpanel_database::operations::Operation) -> Option<WpAnswer> {
+    use builtpanel_database::operations::Status;
     match row.status {
         Status::Succeeded => {
-            let output: dhpanel_node_protocol::Output = row
+            let output: builtpanel_node_protocol::Output = row
                 .output
                 .clone()
                 .and_then(|o| serde_json::from_value(o).ok())?;
             Some(match output {
-                dhpanel_node_protocol::Output::WordPressScan(scan) => WpAnswer {
+                builtpanel_node_protocol::Output::WordPressScan(scan) => WpAnswer {
                     state: "done".into(),
                     overview: None,
                     scan: Some(scan),
                     output: None,
                     error: None,
                 },
-                dhpanel_node_protocol::Output::WordPressOverview(o) => WpAnswer {
+                builtpanel_node_protocol::Output::WordPressOverview(o) => WpAnswer {
                     state: "done".into(),
                     overview: Some(o),
                     scan: None,
                     output: None,
                     error: None,
                 },
-                dhpanel_node_protocol::Output::WpCliDone { output } => WpAnswer {
+                builtpanel_node_protocol::Output::WpCliDone { output } => WpAnswer {
                     state: "done".into(),
                     overview: None,
                     scan: None,
@@ -1123,7 +1123,7 @@ async fn run_wp(
     state: &AppsState,
     who: &Principal,
     app_id: Uuid,
-    command: dhpanel_node_protocol::WpCommand,
+    command: builtpanel_node_protocol::WpCommand,
     password: Option<&str>,
 ) -> Result<axum::response::Response, AppError> {
     use axum::response::IntoResponse as _;
@@ -1224,7 +1224,7 @@ pub async fn wp_overview(
         &state,
         &who,
         id,
-        dhpanel_node_protocol::WpCommand::Overview,
+        builtpanel_node_protocol::WpCommand::Overview,
         None,
     )
     .await
@@ -1253,7 +1253,7 @@ pub async fn wp_update_plugins(
         &state,
         &who,
         id,
-        dhpanel_node_protocol::WpCommand::UpdatePlugins { slug: req.slug },
+        builtpanel_node_protocol::WpCommand::UpdatePlugins { slug: req.slug },
         None,
     )
     .await
@@ -1282,7 +1282,7 @@ pub async fn wp_update_themes(
         &state,
         &who,
         id,
-        dhpanel_node_protocol::WpCommand::UpdateThemes { slug: req.slug },
+        builtpanel_node_protocol::WpCommand::UpdateThemes { slug: req.slug },
         None,
     )
     .await
@@ -1311,7 +1311,7 @@ pub async fn wp_update_core(
         &state,
         &who,
         id,
-        dhpanel_node_protocol::WpCommand::UpdateCore {
+        builtpanel_node_protocol::WpCommand::UpdateCore {
             version: req.version,
         },
         None,
@@ -1352,7 +1352,7 @@ pub async fn wp_scan(
         &state,
         &who,
         id,
-        dhpanel_node_protocol::WpCommand::Scan,
+        builtpanel_node_protocol::WpCommand::Scan,
         None,
     )
     .await
@@ -1378,7 +1378,7 @@ pub async fn wp_harden(
         &state,
         &who,
         id,
-        dhpanel_node_protocol::WpCommand::Harden {
+        builtpanel_node_protocol::WpCommand::Harden {
             debug_off: req.debug_off,
             file_edit_off: req.file_edit_off,
             xmlrpc_off: req.xmlrpc_off,
@@ -1405,7 +1405,7 @@ pub async fn wp_maintenance(
         &state,
         &who,
         id,
-        dhpanel_node_protocol::WpCommand::Maintenance { on: req.on },
+        builtpanel_node_protocol::WpCommand::Maintenance { on: req.on },
         None,
     )
     .await
@@ -1437,7 +1437,7 @@ pub async fn wp_admin_password(
         &state,
         &who,
         id,
-        dhpanel_node_protocol::WpCommand::ResetAdminPassword { user: req.user },
+        builtpanel_node_protocol::WpCommand::ResetAdminPassword { user: req.user },
         Some(&req.password),
     )
     .await
@@ -1544,12 +1544,12 @@ fn cache_limit(plan: &plans::Plan) -> Option<i64> {
     (value >= 0).then_some(value)
 }
 
-fn cache_view(state: &AppsState, i: dhpanel_database::cache_instances::Instance) -> CacheView {
+fn cache_view(state: &AppsState, i: builtpanel_database::cache_instances::Instance) -> CacheView {
     let password = i.sealed_password.as_ref().and_then(|sealed| {
         state
             .master_key
             .open(
-                &dhpanel_database::cache_instances::password_context(i.id),
+                &builtpanel_database::cache_instances::password_context(i.id),
                 sealed,
             )
             .ok()
@@ -1597,7 +1597,7 @@ pub async fn cache_list(
     who: Principal,
 ) -> Result<Json<CacheList>, AppError> {
     let (tenant, plan) = cache_feature(&state, &who).await?;
-    let items = dhpanel_database::cache_instances::list(&state.db, tenant.id)
+    let items = builtpanel_database::cache_instances::list(&state.db, tenant.id)
         .await
         .map_err(internal)?
         .into_iter()
@@ -1638,12 +1638,12 @@ pub async fn cache_set(
         return Err(bad("memory_mb", "1 to 4096 MiB."));
     }
     let mut tx = state.db.begin().await.map_err(internal)?;
-    dhpanel_database::domains::lock_tenant(&mut tx, tenant.id)
+    builtpanel_database::domains::lock_tenant(&mut tx, tenant.id)
         .await
         .map_err(internal)?;
     if let Some(limit) = cache_limit(&plan) {
         let others =
-            dhpanel_database::cache_instances::memory_used(&state.db, tenant.id, &req.kind)
+            builtpanel_database::cache_instances::memory_used(&state.db, tenant.id, &req.kind)
                 .await
                 .map_err(internal)?;
         if others + i64::from(memory) > limit {
@@ -1655,19 +1655,20 @@ pub async fn cache_set(
     }
     let password = (req.kind == "redis").then(generate_password);
     // A new row needs its id to seal the password to it: make it, then seal.
-    let id = dhpanel_database::cache_instances::upsert(&mut tx, tenant.id, &req.kind, memory, None)
-        .await
-        .map_err(internal)?;
+    let id =
+        builtpanel_database::cache_instances::upsert(&mut tx, tenant.id, &req.kind, memory, None)
+            .await
+            .map_err(internal)?;
     if let Some(password) = &password {
         let sealed = state
             .master_key
             .seal(
-                &dhpanel_database::cache_instances::password_context(id),
+                &builtpanel_database::cache_instances::password_context(id),
                 password.as_bytes(),
             )
             .map_err(internal)?;
         // (An existing password stays: the first one made is kept.)
-        dhpanel_database::sqlx::query(
+        builtpanel_database::sqlx::query(
             "UPDATE cache_instances SET sealed_password = COALESCE(sealed_password, $2) WHERE id = $1",
         )
         .bind(id)
@@ -1707,7 +1708,7 @@ pub async fn cache_set(
         ),
         other => internal(other),
     })?;
-    dhpanel_database::sqlx::query(
+    builtpanel_database::sqlx::query(
         "UPDATE cache_instances SET op_id = $2, status = 'pending' WHERE id = $1",
     )
     .bind(id)
@@ -1715,7 +1716,7 @@ pub async fn cache_set(
     .execute(&mut *tx)
     .await
     .map_err(internal)?;
-    dhpanel_audit::insert(
+    builtpanel_audit::insert(
         &mut *tx,
         &AuditEntry::new("cache.set", Outcome::Success)
             .actor(who.account_id())
@@ -1726,7 +1727,7 @@ pub async fn cache_set(
     .await
     .map_err(internal)?;
     tx.commit().await.map_err(internal)?;
-    let row = dhpanel_database::cache_instances::get(&state.db, tenant.id, &req.kind)
+    let row = builtpanel_database::cache_instances::get(&state.db, tenant.id, &req.kind)
         .await
         .map_err(internal)?
         .ok_or_else(|| AppError::not_found("cache"))?;
@@ -1744,7 +1745,7 @@ pub async fn cache_remove(
     Path(kind): Path<String>,
 ) -> Result<StatusCode, AppError> {
     let tenant = client_tenant(&state, &who).await?;
-    let row = dhpanel_database::cache_instances::get(&state.db, tenant.id, &kind)
+    let row = builtpanel_database::cache_instances::get(&state.db, tenant.id, &kind)
         .await
         .map_err(internal)?
         .ok_or_else(|| AppError::not_found("cache"))?;
@@ -1775,7 +1776,7 @@ pub async fn cache_remove(
         ),
         other => internal(other),
     })?;
-    dhpanel_database::cache_instances::waiting_for(
+    builtpanel_database::cache_instances::waiting_for(
         &state.db,
         row.id,
         queued.operation().id,
@@ -1783,7 +1784,7 @@ pub async fn cache_remove(
     )
     .await
     .map_err(internal)?;
-    dhpanel_audit::insert(
+    builtpanel_audit::insert(
         &state.db,
         &AuditEntry::new("cache.removed", Outcome::Success)
             .actor(who.account_id())
@@ -1818,8 +1819,8 @@ pub async fn cache_remove(
         containers::ContainerView, containers::CreateContainer, containers::ChangeContainer, gitdeploy::GitDeployView, gitdeploy::GitDeployList,
         gitdeploy::CreateGitDeploy, gitdeploy::WebhookAnswer,
         marketplace::SoftwareView, marketplace::Installed, marketplace::InstallRequest,
-        WpNewPassword, Pending, WpHarden, dhpanel_node_protocol::WpOverview,
-        dhpanel_node_protocol::WpItem, dhpanel_node_protocol::WpScan
+        WpNewPassword, Pending, WpHarden, builtpanel_node_protocol::WpOverview,
+        builtpanel_node_protocol::WpItem, builtpanel_node_protocol::WpScan
     )),
     tags((name = "apps", description = "Applications on domains and paths"))
 )]

@@ -8,7 +8,7 @@ import {
   Button,
   Badge,
   useToast,
-} from "@dhpanel/ui";
+} from "@builtpanel/ui";
 import {
   ShieldCheck,
   ShieldAlert,
@@ -17,8 +17,8 @@ import {
   Plus,
   RefreshCw,
 } from "lucide-react";
-import { useTranslation } from "@dhpanel/i18n";
-import { apiFetch } from "@dhpanel/api";
+import { useTranslation } from "@builtpanel/i18n";
+import { apiFetch } from "@builtpanel/api";
 import { ClientIpRule, IpRuleAction } from "./types";
 import { ClientIpRulesTable } from "./ClientIpRulesTable";
 import { AddIpRuleDialog } from "./AddIpRuleDialog";

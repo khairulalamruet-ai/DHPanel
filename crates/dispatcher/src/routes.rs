@@ -2,8 +2,8 @@
 
 use std::collections::BTreeMap;
 
-use dhpanel_database::routes::{RoutedDomain, RoutedRedirect};
-use dhpanel_node_protocol::{
+use builtpanel_database::routes::{RoutedDomain, RoutedRedirect};
+use builtpanel_node_protocol::{
     MAX_HOSTS_PER_TENANT, MAX_REDIRECTS_PER_TENANT, MAX_SITES_PER_TENANT, RouteRedirect, SiteRoute,
 };
 use uuid::Uuid;
@@ -12,7 +12,7 @@ use uuid::Uuid;
 /// (the primary name of a site is the key; a mode of `off` is simply not in it).
 pub fn apply_waf(
     routes: &mut [SiteRoute],
-    by_host: &BTreeMap<String, dhpanel_node_protocol::WafSetting>,
+    by_host: &BTreeMap<String, builtpanel_node_protocol::WafSetting>,
 ) {
     for site in routes {
         site.waf = site.hosts.first().and_then(|h| by_host.get(h)).cloned();
@@ -133,7 +133,7 @@ mod tests {
         }
     }
 
-    const UP: &str = "dh-alice-web:8080";
+    const UP: &str = "bp-alice-web:8080";
 
     #[test]
     fn domains_become_sites_aliases_join_their_domain() {
@@ -275,7 +275,7 @@ mod tests {
 
     #[test]
     fn the_firewall_setting_goes_to_the_site_of_its_primary_name_only() {
-        use dhpanel_node_protocol::WafSetting;
+        use builtpanel_node_protocol::WafSetting;
         let domains = [
             dom(1, "a.com", "primary", None, "active"),
             dom(2, "b.com", "primary", None, "active"),

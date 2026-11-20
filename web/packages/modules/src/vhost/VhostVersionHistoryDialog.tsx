@@ -8,8 +8,8 @@ import {
   DialogFooter,
   Button,
   Badge,
-} from "@dhpanel/ui";
-import { apiFetch } from "@dhpanel/api";
+} from "@builtpanel/ui";
+import { apiFetch } from "@builtpanel/api";
 import { History, RotateCcw, User, Calendar, FileCode, Check } from "lucide-react";
 import type { VhostTemplate, VhostTemplateVersion } from "./types";
 

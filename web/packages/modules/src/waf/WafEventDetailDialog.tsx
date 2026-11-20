@@ -7,9 +7,9 @@ import {
   DialogFooter,
   Button,
   Badge,
-} from "@dhpanel/ui";
+} from "@builtpanel/ui";
 import { ShieldAlert, ShieldOff, Globe, Terminal, Clock, MapPin } from "lucide-react";
-import { useTranslation } from "@dhpanel/i18n";
+import { useTranslation } from "@builtpanel/i18n";
 import { WafEvent } from "./types";
 
 interface WafEventDetailDialogProps {

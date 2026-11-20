@@ -1,8 +1,8 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "DHPanel API",
-    "description": "Control plane API for the DHPanel hosting panel. Errors use RFC 9457 Problem Details (`application/problem+json`).",
+    "title": "Built Panel API",
+    "description": "Control plane API for the Built Panel hosting panel. Errors use RFC 9457 Problem Details (`application/problem+json`).",
     "license": {
       "name": "Proprietary"
     },
@@ -23410,7 +23410,7 @@
                 "schema": {
                   "type": "string"
                 },
-                "description": "__Host-dh_session=…; Path=/; Secure; HttpOnly; SameSite=Strict"
+                "description": "__Host-bp_session=…; Path=/; Secure; HttpOnly; SameSite=Strict"
               }
             },
             "content": {
@@ -23489,7 +23489,7 @@
                 "schema": {
                   "type": "string"
                 },
-                "description": "__Host-dh_session=…; Path=/; Secure; HttpOnly; SameSite=Strict"
+                "description": "__Host-bp_session=…; Path=/; Secure; HttpOnly; SameSite=Strict"
               }
             },
             "content": {
@@ -23501,7 +23501,7 @@
             }
           },
           "202": {
-            "description": "Password accepted but a second factor is required: a short-lived `__Host-dh_mfa` cookie is set; continue with POST /api/v1/public/auth/login/mfa",
+            "description": "Password accepted but a second factor is required: a short-lived `__Host-bp_mfa` cookie is set; continue with POST /api/v1/public/auth/login/mfa",
             "content": {
               "application/json": {
                 "schema": {
@@ -23839,7 +23839,7 @@
             }
           },
           "503": {
-            "description": "`enrollment_unavailable`: this control plane has no node CA yet (run `dhctl ca init`)",
+            "description": "`enrollment_unavailable`: this control plane has no node CA yet (run `bpctl ca init`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -25502,7 +25502,7 @@
           "panel_name": {
             "type": "string",
             "description": "Name shown on the sign-in page and in the browser tab.",
-            "example": "DHPanel"
+            "example": "Built Panel"
           }
         }
       },
@@ -26633,7 +26633,7 @@
           },
           "source_type": {
             "type": "string",
-            "description": "`cpanel` or `cyberpanel` (`openpanel` and `dhpanel_archive` are not readable yet)."
+            "description": "`cpanel` or `cyberpanel` (`openpanel` and `builtpanel_archive` are not readable yet)."
           },
           "ssh_key": {
             "type": [
@@ -26733,7 +26733,7 @@
               "string",
               "null"
             ],
-            "description": "A webhook's signing secret: shown this once (the calls carry `X-DHPanel-Signature`, the\nHMAC-SHA256 of the body under it)."
+            "description": "A webhook's signing secret: shown this once (the calls carry `X-BuiltPanel-Signature`, the\nHMAC-SHA256 of the body under it)."
           }
         }
       },
@@ -31061,7 +31061,7 @@
       },
       "ProblemDetails": {
         "type": "object",
-        "description": "Wire format (RFC 9457 + DHPanel extensions `code`, `correlation_id`, `errors`).",
+        "description": "Wire format (RFC 9457 + Built Panel extensions `code`, `correlation_id`, `errors`).",
         "required": [
           "type",
           "title",
@@ -32548,7 +32548,7 @@
           },
           "name": {
             "type": "string",
-            "description": "Its name (`dh-<account>-<role>`)."
+            "description": "Its name (`bp-<account>-<role>`)."
           },
           "role": {
             "type": "string",
@@ -35230,7 +35230,7 @@
       "session": {
         "type": "apiKey",
         "in": "cookie",
-        "name": "__Host-dh_session",
+        "name": "__Host-bp_session",
         "description": "HttpOnly session cookie set by POST /api/v1/public/auth/login"
       }
     }

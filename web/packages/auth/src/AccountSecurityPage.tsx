@@ -21,9 +21,9 @@ import {
   DialogTitle,
   DialogDescription,
   DialogFooter,
-} from "@dhpanel/ui";
-import { useTranslation, useFormatters } from "@dhpanel/i18n";
-import { api, getCsrfToken, apiFetch } from "@dhpanel/api";
+} from "@builtpanel/ui";
+import { useTranslation, useFormatters } from "@builtpanel/i18n";
+import { api, getCsrfToken, apiFetch } from "@builtpanel/api";
 import {
   ShieldCheck,
   ShieldAlert,

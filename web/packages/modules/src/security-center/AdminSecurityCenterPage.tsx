@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { apiFetch } from "@dhpanel/api";
-import { useToast } from "@dhpanel/ui";
-import { useTranslation } from "@dhpanel/i18n";
+import { apiFetch } from "@builtpanel/api";
+import { useToast } from "@builtpanel/ui";
+import { useTranslation } from "@builtpanel/i18n";
 import { useNavigate } from "@tanstack/react-router";
 import { ShieldCheck, AlertCircle } from "lucide-react";
 import { SecurityOverviewResponse, SecurityIssue } from "./types";

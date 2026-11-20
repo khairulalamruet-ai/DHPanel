@@ -1,6 +1,6 @@
 {
   "common": {
-    "appName": "DHPanel",
+    "appName": "Built Panel",
     "dashboard": "Dashboard",
     "domains": "Domains",
     "users": "Users",
@@ -12,8 +12,8 @@
     "language": "Language",
     "english": "English",
     "bangla": "বাংলা",
-    "adminTitle": "DHPanel Admin",
-    "clientTitle": "DHPanel Client Portal",
+    "adminTitle": "Built Panel Admin",
+    "clientTitle": "Built Panel Client Portal",
     "welcome": "Welcome back",
     "healthStatus": "System Health",
     "status": "Status",
@@ -41,7 +41,7 @@
   },
   "auth": {
     "login": "Sign In",
-    "signInTitle": "Sign in to DHPanel",
+    "signInTitle": "Sign in to Built Panel",
     "signInDesc": "Enter your credentials to access your control panel",
     "username": "Username or Email",
     "usernamePlaceholder": "admin or your email",
@@ -1138,7 +1138,7 @@
       "extend": "Extend Validity",
       "expiredTitle": "Preview Link Expired",
       "expiredDesc": "The temporary link has elapsed its validity period and requests are now rejected (HTTP 410 Gone). Generate a new link below to continue previewing.",
-      "intro": "Preview your site immediately before DNS nameservers or records propagate worldwide. A temporary URL (<hash>.preview.dhpanel.net) will be created with an automated expiration.",
+      "intro": "Preview your site immediately before DNS nameservers or records propagate worldwide. A temporary URL (<hash>.preview.builtpanel.net) will be created with an automated expiration.",
       "selectValidity": "Select Link Validity Period",
       "generateBtn": "Generate Temporary Preview Link",
       "toastGenerated": "Temporary preview link generated successfully",
@@ -2777,7 +2777,7 @@
     "nav": "Migration",
     "adminNav": "Migration & Transfers",
     "pageTitle": "Server Migration & Account Import",
-    "pageSubtitle": "Automate remote tenant migration from cPanel, CyberPanel, and OpenPanel directly into DHPanel.",
+    "pageSubtitle": "Automate remote tenant migration from cPanel, CyberPanel, and OpenPanel directly into Built Panel.",
     "startMigrationBtn": "New Migration Transfer",
     "loadError": "Failed to load migration transfer status.",
     "activeTransfers": "Active Transfers",
@@ -2829,7 +2829,7 @@
   "license": {
     "nav": "License Authority",
     "pageTitle": "License & Authority Verification",
-    "pageSubtitle": "Manage DHPanel commercial subscription, cryptographic entitlement, and anti-tamper recovery.",
+    "pageSubtitle": "Manage Built Panel commercial subscription, cryptographic entitlement, and anti-tamper recovery.",
     "enterKeyBtn": "Enter License Key",
     "activeTitle": "License Verified & Cryptographically Signed",
     "statusActive": "ACTIVE",
@@ -2875,7 +2875,7 @@
     "featApi": "REST API & Automation Webhooks",
     "featApiDesc": "WHMCS / Blesta billing integration and API tokens.",
     "activateModalTitle": "Activate License Key",
-    "activateModalSubtitle": "Enter your issued DHPanel commercial license key to unlock features and node capacity.",
+    "activateModalSubtitle": "Enter your issued Built Panel commercial license key to unlock features and node capacity.",
     "keyRequired": "Please enter a valid license key.",
     "keyInvalidFormat": "License keys must start with 'DHP-' prefix.",
     "activationFailed": "Failed to activate license key.",
@@ -3098,11 +3098,11 @@
     "savedTitle": "Branding Updated",
     "savedDesc": "New branding applied immediately without page reload.",
     "resetTitle": "Branding Reset",
-    "resetDesc": "Restored default DHPanel branding."
+    "resetDesc": "Restored default Built Panel branding."
   },
   "onboarding": {
     "admin": {
-      "title": "Getting Started with DHPanel",
+      "title": "Getting Started with Built Panel",
       "stepsDone": "completed",
       "description": "Complete these initial configuration steps to prepare your cluster for tenants and domains.",
       "dismiss": "Dismiss Quickstart Checklist",
@@ -3131,7 +3131,7 @@
     },
     "client": {
       "tour": {
-        "title": "Welcome to Your DHPanel Account",
+        "title": "Welcome to Your Built Panel Account",
         "subtitle": "Take a quick 1-minute walkthrough of the key features of your hosting account.",
         "dismiss": "Dismiss Tour",
         "finish": "Finish Tour",
@@ -3171,7 +3171,7 @@
   },
   "update": {
     "nav": "Panel Update",
-    "title": "DHPanel Release & Update Manager",
+    "title": "Built Panel Release & Update Manager",
     "pageTitle": "Panel Update & Releases",
     "pageSubtitle": "Manage control plane versions, switch update channels, and execute verified releases.",
     "description": "Automated self-updating control plane backed by Ed25519 signed manifests and atomic rollbacks.",
@@ -3187,7 +3187,7 @@
     "updateNow": "Update Now",
     "changelog": "Release Notes & Changelog",
     "requiredMigrations": "Database Schema Migrations",
-    "upToDate": "DHPanel is up to date.",
+    "upToDate": "Built Panel is up to date.",
     "upToDateDesc": "You are currently running the latest certified build on the active channel.",
     "channelUpdated": "Update Channel Changed",
     "channelUpdatedDesc": "Switched update channel.",
@@ -3199,7 +3199,7 @@
       "snapshot": "Creating pre-update backup snapshot...",
       "migrations": "Applying database schema migrations...",
       "rollbackSuccess": "Update failed. Automatic rollback completed: safely returned to previous version.",
-      "completed": "Update successfully applied! DHPanel is running the newest release.",
+      "completed": "Update successfully applied! Built Panel is running the newest release.",
       "manualRollback": "Reverting schema and binary to previous version..."
     },
     "rollbackNotice": "Automatic Rollback Triggered",
@@ -3218,7 +3218,7 @@
     "pageTitle": "API Tokens & Public Developer API",
     "pageSubtitle": "Generate scoped Bearer tokens for billing integration (WHMCS), CLI clients, and public REST endpoints.",
     "tableTitle": "Active API Access Tokens",
-    "tableDesc": "Manage Bearer credentials authorized to invoke DHPanel REST endpoints.",
+    "tableDesc": "Manage Bearer credentials authorized to invoke Built Panel REST endpoints.",
     "noTokens": "No API tokens created yet. Generate one above to get started.",
     "generateButton": "Generate New Token",
     "createTitle": "Generate New API Token",

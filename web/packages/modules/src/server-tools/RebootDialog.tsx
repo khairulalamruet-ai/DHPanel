@@ -7,9 +7,9 @@ import {
   DialogFooter,
   Button,
   Input,
-} from "@dhpanel/ui";
+} from "@builtpanel/ui";
 import { AlertTriangle, Lock, RefreshCw } from "lucide-react";
-import { useTranslation } from "@dhpanel/i18n";
+import { useTranslation } from "@builtpanel/i18n";
 
 interface RebootDialogProps {
   open: boolean;

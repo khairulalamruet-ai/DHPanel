@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { useTranslation } from "@dhpanel/i18n";
-import { apiFetch } from "@dhpanel/api";
-import { useToast, Button } from "@dhpanel/ui";
+import { useTranslation } from "@builtpanel/i18n";
+import { apiFetch } from "@builtpanel/api";
+import { useToast, Button } from "@builtpanel/ui";
 import { KeyRound, RefreshCw, LifeBuoy, AlertCircle } from "lucide-react";
 import {
   LicenseState,
@@ -105,7 +105,7 @@ export function LicensePage() {
           <p className="text-muted-foreground text-sm">
             {t(
               "license.pageSubtitle",
-              "Manage DHPanel commercial subscription, cryptographic entitlement, and anti-tamper recovery."
+              "Manage Built Panel commercial subscription, cryptographic entitlement, and anti-tamper recovery."
             )}
           </p>
         </div>

@@ -1,6 +1,6 @@
 import React from "react";
-import { Card, CardHeader, CardTitle, CardContent, Button, Badge } from "@dhpanel/ui";
-import { useTranslation } from "@dhpanel/i18n";
+import { Card, CardHeader, CardTitle, CardContent, Button, Badge } from "@builtpanel/ui";
+import { useTranslation } from "@builtpanel/i18n";
 import { ShieldAlert, ShieldCheck, Shield, RefreshCw } from "lucide-react";
 import { SecurityOverviewStats } from "./types";
 

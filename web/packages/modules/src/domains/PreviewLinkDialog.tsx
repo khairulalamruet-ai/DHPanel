@@ -10,8 +10,8 @@ import {
   Badge,
   Input,
   useToast,
-} from "@dhpanel/ui";
-import { apiFetch } from "@dhpanel/api";
+} from "@builtpanel/ui";
+import { apiFetch } from "@builtpanel/api";
 import {
   Globe2,
   Copy,
@@ -24,7 +24,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { ClientDomainItem, PreviewLinkInfo } from "./types";
-import { useTranslation } from "@dhpanel/i18n";
+import { useTranslation } from "@builtpanel/i18n";
 
 interface PreviewLinkDialogProps {
   open: boolean;
@@ -298,7 +298,7 @@ export function PreviewLinkDialog({
                   <p>
                     {t(
                       "domains.preview.intro",
-                      "Preview your site immediately before DNS records propagate worldwide. A temporary URL (<hash>.preview.dhpanel.net) will be created with an automated expiration."
+                      "Preview your site immediately before DNS records propagate worldwide. A temporary URL (<hash>.preview.builtpanel.net) will be created with an automated expiration."
                     )}
                   </p>
                 </div>

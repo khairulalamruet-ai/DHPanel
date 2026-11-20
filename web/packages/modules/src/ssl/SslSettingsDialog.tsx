@@ -6,9 +6,9 @@ import {
   DialogTitle,
   DialogFooter,
   Button,
-} from "@dhpanel/ui";
-import { apiFetch } from "@dhpanel/api";
-import { useTranslation } from "@dhpanel/i18n";
+} from "@builtpanel/ui";
+import { apiFetch } from "@builtpanel/api";
+import { useTranslation } from "@builtpanel/i18n";
 import { Shield, ShieldAlert, Lock, RefreshCw, AlertCircle } from "lucide-react";
 import type { SslCertificateItem, SslSettingsPayload } from "./types";
 

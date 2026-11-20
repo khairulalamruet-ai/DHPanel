@@ -2,10 +2,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import React from "react";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { AccountSecurityPage } from "./AccountSecurityPage";
-import * as dhpanelApi from "@dhpanel/api";
-const { api } = dhpanelApi;
+import * as builtpanelApi from "@builtpanel/api";
+const { api } = builtpanelApi;
 
-vi.mock("@dhpanel/i18n", () => ({
+vi.mock("@builtpanel/i18n", () => ({
   useTranslation: () => ({
     t: (key: string) => {
       const translations: Record<string, string> = {
@@ -81,7 +81,7 @@ describe("AccountSecurityPage", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
 
-    vi.spyOn(dhpanelApi, "apiFetch").mockImplementation(async (url: string) => {
+    vi.spyOn(builtpanelApi, "apiFetch").mockImplementation(async (url: string) => {
       if (url === "/api/v1/account/password") {
         return { success: true };
       }
@@ -157,7 +157,7 @@ describe("AccountSecurityPage", () => {
         return {
           data: {
             secret: "TESTSECRETKEY123",
-            otpauth_uri: "otpauth://totp/DHPanel:test?secret=TESTSECRETKEY123",
+            otpauth_uri: "otpauth://totp/Built%20Panel:test?secret=TESTSECRETKEY123",
           },
           response: new Response(),
         } as any;

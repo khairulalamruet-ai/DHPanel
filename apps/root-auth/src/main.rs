@@ -1,25 +1,24 @@
-//! `dhpanel-root-auth`: checks the server's root password for the panel's root login.
+//! `builtpanel-root-auth`: checks the server's root password for the panel's root login.
 //!
 //! ```text
-//! dhpanel-root-auth [--socket PATH] [--client-user NAME] [--user NAME] [--shadow PATH]
+//! builtpanel-root-auth [--socket PATH] [--client-user NAME] [--user NAME] [--shadow PATH]
 //! ```
 //!
-//! Started by systemd as root (`dhpanel-root-auth.service`). See the library documentation.
+//! Started by systemd as root (`builtpanel-root-auth.service`). See the library documentation.
 //! Exit codes: 64 bad usage, 78 the panel's user does not exist, 74 the socket cannot be set up.
 
 use std::{path::PathBuf, process::ExitCode, sync::atomic::AtomicBool, time::Duration};
 
-use dhpanel_root_auth::{
+use builtpanel_root_auth::{
     Config, DEFAULT_SOCKET, Log as _, StderrLog, bind, lookup_system_user, serve,
 };
 
-const USAGE: &str =
-    "usage: dhpanel-root-auth [--socket PATH] [--client-user NAME] [--user NAME] [--shadow PATH]";
+const USAGE: &str = "usage: builtpanel-root-auth [--socket PATH] [--client-user NAME] [--user NAME] [--shadow PATH]";
 
 fn main() -> ExitCode {
     let log = StderrLog;
     let mut socket = PathBuf::from(DEFAULT_SOCKET);
-    let mut client = String::from("dhpanel");
+    let mut client = String::from("builtpanel");
     let mut user = String::from("root");
     let mut shadow = PathBuf::from("/etc/shadow");
     let mut args = std::env::args().skip(1);

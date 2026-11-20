@@ -1,5 +1,5 @@
 import React from "react";
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, Badge } from "@dhpanel/ui";
+import { Card, CardHeader, CardTitle, CardDescription, CardContent, Badge } from "@builtpanel/ui";
 import { Blocks, CheckCircle2 } from "lucide-react";
 
 interface PhpExtensionsListProps {

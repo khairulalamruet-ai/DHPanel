@@ -1,23 +1,23 @@
-# DHPanel node agent. Installed by deploy/agent/install.sh, which replaces
-# @AGENT_UID@ with the numeric id of the dhpanel-agent user (systemd's %U would
+# Built Panel node agent. Installed by deploy/agent/install.sh, which replaces
+# @AGENT_UID@ with the numeric id of the builtpanel-agent user (systemd's %U would
 # give root's id in a system unit).
 #
 # Enrol first, then start:
-#   sudo -u dhpanel-agent dhpanel-agent enroll --server … --ca-fingerprint … --token …
-#   sudo systemctl enable --now dhpanel-agent
+#   sudo -u builtpanel-agent builtpanel-agent enroll --server … --ca-fingerprint … --token …
+#   sudo systemctl enable --now builtpanel-agent
 [Unit]
-Description=DHPanel node agent
-Documentation=https://docs.dhpanel.dev/agent
+Description=Built Panel node agent
+Documentation=https://docs.builtpanel.dev/agent
 After=network-online.target user@@AGENT_UID@.service
 Wants=network-online.target
 # Never start an agent that has no identity; enrolment comes first.
-ConditionPathExists=/var/lib/dhpanel-agent/identity.json
+ConditionPathExists=/var/lib/builtpanel-agent/identity.json
 
 [Service]
 Type=simple
-User=dhpanel-agent
-Group=dhpanel-agent
-ExecStart=/usr/local/bin/dhpanel-agent run
+User=builtpanel-agent
+Group=builtpanel-agent
+ExecStart=/usr/local/bin/builtpanel-agent run
 # The agent's own rootless Docker daemon (ADR 0004), never a root daemon.
 Environment=XDG_RUNTIME_DIR=/run/user/@AGENT_UID@
 Environment=DOCKER_HOST=unix:///run/user/@AGENT_UID@/docker.sock
@@ -33,8 +33,8 @@ NoNewPrivileges=yes
 CapabilityBoundingSet=
 AmbientCapabilities=
 ProtectSystem=strict
-ReadWritePaths=/var/lib/dhpanel-agent /var/lib/dhpanel-transfers
-Environment=DHPANEL_AGENT_TRANSFERS=/var/lib/dhpanel-transfers
+ReadWritePaths=/var/lib/builtpanel-agent /var/lib/builtpanel-transfers
+Environment=BUILTPANEL_AGENT_TRANSFERS=/var/lib/builtpanel-transfers
 # read-only, not yes: `yes` also hides /run/user, where the agent's own Docker socket is, and without
 # Docker the agent offers no tenant operation at all.
 ProtectHome=read-only

@@ -9,7 +9,7 @@ import {
   Badge,
   Input,
   useToast,
-} from "@dhpanel/ui";
+} from "@builtpanel/ui";
 import {
   ShieldAlert,
   ShieldCheck,
@@ -20,8 +20,8 @@ import {
   Gauge,
   Lock,
 } from "lucide-react";
-import { useTranslation } from "@dhpanel/i18n";
-import { apiFetch } from "@dhpanel/api";
+import { useTranslation } from "@builtpanel/i18n";
+import { apiFetch } from "@builtpanel/api";
 import { AdminFirewallOverview, NodePortRule, GlobalIpBan } from "./types";
 import { AdminPortsTable } from "./AdminPortsTable";
 import { AdminBansTable } from "./AdminBansTable";

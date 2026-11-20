@@ -8,9 +8,9 @@ import {
   Badge,
   Input,
   useToast,
-} from "@dhpanel/ui";
-import { apiFetch } from "@dhpanel/api";
-import { useTranslation } from "@dhpanel/i18n";
+} from "@builtpanel/ui";
+import { apiFetch } from "@builtpanel/api";
+import { useTranslation } from "@builtpanel/i18n";
 import {
   Server,
   Activity,
@@ -87,11 +87,11 @@ export function AdminSystemLogsPage() {
           "Agent health heartbeat ping ACK received from control-plane",
           "Collected cgroup v2 metrics for 12 tenant containers: CPU 1.4%, Mem 24%",
           "Syncing node iptables firewall rules for ingress ports 80, 443",
-          "Storage scan finished: /var/lib/dhpanel/tenants disk usage 42.1 GB",
+          "Storage scan finished: /var/lib/builtpanel/tenants disk usage 42.1 GB",
         ],
         caddy: [
           "tls.handshake: completed successfully client=192.168.1.102 cipher=TLS_AES_256_GCM_SHA384",
-          "http.log.access: handled request method=GET uri=/ host=demo.dhpanel.test status=200",
+          "http.log.access: handled request method=GET uri=/ host=demo.builtpanel.test status=200",
           "reverse_proxy: upstream backend 127.0.0.1:8000 response header received in 4.2ms",
         ],
         auth: [

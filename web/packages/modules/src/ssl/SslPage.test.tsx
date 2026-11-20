@@ -1,8 +1,8 @@
 import React from "react";
 import { describe, it, expect, beforeEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
-import { ToastProvider } from "@dhpanel/ui";
-import { resetMockSsl } from "@dhpanel/api";
+import { ToastProvider } from "@builtpanel/ui";
+import { resetMockSsl } from "@builtpanel/api";
 import { SslPage } from "./SslPage";
 
 function renderWithProviders(ui: React.ReactElement) {

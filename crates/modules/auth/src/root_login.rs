@@ -2,7 +2,7 @@
 //!
 //! The administrator account named `root` has no panel password: its `password_hash` is
 //! [`accounts::SYSTEM_ROOT_PASSWORD`]. The control plane never runs as root and cannot read
-//! `/etc/shadow`, so the password is handed to `dhpanel-root-auth`, a small root service that
+//! `/etc/shadow`, so the password is handed to `builtpanel-root-auth`, a small root service that
 //! answers one question over a Unix socket only the panel's user can open: "is this root's
 //! password?". It checks one guess at a time and waits a second after a wrong one, on top of the
 //! lockout here.
@@ -13,7 +13,7 @@
 //! password (locked or empty: set one with `passwd`), `U` root's password uses a scheme the
 //! helper does not know, `E` the helper could not check (e.g. cannot read the file).
 //!
-//! [`accounts::SYSTEM_ROOT_PASSWORD`]: dhpanel_database::accounts::SYSTEM_ROOT_PASSWORD
+//! [`accounts::SYSTEM_ROOT_PASSWORD`]: builtpanel_database::accounts::SYSTEM_ROOT_PASSWORD
 
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
@@ -54,7 +54,7 @@ pub enum RootCheckError {
     Helper,
 }
 
-/// Client of the `dhpanel-root-auth` helper.
+/// Client of the `builtpanel-root-auth` helper.
 #[derive(Debug, Clone)]
 pub struct RootLogin {
     socket: Arc<PathBuf>,
@@ -113,7 +113,7 @@ mod tests {
 
     async fn helper_answering(answer: u8) -> (RootLogin, tokio::task::JoinHandle<Vec<u8>>) {
         let dir = std::env::temp_dir().join(format!(
-            "dh-root-login-{}-{}",
+            "bp-root-login-{}-{}",
             std::process::id(),
             uuid::Uuid::now_v7()
         ));
@@ -157,7 +157,7 @@ mod tests {
             client.check(&SecretString::from("x")).await,
             Err(RootCheckError::Helper)
         ));
-        let missing = RootLogin::new(PathBuf::from("/nonexistent/dhpanel/root-auth.sock"));
+        let missing = RootLogin::new(PathBuf::from("/nonexistent/builtpanel/root-auth.sock"));
         assert!(matches!(
             missing.check(&SecretString::from("x")).await,
             Err(RootCheckError::Io(_))

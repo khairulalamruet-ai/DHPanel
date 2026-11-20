@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, waitFor, act } from "@testing-library/react";
 import { useOperation } from "./useOperation";
-import * as dhpanelApi from "@dhpanel/api";
+import * as builtpanelApi from "@builtpanel/api";
 
 describe("useOperation hook", () => {
   beforeEach(() => {
@@ -10,7 +10,7 @@ describe("useOperation hook", () => {
 
   it("fetches operation data and handles polling until completion", async () => {
     let callCount = 0;
-    vi.spyOn(dhpanelApi, "apiFetch").mockImplementation(async (url: string) => {
+    vi.spyOn(builtpanelApi, "apiFetch").mockImplementation(async (url: string) => {
       if (url.includes("/api/v1/admin/operations/op_123")) {
         callCount++;
         if (callCount === 1) {
@@ -60,7 +60,7 @@ describe("useOperation hook", () => {
   });
 
   it("triggers retry on failed operation", async () => {
-    vi.spyOn(dhpanelApi, "apiFetch").mockImplementation(async (url: string, opts?: any) => {
+    vi.spyOn(builtpanelApi, "apiFetch").mockImplementation(async (url: string, opts?: any) => {
       if (opts?.method === "POST" && url.includes("/retry")) {
         return {
           success: true,

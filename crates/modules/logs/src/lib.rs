@@ -18,17 +18,17 @@ use axum::{
     response::{IntoResponse as _, Response},
     routing::get,
 };
-use dhpanel_database::{
+use builtpanel_database::{
     accounts::DbAccountKind,
     operations::{self, NewOperation, Status},
     plans,
     sqlx::PgPool,
     tenants,
 };
-use dhpanel_http_kit::{AppError, FieldError, ProblemDetails};
-use dhpanel_node_protocol::{LogLine, LogSource, MAX_LOG_LINES, Operation, Output};
-use dhpanel_rbac::Principal;
-use dhpanel_session::SessionStore;
+use builtpanel_http_kit::{AppError, FieldError, ProblemDetails};
+use builtpanel_node_protocol::{LogLine, LogSource, MAX_LOG_LINES, Operation, Output};
+use builtpanel_rbac::Principal;
+use builtpanel_session::SessionStore;
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, OpenApi, ToSchema};
 use uuid::Uuid;
@@ -142,7 +142,7 @@ pub async fn read_logs(
             "This is for hosting accounts.",
         ));
     }
-    let user = dhpanel_database::users::get(&state.db, who.account_id())
+    let user = builtpanel_database::users::get(&state.db, who.account_id())
         .await
         .map_err(internal)?;
     let owned = user.and_then(|u| u.tenant).ok_or_else(|| {
