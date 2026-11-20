@@ -18,12 +18,14 @@
 
 UI_FANCY=0; UI_I=0; UI_TOTAL=${UI_TOTAL:-10}; UI_LABEL=""; UI_PID=""; UI_LOG=""
 UI_T0=$SECONDS; UI_STEP_T0=$SECONDS; UI_COLS=80
-UI_R=""; UI_B=""; UI_DIM=""; UI_OK=""; UI_BAD=""; UI_ACC=""; UI_MUT=""; UI_WARN=""
+UI_FLAG=""; UI_R=""; UI_B=""; UI_DIM=""; UI_OK=""; UI_BAD=""; UI_ACC=""; UI_MUT=""; UI_WARN=""
 
 ui_init() {
     exec 3>&1 4>&2
     if [ -t 1 ] && [ "${TERM:-dumb}" != dumb ] && [ -z "${NO_COLOR:-}" ] && [ "${BUILTPANEL_PLAIN:-0}" != 1 ]; then
         UI_FANCY=1
+        UI_FLAG=$(mktemp "${TMPDIR:-/tmp}/builtpanel-ui.XXXXXX")
+        rm -f "$UI_FLAG"
         UI_R=$'\e[0m'; UI_B=$'\e[1m'; UI_DIM=$'\e[2m'
         UI_OK=$'\e[38;5;42m'; UI_BAD=$'\e[38;5;203m'; UI_ACC=$'\e[38;5;45m'
         UI_MUT=$'\e[38;5;244m'; UI_WARN=$'\e[38;5;214m'
@@ -115,7 +117,7 @@ _ui_spin() { # runs in the background until killed
     [ "$width" -ge 16 ] || width=16
     label="$UI_LABEL"
     [ "${#label}" -le "$width" ] || label="${label:0:$((width - 1))}…"
-    while :; do
+    while [ -e "$UI_FLAG" ]; do
         # Creeps forward within the step (never past it) so the bar is always alive.
         pct=$((base + (k / 8 < step_pct ? k / 8 : step_pct - 1)))
         [ "$pct" -le 99 ] || pct=99
@@ -128,12 +130,28 @@ _ui_spin() { # runs in the background until killed
     done
 }
 
+# The spinner runs in the background and stops by itself when its flag file is removed (it is
+# not killed: a killed job is reported by bash, and stopping it by signal raced with this
+# shell's own cleanup). It is a copy of this shell, so it would run this shell's EXIT trap when
+# it ends: a trap that must run once (removing the install's work folder) has to check
+# `ui_is_main` first.
+_ui_start_spinner() {
+    : > "$UI_FLAG"
+    _ui_spin &
+    UI_PID=$!
+}
+
 _ui_stop_spinner() {
     if [ -n "$UI_PID" ]; then
-        kill "$UI_PID" 2> /dev/null || true
+        rm -f "$UI_FLAG"
         wait "$UI_PID" 2> /dev/null || true
         UI_PID=""
     fi
+}
+
+UI_MAIN_PID=$$
+ui_is_main() { # true in the script itself, false in the spinner (a copy of it)
+    [ "${BASHPID:-$$}" = "$UI_MAIN_PID" ]
 }
 
 _ui_end_step() {
@@ -153,10 +171,7 @@ ui_step() { # label
     UI_LABEL="$1"
     UI_STEP_T0=$SECONDS
     echo "==> $1"
-    if [ "$UI_FANCY" -eq 1 ]; then
-        _ui_spin &
-        UI_PID=$!
-    fi
+    if [ "$UI_FANCY" -eq 1 ]; then _ui_start_spinner; fi
 }
 
 ui_warn() { # text
@@ -164,7 +179,7 @@ ui_warn() { # text
     if [ "$UI_FANCY" -eq 1 ]; then
         _ui_stop_spinner
         printf '\r\e[K     %s! %s%s\n' "$UI_WARN" "$1" "$UI_R" >&3
-        if [ -n "$UI_LABEL" ]; then _ui_spin & UI_PID=$!; fi
+        if [ -n "$UI_LABEL" ]; then _ui_start_spinner; fi
     fi
 }
 
@@ -215,5 +230,6 @@ ui_box() { # the lines come on stdin
 
 ui_cleanup() {
     _ui_stop_spinner
+    [ -z "$UI_FLAG" ] || rm -f "$UI_FLAG"
     [ "$UI_FANCY" -ne 1 ] || printf '\e[?25h' >&3 2> /dev/null || true
 }

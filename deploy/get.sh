@@ -56,6 +56,7 @@ if ! declare -F ui_init > /dev/null; then
         ui_step() { echo "==> $1"; }
         ui_fail() { echo "get.sh: $1" >&2; }
         ui_cleanup() { :; }
+        ui_is_main() { :; }
         _ui_end_step() { :; }
     fi
 fi
@@ -78,7 +79,8 @@ if ! command -v curl > /dev/null || ! command -v tar > /dev/null; then
 fi
 
 WORK="$(mktemp -d /var/tmp/builtpanel-get.XXXXXX)"
-trap 'ui_cleanup; rm -rf "$WORK"' EXIT
+# Only the script itself may run this: the spinner is a copy of it, and would delete the folder.
+trap 'if ui_is_main; then ui_cleanup; rm -rf "$WORK"; fi' EXIT
 
 # --- the release ----------------------------------------------------------------------------
 if [ -n "$TARBALL" ]; then

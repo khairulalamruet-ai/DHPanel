@@ -65,6 +65,7 @@ else
     ui_done() { :; }
     ui_box() { cat >&3; }
     ui_cleanup() { :; }
+    ui_is_main() { :; }
 fi
 UI_TOTAL=$(grep -c '^[[:space:]]*say "' "${BASH_SOURCE[0]}")
 ui_init
@@ -73,7 +74,7 @@ ui_init
 step=""
 say() { step="$*"; ui_step "$*"; }
 die() { ui_fail "$*"; exit 1; }
-trap 'rc=$?; ui_cleanup; [ $rc -ne 0 ] && [ -n "$step" ] && echo "install.sh: stopped during \"$step\"; fix the cause above and run this again" >&4' EXIT
+trap 'rc=$?; ui_is_main || exit $rc; ui_cleanup; [ $rc -ne 0 ] && [ -n "$step" ] && echo "install.sh: stopped during \"$step\"; fix the cause above and run this again" >&4' EXIT
 
 # --- what this machine is ------------------------------------------------------------------
 [ "$(uname -s)" = Linux ] || die "Linux only"
