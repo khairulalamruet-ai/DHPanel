@@ -147,4 +147,4 @@ fi
 say "starting the installer"
 _ui_end_step
 # The installer goes on with the same look, without drawing the logo again.
-BUILTPANEL_UI_BANNER=0 "$WORK/release/install.sh" --bin-dir "$WORK/release/bin" --hostname "$HOSTNAME_FQDN" --admin-email "$ADMIN_EMAIL" ${PASS[@]+"${PASS[@]}"}
+BPINSTALL_BANNER=0 "$WORK/release/install.sh" --bin-dir "$WORK/release/bin" --hostname "$HOSTNAME_FQDN" --admin-email "$ADMIN_EMAIL" ${PASS[@]+"${PASS[@]}"}

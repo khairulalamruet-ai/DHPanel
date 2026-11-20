@@ -14,7 +14,7 @@
 #   ui_cleanup              stops the spinner and shows the cursor again (call from an EXIT trap)
 #
 # Plain lines ("==> step", no colours, no animation) when the output is not a terminal, TERM is
-# dumb, NO_COLOR is set or BUILTPANEL_PLAIN=1: logs and CI stay readable.
+# dumb, NO_COLOR is set or BPINSTALL_PLAIN=1: logs and CI stay readable.
 
 UI_FANCY=0; UI_I=0; UI_TOTAL=${UI_TOTAL:-10}; UI_LABEL=""; UI_PID=""; UI_LOG=""
 UI_T0=$SECONDS; UI_STEP_T0=$SECONDS; UI_COLS=80
@@ -22,7 +22,7 @@ UI_FLAG=""; UI_R=""; UI_B=""; UI_DIM=""; UI_OK=""; UI_BAD=""; UI_ACC=""; UI_MUT=
 
 ui_init() {
     exec 3>&1 4>&2
-    if [ -t 1 ] && [ "${TERM:-dumb}" != dumb ] && [ -z "${NO_COLOR:-}" ] && [ "${BUILTPANEL_PLAIN:-0}" != 1 ]; then
+    if [ -t 1 ] && [ "${TERM:-dumb}" != dumb ] && [ -z "${NO_COLOR:-}" ] && [ "${BPINSTALL_PLAIN:-0}" != 1 ]; then
         UI_FANCY=1
         UI_FLAG=$(mktemp "${TMPDIR:-/tmp}/builtpanel-ui.XXXXXX")
         rm -f "$UI_FLAG"

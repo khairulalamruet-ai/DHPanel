@@ -69,12 +69,12 @@ else
 fi
 UI_TOTAL=$(grep -c '^[[:space:]]*say "' "${BASH_SOURCE[0]}")
 ui_init
-[ "${BUILTPANEL_UI_BANNER:-1}" = 0 ] || ui_banner "the modern hosting control panel  ·  installer"
+[ "${BPINSTALL_BANNER:-1}" = 0 ] || ui_banner "the modern hosting control panel  ·  installer"
 
 step=""
 say() { step="$*"; ui_step "$*"; }
 die() { ui_fail "$*"; exit 1; }
-trap 'rc=$?; ui_is_main || exit $rc; ui_cleanup; [ $rc -ne 0 ] && [ -n "$step" ] && echo "install.sh: stopped during \"$step\"; fix the cause above and run this again" >&4' EXIT
+trap 'rc=$?; ui_is_main || exit $rc; ui_cleanup; if [ $rc -ne 0 ] && [ -n "$step" ]; then { echo; echo "install.sh: stopped during \"$step\" (the end of /var/log/builtpanel-install.log):"; tail -n 15 /var/log/builtpanel-install.log 2> /dev/null | sed "s/^/  | /"; echo "fix the cause and run this again"; } >&4; fi' EXIT
 
 # --- what this machine is ------------------------------------------------------------------
 [ "$(uname -s)" = Linux ] || die "Linux only"
