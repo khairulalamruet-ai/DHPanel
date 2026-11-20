@@ -23559,6 +23559,16 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "`root` with the server's root password: the root login helper is not reachable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
           }
         }
       }

@@ -21,6 +21,8 @@
 //!   names behave the same) and per client address. Reaching a threshold
 //!   answers 429 `too_many_attempts` with `Retry-After` until the lock expires,
 //!   even for the correct password. A successful login clears the account count.
+//! * `root` logs in with the server's own root password (like WHM), checked by
+//!   the `dhpanel-root-auth` helper; see [`root_login`]. The same lockout applies.
 //!
 //! The server must be run with `into_make_service_with_connect_info::<SocketAddr>()`
 //! so the client IP is available.
@@ -33,6 +35,7 @@
 
 pub mod impersonate;
 pub mod mfa;
+pub mod root_login;
 pub mod sessions;
 
 use std::{
@@ -50,7 +53,10 @@ use axum::{
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use dhpanel_audit::{AuditEntry, AuditWriter, Outcome};
-use dhpanel_auth_core::{password::PasswordHasher, secretbox::MasterKey};
+use dhpanel_auth_core::{
+    password::{PasswordHasher, Verification},
+    secretbox::MasterKey,
+};
 use dhpanel_cache::{
     RedisHandle,
     lockout::{FailureLimiter, LockoutPolicy},
@@ -104,6 +110,9 @@ pub struct AuthState {
     pub totp_issuer: Arc<str>,
     /// Audit log.
     pub audit: AuditWriter,
+    /// The helper that checks the server's root password for the administrator `root`;
+    /// `None` turns that login off.
+    pub root_login: Option<root_login::RootLogin>,
 }
 
 impl FromRef<AuthState> for PgPool {
@@ -362,7 +371,8 @@ fn login_audit_entry(ev: &LoginEvent<'_>) -> Option<AuditEntry> {
         (status = 403, description = "Correct password but account suspended or disabled", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 422, description = "Malformed body", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 429, description = "Too many failed attempts for this account or address", body = ProblemDetails, content_type = "application/problem+json",
-         headers(("retry-after" = u64, description = "Seconds until the lock expires")))
+         headers(("retry-after" = u64, description = "Seconds until the lock expires"))),
+        (status = 503, description = "`root` with the server's root password: the root login helper is not reachable", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 pub async fn login(
@@ -404,13 +414,23 @@ pub async fn login(
         return Err(invalid_credentials());
     }
 
+    // `root` is a reserved name: it only ever means the server's root (see [`root_login`]).
+    let as_root = attempted.eq_ignore_ascii_case("root");
     // Identifiers that cannot exist (bad format, reserved) simply match nothing.
     let (username, email) = if attempted.contains('@') {
         (None, Email::parse(attempted).ok())
     } else {
         (Username::parse(attempted).ok(), None)
     };
-    let account = if username.is_some() || email.is_some() {
+    let account = if as_root {
+        if state.root_login.is_some() {
+            accounts::find_system_root(&state.db)
+                .await
+                .map_err(AppError::internal)?
+        } else {
+            None
+        }
+    } else if username.is_some() || email.is_some() {
         accounts::find_for_login(&state.db, username.as_ref(), email.as_ref())
             .await
             .map_err(AppError::internal)?
@@ -419,6 +439,7 @@ pub async fn login(
     };
 
     let normalised = match (&username, &email) {
+        _ if as_root => "root".to_owned(),
         (Some(u), _) => u.as_str().to_owned(),
         (_, Some(e)) => e.as_str().to_owned(),
         _ => attempted.to_lowercase(),
@@ -444,11 +465,7 @@ pub async fn login(
         return Err(invalid_credentials());
     };
 
-    let verification = state
-        .hasher
-        .verify_async(password.clone(), account.password_hash.clone())
-        .await
-        .map_err(AppError::internal)?;
+    let verification = check_password(&state, &password, &account.password_hash).await?;
     if !verification.matches {
         count_failure(&state.limits.account, &subject).await?;
         count_failure(&state.limits.ip, &ip_subject).await?;
@@ -512,6 +529,61 @@ pub async fn login(
         tracing::warn!(error = %err, "failed-login counter not reset");
     }
     finish_login(&state, account.id, attempted, ip, &headers).await
+}
+
+/// Checks a password against an account's stored hash, or, for the administrator `root`,
+/// against the server's root password through the root helper.
+///
+/// # Errors
+/// Internal errors; 503 `root_login_unavailable` when the root helper cannot be asked.
+pub(crate) async fn check_password(
+    state: &AuthState,
+    password: &SecretString,
+    stored: &str,
+) -> Result<Verification, AppError> {
+    if stored != accounts::SYSTEM_ROOT_PASSWORD {
+        return state
+            .hasher
+            .verify_async(password.clone(), stored.to_owned())
+            .await
+            .map_err(AppError::internal);
+    }
+    let Some(helper) = &state.root_login else {
+        // Turned off in the configuration: as slow as a wrong password, and as silent.
+        let _ = state.hasher.verify_dummy_async(password.clone()).await;
+        return Ok(Verification {
+            matches: false,
+            needs_rehash: false,
+        });
+    };
+    let matches = match helper.check(password).await {
+        Ok(root_login::RootCheck::Match) => true,
+        Ok(root_login::RootCheck::Mismatch) => false,
+        Ok(root_login::RootCheck::NoPassword) => {
+            tracing::warn!(
+                "root login refused: root has no password on this server (set one with `passwd`)"
+            );
+            false
+        }
+        Ok(root_login::RootCheck::UnsupportedScheme) => {
+            tracing::warn!(
+                "root login refused: root's password hash uses a scheme the helper does not know \
+                 (set it again with `passwd` to store it as yescrypt or SHA-512)"
+            );
+            false
+        }
+        Err(err) => {
+            tracing::error!(error = %err, "root login: the root helper could not be asked");
+            return Err(AppError::unavailable(
+                "root_login_unavailable",
+                "Logging in as root is not available right now. Try again later or use another administrator.",
+            ));
+        }
+    };
+    Ok(Verification {
+        matches,
+        needs_rehash: false,
+    })
 }
 
 /// Completes a login after every required factor has been verified: rotates

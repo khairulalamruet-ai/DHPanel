@@ -28,6 +28,9 @@ sha2 = "0.11"
 secrecy = "0.10"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# The client of the root login helper (a Unix socket, with a time limit).
+thiserror = "2.0.21"
+tokio = { version = "1", features = ["net", "io-util", "time"] }
 tracing = "0.1.44"
 utoipa = { version = "6", features = ["uuid"] }
 uuid = { version = "1", features = ["serde"] }

@@ -5,6 +5,7 @@ members = [
     "apps/worker",
     "apps/node-agent",
     "apps/priv-helper",
+    "apps/root-auth",
     "apps/dhctl",
     "apps/license-authority",
     "crates/kernel",

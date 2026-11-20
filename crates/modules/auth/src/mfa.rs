@@ -405,11 +405,8 @@ async fn require_password(
         .map_err(AppError::internal)?
         .ok_or(AppError::Unauthorized)?;
     let matches = password.len() <= MAX_PASSWORD_BYTES
-        && state
-            .hasher
-            .verify_async(SecretString::from(password), account.password_hash)
-            .await
-            .map_err(AppError::internal)?
+        && crate::check_password(state, &SecretString::from(password), &account.password_hash)
+            .await?
             .matches;
     if !matches {
         count_failure(&state.limits.account, &subject).await?;

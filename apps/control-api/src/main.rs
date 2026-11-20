@@ -284,6 +284,11 @@ async fn main() -> ExitCode {
         redis: redis.clone(),
         master_key,
         totp_issuer: config.auth.totp_issuer.trim().into(),
+        root_login: config
+            .auth
+            .root_login_socket
+            .clone()
+            .map(dhpanel_mod_auth::root_login::RootLogin::new),
         audit: dhpanel_audit::AuditWriter::new(db.clone()),
     };
 

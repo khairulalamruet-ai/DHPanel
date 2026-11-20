@@ -60,6 +60,11 @@ ip_lockout_minutes = 60        # 1..=10080
 # Two-factor authentication: the name authenticator apps show for this panel.
 totp_issuer = "DHPanel"
 
+# Root login (like WHM): the administrator `root` logs in with this server's root password,
+# checked by the dhpanel-root-auth helper on this socket. install.sh sets it up; remove the
+# line (and run `dhctl admin root-login --disable`) to turn it off.
+# root_login_socket = "/run/dhpanel-root-auth/root-auth.sock"
+
 [secrets]
 # Master key that encrypts secrets stored in the database (TOTP secrets, ...).
 # Create once and back it up separately from the database:

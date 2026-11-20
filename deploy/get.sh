@@ -79,7 +79,9 @@ elif [ -n "$BASE_URL" ]; then
 else
     if [ -z "$VERSION" ]; then
         say "looking for the latest release of $REPO"
-        tag=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)
+        # The page /releases/latest redirects to /releases/tag/<tag>. (Not api.github.com: it
+        # allows 60 requests an hour per address and then answers 403, e.g. on shared hosts.)
+        tag=$(curl -fsSIL -o /dev/null -w '%{url_effective}' "https://github.com/$REPO/releases/latest" | sed -n 's#.*/releases/tag/\([^/?]*\)$#\1#p')
         [ -n "$tag" ] || die "no release found for $REPO (give one with --version)"
         VERSION="${tag#v}"
     fi

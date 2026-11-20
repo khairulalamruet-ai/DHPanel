@@ -4,7 +4,7 @@
 #
 #   sudo ./install.sh --bin-dir ./bin --hostname panel.example.com --admin-email you@example.com
 #
-#   --bin-dir DIR        the release's binaries: dhpanel-control-api, dhctl, and (for the local
+#   --bin-dir DIR        the release's binaries: dhpanel-control-api, dhctl, dhpanel-root-auth, and (for the local
 #                        node) dhpanel-agent and dhpanel-priv-helper
 #   --hostname NAME      the DNS name the panel is served under (it must already point here;
 #                        Caddy gets its certificate from it)
@@ -17,6 +17,8 @@
 #   --admin-hostname N   the name the administrators' app is served under (default: admin.<hostname>;
 #                        it must point here too; on sslip.io names it does on its own)
 #   --no-agent           install the control plane only (nodes are added from other servers)
+#   --no-root-login      do not let `root` log in to the panel with this server's root password
+#                        (on by default, like WHM; the helper dhpanel-root-auth checks it)
 #   --check              only look: what is there, what would be done; changes nothing
 #
 # Safe to run again: every step looks at what is already there, secrets and the CA are never
@@ -28,7 +30,7 @@
 # of the node channel, and with the local node: rootless Docker, the agent and the root helper.
 set -euo pipefail
 
-BIN_DIR=""; WEB_DIR=""; ADMIN_HOSTNAME=""; HOSTNAME_FQDN=""; ADMIN_EMAIL=""; ADMIN_USER=owner; WITH_AGENT=1; CHECK=0
+BIN_DIR=""; WEB_DIR=""; ADMIN_HOSTNAME=""; HOSTNAME_FQDN=""; ADMIN_EMAIL=""; ADMIN_USER=owner; WITH_AGENT=1; ROOT_LOGIN=1; CHECK=0
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ETC=/etc/dhpanel; SECRETS=$ETC/secrets; STATE=/var/lib/dhpanel; AGENT_PORT=8444
 
@@ -41,8 +43,9 @@ while [ $# -gt 0 ]; do
         --admin-email) ADMIN_EMAIL="${2:?--admin-email needs an address}"; shift 2 ;;
         --admin-username) ADMIN_USER="${2:?--admin-username needs a name}"; shift 2 ;;
         --no-agent) WITH_AGENT=0; shift ;;
+        --no-root-login) ROOT_LOGIN=0; shift ;;
         --check) CHECK=1; shift ;;
-        -h | --help) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h | --help) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "install.sh: unknown option: $1 (see --help)" >&2; exit 64 ;;
     esac
 done
@@ -82,7 +85,7 @@ if [ -n "$WEB_DIR" ]; then
 fi
 [ -n "$ADMIN_EMAIL" ] || die "give the first administrator's email with --admin-email"
 [[ "$ADMIN_EMAIL" =~ ^[^@\ ]+@[^@\ ]+\.[^@\ ]+$ ]] || die "--admin-email does not look like an email address"
-need=(dhpanel-control-api dhctl); [ "$WITH_AGENT" -eq 1 ] && need+=(dhpanel-agent dhpanel-priv-helper)
+need=(dhpanel-control-api dhctl); [ "$WITH_AGENT" -eq 1 ] && need+=(dhpanel-agent dhpanel-priv-helper); [ "$ROOT_LOGIN" -eq 1 ] && need+=(dhpanel-root-auth)
 for b in "${need[@]}"; do
     [ -x "$BIN_DIR/$b" ] || die "$BIN_DIR/$b is missing or not executable"
     # An ELF program for this machine's architecture (the control plane has no --version: running
@@ -105,6 +108,7 @@ if [ "$CHECK" -eq 1 ]; then
     echo "    panel user:    $(id dhpanel > /dev/null 2>&1 && echo present || echo 'would be created')"
     echo "    configuration: $([ -f $ETC/control.toml ] && echo "present ($ETC/control.toml is kept)" || echo 'would be written')"
     echo "    CA:            $([ -f $SECRETS/node_ca.crt ] && echo 'present (kept)' || echo 'would be created')"
+    echo "    root login:    $([ "$ROOT_LOGIN" -eq 1 ] && echo "on (root's password: $(passwd -S root 2> /dev/null | awk '{print $2}'))" || echo off)"
     exit 0
 fi
 [ "$(id -u)" -eq 0 ] || die "run as root (sudo)"
@@ -160,6 +164,7 @@ install -d -m 0755 -o root -g dhpanel "$ETC"
 install -d -m 0750 -o root -g dhpanel "$SECRETS"
 install -d -m 0700 -o dhpanel -g dhpanel "$STATE"
 for b in dhpanel-control-api dhctl; do install -m 0755 -o root -g root "$BIN_DIR/$b" /usr/local/bin/$b; done
+[ "$ROOT_LOGIN" -eq 0 ] || install -m 0755 -o root -g root "$BIN_DIR/dhpanel-root-auth" /usr/local/bin/dhpanel-root-auth
 
 secret() { # name, command that prints it: written once, never replaced
     if [ ! -s "$SECRETS/$1" ]; then
@@ -222,6 +227,17 @@ stream_url = "https://$HOSTNAME_FQDN:$AGENT_PORT"
 TOML
     chown root:dhpanel "$ETC/control.toml"; chmod 0640 "$ETC/control.toml"
 fi
+# Root login (like WHM): the control plane asks the root helper on this socket. Kept in step with
+# --no-root-login on every run, also in a configuration written by an earlier run.
+ROOT_SOCKET=/run/dhpanel-root-auth/root-auth.sock
+sed -i '/^root_login_socket *=/d' "$ETC/control.toml"
+if [ "$ROOT_LOGIN" -eq 1 ]; then
+    if grep -q '^\[auth\]' "$ETC/control.toml"; then
+        sed -i "/^\[auth\]/a root_login_socket = \"$ROOT_SOCKET\"" "$ETC/control.toml"
+    else
+        printf '\n[auth]\nroot_login_socket = "%s"\n' "$ROOT_SOCKET" >> "$ETC/control.toml"
+    fi
+fi
 export DHPANEL_CONFIG="$ETC/control.toml"
 as_panel() { runuser -u dhpanel -- env DHPANEL_CONFIG="$DHPANEL_CONFIG" "$@"; }
 
@@ -241,6 +257,23 @@ ADMIN_PASSWORD=""
 if [ "$(runuser -u postgres -- psql -qAt -d dhpanel -c "select count(*) from accounts where kind = 'admin'")" = 0 ]; then
     ADMIN_PASSWORD="$(openssl rand -base64 24 | tr -d '/+=' | cut -c1-24)-Aa1"
     printf '%s\n' "$ADMIN_PASSWORD" | as_panel dhctl admin create --username "$ADMIN_USER" --email "$ADMIN_EMAIL" --password-stdin > /dev/null
+fi
+
+ROOT_PW_STATE=""
+if [ "$ROOT_LOGIN" -eq 1 ]; then
+    say "root login (root with this server's root password)"
+    install -m 0644 "$HERE/systemd/dhpanel-root-auth.service" /etc/systemd/system/dhpanel-root-auth.service
+    systemctl daemon-reload
+    systemctl enable dhpanel-root-auth > /dev/null 2>&1
+    systemctl restart dhpanel-root-auth
+    as_panel dhctl admin root-login --email "root@$HOSTNAME_FQDN" > /dev/null
+    # P: root has a usable password; L: locked; NP: none (cloud images often log in with a key only).
+    ROOT_PW_STATE=$(passwd -S root 2> /dev/null | awk '{print $2}')
+else
+    as_panel dhctl admin root-login --disable > /dev/null
+    if [ -f /etc/systemd/system/dhpanel-root-auth.service ]; then
+        systemctl disable --now dhpanel-root-auth > /dev/null 2>&1 || true
+    fi
 fi
 
 # --- the service, the web server, the firewall ----------------------------------------------
@@ -356,6 +389,8 @@ DHPanel is installed.
   Panel:     https://$HOSTNAME_FQDN   (the certificate arrives within a minute, once the name points here)
 $([ -n "$WEB_DIR" ] && printf '  Admin:     https://%s   (this name must point here too)\n' "$ADMIN_HOSTNAME")
   Login:     $ADMIN_USER   (role super_admin: every permission on the panel, like WHM's root)
+$([ "$ROOT_LOGIN" -eq 1 ] && printf '  Root:      root   with this server'"'"'s root password (full access, like WHM)\n')
+$([ "$ROOT_LOGIN" -eq 1 ] && [ "$ROOT_PW_STATE" != P ] && printf '             root has no usable password yet: set one with `sudo passwd root` to use it\n')
 $([ -n "$ADMIN_PASSWORD" ] && printf '  Password:  %s\n  (shown once, never stored: sign in and change it, then set up two-factor)\n' "$ADMIN_PASSWORD" || echo '  (the administrator already existed; its password is unchanged)')
 
 Keep a copy of $SECRETS/master_key somewhere else: without it a lost server cannot be restored

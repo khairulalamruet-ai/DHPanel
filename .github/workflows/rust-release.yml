@@ -93,14 +93,14 @@ jobs:
         run: |
           export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
           export RUSTFLAGS="--remap-path-prefix=$PWD=/src --remap-path-prefix=$HOME/.cargo=/cargo -C strip=symbols"
-          cargo build --release --locked -p dhpanel-control-api -p dhpanel-dhctl -p dhpanel-node-agent -p dhpanel-priv-helper -p dhpanel-license-authority
+          cargo build --release --locked -p dhpanel-control-api -p dhpanel-dhctl -p dhpanel-node-agent -p dhpanel-priv-helper -p dhpanel-root-auth -p dhpanel-license-authority
           # No program may need a newer glibc than the oldest system the installer supports.
-          for f in target/release/dhpanel-control-api target/release/dhctl target/release/dhpanel-agent target/release/dhpanel-priv-helper target/release/dhpanel-license-authority; do
+          for f in target/release/dhpanel-control-api target/release/dhctl target/release/dhpanel-agent target/release/dhpanel-priv-helper target/release/dhpanel-root-auth target/release/dhpanel-license-authority; do
             v="$(objdump -T "$f" | grep -o 'GLIBC_[0-9.]*' | sort -V | tail -1 | cut -d_ -f2)"
             [ "$(printf '%s\n2.35\n' "$v" | sort -V | tail -1)" = 2.35 ] || { echo "$f needs glibc $v (more than 2.35)"; exit 1; }
           done
           mkdir -p dist/bin
-          for b in dhpanel-control-api dhctl dhpanel-agent dhpanel-priv-helper dhpanel-license-authority; do
+          for b in dhpanel-control-api dhctl dhpanel-agent dhpanel-priv-helper dhpanel-root-auth dhpanel-license-authority; do
             install -m 0755 "target/release/$b" dist/bin/
           done
       - name: SBOM
@@ -147,7 +147,7 @@ jobs:
           export RUSTFLAGS="--remap-path-prefix=$PWD=/src --remap-path-prefix=$HOME/.cargo=/cargo -C strip=symbols"
           # The same packages as the real build: building a different set unifies features
           # differently and gives different bytes.
-          cargo build --release --locked -p dhpanel-control-api -p dhpanel-dhctl -p dhpanel-node-agent -p dhpanel-priv-helper -p dhpanel-license-authority
+          cargo build --release --locked -p dhpanel-control-api -p dhpanel-dhctl -p dhpanel-node-agent -p dhpanel-priv-helper -p dhpanel-root-auth -p dhpanel-license-authority
           sha256sum target/release/dhpanel-control-api target/release/dhctl | awk '{print $1}' > /tmp/second.sha
       - uses: actions/download-artifact@v7
         with:

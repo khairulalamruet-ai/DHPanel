@@ -17,7 +17,7 @@ docker run --rm \
         curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain "$(sed -n "s/^channel *= *\"\(.*\)\"/\1/p" /src/rust-toolchain.toml)" > /dev/null
         . /root/.cargo/env
         cd /src
-        cargo build --release --locked -p dhpanel-control-api -p dhpanel-dhctl -p dhpanel-node-agent -p dhpanel-priv-helper
-        for b in dhpanel-control-api dhctl dhpanel-agent dhpanel-priv-helper; do cp "/target/release/$b" /out/; done
+        cargo build --release --locked -p dhpanel-control-api -p dhpanel-dhctl -p dhpanel-node-agent -p dhpanel-priv-helper -p dhpanel-root-auth
+        for b in dhpanel-control-api dhctl dhpanel-agent dhpanel-priv-helper dhpanel-root-auth; do cp "/target/release/$b" /out/; done
         echo "glibc needed:"; for b in /out/*; do printf "  %-24s %s\n" "$(basename $b)" "$(objdump -T $b | grep -o "GLIBC_[0-9.]*" | sort -V | tail -1)"; done
     '

@@ -75,6 +75,7 @@ async fn app(pool: &PgPool, spool: &std::path::Path) -> App {
         redis: redis.clone(),
         master_key: master_key.clone(),
         totp_issuer: "DHPanel Test".into(),
+        root_login: None,
         audit: dhpanel_audit::AuditWriter::new(pool.clone()),
     };
     let admin = dhpanel_mod_admin::AdminState {

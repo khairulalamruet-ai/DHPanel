@@ -74,6 +74,7 @@ fn limited_state(
         redis: redis_handle,
         master_key: dhpanel_auth_core::secretbox::MasterKey::from_bytes(&[42; 32]),
         totp_issuer: "DHPanel Test".into(),
+        root_login: None,
         audit: dhpanel_audit::AuditWriter::new(pool.clone()),
     }
 }
@@ -1744,4 +1745,101 @@ async fn ten_failures_from_one_address_block_it_for_an_hour(pool: PgPool) {
     assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS);
     let left: u64 = r.retry_after.expect("retry-after");
     assert!((3500..=3600).contains(&left), "{left}");
+}
+
+/// A stand-in for dhpanel-root-auth: root's password is `ROOT_PASSWORD`.
+const ROOT_PASSWORD: &str = "Server-Root-Secret-77";
+
+fn fake_root_helper() -> std::path::PathBuf {
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+    let dir = std::env::temp_dir().join(format!("dh-root-live-{}", Uuid::now_v7().simple()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("root-auth.sock");
+    let listener = tokio::net::UnixListener::bind(&path).unwrap();
+    tokio::spawn(async move {
+        while let Ok((mut s, _)) = listener.accept().await {
+            let mut len = [0u8; 2];
+            if s.read_exact(&mut len).await.is_err() {
+                continue;
+            }
+            let mut pw = vec![0u8; usize::from(u16::from_be_bytes(len))];
+            if s.read_exact(&mut pw).await.is_err() {
+                continue;
+            }
+            let answer = if pw == ROOT_PASSWORD.as_bytes() {
+                b'Y'
+            } else {
+                b'N'
+            };
+            let _ = s.write_all(&[answer]).await;
+        }
+    });
+    path
+}
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn root_logs_in_with_the_servers_root_password(pool: PgPool) {
+    let hasher = PasswordHasher::new(fast_params(2)).unwrap();
+    let email = dhpanel_domain::Email::parse("root@panel.example.com").unwrap();
+    let (id, created) = dhpanel_database::accounts::enable_system_root(&pool, &email)
+        .await
+        .unwrap();
+    assert!(created);
+    // Turned on again: the same account.
+    assert_eq!(
+        dhpanel_database::accounts::enable_system_root(&pool, &email)
+            .await
+            .unwrap(),
+        (id, false)
+    );
+
+    // Without the helper configured, root cannot log in at all.
+    let off = app(state(&pool, hasher.clone()));
+    assert_eq!(
+        login(&off, "root", ROOT_PASSWORD, None).await.status,
+        StatusCode::UNAUTHORIZED
+    );
+
+    let mut st = state(&pool, hasher.clone());
+    st.root_login = Some(dhpanel_mod_auth::root_login::RootLogin::new(
+        fake_root_helper(),
+    ));
+    let on = app(st);
+    let r = login(&on, "root", "not-the-root-password", None).await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED, "{:?}", r.body);
+    let r = login(&on, "ROOT", ROOT_PASSWORD, None).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert_eq!(r.body["username"], "root");
+    assert_eq!(r.body["kind"], "admin");
+
+    // The marker is not a password: no other account can be given it.
+    let bad = sqlx::query(
+        "INSERT INTO accounts (kind, username, email, password_hash)
+         VALUES ('client', 'mallory', 'm@example.com', '!system:root')",
+    )
+    .execute(&pool)
+    .await;
+    assert!(bad.is_err());
+
+    // A helper that is down is reported, not taken for a wrong password.
+    let mut st = state(&pool, hasher.clone());
+    st.root_login = Some(dhpanel_mod_auth::root_login::RootLogin::new(
+        "/nonexistent/root-auth.sock".into(),
+    ));
+    let r = login(&app(st), "root", ROOT_PASSWORD, None).await;
+    assert_eq!(r.status, StatusCode::SERVICE_UNAVAILABLE, "{:?}", r.body);
+
+    // Turned off: the account is disabled and the login stops working.
+    assert!(
+        dhpanel_database::accounts::disable_system_root(&pool)
+            .await
+            .unwrap()
+    );
+    let mut st = state(&pool, hasher);
+    st.root_login = Some(dhpanel_mod_auth::root_login::RootLogin::new(
+        fake_root_helper(),
+    ));
+    let r = login(&app(st), "root", ROOT_PASSWORD, None).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{:?}", r.body);
 }

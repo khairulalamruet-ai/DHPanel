@@ -230,6 +230,17 @@ enum AdminAction {
         #[arg(long)]
         require_mfa: bool,
     },
+    /// Let the administrator `root` log in with this server's root password (like WHM).
+    /// Creates that administrator (full access) or turns it back on; the password is checked
+    /// by the dhpanel-root-auth helper (auth.root_login_socket in the configuration).
+    RootLogin {
+        /// Contact email of the `root` administrator (used only when it is created).
+        #[arg(long, required_unless_present = "disable")]
+        email: Option<String>,
+        /// Turn the root login off (the `root` administrator is disabled, not deleted).
+        #[arg(long, conflicts_with = "email")]
+        disable: bool,
+    },
 }
 
 /// A failure with its exit code. Messages never contain secrets.
@@ -258,6 +269,9 @@ async fn main() -> ExitCode {
                     require_mfa,
                 },
         } => admin_create(&username, &email, password_stdin, &role, require_mfa).await,
+        Command::Admin {
+            action: AdminAction::RootLogin { email, disable },
+        } => admin_root_login(email.as_deref(), disable).await,
         Command::Ca { action } => ca(action),
         Command::SystemBackup { action } => system_backup(&action),
         Command::Release { action } => release(action),
@@ -658,6 +672,72 @@ async fn admin_create(
     }
     let mfa = if require_mfa { " (2FA required)" } else { "" };
     println!("created admin '{username}' <{email}> id={id} role={role}{first}{mfa}");
+    Ok(())
+}
+
+async fn admin_root_login(email: Option<&str>, disable: bool) -> Result<(), Failure> {
+    let email = email
+        .map(|e| Email::parse(e).map_err(|e| Failure(EXIT_USAGE, format!("--email: {e}"))))
+        .transpose()?;
+    let config = load_config()?;
+    let pool = connect(&config).await?;
+    let db_err = |e: dhpanel_database::sqlx::Error| {
+        Failure(EXIT_UNAVAILABLE, format!("database error: {e}"))
+    };
+    if disable {
+        let was = dhpanel_database::accounts::disable_system_root(&pool)
+            .await
+            .map_err(db_err)?;
+        println!(
+            "{}",
+            if was {
+                "root login turned off (the root administrator is disabled)"
+            } else {
+                "root login was not set up"
+            }
+        );
+        return Ok(());
+    }
+    let Some(email) = email else {
+        return Err(Failure(EXIT_USAGE, "give --email or --disable".to_owned()));
+    };
+    let (id, created) = dhpanel_database::accounts::enable_system_root(&pool, &email)
+        .await
+        .map_err(|e| match e {
+            InsertAccountError::EmailTaken => Failure(
+                EXIT_DATAERR,
+                format!("--email: {email} is already used by another account"),
+            ),
+            InsertAccountError::UsernameTaken => Failure(
+                EXIT_DATAERR,
+                "an account named root exists and is not an administrator".to_owned(),
+            ),
+            InsertAccountError::Database(db) => {
+                Failure(EXIT_UNAVAILABLE, format!("database error: {db}"))
+            }
+        })?;
+    match dhpanel_database::rbac::assign_role(&pool, id, "super_admin", None)
+        .await
+        .map_err(db_err)?
+    {
+        dhpanel_database::rbac::AssignRole::UnknownRole => {
+            return Err(Failure(
+                EXIT_SOFTWARE,
+                "the built-in role super_admin is missing; run `dhctl migrate`".to_owned(),
+            ));
+        }
+        dhpanel_database::rbac::AssignRole::Assigned
+        | dhpanel_database::rbac::AssignRole::AlreadyAssigned => {}
+    }
+    if config.auth.root_login_socket.is_none() {
+        eprintln!(
+            "dhctl: warning: auth.root_login_socket is not set in the configuration, so root cannot log in yet"
+        );
+    }
+    println!(
+        "root login {} (id={id}): log in as `root` with this server's root password",
+        if created { "set up" } else { "turned on" }
+    );
     Ok(())
 }
 

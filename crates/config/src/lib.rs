@@ -262,6 +262,10 @@ pub struct AuthConfig {
     pub ip_lockout_minutes: u32,
     /// Name shown in authenticator apps for TOTP entries (1..=64 characters, no `:`).
     pub totp_issuer: String,
+    /// Socket of `dhpanel-root-auth`, the root helper that checks the server's root password
+    /// for the administrator `root` (WHM-style root login). Unset: `root` cannot log in.
+    #[serde(default)]
+    pub root_login_socket: Option<PathBuf>,
 }
 
 /// Logging settings.
@@ -343,6 +347,7 @@ impl Default for ControlConfig {
                 ip_lockout_threshold: 10,
                 ip_lockout_minutes: 60,
                 totp_issuer: "DHPanel".to_owned(),
+                root_login_socket: None,
             },
             secrets: SecretsConfig {
                 master_key: None,
