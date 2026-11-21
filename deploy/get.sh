@@ -73,9 +73,16 @@ say() { ui_step "$*"; }
 case "$(uname -m)" in x86_64) ARCH=x86_64 ;; aarch64 | arm64) ARCH=aarch64 ;; *) die "x86_64 or aarch64 only" ;; esac
 
 if ! command -v curl > /dev/null || ! command -v tar > /dev/null; then
-    command -v apt-get > /dev/null || die "curl and tar are needed"
-    DEBIAN_FRONTEND=noninteractive apt-get update -qq > /dev/null
-    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl tar ca-certificates > /dev/null
+    if command -v apt-get > /dev/null; then
+        DEBIAN_FRONTEND=noninteractive apt-get update -qq > /dev/null
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl tar ca-certificates > /dev/null
+    elif command -v dnf > /dev/null; then
+        # curl-minimal (the default) is enough: only what is missing is installed.
+        command -v curl > /dev/null || dnf install -y -q curl > /dev/null
+        command -v tar > /dev/null || dnf install -y -q tar > /dev/null
+    else
+        die "curl and tar are needed"
+    fi
 fi
 
 WORK="$(mktemp -d /var/tmp/builtpanel-get.XXXXXX)"

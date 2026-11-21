@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Installs the Built Panel control plane, and by default a local node agent, on ONE new server
-# (Ubuntu 22.04/24.04/26.04 or Debian 12/13, run as root). T19.01.
+# (Ubuntu 22.04/24.04/26.04, Debian 12/13, or AlmaLinux/Rocky/RHEL 9 and 10; run as root). T19.01.
 #
 #   sudo ./install.sh --bin-dir ./bin --hostname panel.example.com --admin-email you@example.com
 #
@@ -25,8 +25,8 @@
 # replaced, an administrator is created only when there is none. When a step fails it says
 # which and why; running again continues from there.
 #
-# What it installs: PostgreSQL 18 (PGDG), Redis, Caddy, ufw (22, 80, 443 and the agent port
-# 8444), the control plane as the unprivileged user `builtpanel` under its hardened unit, the CA
+# What it installs: PostgreSQL 18 (PGDG), Redis, Caddy, a firewall (ufw, or firewalld on the Red Hat
+# family: 22, 80, 443 and the agent port 8444), the control plane as the unprivileged user `builtpanel` under its hardened unit, the CA
 # of the node channel, and with the local node: rootless Docker, the agent and the root helper.
 set -euo pipefail
 
@@ -77,6 +77,8 @@ die() { ui_fail "$*"; exit 1; }
 trap 'rc=$?; ui_is_main || exit $rc; ui_cleanup; if [ $rc -ne 0 ] && [ -n "$step" ]; then { echo; echo "install.sh: stopped during \"$step\" (the end of /var/log/builtpanel-install.log):"; tail -n 15 /var/log/builtpanel-install.log 2> /dev/null | sed "s/^/  | /"; echo "fix the cause and run this again"; } >&4; fi' EXIT
 
 # --- what this machine is ------------------------------------------------------------------
+FAMILY=deb   # deb: Ubuntu and Debian (apt, ufw); rhel: AlmaLinux, Rocky, RHEL (dnf, firewalld, SELinux)
+PG_BIN=/usr/lib/postgresql/18/bin; PG_SERVICE=postgresql; REDIS_SERVICE=redis-server; REDIS_CONF=/etc/redis/redis.conf
 [ "$(uname -s)" = Linux ] || die "Linux only"
 . /etc/os-release
 case "${ID:-}:${VERSION_ID:-}" in
@@ -85,10 +87,13 @@ case "${ID:-}:${VERSION_ID:-}" in
         die "Ubuntu ${VERSION_ID} is not supported: it starts with the old cgroup v1 (a hosting account's memory and CPU limits do not work with rootless Docker there), has kernel 5.4 and no PostgreSQL 18 packages. Use Ubuntu 22.04 or newer." ;;
     centos:7* | rhel:7* | ol:7* | rocky:7*)
         die "${PRETTY_NAME:-this system} is not supported: kernel 3.10 cannot run rootless containers, there is no PostgreSQL 18 for it, and it is out of support. Use Ubuntu 22.04 or newer, Debian 12 or newer." ;;
+    almalinux:9 | almalinux:9.* | almalinux:10 | almalinux:10.* | rocky:9 | rocky:9.* | rocky:10 | rocky:10.* | rhel:9 | rhel:9.* | rhel:10 | rhel:10.* | centos:9 | centos:10 | ol:9 | ol:9.* | ol:10 | ol:10.*)
+        FAMILY=rhel; CODENAME="" ;;
     almalinux:* | rocky:* | rhel:* | centos:* | ol:*)
-        die "${PRETTY_NAME:-this system} (the Red Hat family) is not supported by this installer yet: it needs dnf, firewalld and SELinux handling. Use Ubuntu 22.04 or newer, Debian 12 or newer." ;;
-    *) die "this installer supports Ubuntu 22.04, 24.04 and 26.04 and Debian 12 and 13 (this is ${PRETTY_NAME:-unknown})" ;;
+        die "${PRETTY_NAME:-this system} is not supported: version 8 starts with the old cgroup v1 and has kernel 4.18 (rootless containers with memory and CPU limits do not work). Use AlmaLinux, Rocky Linux or RHEL 9 or 10 (or Ubuntu 22.04 or newer, Debian 12 or newer)." ;;
+    *) die "this installer supports Ubuntu 22.04, 24.04 and 26.04, Debian 12 and 13, and AlmaLinux, Rocky Linux and RHEL 9 and 10 (this is ${PRETTY_NAME:-unknown})" ;;
 esac
+if [ "$FAMILY" = rhel ]; then PG_BIN=/usr/pgsql-18/bin; PG_SERVICE=postgresql-18; fi
 [ "$(uname -m)" = x86_64 ] || [ "$(uname -m)" = aarch64 ] || die "x86_64 or aarch64 only"
 # Resource limits of rootless containers need cgroup v2 (the default on every system above).
 [ "$(stat -fc %T /sys/fs/cgroup 2> /dev/null)" = cgroup2fs ] || die "cgroup v2 is not in use (the unified hierarchy): hosting accounts' memory and CPU limits would not work"
@@ -122,7 +127,7 @@ if [ "$CHECK" -eq 1 ]; then
     echo "==> check only: nothing is changed"
     echo "    system:        ${PRETTY_NAME} ($(uname -m)), ${mem_mb} MB memory, ${free_gb} GB free"
     echo "    binaries:      ${need[*]} found and runnable"
-    echo "    postgresql 18: $(command -v /usr/lib/postgresql/18/bin/postgres > /dev/null && echo present || echo 'would be installed')"
+    echo "    postgresql 18: $(command -v $PG_BIN/postgres > /dev/null && echo present || echo 'would be installed')"
     echo "    redis:         $(command -v redis-server || echo 'would be installed')"
     echo "    caddy:         $(command -v caddy || echo 'would be installed')"
     echo "    web interface: $([ -n "$WEB_DIR" ] && echo "$WEB_DIR (clients on $HOSTNAME_FQDN, administrators on $ADMIN_HOSTNAME)" || echo 'none given: only the API is served')"
@@ -138,46 +143,90 @@ ui_log_to /var/log/builtpanel-install.log
 
 export DEBIAN_FRONTEND=noninteractive
 apt_install() { apt-get install -y -qq "$@" > /dev/null; }
+dnf_install() { dnf install -y -q "$@" > /dev/null; }
+MAJOR="${VERSION_ID%%.*}"
+ARCH_RPM="$(uname -m)"
 
 # --- packages --------------------------------------------------------------------------------
 say "base packages"
-apt-get update -qq > /dev/null
-# slirp4netns: rootless Docker's network driver (newer Docker releases no longer bring it along).
-apt_install ca-certificates curl gnupg openssl ufw uidmap dbus-user-session slirp4netns
+if [ "$FAMILY" = rhel ]; then
+    # curl is there already (curl-minimal is enough); the others: the firewall, the user-id mapping
+    # tools and the user's own message bus for rootless Docker, slirp4netns for its network.
+    dnf_install ca-certificates openssl firewalld shadow-utils dbus-daemon slirp4netns procps-ng policycoreutils
+    command -v curl > /dev/null || dnf_install curl
+    # Rootless containers need user namespaces (some images ship the limit at 0).
+    if [ "$(sysctl -n user.max_user_namespaces 2> /dev/null || echo 1)" = 0 ]; then
+        echo 'user.max_user_namespaces = 28633' > /etc/sysctl.d/99-builtpanel.conf
+        sysctl -q -p /etc/sysctl.d/99-builtpanel.conf
+    fi
+    # The web server (Caddy) may talk to the control plane and to the sites' containers on this machine.
+    if command -v getenforce > /dev/null && [ "$(getenforce)" = Enforcing ]; then setsebool -P httpd_can_network_connect 1 || true; fi
+else
+    apt-get update -qq > /dev/null
+    # slirp4netns: rootless Docker's network driver (newer Docker releases no longer bring it along).
+    apt_install ca-certificates curl gnupg openssl ufw uidmap dbus-user-session slirp4netns
+fi
 
 say "PostgreSQL 18"
-if [ ! -x /usr/lib/postgresql/18/bin/postgres ]; then
-    install -d -m 0755 /usr/share/keyrings
-    curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor --yes -o /usr/share/keyrings/postgresql.gpg
-    echo "deb [signed-by=/usr/share/keyrings/postgresql.gpg] https://apt.postgresql.org/pub/repos/apt ${CODENAME}-pgdg main" > /etc/apt/sources.list.d/pgdg.list
-    apt-get update -qq > /dev/null
-    apt_install postgresql-18
+if [ ! -x "$PG_BIN/postgres" ]; then
+    if [ "$FAMILY" = rhel ]; then
+        dnf_install "https://download.postgresql.org/pub/repos/yum/reporpms/EL-${MAJOR}-${ARCH_RPM}/pgdg-redhat-repo-latest.noarch.rpm"
+        # The distribution's own (older) PostgreSQL module would hide the PGDG packages.
+        dnf -qy module disable postgresql > /dev/null 2>&1 || true
+        dnf_install postgresql18-server
+        [ -s /var/lib/pgsql/18/data/PG_VERSION ] || "$PG_BIN/postgresql-18-setup" initdb > /dev/null
+        # The panel connects over 127.0.0.1 with a password: the default there may be `ident`.
+        sed -i -E 's/^(host[[:space:]]+all[[:space:]]+all[[:space:]]+(127\.0\.0\.1\/32|::1\/128)[[:space:]]+)(ident|md5|password)[[:space:]]*$/\1scram-sha-256/' /var/lib/pgsql/18/data/pg_hba.conf
+    else
+        install -d -m 0755 /usr/share/keyrings
+        curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor --yes -o /usr/share/keyrings/postgresql.gpg
+        echo "deb [signed-by=/usr/share/keyrings/postgresql.gpg] https://apt.postgresql.org/pub/repos/apt ${CODENAME}-pgdg main" > /etc/apt/sources.list.d/pgdg.list
+        apt-get update -qq > /dev/null
+        apt_install postgresql-18
+    fi
 fi
-systemctl enable --now postgresql > /dev/null 2>&1
+export PATH="$PG_BIN:$PATH"
+systemctl enable --now "$PG_SERVICE" > /dev/null 2>&1
 for _ in $(seq 1 30); do runuser -u postgres -- psql -qAt -c 'select 1' > /dev/null 2>&1 && break; sleep 1; done
-runuser -u postgres -- psql -qAt -c 'select 1' > /dev/null 2>&1 || die "PostgreSQL does not answer (journalctl -u postgresql)"
+runuser -u postgres -- psql -qAt -c 'select 1' > /dev/null 2>&1 || die "PostgreSQL does not answer (journalctl -u $PG_SERVICE)"
 
 say "Redis"
-if ! command -v redis-server > /dev/null; then
+if ! command -v redis-server > /dev/null && ! command -v valkey-server > /dev/null; then
     # The panel needs Redis 6.2 or newer (GETDEL). Ubuntu 22.04 ships 6.0, so there Redis is taken
     # from the Redis project's own repository; the other systems' own packages are new enough.
-    if [ "${ID}:${VERSION_ID}" = ubuntu:22.04 ]; then
+    if [ "$FAMILY" = rhel ]; then
+        # Redis 6.2 or newer is in AppStream (9) or EPEL; Red Hat 10 has Valkey (Redis-compatible) instead.
+        dnf_install redis 2> /dev/null || { dnf_install epel-release && dnf_install redis; } 2> /dev/null || dnf_install valkey
+    elif [ "${ID}:${VERSION_ID}" = ubuntu:22.04 ]; then
         curl -fsSL https://packages.redis.io/gpg | gpg --dearmor --yes -o /usr/share/keyrings/redis-archive-keyring.gpg
         echo "deb [signed-by=/usr/share/keyrings/redis-archive-keyring.gpg] https://packages.redis.io/deb ${CODENAME} main" > /etc/apt/sources.list.d/redis.list
         apt-get update -qq > /dev/null
     fi
-    apt_install redis-server
+    if [ "$FAMILY" = deb ]; then apt_install redis-server; fi
 fi
-redis_version="$(redis-server --version | sed -n 's/.*v=\([0-9.]*\).*/\1/p')"
+REDIS_BIN=redis-server
+if [ "$FAMILY" = rhel ]; then
+    # Red Hat 10 ships Valkey (the Redis-compatible server) instead of Redis.
+    if ! command -v redis-server > /dev/null && command -v valkey-server > /dev/null; then REDIS_BIN=valkey-server; REDIS_SERVICE=valkey; REDIS_CONF=/etc/valkey/valkey.conf; else REDIS_SERVICE=redis; fi
+fi
+command -v "$REDIS_BIN" > /dev/null || die "Redis could not be installed (the log above has the reason)"
+redis_version="$("$REDIS_BIN" --version | sed -n 's/.*v=\([0-9.]*\).*/\1/p')"
 [ "$(printf '%s\n6.2\n' "$redis_version" | sort -V | head -1)" = 6.2 ] || die "Redis $redis_version is too old: the panel needs 6.2 or newer"
-systemctl enable --now redis-server > /dev/null 2>&1
+systemctl enable --now "$REDIS_SERVICE" > /dev/null 2>&1
 
 say "Caddy"
 if ! command -v caddy > /dev/null; then
-    curl -fsSL https://dl.cloudsmith.io/public/caddy/stable/gpg.key | gpg --dearmor --yes -o /usr/share/keyrings/caddy.gpg
-    echo "deb [signed-by=/usr/share/keyrings/caddy.gpg] https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main" > /etc/apt/sources.list.d/caddy.list
-    apt-get update -qq > /dev/null
-    apt_install caddy
+    if [ "$FAMILY" = rhel ]; then
+        # Caddy's own packages (the COPR the Caddy project publishes).
+        dnf_install 'dnf-command(copr)'
+        dnf copr enable -y @caddy/caddy > /dev/null
+        dnf_install caddy
+    else
+        curl -fsSL https://dl.cloudsmith.io/public/caddy/stable/gpg.key | gpg --dearmor --yes -o /usr/share/keyrings/caddy.gpg
+        echo "deb [signed-by=/usr/share/keyrings/caddy.gpg] https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main" > /etc/apt/sources.list.d/caddy.list
+        apt-get update -qq > /dev/null
+        apt_install caddy
+    fi
 fi
 
 # --- user, folders, secrets ----------------------------------------------------------------
@@ -242,9 +291,9 @@ SQL
 secret database_url printf 'postgres://builtpanel:%s@127.0.0.1/builtpanel' "$DBPW"
 
 say "Redis password (local only)"
-if ! grep -q "^requirepass" /etc/redis/redis.conf; then
-    printf '\nbind 127.0.0.1 -::1\nrequirepass %s\n' "$RPW" >> /etc/redis/redis.conf
-    systemctl restart redis-server
+if ! grep -q "^requirepass" "$REDIS_CONF"; then
+    printf '\nbind 127.0.0.1 -::1\nrequirepass %s\n' "$RPW" >> "$REDIS_CONF"
+    systemctl restart "$REDIS_SERVICE"
 fi
 secret redis_url printf 'redis://:%s@127.0.0.1:6379/' "$RPW"
 
@@ -316,6 +365,7 @@ if [ "$ROOT_LOGIN" -eq 1 ]; then
     as_panel bpctl admin root-login --email "root@$HOSTNAME_FQDN" > /dev/null
     # P: root has a usable password; L: locked; NP: none (cloud images often log in with a key only).
     ROOT_PW_STATE=$(passwd -S root 2> /dev/null | awk '{print $2}')
+    [ "$ROOT_PW_STATE" != PS ] || ROOT_PW_STATE=P   # the Red Hat family's passwd prints PS
 else
     as_panel bpctl admin root-login --disable > /dev/null
     if [ -f /etc/systemd/system/builtpanel-root-auth.service ]; then
@@ -326,6 +376,11 @@ fi
 # --- the service, the web server, the firewall ----------------------------------------------
 say "the control plane's service"
 install -m 0644 "$HERE/systemd/builtpanel-control-api.service" /etc/systemd/system/builtpanel-control-api.service
+if [ "$FAMILY" = rhel ]; then
+    # The unit names the Debian services; start after this system's own (postgresql-18, redis or valkey).
+    install -d -m 0755 /etc/systemd/system/builtpanel-control-api.service.d
+    printf '[Unit]\nAfter=%s.service %s.service\nWants=%s.service %s.service\n' "$PG_SERVICE" "$REDIS_SERVICE" "$PG_SERVICE" "$REDIS_SERVICE" > /etc/systemd/system/builtpanel-control-api.service.d/services.conf
+fi
 systemctl daemon-reload
 systemctl enable builtpanel-control-api > /dev/null 2>&1
 systemctl restart builtpanel-control-api
@@ -349,6 +404,10 @@ if [ -n "$WEB_DIR" ]; then
         rm -rf "$WEB_ROOT/$app.old"; [ -d "$WEB_ROOT/$app" ] && mv "$WEB_ROOT/$app" "$WEB_ROOT/$app.old"
         mv "$WEB_ROOT/$app.new" "$WEB_ROOT/$app"; rm -rf "$WEB_ROOT/$app.old"
     done
+    # SELinux: the web server reads files of this type.
+    if command -v getenforce > /dev/null && [ "$(getenforce)" != Disabled ]; then
+        chcon -R -t httpd_sys_content_t "$WEB_ROOT" > /dev/null 2>&1 || true
+    fi
 fi
 
 # One site block of the panel: the API goes to the control plane, the rest is an app's files (any
@@ -398,18 +457,32 @@ caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile > /dev/null 2>&
 systemctl enable caddy > /dev/null 2>&1
 systemctl reload caddy 2> /dev/null || systemctl restart caddy
 
-say "firewall (ufw: 22, 80, 443, $AGENT_PORT)"
-ufw allow 22/tcp > /dev/null; ufw allow 80/tcp > /dev/null; ufw allow 443/tcp > /dev/null; ufw allow "$AGENT_PORT"/tcp > /dev/null
-ufw --force enable > /dev/null
+if [ "$FAMILY" = rhel ]; then
+    say "firewall (firewalld: 22, 80, 443, $AGENT_PORT)"
+    systemctl enable --now firewalld > /dev/null 2>&1
+    # ssh first: a server must never be locked out by this step.
+    for svc in ssh http https; do firewall-cmd --permanent --add-service="$svc" > /dev/null; done
+    firewall-cmd --permanent --add-port="$AGENT_PORT"/tcp > /dev/null
+    firewall-cmd --reload > /dev/null
+else
+    say "firewall (ufw: 22, 80, 443, $AGENT_PORT)"
+    ufw allow 22/tcp > /dev/null; ufw allow 80/tcp > /dev/null; ufw allow 443/tcp > /dev/null; ufw allow "$AGENT_PORT"/tcp > /dev/null
+    ufw --force enable > /dev/null
+fi
 
 if [ "$WITH_AGENT" -eq 1 ]; then
     say "the local node (rootless Docker, the agent, the root helper)"
     if ! command -v dockerd-rootless-setuptool.sh > /dev/null; then
-        install -m 0755 -d /etc/apt/keyrings
-        curl -fsSL "https://download.docker.com/linux/${ID}/gpg" | gpg --dearmor --yes -o /etc/apt/keyrings/docker.gpg
-        echo "deb [signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/${ID} ${CODENAME} stable" > /etc/apt/sources.list.d/docker.list
-        apt-get update -qq > /dev/null
-        apt_install docker-ce docker-ce-cli containerd.io docker-ce-rootless-extras
+        if [ "$FAMILY" = rhel ]; then
+            curl -fsSL https://download.docker.com/linux/centos/docker-ce.repo -o /etc/yum.repos.d/docker-ce.repo
+            dnf_install docker-ce docker-ce-cli containerd.io docker-ce-rootless-extras
+        else
+            install -m 0755 -d /etc/apt/keyrings
+            curl -fsSL "https://download.docker.com/linux/${ID}/gpg" | gpg --dearmor --yes -o /etc/apt/keyrings/docker.gpg
+            echo "deb [signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/${ID} ${CODENAME} stable" > /etc/apt/sources.list.d/docker.list
+            apt-get update -qq > /dev/null
+            apt_install docker-ce docker-ce-cli containerd.io docker-ce-rootless-extras
+        fi
         # Only the agent's own rootless daemon is used: the system-wide one stays off.
         systemctl disable --now docker.service docker.socket > /dev/null 2>&1 || true
     fi
