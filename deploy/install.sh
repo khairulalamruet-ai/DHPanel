@@ -250,36 +250,6 @@ if ! command -v caddy > /dev/null; then
 fi
 
 # --- user, folders, secrets ----------------------------------------------------------------
-# --- upgrade from DHPanel -------------------------------------------------------------------
-# A server installed while the panel was called DHPanel moves to the new names: services, the
-# system user, folders, the database and its role. Secrets, the CA and the data stay as they are.
-if [ -d /etc/dhpanel ] && [ ! -e "$ETC" ]; then
-    say "upgrading from DHPanel to Built Panel"
-    for unit in dhpanel-control-api dhpanel-root-auth; do
-        systemctl disable --now "$unit" > /dev/null 2>&1 || true
-        rm -f "/etc/systemd/system/$unit.service"
-    done
-    # The node agent's part (its user, Docker and packet filter) is moved by agent/install.sh.
-    systemctl stop dhpanel-agent 2> /dev/null || true
-    systemctl daemon-reload
-    if id dhpanel > /dev/null 2>&1 && ! id builtpanel > /dev/null 2>&1; then
-        usermod -l builtpanel -d "$STATE" dhpanel
-        groupmod -n builtpanel dhpanel 2> /dev/null || true
-    fi
-    mv /etc/dhpanel "$ETC"
-    [ ! -d /var/lib/dhpanel ] || [ -e "$STATE" ] || mv /var/lib/dhpanel "$STATE"
-    [ ! -d /usr/share/dhpanel ] || [ -e /usr/share/builtpanel ] || mv /usr/share/dhpanel /usr/share/builtpanel
-    sed -i 's#/etc/dhpanel#/etc/builtpanel#g; s#/var/lib/dhpanel#/var/lib/builtpanel#g; s#/run/dhpanel#/run/builtpanel#g; s#/usr/share/dhpanel#/usr/share/builtpanel#g' "$ETC/control.toml"
-    runuser -u postgres -- psql -qAt -v ON_ERROR_STOP=1 <<'SQL' > /dev/null
-SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'dhpanel' AND pid <> pg_backend_pid();
-SELECT 'ALTER DATABASE dhpanel RENAME TO builtpanel' WHERE EXISTS (SELECT FROM pg_database WHERE datname = 'dhpanel') AND NOT EXISTS (SELECT FROM pg_database WHERE datname = 'builtpanel') \gexec
-SELECT 'ALTER ROLE dhpanel RENAME TO builtpanel' WHERE EXISTS (SELECT FROM pg_roles WHERE rolname = 'dhpanel') AND NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'builtpanel') \gexec
-SQL
-    # The address names the role and the database (its password is set again below).
-    [ ! -f "$SECRETS/database_url" ] || sed -i 's#//dhpanel:#//builtpanel:#; s#/dhpanel$#/builtpanel#' "$SECRETS/database_url"
-    rm -f /usr/local/bin/dhpanel-control-api /usr/local/bin/dhctl /usr/local/bin/dhpanel-root-auth
-fi
-
 say "the panel's user and folders"
 id builtpanel > /dev/null 2>&1 || useradd --system --user-group --home-dir "$STATE" --no-create-home --shell /usr/sbin/nologin builtpanel
 install -d -m 0755 -o root -g builtpanel "$ETC"

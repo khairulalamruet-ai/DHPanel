@@ -79,54 +79,6 @@ if [ "$check" -eq 1 ]; then
   exit 0
 fi
 
-# --- upgrade from DHPanel -----------------------------------------------------
-# A node installed while the panel was called DHPanel: its user, folders, units and packet
-# filter tables move to the new names. Its Docker containers, volumes and networks keep their
-# `dh-` names (Docker cannot rename a volume); the marker `legacy-names` tells the agent so.
-OLD_USER=dhpanel-agent; OLD_STATE=/var/lib/dhpanel-agent
-if [ "$check" -eq 0 ] && id "$OLD_USER" >/dev/null 2>&1 && ! id "$AGENT_USER" >/dev/null 2>&1; then
-  say "upgrading this node from DHPanel to Built Panel (Docker names stay dh-)"
-  OLD_UID="$(id -u "$OLD_USER")"
-  for unit in dhpanel-agent dhpanel-priv-helper; do
-    systemctl disable --now "$unit" >/dev/null 2>&1 || true
-    rm -f "/etc/systemd/system/$unit.service"
-  done
-  rm -rf /etc/systemd/system/dhpanel-agent.service.d
-  # The user's own services (its rootless Docker) stop with its user manager and start again
-  # under the new name below; the containers come back with Docker (restart policies).
-  loginctl disable-linger "$OLD_USER" 2>/dev/null || true
-  systemctl stop "user@${OLD_UID}.service" 2>/dev/null || true
-  pkill -KILL -u "$OLD_UID" 2>/dev/null || true
-  sleep 1
-  if [ -d "$OLD_STATE" ] && [ ! -e "$STATE_DIR" ]; then
-    mv "$OLD_STATE" "$STATE_DIR"
-    # Docker's bind volumes (webmail, vhosts) keep the path they were made with.
-    ln -s "$STATE_DIR" "$OLD_STATE"
-  fi
-  if [ -d /var/lib/dhpanel-transfers ] && [ ! -e /var/lib/builtpanel-transfers ]; then
-    mv /var/lib/dhpanel-transfers /var/lib/builtpanel-transfers
-    ln -s /var/lib/builtpanel-transfers /var/lib/dhpanel-transfers
-  fi
-  usermod -l "$AGENT_USER" -d "$STATE_DIR/home" "$OLD_USER"
-  groupmod -n "$AGENT_USER" "$OLD_USER" 2>/dev/null || true
-  sed -i "s/^${OLD_USER}:/${AGENT_USER}:/" /etc/subuid /etc/subgid
-  [ ! -f /etc/systemd/system/user@.service.d/dhpanel-delegate.conf ] \
-    || mv /etc/systemd/system/user@.service.d/dhpanel-delegate.conf /etc/systemd/system/user@.service.d/builtpanel-delegate.conf
-  # The helper's packet filter tables: copied under the new names, then the old ones removed,
-  # so no rule is ever missing in between.
-  if [ -x /usr/sbin/nft ]; then
-    for t in db pg fw; do
-      if /usr/sbin/nft list table inet "dhpanel_$t" >/dev/null 2>&1; then
-        /usr/sbin/nft list table inet "dhpanel_$t" | sed "s/table inet dhpanel_$t/table inet builtpanel_$t/" | /usr/sbin/nft -f -
-        /usr/sbin/nft delete table inet "dhpanel_$t"
-      fi
-    done
-  fi
-  rm -f /usr/local/bin/dhpanel-agent /usr/local/bin/dhpanel-priv-helper
-  touch "$STATE_DIR/legacy-names"
-  systemctl daemon-reload
-fi
-
 # --- user and directories ---------------------------------------------------
 if id "$AGENT_USER" >/dev/null 2>&1; then
   say "user $AGENT_USER exists"

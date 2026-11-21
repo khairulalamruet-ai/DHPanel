@@ -159,7 +159,7 @@ pub fn proof_message(
     installation_id: Uuid,
     extra: Option<&str>,
 ) -> Vec<u8> {
-    let mut m = format!("dhpanel-{purpose}-v1\n{nonce}\n{installation_id}");
+    let mut m = format!("builtpanel-{purpose}-v1\n{nonce}\n{installation_id}");
     if let Some(extra) = extra {
         m.push('\n');
         m.push_str(extra);

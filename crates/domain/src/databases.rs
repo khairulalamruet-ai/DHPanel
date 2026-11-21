@@ -25,7 +25,6 @@ const RESERVED: &[&str] = &[
     "admin",
     "administrator",
     "builtpanel",
-    "dhpanel",
     "pma",
     "phpmyadmin",
     "debian_sys_maint",

@@ -230,8 +230,7 @@ async fn existing_extra_php(
     docker: &DockerManager,
     username: &TenantUsername,
 ) -> Result<Vec<(String, Name)>, AgentError> {
-    // Docker reports this node's own names (`dh-…` on a node installed as DHPanel).
-    let prefix = builtpanel_docker_manager::flavor::wire(&format!("bp-{}-php-", username.as_str()));
+    let prefix = format!("bp-{}-php-", username.as_str());
     let mut found = Vec::new();
     for name in docker.list().await.map_err(|e| docker_error(&e))? {
         let Some(rest) = name.strip_prefix(&prefix) else {

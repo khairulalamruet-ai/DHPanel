@@ -739,8 +739,7 @@ fn dns_records(zone: &str, domain: &str) -> Vec<MailDnsRecord> {
 }
 
 fn throttle_description(domain: &str) -> String {
-    // `dhpanel:` on a node installed as DHPanel: its throttles were made with that name.
-    format!("{}:{domain}", builtpanel_docker_manager::flavor::slug())
+    format!("builtpanel:{domain}")
 }
 
 /// Sets, changes or removes the domain's outgoing limit.

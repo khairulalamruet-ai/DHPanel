@@ -62,7 +62,7 @@ fn io(what: &str, e: &std::io::Error) -> Error {
 #[must_use]
 pub fn derive_key(master_key_text: &str) -> [u8; KEY_LEN] {
     let mut h = Sha256::new();
-    h.update(b"dhpanel/system-backup/v1\0");
+    h.update(b"builtpanel/system-backup/v1\0");
     h.update(master_key_text.trim().as_bytes());
     h.finalize().into()
 }

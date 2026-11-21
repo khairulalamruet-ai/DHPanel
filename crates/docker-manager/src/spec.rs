@@ -124,12 +124,9 @@ impl Name {
     ///
     /// # Errors
     /// Not of the form `bp-[a-z0-9][a-z0-9_.-]*`, or too long.
-    /// A name written with `bp-` becomes `dh-…` on a node that keeps its DHPanel names (see
-    /// [`crate::flavor`]); one written with `dh-` is taken as it is.
     pub fn parse(name: &str) -> Result<Self, SpecError> {
         let rest = name
-            .strip_prefix(crate::flavor::PREFIX)
-            .or_else(|| name.strip_prefix(crate::flavor::LEGACY_PREFIX))
+            .strip_prefix("bp-")
             .ok_or_else(|| invalid("name", "must start with `bp-`"))?;
         let ok = (1..=60).contains(&rest.len())
             && rest.starts_with(|c: char| c.is_ascii_lowercase() || c.is_ascii_digit())
@@ -137,7 +134,7 @@ impl Name {
                 .chars()
                 .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || "_.-".contains(c));
         if ok {
-            Ok(Self(crate::flavor::wire(name)))
+            Ok(Self(name.to_owned()))
         } else {
             Err(invalid(
                 "name",
@@ -598,13 +595,7 @@ impl ContainerSpec {
             working_dir: self.working_dir.clone(),
             env: Some(self.env.iter().map(|(k, v)| format!("{k}={v}")).collect()),
             user: self.user.map(|(uid, gid)| format!("{uid}:{gid}")),
-            // Written with this node's names (see `flavor`).
-            labels: Some(
-                labels
-                    .into_iter()
-                    .map(|(k, v)| (crate::flavor::wire(&k), v))
-                    .collect(),
-            ),
+            labels: Some(labels.into_iter().collect()),
             exposed_ports: (!exposed.is_empty()).then_some(exposed),
             host_config: Some(host_config),
             tty: Some(false),

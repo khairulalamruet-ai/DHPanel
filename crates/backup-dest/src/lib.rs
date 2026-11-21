@@ -71,7 +71,7 @@ pub trait Destination: Send {
     /// [`DestError`] saying which step failed.
     fn test(&self) -> Result<(), DestError> {
         let name = format!(".builtpanel-test-{}", test_token());
-        let sample = b"dhpanel destination test";
+        let sample = b"builtpanel destination test";
         self.put(&name, &mut &sample[..])?;
         let mut back = Vec::new();
         self.get(&name)?

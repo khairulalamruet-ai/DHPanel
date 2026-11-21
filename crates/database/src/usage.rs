@@ -56,18 +56,15 @@ fn big(v: u64) -> i64 {
     i64::try_from(v).unwrap_or(i64::MAX)
 }
 
-/// The account a container belongs to: the longest account name `bp-<name>-` begins with
-/// (`dh-<name>-` on a node installed as DHPanel).
+/// The account a container belongs to: the longest account name `bp-<name>-` begins with.
 fn owner<'a>(name: &str, accounts: &'a [(String, Uuid)]) -> Option<&'a Uuid> {
     accounts
         .iter()
         .filter(|(user, _)| {
-            name.strip_prefix("bp-")
-                .or_else(|| name.strip_prefix("dh-"))
-                .is_some_and(|r| {
-                    r.strip_prefix(user.as_str())
-                        .is_some_and(|rest| rest.starts_with('-'))
-                })
+            name.strip_prefix("bp-").is_some_and(|r| {
+                r.strip_prefix(user.as_str())
+                    .is_some_and(|rest| rest.starts_with('-'))
+            })
         })
         .max_by_key(|(user, _)| user.len())
         .map(|(_, id)| id)
@@ -836,11 +833,6 @@ mod tests {
         assert_eq!(owner("bp-alice-php-8-3", &accounts), Some(&a));
         assert_eq!(owner("bp-alice-shop-php", &accounts), Some(&b));
         assert_eq!(owner("bp-alicex-web", &accounts), None);
-        assert_eq!(
-            owner("dh-alice-web", &accounts),
-            Some(&a),
-            "a node installed as DHPanel"
-        );
         assert_eq!(owner("bp-db", &accounts), None);
         assert_eq!(owner("alice-web", &accounts), None);
     }

@@ -17,7 +17,7 @@ pub const MANIFEST_VERSION: u32 = 1;
 
 /// What is put in front of the manifest before it is signed, so that a signature made for
 /// anything else (an entitlement, say) can never pass as a release manifest.
-const RELEASE_DOMAIN: &[u8] = b"dhpanel.release.v1\n";
+const RELEASE_DOMAIN: &[u8] = b"builtpanel.release.v1\n";
 
 /// The most files a manifest may list.
 pub const MAX_COMPONENTS: usize = 256;

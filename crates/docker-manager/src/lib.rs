@@ -19,7 +19,6 @@
 //! The daemon is the agent's own rootless Docker (ADR 0004), reached through
 //! its Unix socket.
 
-pub mod flavor;
 pub mod spec;
 
 use std::{collections::HashMap, path::Path, time::Duration};
@@ -1014,10 +1013,7 @@ impl DockerManager {
     pub async fn usage_of_running(&self) -> Result<Vec<(String, ContainerUsage)>, DockerError> {
         use futures_util::stream::StreamExt as _;
         let filters: HashMap<String, Vec<String>> = [
-            (
-                "label".to_owned(),
-                vec![format!("{}=true", flavor::wire(MANAGED_LABEL))],
-            ),
+            ("label".to_owned(), vec![format!("{}=true", MANAGED_LABEL)]),
             ("status".to_owned(), vec!["running".to_owned()]),
         ]
         .into();
@@ -1082,11 +1078,8 @@ impl DockerManager {
     /// # Errors
     /// [`DockerError::Unavailable`] or [`DockerError::Api`].
     pub async fn list(&self) -> Result<Vec<String>, DockerError> {
-        let filters: HashMap<String, Vec<String>> = [(
-            "label".to_owned(),
-            vec![format!("{}=true", flavor::wire(MANAGED_LABEL))],
-        )]
-        .into();
+        let filters: HashMap<String, Vec<String>> =
+            [("label".to_owned(), vec![format!("{}=true", MANAGED_LABEL)])].into();
         let options = ListContainersOptionsBuilder::default()
             .all(true)
             .filters(&filters)
@@ -1112,8 +1105,8 @@ impl DockerManager {
         let filters: HashMap<String, Vec<String>> = [(
             "label".to_owned(),
             vec![
-                format!("{}=true", flavor::wire(MANAGED_LABEL)),
-                format!("{}={tenant_id}", flavor::wire(TENANT_LABEL)),
+                format!("{}=true", MANAGED_LABEL),
+                format!("{}={tenant_id}", TENANT_LABEL),
             ],
         )]
         .into();
@@ -1136,10 +1129,7 @@ impl DockerManager {
                 let labels = c.labels.unwrap_or_default();
                 Some(TenantContainer {
                     name,
-                    role: labels
-                        .get(&flavor::wire(ROLE_LABEL))
-                        .cloned()
-                        .unwrap_or_default(),
+                    role: labels.get(ROLE_LABEL).cloned().unwrap_or_default(),
                     image: c.image.unwrap_or_default(),
                     state: c.state.map(|s| s.to_string()).unwrap_or_default(),
                     status: c.status.unwrap_or_default(),
@@ -1169,12 +1159,7 @@ impl DockerManager {
     pub async fn create_volume(&self, name: &Name) -> Result<(), DockerError> {
         match self.docker.inspect_volume(name.as_str()).await {
             Ok(existing) => {
-                return if existing
-                    .labels
-                    .get(&flavor::wire(MANAGED_LABEL))
-                    .map(String::as_str)
-                    == Some("true")
-                {
+                return if existing.labels.get(MANAGED_LABEL).map(String::as_str) == Some("true") {
                     Ok(())
                 } else {
                     Err(DockerError::NotManaged)
@@ -1188,7 +1173,7 @@ impl DockerManager {
         self.docker
             .create_volume(VolumeCreateRequest {
                 name: Some(name.as_str().to_owned()),
-                labels: Some([(flavor::wire(MANAGED_LABEL), "true".to_owned())].into()),
+                labels: Some([(MANAGED_LABEL.to_owned(), "true".to_owned())].into()),
                 ..Default::default()
             })
             .await
@@ -1216,12 +1201,7 @@ impl DockerManager {
         let device = bind_device(host_dir, allowed_root)?;
         match self.docker.inspect_volume(name.as_str()).await {
             Ok(existing) => {
-                if existing
-                    .labels
-                    .get(&flavor::wire(MANAGED_LABEL))
-                    .map(String::as_str)
-                    != Some("true")
-                {
+                if existing.labels.get(MANAGED_LABEL).map(String::as_str) != Some("true") {
                     return Err(DockerError::NotManaged);
                 }
                 return if existing.options.get("device").map(String::as_str)
@@ -1251,7 +1231,7 @@ impl DockerManager {
                     ]
                     .into(),
                 ),
-                labels: Some([(flavor::wire(MANAGED_LABEL), "true".to_owned())].into()),
+                labels: Some([(MANAGED_LABEL.to_owned(), "true".to_owned())].into()),
                 ..Default::default()
             })
             .await
@@ -1270,12 +1250,7 @@ impl DockerManager {
             .inspect_volume(name.as_str())
             .await
             .map_err(map_error)?;
-        if volume
-            .labels
-            .get(&flavor::wire(MANAGED_LABEL))
-            .map(String::as_str)
-            != Some("true")
-        {
+        if volume.labels.get(MANAGED_LABEL).map(String::as_str) != Some("true") {
             return Err(DockerError::NotManaged);
         }
         self.docker
@@ -1298,7 +1273,7 @@ impl DockerManager {
                 name: name.as_str().to_owned(),
                 driver: Some("bridge".to_owned()),
                 internal: Some(internal),
-                labels: Some([(flavor::wire(MANAGED_LABEL), "true".to_owned())].into()),
+                labels: Some([(MANAGED_LABEL.to_owned(), "true".to_owned())].into()),
                 ..Default::default()
             })
             .await
@@ -1339,7 +1314,7 @@ impl DockerManager {
         if net
             .labels
             .as_ref()
-            .and_then(|l| l.get(&flavor::wire(MANAGED_LABEL)))
+            .and_then(|l| l.get(MANAGED_LABEL))
             .map(String::as_str)
             != Some("true")
         {
@@ -1387,7 +1362,7 @@ impl DockerManager {
         if net
             .labels
             .as_ref()
-            .and_then(|l| l.get(&flavor::wire(MANAGED_LABEL)))
+            .and_then(|l| l.get(MANAGED_LABEL))
             .map(String::as_str)
             != Some("true")
         {
@@ -1429,7 +1404,7 @@ impl DockerManager {
         if net
             .labels
             .as_ref()
-            .and_then(|l| l.get(&flavor::wire(MANAGED_LABEL)))
+            .and_then(|l| l.get(MANAGED_LABEL))
             .map(String::as_str)
             != Some("true")
         {
@@ -1456,7 +1431,7 @@ impl DockerManager {
                 let ours = existing
                     .labels
                     .as_ref()
-                    .and_then(|l| l.get(&flavor::wire(MANAGED_LABEL)))
+                    .and_then(|l| l.get(MANAGED_LABEL))
                     .map(String::as_str)
                     == Some("true");
                 return if ours {
@@ -1487,7 +1462,7 @@ impl DockerManager {
         let ours = network
             .labels
             .as_ref()
-            .and_then(|l| l.get(&flavor::wire(MANAGED_LABEL)))
+            .and_then(|l| l.get(MANAGED_LABEL))
             .map(String::as_str)
             == Some("true");
         if !ours {
@@ -1507,7 +1482,7 @@ impl DockerManager {
             .map_err(map_error)?;
         let config = c.config.unwrap_or_default();
         let labels = config.labels.unwrap_or_default();
-        if labels.get(&flavor::wire(MANAGED_LABEL)).map(String::as_str) != Some("true") {
+        if labels.get(MANAGED_LABEL).map(String::as_str) != Some("true") {
             return Err(DockerError::NotManaged);
         }
         let state = c.state.unwrap_or_default();
@@ -1545,10 +1520,7 @@ impl DockerManager {
             status: state.status.map(|s| s.to_string()).unwrap_or_default(),
             running,
             exit_code: (!running).then_some(state.exit_code).flatten(),
-            labels: labels
-                .into_iter()
-                .map(|(k, v)| (flavor::local(&k), v))
-                .collect(),
+            labels: labels.into_iter().collect(),
             limits: {
                 let host = c.host_config.unwrap_or_default();
                 Limits {

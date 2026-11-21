@@ -522,8 +522,6 @@ async fn webhook(
     let now = unix_now();
     let signed = headers
         .get("x-builtpanel-signature")
-        // Senders set up while the panel was called DHPanel.
-        .or_else(|| headers.get("x-dhpanel-signature"))
         .and_then(|v| v.to_str().ok())
         .is_some_and(|h| verify(secret.expose_secret().as_bytes(), h, &body, now));
     if !signed {

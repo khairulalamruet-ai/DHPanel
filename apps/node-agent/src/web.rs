@@ -267,8 +267,7 @@ fn validate(username: &TenantUsername, routes: &[SiteRoute]) -> Result<(), Agent
     }
     let mut hosts = BTreeSet::new();
     let mut redirects = 0usize;
-    // `dh-…` too: the containers of a node installed as DHPanel keep that name.
-    let prefixes = [format!("bp-{username}-"), format!("dh-{username}-")];
+    let prefixes = [format!("bp-{username}-")];
     for site in routes {
         if site.hosts.is_empty() || site.hosts.len() > 100 {
             return Err(invalid("a site needs 1 to 100 names"));

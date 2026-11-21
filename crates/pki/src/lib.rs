@@ -39,8 +39,6 @@ pub const CA_CERT_FILE: &str = "node_ca.crt";
 pub const CA_KEY_FILE: &str = "node_ca.key";
 /// Prefix of the identity URI in node certificates: `urn:builtpanel:node:<uuid>`.
 pub const NODE_URI_PREFIX: &str = "urn:builtpanel:node:";
-/// The same in certificates issued while the panel was called DHPanel (still valid).
-pub const LEGACY_NODE_URI_PREFIX: &str = "urn:dhpanel:node:";
 /// Default lifetime of node certificates (ADR 0004: 90 days, rotated by the agent).
 pub const DEFAULT_NODE_VALIDITY: Duration = Duration::days(90);
 /// Longest lifetime allowed for a node or server certificate.

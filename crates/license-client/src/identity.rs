@@ -109,7 +109,7 @@ impl Identity {
         nonce: &str,
         extra: Option<&str>,
     ) -> Result<String, IdentityError> {
-        let mut m = format!("dhpanel-{purpose}-v1\n{nonce}\n{}", self.installation_id);
+        let mut m = format!("builtpanel-{purpose}-v1\n{nonce}\n{}", self.installation_id);
         if let Some(extra) = extra {
             m.push('\n');
             m.push_str(extra);

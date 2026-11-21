@@ -23,7 +23,7 @@ pub const SCHEMA_VERSION: u32 = 1;
 
 /// What a signature covers is prefixed with this, so a signature made for one purpose is
 /// never valid for another (entitlements, release manifests and so on use their own).
-pub const ENTITLEMENT_DOMAIN: &[u8] = b"dhpanel-entitlement-v1\n";
+pub const ENTITLEMENT_DOMAIN: &[u8] = b"builtpanel-entitlement-v1\n";
 
 /// What a license is bound to. All three lists are part of the signed claims, so they cannot be
 /// changed by whoever holds the entitlement. A host name or domain is written in lower case, a
@@ -264,8 +264,8 @@ impl Document {
         {
             return Err(DocumentError::Malformed);
         }
-        if !same_or_legacy(&claims.iss, expect.issuer)
-            || !same_or_legacy(&claims.aud, expect.audience)
+        if claims.iss != expect.issuer
+            || claims.aud != expect.audience
             || claims.installation_id != expect.installation_id
         {
             return Err(DocumentError::Wrong);
@@ -294,15 +294,6 @@ pub struct Expect<'a> {
     pub clock_skew: i64,
     /// What this host says about itself; the license must be bound to it.
     pub host: HostFacts<'a>,
-}
-
-/// Whether a document's issuer or audience is the expected one, or the name it had while the
-/// panel was called DHPanel (`dhpanel-la`, `dhpanel`): documents issued then stay valid.
-fn same_or_legacy(got: &str, expected: &str) -> bool {
-    got == expected
-        || expected
-            .strip_prefix("builtpanel")
-            .is_some_and(|rest| got.strip_prefix("dhpanel") == Some(rest))
 }
 
 #[cfg(test)]
@@ -484,7 +475,7 @@ mod tests {
         );
         // A signature made for another purpose does not pass as an entitlement.
         let other_purpose = key
-            .sign(&signed_bytes(b"dhpanel-release-v1\n", &payload))
+            .sign(&signed_bytes(b"builtpanel-release-v1\n", &payload))
             .unwrap();
         let reused = Document {
             signature: URL_SAFE_NO_PAD.encode(other_purpose),
@@ -504,9 +495,6 @@ mod tests {
             doc.verify(&keys, &expect(Uuid::from_u128(78)), 1_500),
             Err(DocumentError::Wrong)
         );
-        assert!(same_or_legacy("dhpanel-la", "builtpanel-la"));
-        assert!(same_or_legacy("dhpanel", "builtpanel"));
-        assert!(!same_or_legacy("dhpanel-x", "builtpanel"));
         let mut wrong_audience = expect(inst);
         wrong_audience.audience = "something-else";
         assert_eq!(

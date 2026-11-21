@@ -235,14 +235,6 @@ pub async fn attach_domain(
     };
     let (username, domain) = parse(&username, &domain)?;
     check_config(&config)?;
-    // The panel writes the tenant's containers as `bp-<tenant>-…`; nginx finds them by the
-    // names this node gave them (`dh-…` on a node installed as DHPanel).
-    let config = if builtpanel_docker_manager::flavor::legacy() {
-        let ours = format!("bp-{}-", username.as_str());
-        config.replace(&ours, &builtpanel_docker_manager::flavor::wire(&ours))
-    } else {
-        config
-    };
     let applied = change(
         &context,
         &username,

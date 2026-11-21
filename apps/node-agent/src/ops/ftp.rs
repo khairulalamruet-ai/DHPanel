@@ -217,10 +217,7 @@ async fn ensure_container(context: &TenantContext) -> Result<(), AgentError> {
                 "SFTPGO_DATA_PROVIDER__CREATE_DEFAULT_ADMIN".into(),
                 "true".into(),
             );
-            env.insert(
-                "SFTPGO_DEFAULT_ADMIN_USERNAME".into(),
-                builtpanel_docker_manager::flavor::slug().into(),
-            );
+            env.insert("SFTPGO_DEFAULT_ADMIN_USERNAME".into(), "builtpanel".into());
             env.insert(
                 "SFTPGO_DEFAULT_ADMIN_PASSWORD".into(),
                 admin_password(context)?,
@@ -353,7 +350,7 @@ fn token(admin: &str) -> Result<String, AgentError> {
     let http = agent();
     let basic = format!(
         "Basic {}",
-        base64_of(format!("{}:{admin}", builtpanel_docker_manager::flavor::slug()).as_bytes(),)
+        base64_of(format!("builtpanel:{admin}").as_bytes(),)
     );
     let mut last = failed("the file transfer server did not come up").retryable();
     for _ in 0..60 {
@@ -628,7 +625,7 @@ mod tests {
 
     #[test]
     fn base64_matches_the_known_answers() {
-        assert_eq!(base64_of(b"dhpanel:secret"), "ZGhwYW5lbDpzZWNyZXQ=");
+        assert_eq!(base64_of(b"builtpanel:secret"), "YnVpbHRwYW5lbDpzZWNyZXQ=");
         assert_eq!(base64_of(b"ab"), "YWI=");
     }
 }

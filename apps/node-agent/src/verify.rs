@@ -165,11 +165,7 @@ pub fn verify_enrollment(
             "it is not for client authentication only",
         ));
     }
-    // A control plane still running as DHPanel issues `urn:dhpanel:node:`.
-    let expected_uris = [
-        format!("urn:builtpanel:node:{}", response.node_id),
-        format!("urn:dhpanel:node:{}", response.node_id),
-    ];
+    let expected_uris = [format!("urn:builtpanel:node:{}", response.node_id)];
     let names_this_node = cert
         .subject_alternative_name()
         .ok()

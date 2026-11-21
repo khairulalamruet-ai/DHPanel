@@ -255,14 +255,7 @@ fn status_command(state_dir: PathBuf) -> ExitCode {
     }
 }
 
-/// Left in the state folder by the upgrade from DHPanel: this node keeps its `dh-…` Docker
-/// names (Docker cannot rename volumes). See `builtpanel_docker_manager::flavor`.
-const LEGACY_NAMES_MARKER: &str = "legacy-names";
-
 fn run_command(state_dir: PathBuf, stream_url: Option<String>) -> ExitCode {
-    if state_dir.join(LEGACY_NAMES_MARKER).exists() {
-        builtpanel_docker_manager::flavor::use_legacy_names();
-    }
     let loaded = match StateDir::new(&state_dir).load() {
         Ok(l) => l,
         Err(err) => {

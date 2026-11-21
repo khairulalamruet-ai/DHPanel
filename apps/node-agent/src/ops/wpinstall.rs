@@ -378,7 +378,7 @@ $W core verify-checksums 2>&1 || true
 echo "BP_SUM_END"
 echo "BP_DEBUG=$($W config get WP_DEBUG 2>/dev/null | head -1 || true)"
 echo "BP_FILEEDIT=$($W config get DISALLOW_FILE_EDIT 2>/dev/null | head -1 || true)"
-if [ -f "$WP_PATH/wp-content/mu-plugins/builtpanel-hardening.php" ] || [ -f "$WP_PATH/wp-content/mu-plugins/dhpanel-hardening.php" ]; then echo "BP_XMLRPC=off"; else echo "BP_XMLRPC=on"; fi
+if [ -f "$WP_PATH/wp-content/mu-plugins/builtpanel-hardening.php" ]; then echo "BP_XMLRPC=off"; else echo "BP_XMLRPC=on"; fi
 echo "BP_MODE=$(stat -c %a "$WP_PATH/wp-config.php" 2>/dev/null || echo '')"
 echo "BP_WRITABLE=$(find "$WP_PATH" -not -type l -perm -o+w 2>/dev/null | wc -l)"
 "#;
@@ -397,7 +397,6 @@ if [ "$H_XMLRPC" = 1 ]; then
   mkdir -p "$WP_PATH/wp-content/mu-plugins"
   printf '%s
 ' '<?php' '/* Switched on and off by the hosting panel. */' "add_filter( 'xmlrpc_enabled', '__return_false' );" > "$WP_PATH/wp-content/mu-plugins/builtpanel-hardening.php"
-  rm -f "$WP_PATH/wp-content/mu-plugins/dhpanel-hardening.php"
   echo "xmlrpc off"
 fi
 if [ "$H_PERMS" = 1 ]; then
