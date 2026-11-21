@@ -163,13 +163,21 @@ if [ "$FAMILY" = rhel ]; then
     fi
     # Docker's network rules (iptables on nftables) use kernel modules that Red Hat 10 keeps in
     # kernel-modules-extra: without xt_addrtype the daemon refuses to start.
-    dnf_install "kernel-modules-extra-$(uname -r)" 2> /dev/null || dnf_install kernel-modules-extra 2> /dev/null || true
+    if ! dnf_install "kernel-modules-extra-$(uname -r)" 2> /dev/null; then
+        # The repositories no longer carry the running kernel's version: install the current kernel with
+        # its extra modules; they are usable after one reboot.
+        dnf_install kernel kernel-modules-extra || true
+        NEED_REBOOT=1
+    fi
     for m in nf_tables nft_compat xt_addrtype xt_conntrack xt_MASQUERADE xt_mark xt_comment br_netfilter overlay veth; do
         modprobe "$m" 2> /dev/null || true
     done
     printf 'xt_addrtype\nxt_conntrack\nxt_MASQUERADE\nxt_mark\nxt_comment\nnft_compat\nbr_netfilter\noverlay\nveth\n' > /etc/modules-load.d/builtpanel.conf
     if [ "$WITH_AGENT" -eq 1 ] && ! modprobe -n xt_addrtype > /dev/null 2>&1; then
-        die "the kernel has no xt_addrtype module (the running kernel is $(uname -r); if a newer kernel was just installed, reboot into it and run this again)"
+        if [ "${NEED_REBOOT:-0}" = 1 ]; then
+            die "a newer kernel was installed (Docker's network rules need its modules): run  reboot  and then this same command again"
+        fi
+        die "the kernel ($(uname -r)) has no xt_addrtype module and kernel-modules-extra is not available for it"
     fi
     # The web server (Caddy) may talk to the control plane and to the sites' containers on this machine.
     if command -v getenforce > /dev/null && [ "$(getenforce)" = Enforcing ]; then setsebool -P httpd_can_network_connect 1 || true; fi
