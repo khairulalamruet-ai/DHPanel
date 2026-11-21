@@ -542,6 +542,32 @@ if [ "$ROOT_LOGIN" -eq 0 ] || [ "$ROOT_PW_STATE" != P ]; then
     fi
 fi
 
+say "the login message"
+# Shown to whoever logs in to the server over SSH (a login shell on a terminal): what is installed,
+# where to sign in, and the server's current load.
+cat > /etc/profile.d/builtpanel-motd.sh <<MOTD
+# Written by the Built Panel installer.
+case "\$-" in *i*) ;; *) return 0 2> /dev/null || exit 0 ;; esac
+[ -t 1 ] || return 0 2> /dev/null || exit 0
+[ -z "\${BUILTPANEL_MOTD_SHOWN:-}" ] || return 0 2> /dev/null || exit 0
+export BUILTPANEL_MOTD_SHOWN=1
+_bp_cpu=\$(awk '/^cpu /{u=\$2+\$4; t=\$2+\$3+\$4+\$5+\$6+\$7+\$8; printf "%.1f", (t>0)?u*100/t:0}' /proc/stat 2> /dev/null)
+_bp_ram=\$(awk '/^MemTotal/{t=\$2} /^MemAvailable/{a=\$2} END{printf "%d/%dMB (%.2f%%)", (t-a)/1024, t/1024, (t>0)?(t-a)*100/t:0}' /proc/meminfo 2> /dev/null)
+_bp_disk=\$(df -P / 2> /dev/null | awk 'NR==2{printf "%d/%dGB (%s)", \$3/1048576, \$2/1048576, \$5}')
+_bp_up=\$(awk '{d=int(\$1/86400); h=int((\$1%86400)/3600); m=int((\$1%3600)/60); printf "%d days, %d hours, %d minutes", d, h, m}' /proc/uptime 2> /dev/null)
+printf '\nThis server has installed Built Panel.\n'
+printf 'Log in  %s\n' '$([ -n "$PUBLIC_IP" ] && echo "https://$PUBLIC_IP:$ADMIN_PORT" || echo "https://$ADMIN_HOSTNAME")'
+printf 'Login   root, with this server'"'"'s root password\n\n'
+printf 'Current server time : %s\n' "\$(date '+%Y-%m-%d %H:%M:%S')"
+printf 'Current load average: %s\n' "\$(cut -d' ' -f1-3 /proc/loadavg | sed 's/ /, /g')"
+printf 'Current CPU usage   : %s%% (since boot)\n' "\$_bp_cpu"
+printf 'Current RAM usage   : %s\n' "\$_bp_ram"
+printf 'Current Disk usage  : %s\n' "\$_bp_disk"
+printf 'System uptime       : %s\n\n' "\$_bp_up"
+unset _bp_cpu _bp_ram _bp_disk _bp_up
+MOTD
+chmod 0644 /etc/profile.d/builtpanel-motd.sh
+
 trap - EXIT
 ui_done
 cat -s <<EOF | ui_box
