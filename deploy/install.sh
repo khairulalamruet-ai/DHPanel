@@ -145,7 +145,15 @@ ui_log_to /var/log/builtpanel-install.log
 
 export DEBIAN_FRONTEND=noninteractive
 apt_install() { apt-get install -y -qq "$@" > /dev/null; }
-dnf_install() { dnf install -y -q "$@" > /dev/null; }
+dnf_install() {
+    # A mirror can fail for a moment: try three times before giving up.
+    local n
+    for n in 1 2 3; do
+        dnf install -y -q --setopt=retries=5 --setopt=timeout=60 "$@" > /dev/null && return 0
+        sleep 5
+    done
+    return 1
+}
 MAJOR="${VERSION_ID%%.*}"
 ARCH_RPM="$(uname -m)"
 
@@ -191,6 +199,11 @@ say "PostgreSQL 18"
 if [ ! -x "$PG_BIN/postgres" ]; then
     if [ "$FAMILY" = rhel ]; then
         dnf_install "https://download.postgresql.org/pub/repos/yum/reporpms/EL-${MAJOR}-${ARCH_RPM}/pgdg-redhat-repo-latest.noarch.rpm"
+        # PGDG publishes one folder per major (rhel-10-...), not per point release (10.1, 10.3), and
+        # dnf on EL10 cannot check the repository signature of its metadata: the packages stay signed.
+        sed -i -e "s/\\\$releasever_major\\.\\\$releasever_minor/${MAJOR}/g" -e "s/\\\$releasever/${MAJOR}/g" \
+            -e 's/^repo_gpgcheck *=.*/repo_gpgcheck=0/' /etc/yum.repos.d/pgdg-redhat-all.repo
+        dnf clean metadata > /dev/null 2>&1 || true
         # The distribution's own (older) PostgreSQL module would hide the PGDG packages.
         dnf -qy module disable postgresql > /dev/null 2>&1 || true
         dnf_install postgresql18-server
