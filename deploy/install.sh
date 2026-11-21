@@ -154,7 +154,7 @@ say "base packages"
 if [ "$FAMILY" = rhel ]; then
     # curl is there already (curl-minimal is enough); the others: the firewall, the user-id mapping
     # tools and the user's own message bus for rootless Docker, slirp4netns for its network.
-    dnf_install ca-certificates openssl firewalld shadow-utils dbus-daemon slirp4netns procps-ng policycoreutils iptables-nft kmod
+    dnf_install ca-certificates openssl firewalld shadow-utils dbus-daemon slirp4netns procps-ng policycoreutils policycoreutils-python-utils iptables-nft kmod
     command -v curl > /dev/null || dnf_install curl
     # Rootless containers need user namespaces (some images ship the limit at 0).
     if [ "$(sysctl -n user.max_user_namespaces 2> /dev/null || echo 1)" = 0 ]; then
@@ -432,9 +432,10 @@ fi
 
 # One site block of the panel: the API goes to the control plane, the rest is an app's files (any
 # path that is not a file is the app's own page: it is a single-page app).
-panel_site() { # name, app folder
+panel_site() { # name, app folder, [extra line inside the block]
     cat <<BLOCK
 $1 {
+    ${3:-}
     encode zstd gzip
     header {
         X-Content-Type-Options nosniff
@@ -457,6 +458,16 @@ $1 {
 BLOCK
 }
 
+# The server's public address (for the certificate-free way in), from the machine itself or, behind
+# NAT, from an echo service; empty when neither gives an IPv4 address.
+CLIENT_PORT=2083; ADMIN_PORT=2087
+PUBLIC_IP=$(curl -4 -fsS --max-time 5 https://api.ipv4.icanhazip.com 2> /dev/null | tr -d ' \r\n' || true)
+[[ "$PUBLIC_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || PUBLIC_IP=$(ip -4 route get 1.1.1.1 2> /dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p' | head -1)
+[[ "$PUBLIC_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || PUBLIC_IP=""
+if [ -n "$PUBLIC_IP" ] && [ "$FAMILY" = rhel ] && command -v semanage > /dev/null && [ "$(getenforce 2> /dev/null)" = Enforcing ]; then
+    for port in $CLIENT_PORT $ADMIN_PORT; do semanage port -a -t http_port_t -p tcp "$port" 2> /dev/null || semanage port -m -t http_port_t -p tcp "$port" 2> /dev/null || true; done
+fi
+
 say "Caddy in front of the panel"
 {
     options=""
@@ -469,6 +480,13 @@ say "Caddy in front of the panel"
     if [ -n "$WEB_DIR" ]; then
         panel_site "$HOSTNAME_FQDN" client
         panel_site "$ADMIN_HOSTNAME" admin
+        # Also by the server's address, with a certificate of Caddy's own (the browser warns once):
+        # the panel stays reachable when no real certificate can be had (a name that does not point
+        # here yet, or Let's Encrypt's rate limit). Ports as in cPanel/WHM: 2083 clients, 2087 administrators.
+        if [ -n "$PUBLIC_IP" ]; then
+            panel_site "https://$PUBLIC_IP:$CLIENT_PORT" client "tls internal"
+            panel_site "https://$PUBLIC_IP:$ADMIN_PORT" admin "tls internal"
+        fi
     else
         printf '%s {\n    encode zstd gzip\n    reverse_proxy 127.0.0.1:8080\n}\n' "$HOSTNAME_FQDN"
     fi
@@ -483,10 +501,12 @@ if [ "$FAMILY" = rhel ]; then
     # ssh first: a server must never be locked out by this step.
     for svc in ssh http https; do firewall-cmd --permanent --add-service="$svc" > /dev/null; done
     firewall-cmd --permanent --add-port="$AGENT_PORT"/tcp > /dev/null
+    [ -z "$PUBLIC_IP" ] || for port in $CLIENT_PORT $ADMIN_PORT; do firewall-cmd --permanent --add-port="$port"/tcp > /dev/null; done
     firewall-cmd --reload > /dev/null
 else
     say "firewall (ufw: 22, 80, 443, $AGENT_PORT)"
     ufw allow 22/tcp > /dev/null; ufw allow 80/tcp > /dev/null; ufw allow 443/tcp > /dev/null; ufw allow "$AGENT_PORT"/tcp > /dev/null
+    [ -z "$PUBLIC_IP" ] || { ufw allow "$CLIENT_PORT"/tcp > /dev/null; ufw allow "$ADMIN_PORT"/tcp > /dev/null; }
     ufw --force enable > /dev/null
 fi
 
@@ -546,6 +566,7 @@ ${UI_OK:-}${UI_B:-}Built Panel is installed.${UI_R:-}
 
   Panel:     https://$HOSTNAME_FQDN   (the certificate arrives within a minute, once the name points here)
 $([ -n "$WEB_DIR" ] && printf '  Admin:     https://%s   (this name must point here too)\n' "$ADMIN_HOSTNAME")
+$([ -n "$WEB_DIR" ] && [ -n "$PUBLIC_IP" ] && printf '  Without a certificate (works at once; the browser warns once: Advanced, continue):\n    admin:   https://%s:%s\n    clients: https://%s:%s\n' "$PUBLIC_IP" "$ADMIN_PORT" "$PUBLIC_IP" "$CLIENT_PORT")
 $([ "$ROOT_LOGIN" -eq 1 ] && [ "$ROOT_PW_STATE" = P ] && printf '  Login:     root\n  Password:  this server'"'"'s root password (the one you log in to the server with)\n  Access:    full, like WHM'"'"'s root (role super_admin)\n')
 $([ -n "$ADMIN_PASSWORD" ] && printf '  Login:     %s   (role super_admin: every permission on the panel)\n  Password:  %s\n  (shown once, never stored: sign in and change it, then set up two-factor)\n' "$ADMIN_USER" "$ADMIN_PASSWORD")
 $([ "$ROOT_LOGIN" -eq 1 ] && [ "$ROOT_PW_STATE" != P ] && printf '  Root:      root has no usable password on this server: set one with `sudo passwd root`, then log in as root\n')
