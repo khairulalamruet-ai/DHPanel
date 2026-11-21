@@ -154,12 +154,22 @@ say "base packages"
 if [ "$FAMILY" = rhel ]; then
     # curl is there already (curl-minimal is enough); the others: the firewall, the user-id mapping
     # tools and the user's own message bus for rootless Docker, slirp4netns for its network.
-    dnf_install ca-certificates openssl firewalld shadow-utils dbus-daemon slirp4netns procps-ng policycoreutils
+    dnf_install ca-certificates openssl firewalld shadow-utils dbus-daemon slirp4netns procps-ng policycoreutils iptables-nft kmod
     command -v curl > /dev/null || dnf_install curl
     # Rootless containers need user namespaces (some images ship the limit at 0).
     if [ "$(sysctl -n user.max_user_namespaces 2> /dev/null || echo 1)" = 0 ]; then
         echo 'user.max_user_namespaces = 28633' > /etc/sysctl.d/99-builtpanel.conf
         sysctl -q -p /etc/sysctl.d/99-builtpanel.conf
+    fi
+    # Docker's network rules (iptables on nftables) use kernel modules that Red Hat 10 keeps in
+    # kernel-modules-extra: without xt_addrtype the daemon refuses to start.
+    dnf_install "kernel-modules-extra-$(uname -r)" 2> /dev/null || dnf_install kernel-modules-extra 2> /dev/null || true
+    for m in nf_tables nft_compat xt_addrtype xt_conntrack xt_MASQUERADE xt_mark xt_comment br_netfilter overlay veth; do
+        modprobe "$m" 2> /dev/null || true
+    done
+    printf 'xt_addrtype\nxt_conntrack\nxt_MASQUERADE\nxt_mark\nxt_comment\nnft_compat\nbr_netfilter\noverlay\nveth\n' > /etc/modules-load.d/builtpanel.conf
+    if [ "$WITH_AGENT" -eq 1 ] && ! modprobe -n xt_addrtype > /dev/null 2>&1; then
+        die "the kernel has no xt_addrtype module (the running kernel is $(uname -r); if a newer kernel was just installed, reboot into it and run this again)"
     fi
     # The web server (Caddy) may talk to the control plane and to the sites' containers on this machine.
     if command -v getenforce > /dev/null && [ "$(getenforce)" = Enforcing ]; then setsebool -P httpd_can_network_connect 1 || true; fi
