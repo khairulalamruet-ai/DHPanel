@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One-command installer: downloads a Built Panel release, checks it and runs install.sh from it.
 #
-#   curl -fsSL https://github.com/khairulalamruet-ai/DHPanel/releases/latest/download/get.sh | sudo bash
+#   curl -fsSL https://github.com/khairulalamruet-ai/DPanel/releases/latest/download/get.sh | sudo bash
 #
 # That is all that is needed on a new Ubuntu 22.04+/Debian 12+ server: the panel is then served
 # under <ip>.sslip.io (no DNS to set up) and the first administrator is `owner`. Options go after
@@ -13,7 +13,7 @@
 #   --admin-email MAIL   the first administrator's email (default: admin@<hostname>)
 #   --admin-username U   the first administrator's login (default: owner)
 #   --version X.Y.Z      a release other than the latest
-#   --repo OWNER/NAME    where releases are published (default: khairulalamruet-ai/DHPanel)
+#   --repo OWNER/NAME    where releases are published (default: khairulalamruet-ai/DPanel)
 #   --url BASE           download the archive and its .sha256 from BASE (any https address, e.g. a
 #                        private server or bucket) instead of GitHub
 #   --header 'H: V'      an HTTP header for the download (e.g. 'Authorization: Bearer TOKEN')
@@ -25,7 +25,7 @@
 # root); the generated password is printed once at the end. Anything else is passed to install.sh.
 set -euo pipefail
 
-REPO="khairulalamruet-ai/DHPanel"; BASE_URL=""; HEADER=(); VERSION=""; TARBALL=""; HOSTNAME_FQDN=""; ADMIN_EMAIL=""
+REPO="khairulalamruet-ai/DPanel"; BASE_URL=""; HEADER=(); VERSION=""; TARBALL=""; HOSTNAME_FQDN=""; ADMIN_EMAIL=""
 PASS=()
 
 while [ $# -gt 0 ]; do
