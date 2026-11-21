@@ -12479,6 +12479,91 @@
         ]
       }
     },
+    "/api/v1/client/activity": {
+      "get": {
+        "tags": [
+          "logs"
+        ],
+        "summary": "What happened in the account, newest first (logins, changes, failures).",
+        "operationId": "clientActivity",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "path",
+            "description": "How many entries (1-200, default 50).",
+            "required": true,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "path",
+            "description": "`next_cursor` of the page before.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "action",
+            "in": "path",
+            "description": "Only actions that start with this (`login`, `database`, ...).",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of entries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityPage"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`client_only`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A count or cursor that is not usable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/client/apps": {
       "get": {
         "tags": [
@@ -24303,6 +24388,84 @@
           }
         },
         "additionalProperties": false
+      },
+      "ActivityItem": {
+        "type": "object",
+        "description": "One thing that happened in the account.",
+        "required": [
+          "id",
+          "at",
+          "action",
+          "outcome",
+          "by_you"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "What happened, e.g. `database.create`."
+          },
+          "at": {
+            "type": "string",
+            "description": "When (RFC 3339, UTC)."
+          },
+          "by_you": {
+            "type": "boolean",
+            "description": "Whether the account's own login did it (otherwise staff did, on its behalf)."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Entry id."
+          },
+          "ip": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where from: only for what the account did itself."
+          },
+          "outcome": {
+            "type": "string",
+            "description": "`success`, `failure` or `denied`."
+          },
+          "target_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Which one."
+          },
+          "target_type": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What it was done to (`domain`, `database`, ...)."
+          }
+        }
+      },
+      "ActivityPage": {
+        "type": "object",
+        "description": "A page of the activity.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActivityItem"
+            },
+            "description": "Newest first."
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Pass this as `cursor` for the next page (`null`: the end)."
+          }
+        }
       },
       "AddAdvisory": {
         "type": "object",

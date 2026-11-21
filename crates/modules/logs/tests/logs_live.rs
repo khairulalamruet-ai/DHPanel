@@ -282,3 +282,67 @@ async fn logs_are_read_through_the_node_for_the_owner_only(pool: PgPool) {
     );
     played.abort();
 }
+
+#[sqlx::test(migrations = "../../../migrations")]
+#[ignore = "needs PostgreSQL + Redis"]
+async fn the_activity_is_the_accounts_own_and_pages(pool: PgPool) {
+    let e = env(&pool, Duration::from_secs(5)).await;
+    let (alice_account, alice_tenant) = client(&pool, "alice", 10_000).await;
+    let (bob_account, bob_tenant) = client(&pool, "bob", 10_001).await;
+    let alice = e.sign_in(alice_account).await;
+    let bob = e.sign_in(bob_account).await;
+    let staff = Uuid::now_v7();
+    for (n, tenant, actor) in [
+        (1, alice_tenant, alice_account),
+        (2, alice_tenant, alice_account),
+        (3, alice_tenant, staff),
+        (4, bob_tenant, bob_account),
+    ] {
+        sqlx::query(
+            "INSERT INTO audit_logs (at, actor_id, actor_ip, action, target_type, target_id, tenant_id, outcome, metadata)
+             VALUES (now() - make_interval(secs => 10 - $1), $2, '203.0.113.9', $3, 'database', 'd1', $4, 'success', '{\"secret\":\"x\"}')",
+        )
+        .bind(f64::from(n))
+        .bind(actor)
+        .bind(if n == 3 { "database.drop" } else { "database.create" })
+        .bind(tenant)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    let (status, got) = e.get(&alice, "/api/v1/client/activity").await;
+    assert_eq!(status, StatusCode::OK, "{got}");
+    let items = got["items"].as_array().unwrap();
+    assert_eq!(items.len(), 3, "only Alice's own account: {got}");
+    // Newest first: the staff entry, then her two.
+    assert_eq!(items[0]["action"], "database.drop");
+    assert_eq!(items[0]["by_you"], false);
+    assert!(items[0]["ip"].is_null(), "staff's address stays hidden");
+    assert_eq!(items[1]["by_you"], true);
+    assert_eq!(items[1]["ip"], "203.0.113.9");
+    assert!(items[1].get("metadata").is_none());
+    // Pages.
+    let (_, first) = e.get(&alice, "/api/v1/client/activity?limit=2").await;
+    assert_eq!(first["items"].as_array().unwrap().len(), 2);
+    let cursor = first["next_cursor"].as_str().unwrap();
+    let (_, rest) = e
+        .get(
+            &alice,
+            &format!("/api/v1/client/activity?limit=2&cursor={cursor}"),
+        )
+        .await;
+    assert_eq!(rest["items"].as_array().unwrap().len(), 1);
+    assert!(rest["next_cursor"].is_null());
+    // A filter, and what is refused.
+    let (_, only) = e
+        .get(&alice, "/api/v1/client/activity?action=database.drop")
+        .await;
+    assert_eq!(only["items"].as_array().unwrap().len(), 1);
+    for q in ["limit=0", "limit=500", "cursor=x", "action=A%20B"] {
+        let (status, got) = e.get(&alice, &format!("/api/v1/client/activity?{q}")).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{q}: {got}");
+    }
+    // Bob sees only his.
+    let (_, got) = e.get(&bob, "/api/v1/client/activity").await;
+    assert_eq!(got["items"].as_array().unwrap().len(), 1);
+}

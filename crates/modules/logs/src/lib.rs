@@ -64,7 +64,9 @@ pub const DEFAULT_WAIT: Duration = Duration::from_secs(8);
 
 /// Routes for hosting accounts.
 pub fn client_router() -> Router<LogsState> {
-    Router::new().route("/api/v1/client/logs", get(read_logs))
+    Router::new()
+        .route("/api/v1/client/logs", get(read_logs))
+        .route("/api/v1/client/activity", get(activity))
 }
 
 fn internal(err: impl Into<Box<dyn std::error::Error + Send + Sync + 'static>>) -> AppError {
@@ -261,11 +263,178 @@ pub async fn read_logs(
     }
 }
 
+/// Which page of the activity.
+#[derive(Debug, Deserialize, IntoParams)]
+pub struct ActivityQuery {
+    /// How many entries (1-200, default 50).
+    pub limit: Option<i64>,
+    /// `next_cursor` of the page before.
+    pub cursor: Option<String>,
+    /// Only actions that start with this (`login`, `database`, ...).
+    pub action: Option<String>,
+}
+
+/// One thing that happened in the account.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ActivityItem {
+    /// Entry id.
+    pub id: Uuid,
+    /// When (RFC 3339, UTC).
+    pub at: String,
+    /// What happened, e.g. `database.create`.
+    pub action: String,
+    /// `success`, `failure` or `denied`.
+    pub outcome: String,
+    /// What it was done to (`domain`, `database`, ...).
+    pub target_type: Option<String>,
+    /// Which one.
+    pub target_id: Option<String>,
+    /// Whether the account's own login did it (otherwise staff did, on its behalf).
+    pub by_you: bool,
+    /// Where from: only for what the account did itself.
+    pub ip: Option<String>,
+}
+
+/// A page of the activity.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ActivityPage {
+    /// Newest first.
+    pub items: Vec<ActivityItem>,
+    /// Pass this as `cursor` for the next page (`null`: the end).
+    pub next_cursor: Option<String>,
+}
+
+/// What happened in the account, newest first (logins, changes, failures).
+#[utoipa::path(
+    get,
+    path = "/api/v1/client/activity",
+    tag = "logs",
+    operation_id = "clientActivity",
+    security(("session" = [])),
+    params(ActivityQuery),
+    responses(
+        (status = 200, description = "A page of entries", body = ActivityPage),
+        (status = 403, description = "`client_only`", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 422, description = "A count or cursor that is not usable", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+pub async fn activity(
+    State(state): State<LogsState>,
+    who: Principal,
+    Query(q): Query<ActivityQuery>,
+) -> Result<Json<ActivityPage>, AppError> {
+    if who.kind != DbAccountKind::Client {
+        return Err(AppError::forbidden(
+            "client_only",
+            "This is for hosting accounts.",
+        ));
+    }
+    let limit = q.limit.unwrap_or(50);
+    if !(1..=200).contains(&limit) {
+        return Err(bad("limit", "out_of_range", "Between 1 and 200."));
+    }
+    let cursor = match q.cursor.as_deref() {
+        None => None,
+        Some(c) => {
+            let (micros, id) = c
+                .split_once('.')
+                .and_then(|(m, i)| Some((m.parse::<i64>().ok()?, Uuid::parse_str(i).ok()?)))
+                .ok_or_else(|| bad("cursor", "invalid", "Not a cursor this API gave."))?;
+            Some((micros, id))
+        }
+    };
+    let action = match q.action.as_deref() {
+        None | Some("") => None,
+        Some(a)
+            if a.len() <= 64
+                && a.bytes().all(|b| {
+                    b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'.'
+                }) =>
+        {
+            Some(a.to_owned())
+        }
+        Some(_) => {
+            return Err(bad(
+                "action",
+                "invalid",
+                "Lowercase letters, digits, `_` and `.`.",
+            ));
+        }
+    };
+    let user = builtpanel_database::users::get(&state.db, who.account_id())
+        .await
+        .map_err(internal)?;
+    let owned = user.and_then(|u| u.tenant).ok_or_else(|| {
+        AppError::conflict("no_hosting", "This account has no hosting account yet.")
+    })?;
+    let me = who.account_id();
+    let (cursor_micros, cursor_id) = cursor.unzip();
+    let mut rows = builtpanel_database::sqlx::query_as::<
+        _,
+        (Uuid, i64, Uuid, Option<String>, String, String, Option<String>, Option<String>),
+    >(
+        "SELECT id, (extract(epoch FROM at) * 1000000)::bigint, COALESCE(actor_id, '00000000-0000-0000-0000-000000000000'::uuid),
+                host(actor_ip), action, outcome, target_type, target_id
+         FROM audit_logs
+         WHERE tenant_id = $1
+           AND ($2::text IS NULL OR starts_with(action, $2))
+           AND ($3::bigint IS NULL
+                OR (at, id) < ('epoch'::timestamptz + $3::bigint * interval '1 microsecond', $4::uuid))
+         ORDER BY at DESC, id DESC
+         LIMIT $5",
+    )
+    .bind(owned.id)
+    .bind(action)
+    .bind(cursor_micros)
+    .bind(cursor_id)
+    .bind(limit + 1)
+    .fetch_all(&state.db)
+    .await
+    .map_err(internal)?;
+    let has_more = i64::try_from(rows.len()).is_ok_and(|n| n > limit);
+    if has_more {
+        rows.truncate(usize::try_from(limit).unwrap_or(usize::MAX));
+    }
+    let next_cursor = has_more
+        .then(|| rows.last().map(|r| format!("{}.{}", r.1, r.0)))
+        .flatten();
+    let items = rows
+        .into_iter()
+        .map(
+            |(id, micros, actor, ip, action, outcome, target_type, target_id)| {
+                let by_you = actor == me;
+                ActivityItem {
+                    id,
+                    at: rfc3339(micros),
+                    action,
+                    outcome,
+                    target_type,
+                    target_id,
+                    by_you,
+                    ip: if by_you { ip } else { None },
+                }
+            },
+        )
+        .collect();
+    Ok(Json(ActivityPage { items, next_cursor }))
+}
+
+/// Microseconds since the epoch as RFC 3339 (UTC).
+fn rfc3339(micros: i64) -> String {
+    time::OffsetDateTime::from_unix_timestamp_nanos(i128::from(micros) * 1000)
+        .ok()
+        .and_then(|t| {
+            t.format(&time::format_description::well_known::Rfc3339)
+                .ok()
+        })
+        .unwrap_or_default()
+}
+
 /// The module's OpenAPI document.
 #[derive(OpenApi)]
 #[openapi(
-    paths(read_logs),
-    components(schemas(LogView, LogLineView, Pending)),
+    paths(read_logs, activity),
+    components(schemas(LogView, LogLineView, Pending, ActivityItem, ActivityPage)),
     tags((name = "logs", description = "Logs"))
 )]
 pub struct LogsApi;
