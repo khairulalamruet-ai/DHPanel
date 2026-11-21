@@ -77,6 +77,8 @@ die() { ui_fail "$*"; exit 1; }
 trap 'rc=$?; ui_is_main || exit $rc; ui_cleanup; if [ $rc -ne 0 ] && [ -n "$step" ]; then { echo; echo "install.sh: stopped during \"$step\" (the end of /var/log/builtpanel-install.log):"; tail -n 15 /var/log/builtpanel-install.log 2> /dev/null | sed "s/^/  | /"; echo "fix the cause and run this again"; } >&4; fi' EXIT
 
 # --- what this machine is ------------------------------------------------------------------
+# sudo on the Red Hat family does not have /usr/local/bin in its PATH, where the programs go.
+export PATH="/usr/local/bin:/usr/local/sbin:/usr/sbin:/sbin:$PATH"
 FAMILY=deb   # deb: Ubuntu and Debian (apt, ufw); rhel: AlmaLinux, Rocky, RHEL (dnf, firewalld, SELinux)
 PG_BIN=/usr/lib/postgresql/18/bin; PG_SERVICE=postgresql; REDIS_SERVICE=redis-server; REDIS_CONF=/etc/redis/redis.conf
 [ "$(uname -s)" = Linux ] || die "Linux only"
@@ -341,7 +343,7 @@ if [ "$ROOT_LOGIN" -eq 1 ]; then
     fi
 fi
 export BUILTPANEL_CONFIG="$ETC/control.toml"
-as_panel() { runuser -u builtpanel -- env BUILTPANEL_CONFIG="$BUILTPANEL_CONFIG" "$@"; }
+as_panel() { runuser -u builtpanel -- env PATH="$PATH" BUILTPANEL_CONFIG="$BUILTPANEL_CONFIG" "$@"; }
 
 say "the node channel's certificate authority"
 # Made by root (the folder is not writable for the panel's user); the keys are handed over below.

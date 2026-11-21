@@ -22,6 +22,7 @@
 # shows when you add the node (run as the agent user), then enable the service.
 set -euo pipefail
 
+export PATH="/usr/local/bin:/usr/local/sbin:/usr/sbin:/sbin:$PATH"   # sudo on the Red Hat family leaves these out
 AGENT_USER=builtpanel-agent
 STATE_DIR=/var/lib/builtpanel-agent
 BIN_DST=/usr/local/bin/builtpanel-agent
